@@ -1,39 +1,21 @@
+import MainLayout from "@/components/layout/MainLayout";
+import StatCard from "@/components/dashboard/StatCard";
+
 export default function Home() {
   return (
-    <main
-      style={{
-        background: "#0f172a",
-        minHeight: "100vh",
-        color: "white",
-        padding: "40px",
-        fontFamily: "Arial",
-      }}
-    >
-      <h1 style={{ fontSize: "42px" }}>
-        XAUUSD AI MASTER
-      </h1>
+    <MainLayout>
+      <div className="space-y-6">
+        <h1 className="text-3xl font-bold">
+          Dashboard
+        </h1>
 
-      <h2 style={{ color: "#38bdf8" }}>
-        AI Trading Dashboard
-      </h2>
-
-      <hr />
-
-      <h3>Market Status</h3>
-
-      <p>XAUUSD : Waiting for data...</p>
-
-      <h3>Signal</h3>
-
-      <p>No Signal</p>
-
-      <h3>News</h3>
-
-      <p>No News</p>
-
-      <h3>System</h3>
-
-      <p>Phase 3 Completed</p>
-    </main>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <StatCard title="Balance" value="$100,000" />
+          <StatCard title="Win Rate" value="82%" />
+          <StatCard title="Signals" value="0" />
+          <StatCard title="Market" value="Waiting..." />
+        </div>
+      </div>
+    </MainLayout>
   );
 }
