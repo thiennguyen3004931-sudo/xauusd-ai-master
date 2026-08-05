@@ -12,6 +12,22 @@ import { useAI } from "../../ai/hooks/useAI";
 export default function SignalCard() {
   const signal = useAI();
 
+  if (!signal) {
+    return (
+      <Card sx={{ height: "100%" }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            AI Signal
+          </Typography>
+
+          <Typography color="text.secondary">
+            Loading AI Signal...
+          </Typography>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card sx={{ height: "100%" }}>
       <CardContent>
@@ -55,7 +71,7 @@ export default function SignalCard() {
           </Typography>
 
           <Typography>
-            RR: <b>1 : {signal.rr}</b>
+            Risk : Reward: <b>1 : {signal.rr}</b>
           </Typography>
 
           <Typography>
@@ -74,7 +90,10 @@ export default function SignalCard() {
 
         <Stack spacing={0.5}>
           {signal.reason.map((item) => (
-            <Typography key={item} variant="body2">
+            <Typography
+              key={item}
+              variant="body2"
+            >
               • {item}
             </Typography>
           ))}

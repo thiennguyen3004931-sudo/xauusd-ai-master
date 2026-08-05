@@ -1,21 +1,19 @@
 export interface AISignal {
+  action: "BUY" | "SELL" | "WAIT";
 
-    action:"BUY"|"SELL"|"WAIT";
+  entry: number;
 
-    entry:number;
+  sl: number;
 
-    sl:number;
+  tp1: number;
 
-    tp1:number;
+  tp2: number;
 
-    tp2:number;
+  tp3: number;
 
-    tp3:number;
+  rr: number;
 
-    rr:number;
+  confidence: number;
 
-    confidence:number;
-
-    reason:string[];
-
+  reason: string[];
 }

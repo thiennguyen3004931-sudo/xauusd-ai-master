@@ -9,14 +9,21 @@ import {
 import { useMarket } from "../hooks/useMarket";
 
 export default function MarketInfoCard() {
-  const { data } = useMarket();
+  const market = useMarket();
 
-  if (!data) return null;
+  if (!market) {
+    return (
+      <Card sx={{ height: "100%" }}>
+        <CardContent>
+          <Typography>Loading market...</Typography>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card sx={{ height: "100%" }}>
       <CardContent>
-
         <Typography variant="h6">
           Market Information
         </Typography>
@@ -24,29 +31,46 @@ export default function MarketInfoCard() {
         <Divider sx={{ my: 2 }} />
 
         <Stack spacing={1}>
+          <Typography>
+            <b>Symbol:</b> {market.symbol}
+          </Typography>
 
-          <Typography>Symbol : {data.symbol}</Typography>
+          <Typography>
+            <b>Bid:</b> {market.bid}
+          </Typography>
 
-          <Typography>Bid : {data.bid}</Typography>
+          <Typography>
+            <b>Ask:</b> {market.ask}
+          </Typography>
 
-          <Typography>Ask : {data.ask}</Typography>
+          <Typography>
+            <b>Spread:</b> {market.spread}
+          </Typography>
 
-          <Typography>Spread : {data.spread}</Typography>
+          <Typography>
+            <b>High:</b> {market.high}
+          </Typography>
 
-          <Typography>High : {data.high}</Typography>
+          <Typography>
+            <b>Low:</b> {market.low}
+          </Typography>
 
-          <Typography>Low : {data.low}</Typography>
+          <Typography>
+            <b>Trend:</b> {market.trend}
+          </Typography>
 
-          <Typography>Trend : {data.trend}</Typography>
+          <Typography>
+            <b>Session:</b> {market.session}
+          </Typography>
 
-          <Typography>Session : {data.session}</Typography>
+          <Typography>
+            <b>Volatility:</b> {market.volatility}
+          </Typography>
 
-          <Typography>Volatility : {data.volatility}</Typography>
-
-          <Typography>Time : {data.time}</Typography>
-
+          <Typography>
+            <b>Time:</b> {market.time}
+          </Typography>
         </Stack>
-
       </CardContent>
     </Card>
   );

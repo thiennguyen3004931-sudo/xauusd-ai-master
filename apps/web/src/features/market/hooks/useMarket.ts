@@ -1,19 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { getMarket } from "../services/market.service";
-import type { MarketData } from "../types/market";
+import { useMarketStore } from "../../../store/market.store";
 
 export function useMarket() {
-  const [data, setData] = useState<MarketData | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const market = useMarketStore((s) => s.market);
+  const setMarket = useMarketStore((s) => s.setMarket);
 
   useEffect(() => {
-    getMarket()
-      .then(setData)
-      .finally(() => setIsLoading(false));
-  }, []);
+    if (!market) {
+      getMarket().then(setMarket);
+    }
+  }, [market, setMarket]);
 
-  return {
-    data,
-    isLoading,
-  };
+  return market;
 }

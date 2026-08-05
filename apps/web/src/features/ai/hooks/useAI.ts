@@ -1,7 +1,16 @@
-import { generateSignal } from "../engine/ai.engine";
+import { useEffect } from "react";
+import { useAIStore } from "../store/ai.store";
+import { getAISignal } from "../services/ai.service";
 
-export function useAI(){
+export function useAI() {
+  const signal = useAIStore((s) => s.signal);
+  const setSignal = useAIStore((s) => s.setSignal);
 
-    return generateSignal();
+  useEffect(() => {
+    if (!signal) {
+      getAISignal().then(setSignal);
+    }
+  }, [signal, setSignal]);
 
+  return signal;
 }
