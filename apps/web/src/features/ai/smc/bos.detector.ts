@@ -1,16 +1,26 @@
-import type { SwingPoint } from "./swing.detector";
+import type { Candle } from "../../market/types/candle";
+
+export interface BOSResult {
+  bullish: boolean;
+  bearish: boolean;
+}
 
 export function detectBOS(
-  swing: SwingPoint,
-  price: number
-) {
+  candles: Candle[],
+  swingHigh: number,
+  swingLow: number
+): BOSResult {
+  if (candles.length === 0) {
+    return {
+      bullish: false,
+      bearish: false,
+    };
+  }
+
+  const last = candles[candles.length - 1];
 
   return {
-
-    bullish: price > swing.high,
-
-    bearish: price < swing.low,
-
+    bullish: last.close > swingHigh,
+    bearish: last.close < swingLow,
   };
-
 }

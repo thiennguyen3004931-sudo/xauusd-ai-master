@@ -1,16 +1,13 @@
-import { useEffect } from "react";
-import { getMarket } from "../services/market.service";
-import { useMarketStore } from "../../../store/market.store";
+import { useQuery } from "@tanstack/react-query";
+
+import { marketService } from "../services/market.service";
 
 export function useMarket() {
-  const market = useMarketStore((s) => s.market);
-  const setMarket = useMarketStore((s) => s.setMarket);
+  return useQuery({
+    queryKey: ["market"],
 
-  useEffect(() => {
-    if (!market) {
-      getMarket().then(setMarket);
-    }
-  }, [market, setMarket]);
+    queryFn: () => marketService.getQuote(),
 
-  return market;
+    refetchInterval: 3000,
+  });
 }

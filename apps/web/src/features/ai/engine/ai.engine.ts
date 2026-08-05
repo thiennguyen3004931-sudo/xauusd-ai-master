@@ -1,6 +1,7 @@
 import type { AISignal } from "../types/ai";
 
-import { marketMock } from "../../market/mock/market.mock";
+import type { MarketData } from "../../market/types/market";
+import type { Candle } from "../../market/types/candle";
 
 import { analyzeTrend } from "../analyzers/trend.analyzer";
 import { analyzeMomentum } from "../analyzers/momentum.analyzer";
@@ -10,14 +11,18 @@ import { analyzeRisk } from "../analyzers/risk.analyzer";
 import { detectSwing } from "../smc/swing.detector";
 import { detectBOS } from "../smc/bos.detector";
 import { detectCHOCH } from "../smc/choch.detector";
-import { detectLiquidity } from "../smc/liquidity.detector";
+import { detectLiquiditySweep } from "../smc/liquidity.detector";
 import { detectOrderBlock } from "../smc/ob.detector";
 import { detectFVG } from "../smc/fvg.detector";
 
-export function generateSignal(): AISignal {
-  const market = marketMock;
+export function generateSignal(
+  market: MarketData,
+  candles: Candle[]
+): AISignal {
 
-  // ===== AI ANALYZERS =====
+  // ============================
+  // ANALYZERS
+  // ============================
 
   const trend = analyzeTrend(market);
 
@@ -25,13 +30,16 @@ export function generateSignal(): AISignal {
 
   const volatility = analyzeVolatility(market);
 
-  // ===== SMC =====
+  // ============================
+  // SMC
+  // ============================
 
-  const swing = detectSwing(market);
+  const swing = detectSwing(candles);
 
   const bos = detectBOS(
-    swing,
-    market.bid
+    candles,
+    swing.high,
+    swing.low
   );
 
   const choch = detectCHOCH(
@@ -39,7 +47,7 @@ export function generateSignal(): AISignal {
     bos.bearish
   );
 
-  const liquidity = detectLiquidity(
+  const liquidity = detectLiquiditySweep(
     market.spread
   );
 
@@ -47,7 +55,9 @@ export function generateSignal(): AISignal {
 
   const fvg = detectFVG();
 
-  // ===== TRADE PLAN =====
+  // ============================
+  // TRADE PLAN
+  // ============================
 
   const entry = market.bid;
 
@@ -77,7 +87,9 @@ export function generateSignal(): AISignal {
     tp3
   );
 
-  // ===== DECISION ENGINE =====
+  // ============================
+  // DECISION
+  // ============================
 
   let action: "BUY" | "SELL" | "WAIT" = "WAIT";
 
@@ -97,7 +109,9 @@ export function generateSignal(): AISignal {
     action = "SELL";
   }
 
-  // ===== RETURN =====
+  // ============================
+  // RETURN
+  // ============================
 
   return {
     action,
@@ -124,8 +138,12 @@ export function generateSignal(): AISignal {
       `Volatility : ${
         volatility.highVolatility ? "High" : "Normal"
       }`,
+
+      `Candles : ${candles.length}`,
+
       `Swing High : ${swing.high}`,
       `Swing Low : ${swing.low}`,
+
       `BOS : ${
         bos.bullish
           ? "Bullish"
@@ -133,24 +151,31 @@ export function generateSignal(): AISignal {
           ? "Bearish"
           : "No"
       }`,
+
       `CHOCH : ${
-        choch.choch ? "Detected" : "No"
+        choch ? "Detected" : "No"
       }`,
+
       `Liquidity Sweep : ${
-        liquidity.sweep ? "Yes" : "No"
+        liquidity ? "Yes" : "No"
       }`,
+
       `Bullish OB : ${
-        orderBlock.bullishOB ? "Yes" : "No"
+        orderBlock.bullish ? "Yes" : "No"
       }`,
+
       `Bearish OB : ${
-        orderBlock.bearishOB ? "Yes" : "No"
+        orderBlock.bearish ? "Yes" : "No"
       }`,
+
       `Bullish FVG : ${
         fvg.bullishFVG ? "Yes" : "No"
       }`,
+
       `Bearish FVG : ${
         fvg.bearishFVG ? "Yes" : "No"
       }`,
+
       `RR : ${risk.rr}`,
     ],
   };

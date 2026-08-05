@@ -1,11 +1,6 @@
 export function detectOrderBlock() {
-
   return {
-
-    bullishOB: false,
-
-    bearishOB: false,
-
+    bullish: true,
+    bearish: false,
   };
-
 }

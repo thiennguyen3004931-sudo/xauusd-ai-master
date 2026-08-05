@@ -1,16 +1,14 @@
-import { useEffect } from "react";
-import { getCandles } from "../services/candle.service";
-import { useCandleStore } from "../store/candle.store";
+import { useQuery } from "@tanstack/react-query";
 
-export function useCandles() {
-  const candles = useCandleStore((s) => s.candles);
-  const setCandles = useCandleStore((s) => s.setCandles);
+import { marketService } from "../services/market.service";
 
-  useEffect(() => {
-    if (candles.length === 0) {
-      getCandles().then(setCandles);
-    }
-  }, [candles, setCandles]);
+export function useCandles(limit = 500) {
+  return useQuery({
+    queryKey: ["candles", limit],
 
-  return candles;
+    queryFn: () =>
+      marketService.getCandles(limit),
+
+    refetchInterval: 5000,
+  });
 }

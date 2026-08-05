@@ -1,11 +1,5 @@
-export function detectLiquidity(
+export function detectLiquiditySweep(
   spread: number
 ) {
-
-  return {
-
-    sweep: spread > 0.5,
-
-  };
-
+  return spread > 0.5;
 }

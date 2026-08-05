@@ -1,17 +1,9 @@
-import express from "express";
+import app from "./app";
 
-const app = express();
-
-const PORT = 3000;
-
-app.get("/health", (_, res) => {
-  res.json({
-    status: "OK",
-    service: "XAUUSD AI MASTER API",
-    version: "1.0.0"
-  });
-});
+const PORT = Number(process.env.PORT ?? 3000);
 
 app.listen(PORT, () => {
-  console.log(`API running at http://localhost:${PORT}`);
+  console.log(
+    `API running at http://localhost:${PORT}`
+  );
 });

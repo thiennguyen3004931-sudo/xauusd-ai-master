@@ -9,13 +9,35 @@ import {
 import { useMarket } from "../hooks/useMarket";
 
 export default function MarketInfoCard() {
-  const market = useMarket();
+  const { data: market, isLoading, error } = useMarket();
+
+  if (isLoading) {
+    return (
+      <Card sx={{ height: "100%" }}>
+        <CardContent>
+          <Typography>Loading market...</Typography>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card sx={{ height: "100%" }}>
+        <CardContent>
+          <Typography color="error">
+            Cannot connect to Market API
+          </Typography>
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (!market) {
     return (
       <Card sx={{ height: "100%" }}>
         <CardContent>
-          <Typography>Loading market...</Typography>
+          <Typography>No market data.</Typography>
         </CardContent>
       </Card>
     );

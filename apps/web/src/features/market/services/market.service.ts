@@ -1,7 +1,13 @@
-import { marketMock } from "../mock/market.mock";
+import * as api from "../api/market.api";
 
-export async function getMarket() {
-  // Tạm thời trả về mock
-  // Sau này sẽ thay bằng API/WebSocket
-  return Promise.resolve(marketMock);
-}
+export const marketService = {
+
+  getQuote() {
+    return api.getQuote();
+  },
+
+  getCandles(limit?: number) {
+    return api.getCandles(limit);
+  },
+
+};
