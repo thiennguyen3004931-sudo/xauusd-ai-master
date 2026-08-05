@@ -3,8 +3,11 @@
   "compilerOptions": {
     "composite": true,
     "declaration": true,
-    "rootDir": "src",
-    "outDir": "dist"
+    "declarationMap": true,
+    "rootDir": "./src",
+    "outDir": "./dist"
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }
