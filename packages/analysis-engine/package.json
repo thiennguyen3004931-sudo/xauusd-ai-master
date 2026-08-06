@@ -1,0 +1,21 @@
+{
+  "name": "@xauusd/analysis-engine",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --dts",
+    "dev": "tsup src/index.ts --watch",
+    "test": "vitest run",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "@xauusd/market-data": "workspace:*"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.2",
+    "vitest": "^2.0.5"
+  }
+}
