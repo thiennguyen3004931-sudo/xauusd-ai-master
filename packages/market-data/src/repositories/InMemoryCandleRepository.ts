@@ -6,27 +6,39 @@ export class InMemoryCandleRepository implements ICandleRepository {
 
     private readonly storage = new Map<string, Candle[]>();
 
-    private getKey(symbol: string, timeframe: Timeframe): string {
+    private key(symbol: string, timeframe: Timeframe): string {
         return `${symbol}:${timeframe}`;
     }
 
     async save(candle: Candle): Promise<void> {
 
-        const key = this.getKey(candle.symbol, candle.timeframe);
+        const key = this.key(candle.symbol, candle.timeframe);
 
         const candles = this.storage.get(key) ?? [];
 
-        candles.push(candle);
+        const existed = candles.findIndex(
+            c => c.openTime === candle.openTime
+        );
 
-        candles.sort((a,b)=>a.openTime-b.openTime);
+        if (existed >= 0) {
 
-        this.storage.set(key,candles);
+            candles[existed] = candle;
+
+        } else {
+
+            candles.push(candle);
+
+        }
+
+        candles.sort((a, b) => a.openTime - b.openTime);
+
+        this.storage.set(key, candles);
 
     }
 
-    async saveMany(candles: Candle[]): Promise<void>{
+    async saveMany(candles: Candle[]): Promise<void> {
 
-        for(const candle of candles){
+        for (const candle of candles) {
 
             await this.save(candle);
 
@@ -34,21 +46,63 @@ export class InMemoryCandleRepository implements ICandleRepository {
 
     }
 
-    async getLatest(symbol:string,timeframe:Timeframe){
+    async getLatest(
 
-        const candles=this.storage.get(this.getKey(symbol,timeframe));
+        symbol: string,
 
-        if(!candles?.length) return null;
+        timeframe: Timeframe
 
-        return candles[candles.length-1];
+    ): Promise<Candle | null> {
+
+        const candles = this.storage.get(
+
+            this.key(symbol, timeframe)
+
+        );
+
+        if (!candles?.length) {
+
+            return null;
+
+        }
+
+        return candles[candles.length - 1];
 
     }
 
-    async getHistory(symbol:string,timeframe:Timeframe,limit:number){
+    async getHistory(
 
-        const candles=this.storage.get(this.getKey(symbol,timeframe)) ?? [];
+        symbol: string,
+
+        timeframe: Timeframe,
+
+        limit: number
+
+    ): Promise<Candle[]> {
+
+        const candles = this.storage.get(
+
+            this.key(symbol, timeframe)
+
+        ) ?? [];
 
         return candles.slice(-limit);
+
+    }
+
+    async clear(
+
+        symbol: string,
+
+        timeframe: Timeframe
+
+    ): Promise<void> {
+
+        this.storage.delete(
+
+            this.key(symbol, timeframe)
+
+        );
 
     }
 
