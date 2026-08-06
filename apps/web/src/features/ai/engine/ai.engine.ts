@@ -19,10 +19,9 @@ export function generateSignal(
   market: MarketData,
   candles: Candle[]
 ): AISignal {
-
-  // ============================
+  //----------------------------------------
   // ANALYZERS
-  // ============================
+  //----------------------------------------
 
   const trend = analyzeTrend(market);
 
@@ -30,9 +29,9 @@ export function generateSignal(
 
   const volatility = analyzeVolatility(market);
 
-  // ============================
-  // SMC
-  // ============================
+  //----------------------------------------
+  // SMART MONEY
+  //----------------------------------------
 
   const swing = detectSwing(candles);
 
@@ -55,43 +54,45 @@ export function generateSignal(
 
   const fvg = detectFVG();
 
-  // ============================
+  //----------------------------------------
   // TRADE PLAN
-  // ============================
+  //----------------------------------------
 
   const entry = market.bid;
 
-  const sl =
+  const stopLoss =
     trend.direction === "Bullish"
       ? entry - 6
       : entry + 6;
 
-  const tp1 =
-    trend.direction === "Bullish"
-      ? entry + 8
-      : entry - 8;
+  const takeProfit = {
+    tp1:
+      trend.direction === "Bullish"
+        ? entry + 8
+        : entry - 8,
 
-  const tp2 =
-    trend.direction === "Bullish"
-      ? entry + 16
-      : entry - 16;
+    tp2:
+      trend.direction === "Bullish"
+        ? entry + 16
+        : entry - 16,
 
-  const tp3 =
-    trend.direction === "Bullish"
-      ? entry + 24
-      : entry - 24;
+    tp3:
+      trend.direction === "Bullish"
+        ? entry + 24
+        : entry - 24,
+  };
 
   const risk = analyzeRisk(
     entry,
-    sl,
-    tp3
+    stopLoss,
+    takeProfit.tp3
   );
 
-  // ============================
+  //----------------------------------------
   // DECISION
-  // ============================
+  //----------------------------------------
 
-  let action: "BUY" | "SELL" | "WAIT" = "WAIT";
+  let action: AISignal["action"] = "WAIT";
 
   if (
     trend.direction === "Bullish" &&
@@ -109,41 +110,40 @@ export function generateSignal(
     action = "SELL";
   }
 
-  // ============================
+  //----------------------------------------
   // RETURN
-  // ============================
+  //----------------------------------------
 
   return {
     action,
 
+    confidence: momentum.score,
+
+    score: momentum.score,
+
+    strategy: "Trend + Momentum + Smart Money",
+
     entry,
 
-    sl,
+    stopLoss,
 
-    tp1,
-
-    tp2,
-
-    tp3,
+    takeProfit,
 
     rr: risk.rr,
 
-    confidence: momentum.score,
-
-    reason: [
+    reasons: [
       `Trend : ${trend.direction}`,
       `Momentum : ${momentum.score}%`,
       `Spread : ${market.spread}`,
       `Session : ${market.session}`,
       `Volatility : ${
-        volatility.highVolatility ? "High" : "Normal"
+        volatility.highVolatility
+          ? "High"
+          : "Normal"
       }`,
-
       `Candles : ${candles.length}`,
-
       `Swing High : ${swing.high}`,
       `Swing Low : ${swing.low}`,
-
       `BOS : ${
         bos.bullish
           ? "Bullish"
@@ -151,32 +151,53 @@ export function generateSignal(
           ? "Bearish"
           : "No"
       }`,
-
       `CHOCH : ${
         choch ? "Detected" : "No"
       }`,
-
       `Liquidity Sweep : ${
         liquidity ? "Yes" : "No"
       }`,
-
       `Bullish OB : ${
         orderBlock.bullish ? "Yes" : "No"
       }`,
-
       `Bearish OB : ${
         orderBlock.bearish ? "Yes" : "No"
       }`,
-
       `Bullish FVG : ${
         fvg.bullishFVG ? "Yes" : "No"
       }`,
-
       `Bearish FVG : ${
         fvg.bearishFVG ? "Yes" : "No"
       }`,
-
-      `RR : ${risk.rr}`,
+      `Risk Reward : ${risk.rr}`,
     ],
+
+    indicators: {
+      ema20: 0,
+      ema50: 0,
+      ema200: 0,
+      rsi: momentum.score,
+      atr: 0,
+    },
+
+    smc: {
+      bos:
+        bos.bullish ||
+        bos.bearish,
+
+      choch,
+
+      liquidity,
+
+      orderBlock:
+        orderBlock.bullish ||
+        orderBlock.bearish,
+
+      fvg:
+        fvg.bullishFVG ||
+        fvg.bearishFVG,
+    },
+
+    timestamp: new Date().toISOString(),
   };
 }

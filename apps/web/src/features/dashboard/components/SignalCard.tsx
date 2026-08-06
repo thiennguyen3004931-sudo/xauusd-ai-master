@@ -55,19 +55,19 @@ export default function SignalCard() {
           </Typography>
 
           <Typography>
-            Stop Loss: <b>{signal.sl}</b>
+            Stop Loss: <b>{signal.stopLoss}</b>
           </Typography>
 
           <Typography>
-            Take Profit 1: <b>{signal.tp1}</b>
+            Take Profit 1: <b>{signal.takeProfit.tp1}</b>
           </Typography>
 
           <Typography>
-            Take Profit 2: <b>{signal.tp2}</b>
+            Take Profit 2: <b>{signal.takeProfit.tp2}</b>
           </Typography>
 
           <Typography>
-            Take Profit 3: <b>{signal.tp3}</b>
+            Take Profit 3: <b>{signal.takeProfit.tp3}</b>
           </Typography>
 
           <Typography>
@@ -76,6 +76,10 @@ export default function SignalCard() {
 
           <Typography>
             Confidence: <b>{signal.confidence}%</b>
+          </Typography>
+
+          <Typography>
+            Strategy: <b>{signal.strategy}</b>
           </Typography>
         </Stack>
 
@@ -89,7 +93,7 @@ export default function SignalCard() {
         </Typography>
 
         <Stack spacing={0.5}>
-          {signal.reason.map((item) => (
+          {signal.reasons.map((item: string) => (
             <Typography
               key={item}
               variant="body2"
