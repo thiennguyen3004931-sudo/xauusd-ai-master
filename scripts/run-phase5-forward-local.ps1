@@ -164,7 +164,7 @@ try {
   Write-Host "PHASE5_FORWARD_BUILD_STATUS=PASS"
 
   Write-Host "PHASE5_FORWARD_REPLAY_START"
-  & pnpm exec tsx $Runner 2>&1 | Tee-Object $consoleLog
+  & pnpm exec tsx $Runner 2>&1 | Tee-Object $consoleLog | Out-Null
   if ($LASTEXITCODE -ne 0) {
     throw "Phase 5 canonical replay failed with exit code $LASTEXITCODE"
   }
@@ -175,7 +175,11 @@ finally {
 
 Write-Host "PHASE5_FORWARD_REPLAY_STATUS=PASS"
 Write-Host "PHASE5_FORWARD_LOG=$consoleLog"
+Write-Host "PHASE5_FORWARD_REPLAY_BASELINE_BEGIN"
+Select-String -Path $consoleLog -Pattern "^(REPLAY_AI_EXECUTABLE|PHASE4_TOTAL_CASES|PHASE4_FINAL_MINLOT_FEASIBLE|PHASE4_MINLOT_RESCUED)=" |
+  ForEach-Object { $_.Line }
+Write-Host "PHASE5_FORWARD_REPLAY_BASELINE_END"
 Write-Host "PHASE5_FORWARD_STATUS_LINES_BEGIN"
-Select-String -Path $consoleLog -Pattern "PHASE5_" | ForEach-Object { $_.Line }
+Select-String -Path $consoleLog -Pattern "^PHASE5_" | ForEach-Object { $_.Line }
 Write-Host "PHASE5_FORWARD_STATUS_LINES_END"
 Write-Host "PHASE5_FORWARD_RUN_STATUS=PASS"
