@@ -1,0 +1,155 @@
+import type {
+  Phase4ShadowManagementConfig,
+  Phase4ShadowReplayMetrics,
+  Phase4ShadowTradeCase,
+} from "../models";
+import { Phase4ShadowReplayService } from "./Phase4ShadowReplayService";
+
+export type Phase5ForwardHoldoutStatus =
+  | "INSUFFICIENT_SAMPLE"
+  | "PASS"
+  | "FAIL";
+
+export interface Phase5ForwardHoldoutResult {
+  cutoffTimestamp: number;
+  candidate: "CANONICAL_SELL";
+  management: Phase4ShadowManagementConfig;
+  minimumFilledTrades: number;
+  totalInputCases: number;
+  preCutoffCasesIgnored: number;
+  postCutoffCases: number;
+  eligibleCases: number;
+  firstEligibleTimestamp: number | null;
+  lastEligibleTimestamp: number | null;
+  metrics: Phase4ShadowReplayMetrics;
+  status: Phase5ForwardHoldoutStatus;
+}
+
+/**
+ * Frozen research cutoff from Phase 4F/H.
+ * Only signals strictly AFTER this instant are eligible for Phase 5.
+ */
+export const PHASE5_FORWARD_CUTOFF_TIMESTAMP = Date.parse(
+  "2026-08-12T12:45:00.000Z",
+);
+
+/**
+ * Pre-registered management. Do not retune on the Phase 5 holdout.
+ */
+export const PHASE5_FORWARD_MANAGEMENT: Phase4ShadowManagementConfig = {
+  breakEvenTriggerPrice: 6,
+  breakEvenOffsetPrice: 2,
+  trailingTriggerPrice: 10,
+  trailingDistancePrice: 5,
+};
+
+/**
+ * Pre-registered sample gate. Until this many trades are filled, Phase 5
+ * reports INSUFFICIENT_SAMPLE rather than PASS/FAIL.
+ */
+export const PHASE5_MINIMUM_FILLED_TRADES = 30;
+
+/**
+ * Pre-registered PF floor. The research sample reached PF 1.6598 for
+ * CANONICAL_SELL; the untouched holdout only needs to clear a much lower
+ * floor to demonstrate a positive, non-trivial edge without curve fitting.
+ */
+export const PHASE5_MINIMUM_PROFIT_FACTOR = 1.1;
+
+export class Phase5ForwardHoldoutService {
+  run(
+    cases: readonly Phase4ShadowTradeCase[],
+    cutoffTimestamp = PHASE5_FORWARD_CUTOFF_TIMESTAMP,
+    management: Phase4ShadowManagementConfig = PHASE5_FORWARD_MANAGEMENT,
+    minimumFilledTrades = PHASE5_MINIMUM_FILLED_TRADES,
+  ): Phase5ForwardHoldoutResult {
+    if (!Number.isFinite(cutoffTimestamp)) {
+      throw new Error("Phase5ForwardHoldoutService requires a finite cutoff timestamp.");
+    }
+    if (!Number.isInteger(minimumFilledTrades) || minimumFilledTrades < 1) {
+      throw new Error("Phase5ForwardHoldoutService requires minimumFilledTrades >= 1.");
+    }
+
+    const ordered = [...cases].sort(
+      (a, b) => a.signalTimestamp - b.signalTimestamp || a.id.localeCompare(b.id),
+    );
+    const preCutoffCasesIgnored = ordered.filter(
+      (item) => item.signalTimestamp <= cutoffTimestamp,
+    ).length;
+    const postCutoff = ordered.filter(
+      (item) => item.signalTimestamp > cutoffTimestamp,
+    );
+    const eligible = postCutoff.filter(
+      (item) =>
+        (item.entrySource ?? "CANONICAL") === "CANONICAL" &&
+        item.side === "SELL",
+    );
+
+    const replay = new Phase4ShadowReplayService(management).run(eligible);
+    const metrics = replay.metrics;
+
+    const positive =
+      metrics.netPnl > 0 &&
+      metrics.expectancy > 0 &&
+      metrics.averageRMultiple > 0 &&
+      effectiveProfitFactor(metrics) > PHASE5_MINIMUM_PROFIT_FACTOR;
+
+    const status: Phase5ForwardHoldoutStatus =
+      metrics.filledTrades < minimumFilledTrades
+        ? "INSUFFICIENT_SAMPLE"
+        : positive
+          ? "PASS"
+          : "FAIL";
+
+    return {
+      cutoffTimestamp,
+      candidate: "CANONICAL_SELL",
+      management,
+      minimumFilledTrades,
+      totalInputCases: ordered.length,
+      preCutoffCasesIgnored,
+      postCutoffCases: postCutoff.length,
+      eligibleCases: eligible.length,
+      firstEligibleTimestamp: eligible[0]?.signalTimestamp ?? null,
+      lastEligibleTimestamp: eligible.at(-1)?.signalTimestamp ?? null,
+      metrics,
+      status,
+    };
+  }
+
+  format(result: Phase5ForwardHoldoutResult): string[] {
+    const c = result.management;
+    const m = result.metrics;
+    return [
+      `PHASE5_CUTOFF=${new Date(result.cutoffTimestamp).toISOString()}`,
+      `PHASE5_CANDIDATE=${result.candidate}`,
+      `PHASE5_CONFIG=BE_TRIGGER=${c.breakEvenTriggerPrice}|BE_OFFSET=${c.breakEvenOffsetPrice}|TRAIL_TRIGGER=${c.trailingTriggerPrice}|TRAIL_DISTANCE=${c.trailingDistancePrice}`,
+      `PHASE5_MINIMUM_FILLED_TRADES=${result.minimumFilledTrades}`,
+      `PHASE5_MINIMUM_PROFIT_FACTOR=${PHASE5_MINIMUM_PROFIT_FACTOR}`,
+      `PHASE5_TOTAL_INPUT_CASES=${result.totalInputCases}`,
+      `PHASE5_PRE_CUTOFF_CASES_IGNORED=${result.preCutoffCasesIgnored}`,
+      `PHASE5_POST_CUTOFF_CASES=${result.postCutoffCases}`,
+      `PHASE5_ELIGIBLE_CASES=${result.eligibleCases}`,
+      `PHASE5_FIRST_ELIGIBLE=${isoOrNone(result.firstEligibleTimestamp)}`,
+      `PHASE5_LAST_ELIGIBLE=${isoOrNone(result.lastEligibleTimestamp)}`,
+      `PHASE5_FILLED_TRADES=${m.filledTrades}`,
+      `PHASE5_WIN_RATE=${m.winRatePercent}`,
+      `PHASE5_NET_PNL=${m.netPnl}`,
+      `PHASE5_PROFIT_FACTOR=${m.profitFactor ?? "INF"}`,
+      `PHASE5_EXPECTANCY=${m.expectancy}`,
+      `PHASE5_AVG_R=${m.averageRMultiple}`,
+      `PHASE5_STATUS=${result.status}`,
+      "PHASE5_PRE_REGISTERED=PASS",
+      "PHASE5_PRODUCTION_MUTATION=false",
+    ];
+  }
+}
+
+function effectiveProfitFactor(metrics: Phase4ShadowReplayMetrics): number {
+  if (metrics.profitFactor !== null) return metrics.profitFactor;
+  return metrics.netPnl > 0 ? Number.POSITIVE_INFINITY : 0;
+}
+
+function isoOrNone(timestamp: number | null): string {
+  return timestamp === null ? "NONE" : new Date(timestamp).toISOString();
+}
