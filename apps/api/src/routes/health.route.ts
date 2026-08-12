@@ -1,21 +1,6 @@
-import { Router } from "express";
-
+import { Router, type Request, type Response } from "express";
 const router = Router();
-
-router.get("/", (_, res) => {
-
-  res.json({
-    success: true,
-
-    data: {
-      status: "OK",
-      service: "XAUUSD AI MASTER API",
-      version: "2.0.0"
-    },
-
-    timestamp: Date.now()
-  });
-
+router.get("/", (_req: Request, res: Response) => {
+  res.json({ success: true, data: { status: "OK", service: "XAUUSD AI MASTER API", version: "12-pack-fix-1" }, timestamp: Date.now() });
 });
-
 export default router;

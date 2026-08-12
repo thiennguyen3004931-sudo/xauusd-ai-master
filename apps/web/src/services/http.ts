@@ -1,1 +1,0 @@
-export { http } from "../core/api/http";

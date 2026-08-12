@@ -9,7 +9,10 @@
     "build": "turbo run build",
     "lint": "turbo run lint",
     "test": "turbo run test",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "check:integration": "node scripts/validate-pack-12.mjs",
+    "dev:api": "turbo run dev --filter=@xauusd/api",
+    "dev:web": "turbo run dev --filter=@xauusd/web"
   },
   "devDependencies": {
     "turbo": "^2.5.6",

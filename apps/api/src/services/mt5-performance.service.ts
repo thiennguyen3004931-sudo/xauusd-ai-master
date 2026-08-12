@@ -1,0 +1,731 @@
+import {
+  defaultMt5BrokerConfig,
+  type Mt5BridgeDeal,
+} from "@xauusd/mt5-broker";
+
+import {
+  getMt5DealHistory,
+} from "./mt5-market.service";
+
+import {
+  getMt5Telemetry,
+} from "./mt5.service";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MIN_RECOMMENDATION_SAMPLE = 20;
+
+export interface Mt5PerformanceMetrics {
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  breakeven: number;
+  netPnl: number;
+  grossProfit: number;
+  grossLoss: number;
+  winRatePercent: number;
+  profitFactor: number | null;
+  expectancy: number;
+  averageWin: number;
+  averageLoss: number;
+  maxDrawdown: number;
+  maxDrawdownPercent: number;
+  maxConsecutiveLosses: number;
+}
+
+export interface Mt5PerformanceTrade {
+  id: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  ownership: "SYSTEM" | "VALIDATION" | "OTHER";
+  openedAt: number;
+  closedAt: number;
+  durationMinutes: number;
+  volume: number;
+  entry: number;
+  exit: number;
+  netPnl: number;
+  session: string;
+  brokerHour: number;
+  weekday: string;
+  exitReason: "UNKNOWN";
+}
+
+export interface Mt5PerformanceBucket {
+  key: string;
+  label: string;
+  totalTrades: number;
+  netPnl: number;
+  winRatePercent: number;
+  profitFactor: number | null;
+}
+
+export interface Mt5PerformanceRecommendation {
+  severity: "INFO" | "WATCH" | "ACTION";
+  title: string;
+  evidence: string;
+  suggestion: string;
+  autoApply: false;
+}
+
+export interface Mt5PerformanceSnapshot {
+  source: "MT5_DEMO_READ_ONLY";
+  symbol: string;
+  currency: string;
+  days: number;
+  generatedAt: number;
+  safety: {
+    accountMode: "demo";
+    bridgeTradingEnabled: false;
+    strategyAutoChange: false;
+    liveUnlockAvailable: false;
+  };
+  accountWide: {
+    metrics: Mt5PerformanceMetrics;
+    equityCurve: Array<{
+      timestamp: number;
+      balance: number;
+      drawdownPercent: number;
+    }>;
+  };
+  systemOwned: {
+    metrics: Mt5PerformanceMetrics;
+    minimumRecommendationSample: number;
+    sampleReady: boolean;
+    recent20: Mt5PerformanceMetrics | null;
+    previous20: Mt5PerformanceMetrics | null;
+  };
+  trades: Mt5PerformanceTrade[];
+  breakdown: {
+    side: Mt5PerformanceBucket[];
+    session: Mt5PerformanceBucket[];
+    weekday: Mt5PerformanceBucket[];
+    hour: Mt5PerformanceBucket[];
+    ownership: Mt5PerformanceBucket[];
+  };
+  recommendations: Mt5PerformanceRecommendation[];
+  notes: string[];
+}
+
+function round(value: number, digits = 2): number {
+  const scale = 10 ** digits;
+  return Math.round((value + Number.EPSILON) * scale) / scale;
+}
+
+function validationComment(comment: string): boolean {
+  const value = comment.toLowerCase();
+  return value.includes("gate2") || value.includes("gate3");
+}
+
+function ownershipOf(
+  opening: Mt5BridgeDeal,
+  systemMagic: number,
+): Mt5PerformanceTrade["ownership"] {
+  if (validationComment(opening.comment ?? "")) {
+    return "VALIDATION";
+  }
+
+  return opening.magic === systemMagic
+    ? "SYSTEM"
+    : "OTHER";
+}
+
+function brokerHour(timestamp: number): number {
+  return new Date(timestamp).getUTCHours();
+}
+
+function sessionFromHour(hour: number): string {
+  if (hour >= 0 && hour < 8) return "ASIAN";
+  if (hour >= 8 && hour < 13) return "LONDON";
+  if (hour >= 13 && hour < 17) return "OVERLAP";
+  if (hour >= 17 && hour < 22) return "NEW_YORK";
+  return "CLOSED";
+}
+
+const WEEKDAYS = [
+  "Chủ nhật",
+  "Thứ 2",
+  "Thứ 3",
+  "Thứ 4",
+  "Thứ 5",
+  "Thứ 6",
+  "Thứ 7",
+] as const;
+
+function reconstructTrades(
+  deals: readonly Mt5BridgeDeal[],
+  systemMagic: number,
+): Mt5PerformanceTrade[] {
+  const groups = new Map<string, Mt5BridgeDeal[]>();
+
+  for (const deal of deals) {
+    if (
+      !deal.isTradingDeal ||
+      !deal.positionId ||
+      deal.positionId === "0"
+    ) {
+      continue;
+    }
+
+    const group = groups.get(deal.positionId) ?? [];
+    group.push(deal);
+    groups.set(deal.positionId, group);
+  }
+
+  const trades: Mt5PerformanceTrade[] = [];
+
+  for (const [positionId, group] of groups) {
+    group.sort((left, right) => left.timestamp - right.timestamp);
+
+    const opens = group.filter(
+      (deal) => deal.entry === "IN" && deal.side !== null,
+    );
+
+    const closes = group.filter(
+      (deal) =>
+        deal.entry === "OUT" ||
+        deal.entry === "OUT_BY" ||
+        deal.entry === "INOUT",
+    );
+
+    const firstOpen = opens.at(0);
+    const lastClose = closes.at(-1);
+
+    if (!firstOpen || !lastClose || firstOpen.side === null) {
+      continue;
+    }
+
+    const openVolume = opens.reduce(
+      (sum, deal) => sum + deal.volume,
+      0,
+    );
+
+    const closeVolume = closes.reduce(
+      (sum, deal) => sum + deal.volume,
+      0,
+    );
+
+    if (
+      openVolume <= 0 ||
+      closeVolume <= 0 ||
+      closeVolume + 1e-8 < openVolume
+    ) {
+      continue;
+    }
+
+    const entry =
+      opens.reduce(
+        (sum, deal) => sum + deal.price * deal.volume,
+        0,
+      ) / openVolume;
+
+    const exit =
+      closes.reduce(
+        (sum, deal) => sum + deal.price * deal.volume,
+        0,
+      ) / closeVolume;
+
+    const netPnl = group.reduce(
+      (sum, deal) => sum + deal.netPnl,
+      0,
+    );
+
+    const hour = brokerHour(firstOpen.timestamp);
+    const day = new Date(firstOpen.timestamp).getUTCDay();
+
+    trades.push({
+      id: `mt5-${positionId}`,
+      symbol: firstOpen.symbol || "XAUUSD",
+      side: firstOpen.side,
+      ownership: ownershipOf(firstOpen, systemMagic),
+      openedAt: firstOpen.timestamp,
+      closedAt: lastClose.timestamp,
+      durationMinutes: round(
+        Math.max(0, lastClose.timestamp - firstOpen.timestamp) /
+          60_000,
+        1,
+      ),
+      volume: round(openVolume, 2),
+      entry: round(entry, 2),
+      exit: round(exit, 2),
+      netPnl: round(netPnl, 2),
+      session: sessionFromHour(hour),
+      brokerHour: hour,
+      weekday: WEEKDAYS[day] ?? String(day),
+      exitReason: "UNKNOWN",
+    });
+  }
+
+  return trades.sort(
+    (left, right) => right.closedAt - left.closedAt,
+  );
+}
+
+function calculateMetrics(
+  trades: readonly Mt5PerformanceTrade[],
+  startingBalance?: number,
+): Mt5PerformanceMetrics {
+  const chronological = [...trades].sort(
+    (left, right) => left.closedAt - right.closedAt,
+  );
+
+  const wins = chronological.filter((trade) => trade.netPnl > 0);
+  const losses = chronological.filter((trade) => trade.netPnl < 0);
+  const breakeven = chronological.length - wins.length - losses.length;
+
+  const grossProfit = wins.reduce(
+    (sum, trade) => sum + trade.netPnl,
+    0,
+  );
+
+  const grossLoss = Math.abs(
+    losses.reduce(
+      (sum, trade) => sum + trade.netPnl,
+      0,
+    ),
+  );
+
+  const netPnl = chronological.reduce(
+    (sum, trade) => sum + trade.netPnl,
+    0,
+  );
+
+  let maxConsecutiveLosses = 0;
+  let streak = 0;
+
+  for (const trade of chronological) {
+    if (trade.netPnl < 0) {
+      streak += 1;
+      maxConsecutiveLosses = Math.max(
+        maxConsecutiveLosses,
+        streak,
+      );
+    } else {
+      streak = 0;
+    }
+  }
+
+  let maxDrawdown = 0;
+  let maxDrawdownPercent = 0;
+
+  if (
+    typeof startingBalance === "number" &&
+    Number.isFinite(startingBalance) &&
+    startingBalance > 0
+  ) {
+    let balance = startingBalance;
+    let peak = balance;
+
+    for (const trade of chronological) {
+      balance += trade.netPnl;
+      peak = Math.max(peak, balance);
+
+      const drawdown = peak - balance;
+      const drawdownPercent =
+        peak > 0 ? (drawdown / peak) * 100 : 0;
+
+      maxDrawdown = Math.max(maxDrawdown, drawdown);
+      maxDrawdownPercent = Math.max(
+        maxDrawdownPercent,
+        drawdownPercent,
+      );
+    }
+  }
+
+  return {
+    totalTrades: chronological.length,
+    wins: wins.length,
+    losses: losses.length,
+    breakeven,
+    netPnl: round(netPnl),
+    grossProfit: round(grossProfit),
+    grossLoss: round(grossLoss),
+    winRatePercent:
+      chronological.length > 0
+        ? round((wins.length / chronological.length) * 100)
+        : 0,
+    profitFactor:
+      grossLoss > 0
+        ? round(grossProfit / grossLoss, 3)
+        : grossProfit > 0
+          ? null
+          : 0,
+    expectancy:
+      chronological.length > 0
+        ? round(netPnl / chronological.length)
+        : 0,
+    averageWin:
+      wins.length > 0
+        ? round(grossProfit / wins.length)
+        : 0,
+    averageLoss:
+      losses.length > 0
+        ? round(grossLoss / losses.length)
+        : 0,
+    maxDrawdown: round(maxDrawdown),
+    maxDrawdownPercent: round(maxDrawdownPercent),
+    maxConsecutiveLosses,
+  };
+}
+
+function buildEquityCurve(
+  trades: readonly Mt5PerformanceTrade[],
+  startingBalance: number,
+) {
+  const chronological = [...trades].sort(
+    (left, right) => left.closedAt - right.closedAt,
+  );
+
+  let balance = startingBalance;
+  let peak = startingBalance;
+
+  return chronological.map((trade) => {
+    balance += trade.netPnl;
+    peak = Math.max(peak, balance);
+
+    const drawdownPercent =
+      peak > 0
+        ? ((peak - balance) / peak) * 100
+        : 0;
+
+    return {
+      timestamp: trade.closedAt,
+      balance: round(balance),
+      drawdownPercent: round(drawdownPercent),
+    };
+  });
+}
+
+function bucket(
+  trades: readonly Mt5PerformanceTrade[],
+  keyOf: (trade: Mt5PerformanceTrade) => string,
+): Mt5PerformanceBucket[] {
+  const groups = new Map<string, Mt5PerformanceTrade[]>();
+
+  for (const trade of trades) {
+    const key = keyOf(trade);
+    const group = groups.get(key) ?? [];
+    group.push(trade);
+    groups.set(key, group);
+  }
+
+  return [...groups.entries()]
+    .map(([key, group]) => {
+      const metrics = calculateMetrics(group);
+
+      return {
+        key,
+        label: key,
+        totalTrades: metrics.totalTrades,
+        netPnl: metrics.netPnl,
+        winRatePercent: metrics.winRatePercent,
+        profitFactor: metrics.profitFactor,
+      };
+    })
+    .sort((left, right) => {
+      if (right.totalTrades !== left.totalTrades) {
+        return right.totalTrades - left.totalTrades;
+      }
+
+      return left.label.localeCompare(right.label);
+    });
+}
+
+function recommendations(
+  systemTrades: readonly Mt5PerformanceTrade[],
+): Mt5PerformanceRecommendation[] {
+  if (systemTrades.length < MIN_RECOMMENDATION_SAMPLE) {
+    return [{
+      severity: "INFO",
+      title: "Chưa đủ mẫu để thay đổi chiến lược",
+      evidence:
+        `Mới có ${systemTrades.length}/${MIN_RECOMMENDATION_SAMPLE} ` +
+        "system-owned trade đã đóng.",
+      suggestion:
+        "Tiếp tục DEMO và thu thập thêm mẫu. Không tự động thay đổi " +
+        "MA/FVG/Supply-Demand/Volume Profile hoặc trailing.",
+      autoApply: false,
+    }];
+  }
+
+  const output: Mt5PerformanceRecommendation[] = [];
+  const all = calculateMetrics(systemTrades);
+  const buys = systemTrades.filter((trade) => trade.side === "BUY");
+  const sells = systemTrades.filter((trade) => trade.side === "SELL");
+  const buyMetrics = calculateMetrics(buys);
+  const sellMetrics = calculateMetrics(sells);
+
+  if (
+    (all.profitFactor ?? 0) < 1 &&
+    all.winRatePercent < 40
+  ) {
+    output.push({
+      severity: "ACTION",
+      title: "Chất lượng entry system-owned đang yếu",
+      evidence:
+        `PF ${String(all.profitFactor ?? "∞")} · ` +
+        `Win rate ${all.winRatePercent.toFixed(1)}% · ` +
+        `${all.totalTrades} trades.`,
+      suggestion:
+        "Ưu tiên review các gate TrendContinuation/confluence và " +
+        "không hạ threshold chỉ để tăng số lệnh.",
+      autoApply: false,
+    });
+  }
+
+  if (
+    buys.length >= 5 &&
+    sells.length >= 5 &&
+    Math.abs(
+      buyMetrics.winRatePercent - sellMetrics.winRatePercent,
+    ) >= 20
+  ) {
+    const weak =
+      buyMetrics.winRatePercent < sellMetrics.winRatePercent
+        ? "BUY"
+        : "SELL";
+
+    output.push({
+      severity: "WATCH",
+      title: `${weak} đang yếu hơn rõ rệt`,
+      evidence:
+        `BUY ${buyMetrics.winRatePercent.toFixed(1)}% vs ` +
+        `SELL ${sellMetrics.winRatePercent.toFixed(1)}%.`,
+      suggestion:
+        `Review riêng điều kiện ${weak} theo trend alignment, ` +
+        "FVG/Supply-Demand và Volume Profile trước khi đổi tham số chung.",
+      autoApply: false,
+    });
+  }
+
+  if (
+    all.losses > 0 &&
+    all.wins > 0 &&
+    all.averageLoss > all.averageWin &&
+    (all.profitFactor ?? 0) < 1
+  ) {
+    output.push({
+      severity: "WATCH",
+      title: "Average loss lớn hơn average win",
+      evidence:
+        `Avg win $${all.averageWin.toFixed(2)} · ` +
+        `Avg loss $${all.averageLoss.toFixed(2)}.`,
+      suggestion:
+        "Review geometry SL/TP và management; không kết luận trailing " +
+        "sớm nếu chưa có MFE/MAE theo từng trade.",
+      autoApply: false,
+    });
+  }
+
+  const recent = systemTrades.slice(0, 20);
+  const previous = systemTrades.slice(20, 40);
+
+  if (previous.length === 20) {
+    const currentMetrics = calculateMetrics(recent);
+    const previousMetrics = calculateMetrics(previous);
+
+    const currentPf = currentMetrics.profitFactor ?? 999;
+    const previousPf = previousMetrics.profitFactor ?? 999;
+
+    if (
+      currentPf + 0.25 < previousPf ||
+      currentMetrics.winRatePercent + 10 <
+        previousMetrics.winRatePercent
+    ) {
+      output.push({
+        severity: "WATCH",
+        title: "20 lệnh gần nhất đang suy giảm",
+        evidence:
+          `Recent WR ${currentMetrics.winRatePercent.toFixed(1)}% / ` +
+          `PF ${String(currentMetrics.profitFactor ?? "∞")} vs ` +
+          `previous WR ${previousMetrics.winRatePercent.toFixed(1)}% / ` +
+          `PF ${String(previousMetrics.profitFactor ?? "∞")}.`,
+        suggestion:
+          "Kiểm tra regime/session và chất lượng confluence trước khi " +
+          "thay đổi rule. Không auto-fit theo một chuỗi ngắn.",
+        autoApply: false,
+      });
+    }
+  }
+
+  if (output.length === 0) {
+    output.push({
+      severity: "INFO",
+      title: "Chưa có bằng chứng đủ mạnh để đổi rule",
+      evidence:
+        `${all.totalTrades} system-owned trades chưa kích hoạt rule cảnh báo.`,
+      suggestion:
+        "Tiếp tục DEMO, giữ nguyên cấu hình và theo dõi rolling 20 trades.",
+      autoApply: false,
+    });
+  }
+
+  return output;
+}
+
+export async function getMt5PerformanceSnapshot(
+  days = 90,
+  symbol = "XAUUSD",
+): Promise<Mt5PerformanceSnapshot> {
+  if (
+    !Number.isInteger(days) ||
+    days < 7 ||
+    days > 365
+  ) {
+    throw new Error("days must be an integer between 7 and 365.");
+  }
+
+  const normalizedSymbol = symbol.trim().toUpperCase();
+
+  if (normalizedSymbol !== "XAUUSD") {
+    throw new Error("MT5 performance page currently supports XAUUSD only.");
+  }
+
+  const telemetry = await getMt5Telemetry(normalizedSymbol);
+
+  if (
+    !telemetry.reachable ||
+    !telemetry.health?.connected
+  ) {
+    throw new Error(
+      `MT5 telemetry unavailable: ${telemetry.message}`,
+    );
+  }
+
+  if (telemetry.health.accountMode !== "demo") {
+    throw new Error("MT5 performance analytics is DEMO-only.");
+  }
+
+  if (telemetry.health.tradingEnabled) {
+    throw new Error(
+      "Read-only performance analytics requires Bridge trading=false.",
+    );
+  }
+
+  const brokerNow =
+    telemetry.quote?.timestamp ?? Date.now();
+
+  const fromMs = Math.max(
+    0,
+    brokerNow - days * DAY_MS,
+  );
+
+  const deals = (
+    await getMt5DealHistory(
+      fromMs,
+      brokerNow,
+      normalizedSymbol,
+    )
+  ).filter(
+    (deal) =>
+      deal.isTradingDeal &&
+      deal.symbol === normalizedSymbol,
+  );
+
+  const systemMagic = Number(
+    process.env.MT5_MAGIC_NUMBER ??
+      defaultMt5BrokerConfig.magicNumber,
+  );
+
+  if (
+    !Number.isInteger(systemMagic) ||
+    systemMagic <= 0
+  ) {
+    throw new Error("Configured system magic is invalid.");
+  }
+
+  const trades = reconstructTrades(
+    deals,
+    systemMagic,
+  );
+
+  const currentBalance =
+    telemetry.health.accountBalance;
+
+  const accountWindowPnl = trades.reduce(
+    (sum, trade) => sum + trade.netPnl,
+    0,
+  );
+
+  const startingBalance =
+    typeof currentBalance === "number" &&
+    Number.isFinite(currentBalance) &&
+    currentBalance > 0
+      ? Math.max(0.01, currentBalance - accountWindowPnl)
+      : 10_000;
+
+  const systemTrades = trades.filter(
+    (trade) => trade.ownership === "SYSTEM",
+  );
+
+  const systemMetrics = calculateMetrics(
+    systemTrades,
+  );
+
+  const recent20 =
+    systemTrades.length >= 20
+      ? calculateMetrics(systemTrades.slice(0, 20))
+      : null;
+
+  const previous20 =
+    systemTrades.length >= 40
+      ? calculateMetrics(systemTrades.slice(20, 40))
+      : null;
+
+  return {
+    source: "MT5_DEMO_READ_ONLY",
+    symbol: normalizedSymbol,
+    currency:
+      telemetry.health.accountCurrency ?? "USD",
+    days,
+    generatedAt: brokerNow,
+    safety: {
+      accountMode: "demo",
+      bridgeTradingEnabled: false,
+      strategyAutoChange: false,
+      liveUnlockAvailable: false,
+    },
+    accountWide: {
+      metrics: calculateMetrics(
+        trades,
+        startingBalance,
+      ),
+      equityCurve: buildEquityCurve(
+        trades,
+        startingBalance,
+      ),
+    },
+    systemOwned: {
+      metrics: systemMetrics,
+      minimumRecommendationSample:
+        MIN_RECOMMENDATION_SAMPLE,
+      sampleReady:
+        systemTrades.length >=
+        MIN_RECOMMENDATION_SAMPLE,
+      recent20,
+      previous20,
+    },
+    trades: trades.slice(0, 250),
+    breakdown: {
+      side: bucket(trades, (trade) => trade.side),
+      session: bucket(trades, (trade) => trade.session),
+      weekday: bucket(trades, (trade) => trade.weekday),
+      hour: bucket(
+        trades,
+        (trade) =>
+          `${String(trade.brokerHour).padStart(2, "0")}:00`,
+      ),
+      ownership: bucket(
+        trades,
+        (trade) => trade.ownership,
+      ),
+    },
+    recommendations: recommendations(systemTrades),
+    notes: [
+      "Account-wide metrics may include manual/external/validation trades.",
+      "Strategy recommendations use SYSTEM ownership only.",
+      "Exit reason is UNKNOWN because current MT5 deal payload does not expose deal reason.",
+      "Session/hour breakdown uses broker timestamp carried by MT5 deal history.",
+      "Recommendations are advisory only; no strategy parameter is changed automatically.",
+    ],
+  };
+}

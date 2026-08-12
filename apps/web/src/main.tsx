@@ -1,25 +1,69 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-
-import { QueryClientProvider } from "@tanstack/react-query";
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
-
+import { CssBaseline, ThemeProvider, createTheme } from "@mui/material";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
+import "./styles.css";
 
-import { queryClient } from "./core/query/queryClient";
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      staleTime: 2_000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
-ReactDOM.createRoot(
-  document.getElementById("root")!
-).render(
+const theme = createTheme({
+  palette: {
+    mode: "dark",
+    primary: { main: "#e9b949" },
+    success: { main: "#32d583" },
+    error: { main: "#f97066" },
+    warning: { main: "#fdb022" },
+    background: {
+      default: "#060b14",
+      paper: "#0b1220",
+    },
+    text: {
+      primary: "#f8fafc",
+      secondary: "#8fa0b8",
+    },
+  },
+  shape: { borderRadius: 16 },
+  typography: {
+    fontFamily: "Inter, Segoe UI, Arial, sans-serif",
+  },
+  components: {
+    MuiCard: {
+      styleOverrides: {
+        root: {
+          backgroundImage: "none",
+          border: "1px solid rgba(148,163,184,.14)",
+          boxShadow: "0 18px 48px rgba(0,0,0,.24)",
+        },
+      },
+    },
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          textTransform: "none",
+          fontWeight: 700,
+          borderRadius: 12,
+        },
+      },
+    },
+  },
+});
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-
     <QueryClientProvider client={queryClient}>
-
-      <App />
-
-      <ReactQueryDevtools initialIsOpen={false} />
-
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <App />
+      </ThemeProvider>
     </QueryClientProvider>
-
-  </React.StrictMode>
+  </React.StrictMode>,
 );
