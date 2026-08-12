@@ -5,6 +5,7 @@ export * from "./Phase6TrendEngulfing";
 export * from "./Phase6ADiagnostics";
 export * from "./Phase6BRescueOutcome";
 export * from "./Phase6CForwardHoldout";
+export * from "./Phase6DForwardHoldout";
 export * from "./ExposureProjection";
 export * from "./InstrumentRiskSpec";
 export * from "./MarginProjection";
