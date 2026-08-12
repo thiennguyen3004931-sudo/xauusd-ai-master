@@ -63,7 +63,10 @@ export class Phase4CanonicalReplayAdapter {
 
     this.cases.push({ id: input.id, request });
 
-    if (Number.isFinite(input.canonicalTakeProfit)) {
+    if (
+      typeof input.canonicalTakeProfit === "number" &&
+      Number.isFinite(input.canonicalTakeProfit)
+    ) {
       this.shadowInputs.set(input.id, input as ShadowInput);
     }
   }
