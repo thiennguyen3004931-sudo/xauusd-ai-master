@@ -16,8 +16,23 @@ $Exporter = Join-Path $WorkDir "extract_mt5_history.py"
 $Runner = Join-Path $WorkDir "canonical_replay.ts"
 
 if ([string]::IsNullOrWhiteSpace($BridgeEnv)) {
-  $BridgeEnv = Join-Path $ProjectRoot "packages\mt5-broker\bridge.env"
+  $bridgeEnvCandidates = @(
+    $env:ZIQ_BRIDGE_ENV,
+    (Join-Path $ProjectRoot "packages\mt5-broker\bridge\.env"),
+    (Join-Path $ProjectRoot "packages\mt5-broker\bridge.env")
+  ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+  $BridgeEnv = $bridgeEnvCandidates |
+    Where-Object { Test-Path $_ } |
+    Select-Object -First 1
+
+  if ([string]::IsNullOrWhiteSpace($BridgeEnv)) {
+    $searched = $bridgeEnvCandidates -join "; "
+    throw "Required Phase 5 bridge env not found. Searched: $searched"
+  }
 }
+
+$BridgeEnv = (Resolve-Path $BridgeEnv).Path
 
 foreach ($required in @($Exporter, $Runner, $BridgeEnv)) {
   if (-not (Test-Path $required)) {
@@ -38,6 +53,7 @@ $env:ZIQ_DAYS = [string]$Days
 $env:ZIQ_MAX_RISK_USD = [string]$MaxRiskUsd
 
 Write-Host "PHASE5_FORWARD_RUN_DIR=$runDir"
+Write-Host "PHASE5_FORWARD_BRIDGE_ENV=$BridgeEnv"
 Write-Host "PHASE5_FORWARD_CUTOFF_UTC=2026-08-12T12:45:00.000Z"
 Write-Host "PHASE5_FORWARD_CANDIDATE=CANONICAL_SELL"
 Write-Host "PHASE5_FORWARD_DAYS=$Days"
