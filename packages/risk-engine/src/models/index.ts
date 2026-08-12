@@ -2,6 +2,7 @@ export * from "./EntryCompression";
 export * from "./Phase4M5Research";
 export * from "./Phase4ShadowReplay";
 export * from "./Phase6TrendEngulfing";
+export * from "./Phase6ADiagnostics";
 export * from "./ExposureProjection";
 export * from "./InstrumentRiskSpec";
 export * from "./MarginProjection";
