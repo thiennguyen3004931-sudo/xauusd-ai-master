@@ -1,3 +1,4 @@
+export * from "./EntryCompression";
 export * from "./ExposureProjection";
 export * from "./InstrumentRiskSpec";
 export * from "./MarginProjection";
