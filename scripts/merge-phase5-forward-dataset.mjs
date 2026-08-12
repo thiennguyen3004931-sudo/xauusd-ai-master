@@ -11,14 +11,21 @@ const required = [
   "outM15",
   "outM5",
   "outMeta",
-  "cutoff",
+  "realCutoff",
+  "datasetCutoffMs",
 ];
 for (const key of required) {
   if (!args[key]) throw new Error(`Missing required argument --${key}`);
 }
 
-const cutoff = Date.parse(args.cutoff);
-if (!Number.isFinite(cutoff)) throw new Error(`Invalid cutoff: ${args.cutoff}`);
+const realCutoff = Date.parse(args.realCutoff);
+if (!Number.isFinite(realCutoff)) {
+  throw new Error(`Invalid real cutoff: ${args.realCutoff}`);
+}
+const datasetCutoff = Number(args.datasetCutoffMs);
+if (!Number.isFinite(datasetCutoff)) {
+  throw new Error(`Invalid dataset cutoff ms: ${args.datasetCutoffMs}`);
+}
 
 const frozenM15 = readArray(args.frozenM15);
 const frozenM5 = readArray(args.frozenM5);
@@ -26,8 +33,20 @@ const freshM15 = readArray(args.freshM15);
 const freshM5 = readArray(args.freshM5);
 const freshMeta = JSON.parse(fs.readFileSync(path.resolve(args.freshMeta), "utf8"));
 
-const mergedM15 = mergeBars(frozenM15, freshM15, cutoff, 15 * 60_000, "M15");
-const mergedM5 = mergeBars(frozenM5, freshM5, cutoff, 5 * 60_000, "M5");
+const mergedM15 = mergeBars(
+  frozenM15,
+  freshM15,
+  datasetCutoff,
+  15 * 60_000,
+  "M15",
+);
+const mergedM5 = mergeBars(
+  frozenM5,
+  freshM5,
+  datasetCutoff,
+  5 * 60_000,
+  "M5",
+);
 
 writeJson(args.outM15, mergedM15.bars);
 writeJson(args.outM5, mergedM5.bars);
@@ -37,49 +56,61 @@ const outMeta = {
   m15Count: mergedM15.bars.length,
   m5Count: mergedM5.bars.length,
   phase5ForwardMerge: {
-    cutoffUtc: new Date(cutoff).toISOString(),
+    realCutoffUtc: new Date(realCutoff).toISOString(),
+    datasetCutoff: new Date(datasetCutoff).toISOString(),
+    datasetOffsetMs: datasetCutoff - realCutoff,
     frozenM15Kept: mergedM15.frozenKept,
     frozenM5Kept: mergedM5.frozenKept,
-    freshM15Appended: mergedM15.freshAppended,
-    freshM5Appended: mergedM5.freshAppended,
-    latestM15CloseUtc: isoOrNone(mergedM15.latestClose),
-    latestM5CloseUtc: isoOrNone(mergedM5.latestClose),
+    bridgeM15Appended: mergedM15.bridgeAppended,
+    bridgeM5Appended: mergedM5.bridgeAppended,
+    forwardM15Appended: mergedM15.forwardAppended,
+    forwardM5Appended: mergedM5.forwardAppended,
+    latestM15CloseDatasetTime: isoOrNone(mergedM15.latestClose),
+    latestM5CloseDatasetTime: isoOrNone(mergedM5.latestClose),
   },
 };
 writeJson(args.outMeta, outMeta);
 
-console.log(`PHASE5_MERGE_CUTOFF=${new Date(cutoff).toISOString()}`);
+console.log(`PHASE5_MERGE_REAL_CUTOFF_UTC=${new Date(realCutoff).toISOString()}`);
+console.log(`PHASE5_MERGE_DATASET_CUTOFF=${new Date(datasetCutoff).toISOString()}`);
+console.log(`PHASE5_MERGE_DATASET_OFFSET_MS=${datasetCutoff - realCutoff}`);
 console.log(`PHASE5_MERGE_FROZEN_M15_KEPT=${mergedM15.frozenKept}`);
 console.log(`PHASE5_MERGE_FROZEN_M5_KEPT=${mergedM5.frozenKept}`);
-console.log(`PHASE5_MERGE_FRESH_M15_APPENDED=${mergedM15.freshAppended}`);
-console.log(`PHASE5_MERGE_FRESH_M5_APPENDED=${mergedM5.freshAppended}`);
+console.log(`PHASE5_MERGE_BRIDGE_M15_APPENDED=${mergedM15.bridgeAppended}`);
+console.log(`PHASE5_MERGE_BRIDGE_M5_APPENDED=${mergedM5.bridgeAppended}`);
+console.log(`PHASE5_MERGE_FORWARD_M15_APPENDED=${mergedM15.forwardAppended}`);
+console.log(`PHASE5_MERGE_FORWARD_M5_APPENDED=${mergedM5.forwardAppended}`);
 console.log(`PHASE5_MERGE_LATEST_M15_CLOSE=${isoOrNone(mergedM15.latestClose)}`);
 console.log(`PHASE5_MERGE_LATEST_M5_CLOSE=${isoOrNone(mergedM5.latestClose)}`);
 
-if (mergedM5.freshAppended === 0 || mergedM5.latestClose <= cutoff) {
+if (mergedM5.forwardAppended === 0 || mergedM5.latestClose <= datasetCutoff) {
   console.log("PHASE5_MERGE_FRESHNESS=FAIL");
   throw new Error(
-    "No M5 bar strictly after the Phase 5 cutoff. MT5 forward data is not fresh enough yet.",
+    "No M5 bar strictly after the broker-adjusted Phase 5 cutoff. MT5 forward data is not fresh enough yet.",
   );
 }
 
 console.log("PHASE5_MERGE_FRESHNESS=PASS");
 console.log("PHASE5_MERGE_STATUS=PASS");
 
-function mergeBars(frozen, fresh, cutoffMs, timeframeMs, label) {
-  const frozenBefore = frozen.filter(
-    (bar) => barCloseTime(bar, timeframeMs) <= cutoffMs,
+function mergeBars(frozen, fresh, datasetCutoffMs, timeframeMs, label) {
+  if (frozen.length === 0) throw new Error(`${label} frozen dataset is empty.`);
+
+  const frozenLatestClose = Math.max(
+    ...frozen.map((bar) => barCloseTime(bar, timeframeMs)),
   );
-  const freshAfter = fresh.filter(
-    (bar) => barCloseTime(bar, timeframeMs) > cutoffMs,
+  const freshContinuation = fresh.filter(
+    (bar) => barCloseTime(bar, timeframeMs) > frozenLatestClose,
   );
 
   const byOpen = new Map();
-  for (const bar of frozenBefore) {
+  // Frozen bars are authoritative. Never overwrite them with a re-export.
+  for (const bar of frozen) {
     byOpen.set(barOpenTime(bar), bar);
   }
-  for (const bar of freshAfter) {
-    byOpen.set(barOpenTime(bar), bar);
+  for (const bar of freshContinuation) {
+    const open = barOpenTime(bar);
+    if (!byOpen.has(open)) byOpen.set(open, bar);
   }
 
   const bars = [...byOpen.values()].sort(
@@ -87,11 +118,22 @@ function mergeBars(frozen, fresh, cutoffMs, timeframeMs, label) {
   );
   if (bars.length === 0) throw new Error(`${label} merge produced no bars.`);
 
+  const appended = freshContinuation.filter(
+    (bar) => !frozen.some((frozenBar) => barOpenTime(frozenBar) === barOpenTime(bar)),
+  );
+  const bridgeAppended = appended.filter(
+    (bar) => barCloseTime(bar, timeframeMs) <= datasetCutoffMs,
+  ).length;
+  const forwardAppended = appended.filter(
+    (bar) => barCloseTime(bar, timeframeMs) > datasetCutoffMs,
+  ).length;
   const latestClose = Math.max(...bars.map((bar) => barCloseTime(bar, timeframeMs)));
+
   return {
     bars,
-    frozenKept: frozenBefore.length,
-    freshAppended: freshAfter.length,
+    frozenKept: frozen.length,
+    bridgeAppended,
+    forwardAppended,
     latestClose,
   };
 }
