@@ -1,4 +1,5 @@
 export * from "./EntryCompressionService";
+export * from "./Phase4M5CandidateService";
 export * from "./Phase4ReplayResearchService";
 export * from "./ExposureService";
 export * from "./MarginService";
