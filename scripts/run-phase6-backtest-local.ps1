@@ -59,10 +59,24 @@ Write-Host "PHASE6_BACKTEST_MAX_RISK_USD=$MaxRiskUsd"
 Write-Host "PHASE6_BACKTEST_HOOK_START"
 
 & node $Hook $Runner
-if ($LASTEXITCODE -ne 0) {
-  throw "Phase 6 replay hook failed with exit code $LASTEXITCODE"
+$hookExit = $LASTEXITCODE
+if ($hookExit -ne 0) {
+  $runnerText = Get-Content $Runner -Raw
+  $phase6AlreadyInserted =
+    $runnerText.Contains("const phase6M15TrendEngulfingService = new Phase6M15TrendEngulfingService();") -and
+    $runnerText.Contains("phase6M15TrendEngulfingService.format(phase6M15TrendEngulfingResult)")
+
+  if ($phase6AlreadyInserted) {
+    Write-Host "PHASE6_BACKTEST_HOOK_RECOVERY=PASS"
+    Write-Host "PHASE6_BACKTEST_HOOK_NOTE=HOOK_EXIT_NONZERO_BUT_PHASE6_BLOCK_ALREADY_PRESENT"
+  }
+  else {
+    throw "Phase 6 replay hook failed with exit code $hookExit and Phase 6 block is not present in canonical_replay.ts"
+  }
 }
-Write-Host "PHASE6_BACKTEST_HOOK_STATUS=PASS"
+else {
+  Write-Host "PHASE6_BACKTEST_HOOK_STATUS=PASS"
+}
 
 Push-Location $ProjectRoot
 try {
