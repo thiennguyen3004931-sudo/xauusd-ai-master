@@ -41,14 +41,12 @@ export interface Phase6VolumeProfile {
   val: number;
 }
 
-export interface Phase6Signal {
+export interface Phase6SignalCore {
   id: string;
   side: Phase6Side;
   signalTimestamp: number;
   entry: number;
   stopLoss: number;
-  volume: number;
-  initialRiskUsd: number;
   ma20: number;
   ma50: number;
   ma200: number;
@@ -58,6 +56,16 @@ export interface Phase6Signal {
   fvg: boolean;
   volumeProfile: boolean;
   profile: Phase6VolumeProfile | null;
+}
+
+export interface Phase6Signal extends Phase6SignalCore {
+  volume: number;
+  initialRiskUsd: number;
+}
+
+export interface Phase6RiskBlockedSetup extends Phase6SignalCore {
+  minVolume: number;
+  requiredRiskAtMinVolumeUsd: number;
 }
 
 export interface Phase6TradeResult extends Phase6Signal {
@@ -109,5 +117,6 @@ export interface Phase6RunResult {
   config: Phase6Config;
   metrics: Phase6Metrics;
   signals: Phase6Signal[];
+  riskBlockedSetups: Phase6RiskBlockedSetup[];
   trades: Phase6TradeResult[];
 }
