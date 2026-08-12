@@ -135,7 +135,7 @@ export class Phase5ForwardHoldoutService {
       `PHASE5_FILLED_TRADES=${m.filledTrades}`,
       `PHASE5_WIN_RATE=${m.winRatePercent}`,
       `PHASE5_NET_PNL=${m.netPnl}`,
-      `PHASE5_PROFIT_FACTOR=${m.profitFactor ?? "INF"}`,
+      `PHASE5_PROFIT_FACTOR=${m.filledTrades === 0 ? "NA" : (m.profitFactor ?? "INF")}`,
       `PHASE5_EXPECTANCY=${m.expectancy}`,
       `PHASE5_AVG_R=${m.averageRMultiple}`,
       `PHASE5_STATUS=${result.status}`,
