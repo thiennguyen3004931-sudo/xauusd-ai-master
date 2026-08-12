@@ -161,9 +161,12 @@ export class Phase5ForwardHoldoutService {
 }
 
 export function resolvePhase5DatasetCutoffTimestamp(): number {
-  const raw = typeof process !== "undefined"
-    ? process.env.ZIQ_PHASE5_DATASET_CUTOFF_MS
-    : undefined;
+  const runtime = globalThis as typeof globalThis & {
+    process?: {
+      env?: Record<string, string | undefined>;
+    };
+  };
+  const raw = runtime.process?.env?.ZIQ_PHASE5_DATASET_CUTOFF_MS;
   if (raw === undefined || raw.trim() === "") {
     return PHASE5_FORWARD_DATASET_CUTOFF_TIMESTAMP;
   }
