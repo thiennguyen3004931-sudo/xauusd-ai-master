@@ -12,6 +12,7 @@ export * from "./Phase5ForwardHoldoutService";
 export * from "./Phase6M15TrendEngulfingService";
 export * from "./Phase6ADiagnosticsService";
 export * from "./Phase6BRescueOutcomeService";
+export * from "./Phase6CForwardHoldoutService";
 export * from "./ExposureService";
 export * from "./MarginService";
 export * from "./PositionSizeService";
