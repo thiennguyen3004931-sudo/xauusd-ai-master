@@ -161,6 +161,7 @@ export class Phase6M15TrendEngulfingService {
       `PHASE6_REACHED_PLUS10=${m.reachedPlus10}`,
       `PHASE6_BREAK_EVEN_APPLIED=${m.breakEvenApplied}`,
       `PHASE6_TRAILING_ACTIVATED=${m.trailingActivated}`,
+      "PHASE6_NO_LOOKAHEAD_ENTRY=PASS",
       "PHASE6_RESEARCH_ONLY=PASS",
       "PHASE6_PRODUCTION_MUTATION=false",
     ];
@@ -173,7 +174,7 @@ export class Phase6M15TrendEngulfingService {
     request: Phase6RunRequest,
   ): Phase6TradeResult {
     const expiry = signal.signalTimestamp + this.config.entryExpiryMinutes * 60_000;
-    const bars = m5.filter((bar) => bar.closeTime >= signal.signalTimestamp);
+    const bars = m5.filter((bar) => bar.openTime >= signal.signalTimestamp);
     const trendExit = findTrendExit(signal, m15);
     let entryTime: number | null = null;
     let activeStop = signal.stopLoss;
@@ -186,7 +187,7 @@ export class Phase6M15TrendEngulfingService {
       if (entryTime === null) {
         if (bar.openTime > expiry) break;
         if (!touchesPrice(bar, signal.entry)) continue;
-        entryTime = Math.max(bar.openTime, signal.signalTimestamp);
+        entryTime = bar.openTime;
       }
 
       if (touchesPrice(bar, activeStop)) {
