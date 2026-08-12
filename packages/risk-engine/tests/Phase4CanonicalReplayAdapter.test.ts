@@ -31,6 +31,7 @@ describe("Phase4CanonicalReplayAdapter", () => {
       side: OrderSide.BUY,
       canonicalEntry: 3400,
       canonicalStopLoss: 3388,
+      canonicalTakeProfit: 3420,
       signalTimestamp: 1_000,
       expiresAt: 2_200,
       effectiveRiskCapUsd: 8,
@@ -44,5 +45,28 @@ describe("Phase4CanonicalReplayAdapter", () => {
     expect(result.counters.canonicalMinLotBlocked).toBe(1);
     expect(result.counters.finalMinLotFeasible).toBeGreaterThanOrEqual(0);
     expect(adapter.formatCounters()).toContain("PHASE4_TOTAL_CASES=1");
+  });
+
+  it("exposes only feasible canonical/rescued cases to the shadow lane", () => {
+    const adapter = new Phase4CanonicalReplayAdapter();
+
+    adapter.add({
+      id: "feasible",
+      side: OrderSide.BUY,
+      canonicalEntry: 3400,
+      canonicalStopLoss: 3395,
+      canonicalTakeProfit: 3420,
+      signalTimestamp: 1_000,
+      expiresAt: 2_200,
+      effectiveRiskCapUsd: 10,
+      instrument,
+      m5Bars: bars,
+    });
+
+    const shadow = adapter.shadowCases();
+    expect(shadow).toHaveLength(1);
+    expect(shadow[0]?.volume).toBe(0.01);
+    expect(shadow[0]?.takeProfit).toBe(3420);
+    expect(shadow[0]?.entrySource).toBe("CANONICAL");
   });
 });
