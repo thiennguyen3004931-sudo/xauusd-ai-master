@@ -11,7 +11,9 @@ export type Phase5ForwardHoldoutStatus =
   | "FAIL";
 
 export interface Phase5ForwardHoldoutResult {
+  realCutoffTimestamp: number;
   cutoffTimestamp: number;
+  datasetOffsetMs: number;
   candidate: "CANONICAL_SELL";
   management: Phase4ShadowManagementConfig;
   minimumFilledTrades: number;
@@ -26,8 +28,10 @@ export interface Phase5ForwardHoldoutResult {
 }
 
 /**
- * Frozen research cutoff from Phase 4F/H.
- * Only signals strictly AFTER this instant are eligible for Phase 5.
+ * Pre-registered real UTC research cutoff from Phase 4F/H.
+ * The dataset may encode broker-local timestamps as epoch-like UTC values;
+ * when so, the Phase 5 runner passes a broker-adjusted dataset cutoff through
+ * ZIQ_PHASE5_DATASET_CUTOFF_MS while this real cutoff remains immutable.
  */
 export const PHASE5_FORWARD_CUTOFF_TIMESTAMP = Date.parse(
   "2026-08-12T12:45:00.000Z",
@@ -59,7 +63,7 @@ export const PHASE5_MINIMUM_PROFIT_FACTOR = 1.1;
 export class Phase5ForwardHoldoutService {
   run(
     cases: readonly Phase4ShadowTradeCase[],
-    cutoffTimestamp = PHASE5_FORWARD_CUTOFF_TIMESTAMP,
+    cutoffTimestamp = resolvePhase5DatasetCutoffTimestamp(),
     management: Phase4ShadowManagementConfig = PHASE5_FORWARD_MANAGEMENT,
     minimumFilledTrades = PHASE5_MINIMUM_FILLED_TRADES,
   ): Phase5ForwardHoldoutResult {
@@ -102,7 +106,9 @@ export class Phase5ForwardHoldoutService {
           : "FAIL";
 
     return {
+      realCutoffTimestamp: PHASE5_FORWARD_CUTOFF_TIMESTAMP,
       cutoffTimestamp,
+      datasetOffsetMs: cutoffTimestamp - PHASE5_FORWARD_CUTOFF_TIMESTAMP,
       candidate: "CANONICAL_SELL",
       management,
       minimumFilledTrades,
@@ -121,7 +127,9 @@ export class Phase5ForwardHoldoutService {
     const c = result.management;
     const m = result.metrics;
     return [
-      `PHASE5_CUTOFF=${new Date(result.cutoffTimestamp).toISOString()}`,
+      `PHASE5_REAL_CUTOFF_UTC=${new Date(result.realCutoffTimestamp).toISOString()}`,
+      `PHASE5_DATASET_CUTOFF=${new Date(result.cutoffTimestamp).toISOString()}`,
+      `PHASE5_DATASET_OFFSET_MS=${result.datasetOffsetMs}`,
       `PHASE5_CANDIDATE=${result.candidate}`,
       `PHASE5_CONFIG=BE_TRIGGER=${c.breakEvenTriggerPrice}|BE_OFFSET=${c.breakEvenOffsetPrice}|TRAIL_TRIGGER=${c.trailingTriggerPrice}|TRAIL_DISTANCE=${c.trailingDistancePrice}`,
       `PHASE5_MINIMUM_FILLED_TRADES=${result.minimumFilledTrades}`,
@@ -143,6 +151,21 @@ export class Phase5ForwardHoldoutService {
       "PHASE5_PRODUCTION_MUTATION=false",
     ];
   }
+}
+
+export function resolvePhase5DatasetCutoffTimestamp(): number {
+  const raw = typeof process !== "undefined"
+    ? process.env.ZIQ_PHASE5_DATASET_CUTOFF_MS
+    : undefined;
+  if (raw === undefined || raw.trim() === "") {
+    return PHASE5_FORWARD_CUTOFF_TIMESTAMP;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    throw new Error("ZIQ_PHASE5_DATASET_CUTOFF_MS must be a finite epoch-millisecond value.");
+  }
+  return parsed;
 }
 
 function effectiveProfitFactor(metrics: Phase4ShadowReplayMetrics): number {
