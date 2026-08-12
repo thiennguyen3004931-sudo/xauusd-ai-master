@@ -52,7 +52,8 @@ const verify = fs.readFileSync(file, "utf8");
 const checks = [
   verify.includes("Phase4ContributionDiagnosticsService"),
   verify.includes(blockMarker),
-  verify.includes("PHASE4G_RESCUE_EDGE_STATUS="),
+  verify.includes("const phase4ContributionResult = phase4ContributionService.run(phase4DiagnosticsCases);"),
+  verify.includes("phase4ContributionService.format(phase4ContributionResult)"),
 ];
 if (!checks.every(Boolean)) {
   throw new Error("Phase 4G hook verification failed after write.");
