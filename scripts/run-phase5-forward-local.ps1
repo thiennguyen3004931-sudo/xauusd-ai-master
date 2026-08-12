@@ -16,7 +16,9 @@ $WorkDir = (Resolve-Path $WorkDir).Path
 $Exporter = Join-Path $WorkDir "extract_mt5_history.py"
 $Runner = Join-Path $WorkDir "canonical_replay.ts"
 $Merger = Join-Path $PSScriptRoot "merge-phase5-forward-dataset.mjs"
-$CutoffUtc = "2026-08-12T12:45:00.000Z"
+$RealCutoffUtc = "2026-08-12T12:45:00.000Z"
+$PreRegisteredDatasetOffsetMs = 10800000 # +03:00 broker timestamp space on 2026-08-12
+$AllowedObservedOffsetDeviationMs = 300000 # 5 minutes sanity tolerance
 
 if ([string]::IsNullOrWhiteSpace($BridgeEnv)) {
   $bridgeEnvCandidates = @(
@@ -80,10 +82,17 @@ $env:ZIQ_RESULT_JSON = $rawResult
 $env:ZIQ_DAYS = [string]$Days
 $env:ZIQ_MAX_RISK_USD = [string]$MaxRiskUsd
 
+$realCutoffMs = [DateTimeOffset]::Parse($RealCutoffUtc).ToUnixTimeMilliseconds()
+$datasetCutoffMs = $realCutoffMs + $PreRegisteredDatasetOffsetMs
+$datasetCutoffIso = [DateTimeOffset]::FromUnixTimeMilliseconds($datasetCutoffMs).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+$env:ZIQ_PHASE5_DATASET_CUTOFF_MS = [string]$datasetCutoffMs
+
 Write-Host "PHASE5_FORWARD_RUN_DIR=$runDir"
 Write-Host "PHASE5_FORWARD_BRIDGE_ENV=$BridgeEnv"
 Write-Host "PHASE5_FORWARD_FROZEN_DIR=$FrozenDir"
-Write-Host "PHASE5_FORWARD_CUTOFF_UTC=$CutoffUtc"
+Write-Host "PHASE5_FORWARD_REAL_CUTOFF_UTC=$RealCutoffUtc"
+Write-Host "PHASE5_FORWARD_DATASET_CUTOFF=$datasetCutoffIso"
+Write-Host "PHASE5_FORWARD_DATASET_OFFSET_MS=$PreRegisteredDatasetOffsetMs"
 Write-Host "PHASE5_FORWARD_CANDIDATE=CANONICAL_SELL"
 Write-Host "PHASE5_FORWARD_DAYS=$Days"
 Write-Host "PHASE5_FORWARD_MAX_RISK_USD=$MaxRiskUsd"
@@ -103,9 +112,21 @@ Write-Host "PHASE5_FORWARD_EXPORT_STATUS=PASS"
 
 $offsetLine = Select-String -Path $exportLog -Pattern "^BROKER_HOST_OFFSET_MS=" |
   Select-Object -Last 1
-if ($null -ne $offsetLine) {
-  Write-Host "PHASE5_FORWARD_$($offsetLine.Line)"
+if ($null -eq $offsetLine) {
+  throw "Exporter did not report BROKER_HOST_OFFSET_MS; cannot verify Phase 5 timestamp space."
 }
+
+$observedOffsetMs = [long](($offsetLine.Line -split "=", 2)[1])
+$normalizedObservedOffsetMs = [long]([math]::Round($observedOffsetMs / 60000.0) * 60000)
+$offsetDeviationMs = [math]::Abs($normalizedObservedOffsetMs - $PreRegisteredDatasetOffsetMs)
+Write-Host "PHASE5_FORWARD_BROKER_HOST_OFFSET_MS=$observedOffsetMs"
+Write-Host "PHASE5_FORWARD_NORMALIZED_OFFSET_MS=$normalizedObservedOffsetMs"
+Write-Host "PHASE5_FORWARD_OFFSET_DEVIATION_MS=$offsetDeviationMs"
+if ($offsetDeviationMs -gt $AllowedObservedOffsetDeviationMs) {
+  Write-Host "PHASE5_FORWARD_TIMEBASE_STATUS=FAIL"
+  throw "Observed broker timestamp offset does not match the pre-registered +03:00 dataset timebase."
+}
+Write-Host "PHASE5_FORWARD_TIMEBASE_STATUS=PASS"
 
 Write-Host "PHASE5_FORWARD_MERGE_START"
 & node $Merger `
@@ -117,7 +138,8 @@ Write-Host "PHASE5_FORWARD_MERGE_START"
   --outM15 $mergedM15 `
   --outM5 $mergedM5 `
   --outMeta $mergedMeta `
-  --cutoff $CutoffUtc
+  --realCutoff $RealCutoffUtc `
+  --datasetCutoffMs $datasetCutoffMs
 if ($LASTEXITCODE -ne 0) {
   throw "Phase 5 frozen-plus-forward merge failed with exit code $LASTEXITCODE"
 }
