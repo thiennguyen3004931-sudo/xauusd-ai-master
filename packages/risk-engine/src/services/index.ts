@@ -1,3 +1,4 @@
+export * from "./EntryCompressionService";
 export * from "./ExposureService";
 export * from "./MarginService";
 export * from "./PositionSizeService";
