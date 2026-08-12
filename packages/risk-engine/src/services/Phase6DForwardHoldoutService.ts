@@ -115,6 +115,14 @@ export class Phase6DForwardHoldoutService {
       `PHASE6D_ELIGIBLE_SELL_CASES=${result.eligibleSellCases}`,
       `PHASE6D_FIRST_ELIGIBLE=${isoOrNone(result.firstEligibleTimestamp)}`,
       `PHASE6D_LAST_ELIGIBLE=${isoOrNone(result.lastEligibleTimestamp)}`,
+      `PHASE6D_FILLED_TRADES=${m.filledTrades}`,
+      `PHASE6D_WIN_RATE=${m.winRatePercent}`,
+      `PHASE6D_NET_PNL=${m.netPnl}`,
+      `PHASE6D_PROFIT_FACTOR=${m.filledTrades === 0 ? "NA" : (m.profitFactor ?? "INF")}`,
+      `PHASE6D_EXPECTANCY=${m.expectancy}`,
+      `PHASE6D_AVG_R=${m.averageRMultiple}`,
+      `PHASE6D_MAX_REALIZED_DRAWDOWN_USD=${m.maxRealizedDrawdownUsd}`,
+      `PHASE6D_AVG_HOLD_HOURS=${m.averageHoldHours}`,
       metricLine("PHASE6D_COMBINED", m),
       metricLine("PHASE6D_BUY", result.sideMetrics.BUY),
       metricLine("PHASE6D_SELL", result.sideMetrics.SELL),
@@ -184,7 +192,6 @@ function diagnosticMetrics(trades: readonly Phase6TradeResult[]): Phase6ADiagnos
 function metricLine(name: string, m: Phase6ADiagnosticMetrics): string {
   return `${name}=CASES=${m.cases}|FILLED=${m.filledTrades}|WR=${m.winRatePercent}|NET=${m.netPnl}|PF=${m.filledTrades === 0 ? "NA" : (m.profitFactor ?? "INF")}|EXP=${m.expectancy}|AVG_R=${m.averageRMultiple}|DD=${m.maxRealizedDrawdownUsd}|HOLD_H=${m.averageHoldHours}`;
 }
-
 function maxRealizedDrawdown(trades: readonly Phase6TradeResult[]): number {
   const ordered = [...trades]
     .filter((trade) => trade.exitTime !== null)
@@ -199,7 +206,6 @@ function maxRealizedDrawdown(trades: readonly Phase6TradeResult[]): number {
   }
   return maxDrawdown;
 }
-
 function average(values: readonly number[]): number {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
 }
