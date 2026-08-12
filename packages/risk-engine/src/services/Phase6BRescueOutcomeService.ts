@@ -46,6 +46,12 @@ export class Phase6BRescueOutcomeService {
   ): Phase6BRescueOutcomeResult {
     validateRequest(request);
 
+    if (diagnostics.riskBlockedCount !== baseline.metrics.riskBlocked) {
+      throw new Error(
+        `Phase 6B risk-blocked reconciliation failed: baseline=${baseline.metrics.riskBlocked}, diagnostics=${diagnostics.riskBlockedCount}.`,
+      );
+    }
+
     const feasible = diagnostics.rescueCases.filter((item) => item.rescued);
     if (feasible.length !== diagnostics.rescuedCount) {
       throw new Error(
@@ -74,22 +80,27 @@ export class Phase6BRescueOutcomeService {
       );
     });
 
-    const rescuedMetrics = diagnosticMetrics(rescuedTrades);
+    const rescuedRows = rescuedTrades.map(toMetricTrade);
+    const rescuedMetrics = diagnosticMetrics(rescuedRows);
     const rescuedBySide = {
-      BUY: diagnosticMetrics(rescuedTrades.filter((trade) => trade.side === "BUY")),
-      SELL: diagnosticMetrics(rescuedTrades.filter((trade) => trade.side === "SELL")),
+      BUY: diagnosticMetrics(rescuedRows.filter((trade) => trade.side === "BUY")),
+      SELL: diagnosticMetrics(rescuedRows.filter((trade) => trade.side === "SELL")),
     } satisfies Record<Phase6Side, Phase6ADiagnosticMetrics>;
 
     const rescuedBySource = Object.fromEntries(
       RESCUE_SOURCES.map((source) => [
         source,
-        diagnosticMetrics(rescuedTrades.filter((trade) => trade.rescueSource === source)),
+        diagnosticMetrics(
+          rescuedTrades
+            .filter((trade) => trade.rescueSource === source)
+            .map(toMetricTrade),
+        ),
       ]),
     ) as Record<Phase6ARescueSource, Phase6ADiagnosticMetrics>;
 
     const combinedRows: MetricTrade[] = [
       ...baseline.trades,
-      ...rescuedTrades.map(toMetricTrade),
+      ...rescuedRows,
     ];
     const combinedMetrics = diagnosticMetrics(combinedRows);
     const combinedBySide = {
