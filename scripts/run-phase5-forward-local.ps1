@@ -19,6 +19,23 @@ $Merger = Join-Path $PSScriptRoot "merge-phase5-forward-dataset.mjs"
 $RealCutoffUtc = "2026-08-12T12:45:00.000Z"
 $PreRegisteredDatasetOffsetMs = 10800000 # +03:00 broker timestamp space on 2026-08-12
 $AllowedObservedOffsetDeviationMs = 300000 # 5 minutes sanity tolerance
+$ProgressCsv = Join-Path $WorkDir "phase5-progress.csv"
+
+function Get-Phase5Value {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Name,
+    [Parameter(Mandatory = $true)]
+    [string]$LogPath
+  )
+
+  $match = Select-String -Path $LogPath -Pattern ("^" + [regex]::Escape($Name) + "=") |
+    Select-Object -Last 1
+  if ($null -eq $match) {
+    return $null
+  }
+  return ($match.Line -split "=", 2)[1]
+}
 
 if ([string]::IsNullOrWhiteSpace($BridgeEnv)) {
   $bridgeEnvCandidates = @(
@@ -179,7 +196,75 @@ Write-Host "PHASE5_FORWARD_REPLAY_BASELINE_BEGIN"
 Select-String -Path $consoleLog -Pattern "^(REPLAY_AI_EXECUTABLE|PHASE4_TOTAL_CASES|PHASE4_FINAL_MINLOT_FEASIBLE|PHASE4_MINLOT_RESCUED)=" |
   ForEach-Object { $_.Line }
 Write-Host "PHASE5_FORWARD_REPLAY_BASELINE_END"
+
+$minimumFilled = [int](Get-Phase5Value -Name "PHASE5_MINIMUM_FILLED_TRADES" -LogPath $consoleLog)
+$filledTrades = [int](Get-Phase5Value -Name "PHASE5_FILLED_TRADES" -LogPath $consoleLog)
+$postCutoffCases = [int](Get-Phase5Value -Name "PHASE5_POST_CUTOFF_CASES" -LogPath $consoleLog)
+$eligibleCases = [int](Get-Phase5Value -Name "PHASE5_ELIGIBLE_CASES" -LogPath $consoleLog)
+$winRate = Get-Phase5Value -Name "PHASE5_WIN_RATE" -LogPath $consoleLog
+$netPnl = Get-Phase5Value -Name "PHASE5_NET_PNL" -LogPath $consoleLog
+$profitFactor = Get-Phase5Value -Name "PHASE5_PROFIT_FACTOR" -LogPath $consoleLog
+$expectancy = Get-Phase5Value -Name "PHASE5_EXPECTANCY" -LogPath $consoleLog
+$avgR = Get-Phase5Value -Name "PHASE5_AVG_R" -LogPath $consoleLog
+$status = Get-Phase5Value -Name "PHASE5_STATUS" -LogPath $consoleLog
+$firstEligible = Get-Phase5Value -Name "PHASE5_FIRST_ELIGIBLE" -LogPath $consoleLog
+$lastEligible = Get-Phase5Value -Name "PHASE5_LAST_ELIGIBLE" -LogPath $consoleLog
+
+if ($minimumFilled -lt 1) {
+  throw "Phase 5 progress tracker could not resolve a valid minimum trade count."
+}
+
+$progressPercent = [math]::Min(100, [math]::Round(($filledTrades * 100.0) / $minimumFilled, 1))
+$remainingTrades = [math]::Max(0, $minimumFilled - $filledTrades)
+$barWidth = 30
+$filledWidth = [int][math]::Floor(($progressPercent / 100.0) * $barWidth)
+$progressBar = ("#" * $filledWidth) + ("-" * ($barWidth - $filledWidth))
+
+$progressRecord = [pscustomobject]@{
+  RunLocalTime = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+  RunDir = $runDir
+  Candidate = "CANONICAL_SELL"
+  PostCutoffCases = $postCutoffCases
+  EligibleCases = $eligibleCases
+  FilledTrades = $filledTrades
+  MinimumFilledTrades = $minimumFilled
+  ProgressPercent = $progressPercent
+  RemainingTrades = $remainingTrades
+  WinRate = $winRate
+  NetPnl = $netPnl
+  ProfitFactor = $profitFactor
+  Expectancy = $expectancy
+  AvgR = $avgR
+  Status = $status
+  FirstEligible = $firstEligible
+  LastEligible = $lastEligible
+}
+
+if (Test-Path $ProgressCsv) {
+  $progressRecord | Export-Csv -Path $ProgressCsv -NoTypeInformation -Append -Encoding UTF8
+}
+else {
+  $progressRecord | Export-Csv -Path $ProgressCsv -NoTypeInformation -Encoding UTF8
+}
+
+Write-Host "PHASE5_PROGRESS_BEGIN"
+Write-Host "PHASE5_PROGRESS=$filledTrades/$minimumFilled"
+Write-Host "PHASE5_PROGRESS_PERCENT=$progressPercent"
+Write-Host "PHASE5_PROGRESS_BAR=[$progressBar]"
+Write-Host "PHASE5_PROGRESS_REMAINING_TRADES=$remainingTrades"
+Write-Host "PHASE5_PROGRESS_POST_CUTOFF_CASES=$postCutoffCases"
+Write-Host "PHASE5_PROGRESS_ELIGIBLE_CASES=$eligibleCases"
+Write-Host "PHASE5_PROGRESS_WIN_RATE=$winRate"
+Write-Host "PHASE5_PROGRESS_NET_PNL=$netPnl"
+Write-Host "PHASE5_PROGRESS_PROFIT_FACTOR=$profitFactor"
+Write-Host "PHASE5_PROGRESS_EXPECTANCY=$expectancy"
+Write-Host "PHASE5_PROGRESS_AVG_R=$avgR"
+Write-Host "PHASE5_PROGRESS_STATUS=$status"
+Write-Host "PHASE5_PROGRESS_TRACKER=$ProgressCsv"
+Write-Host "PHASE5_PROGRESS_END"
+
 Write-Host "PHASE5_FORWARD_STATUS_LINES_BEGIN"
-Select-String -Path $consoleLog -Pattern "^PHASE5_" | ForEach-Object { $_.Line }
+Select-String -Path $consoleLog -Pattern "^(PHASE5_REAL_CUTOFF_UTC|PHASE5_DATASET_CUTOFF|PHASE5_CANDIDATE|PHASE5_FIRST_ELIGIBLE|PHASE5_LAST_ELIGIBLE|PHASE5_PRE_REGISTERED|PHASE5_PRODUCTION_MUTATION)=" |
+  ForEach-Object { $_.Line }
 Write-Host "PHASE5_FORWARD_STATUS_LINES_END"
 Write-Host "PHASE5_FORWARD_RUN_STATUS=PASS"
