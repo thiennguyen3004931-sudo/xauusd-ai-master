@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  PHASE5_FORWARD_CUTOFF_TIMESTAMP,
+  PHASE5_FORWARD_DATASET_CUTOFF_TIMESTAMP,
+  PHASE5_FORWARD_DATASET_OFFSET_MS,
   Phase5ForwardHoldoutService,
   type Phase4ShadowTradeCase,
 } from "../src";
@@ -38,6 +41,16 @@ function makeCase(
 }
 
 describe("Phase5ForwardHoldoutService", () => {
+  it("locks the real cutoff and broker +03:00 dataset-time mapping", () => {
+    expect(new Date(PHASE5_FORWARD_CUTOFF_TIMESTAMP).toISOString()).toBe(
+      "2026-08-12T12:45:00.000Z",
+    );
+    expect(PHASE5_FORWARD_DATASET_OFFSET_MS).toBe(10_800_000);
+    expect(new Date(PHASE5_FORWARD_DATASET_CUTOFF_TIMESTAMP).toISOString()).toBe(
+      "2026-08-12T15:45:00.000Z",
+    );
+  });
+
   it("uses only post-cutoff canonical SELL cases and can pass after the sample gate", () => {
     const service = new Phase5ForwardHoldoutService();
     const result = service.run(
