@@ -9,6 +9,7 @@ export * from "./Phase4ShadowDiagnosticsService";
 export * from "./Phase4ContributionDiagnosticsService";
 export * from "./Phase4SubgroupStabilityService";
 export * from "./Phase5ForwardHoldoutService";
+export * from "./Phase6M15TrendEngulfingService";
 export * from "./ExposureService";
 export * from "./MarginService";
 export * from "./PositionSizeService";
