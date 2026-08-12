@@ -56,7 +56,7 @@ const checks = [
   verify.includes(blockMarker),
   verify.includes("m15Bars: rawM15"),
   verify.includes("m5Bars: rawM5"),
-  verify.includes("PHASE6_M15"),
+  verify.includes("phase6M15TrendEngulfingService.format(phase6M15TrendEngulfingResult)"),
 ];
 if (!checks.every(Boolean)) {
   throw new Error("Phase 6 hook verification failed after write.");
