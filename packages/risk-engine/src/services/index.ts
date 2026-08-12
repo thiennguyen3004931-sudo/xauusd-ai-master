@@ -5,6 +5,7 @@ export * from "./Phase4ReplayResearchService";
 export * from "./Phase4ShadowReplayService";
 export * from "./Phase4ManagementSweepService";
 export * from "./Phase4WalkForwardService";
+export * from "./Phase4ShadowDiagnosticsService";
 export * from "./ExposureService";
 export * from "./MarginService";
 export * from "./PositionSizeService";
