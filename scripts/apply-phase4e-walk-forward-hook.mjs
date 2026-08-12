@@ -11,7 +11,9 @@ const file = path.resolve(target);
 const backup = `${file}.phase4e.bak`;
 let content = fs.readFileSync(file, "utf8");
 
-if (content.includes("PHASE4E_TOTAL_CASES=")) {
+const phase4eBlockMarker = "const phase4WalkForwardService = new Phase4WalkForwardService();";
+
+if (content.includes(phase4eBlockMarker)) {
   console.log(`Phase 4E hook already present: ${file}`);
   console.log("PHASE4E_HOOK_STATUS=PASS");
   process.exit(0);
@@ -33,25 +35,27 @@ if (!content.includes("Phase4WalkForwardService")) {
   );
 }
 
-if (!content.includes("const phase4WalkForwardService = new Phase4WalkForwardService();")) {
-  const logRegex = /console\.log\(["']PHASE4D_RESEARCH_ONLY=PASS["']\);/;
-  if (!logRegex.test(content)) {
-    throw new Error("Phase 4D log marker not found.");
-  }
-
-  const block = `const phase4WalkForwardService = new Phase4WalkForwardService();\nconst phase4WalkForwardResult = phase4WalkForwardService.run(phase4Research.shadowCases());\n\nfor (const line of phase4WalkForwardService.format(phase4WalkForwardResult)) {\n  console.log(line);\n}\n\nconsole.log("PHASE4E_PRODUCTION_MUTATION=false");\nconsole.log("PHASE4D_RESEARCH_ONLY=PASS");`;
-
-  content = content.replace(logRegex, block);
+if (!content.includes("const phase4SweepService = new Phase4ManagementSweepService();")) {
+  throw new Error("Phase 4D sweep block not found. Apply Phase 4D hook first.");
 }
 
+const phase4cMarker = `console.log("PHASE4C_RESEARCH_ONLY=PASS");`;
+if (!content.includes(phase4cMarker)) {
+  throw new Error("Phase 4C research marker not found after Phase 4D sweep.");
+}
+
+const block = `const phase4WalkForwardService = new Phase4WalkForwardService();\nconst phase4WalkForwardResult = phase4WalkForwardService.run(phase4Research.shadowCases());\n\nfor (const line of phase4WalkForwardService.format(phase4WalkForwardResult)) {\n  console.log(line);\n}\n\nconsole.log("PHASE4E_PRODUCTION_MUTATION=false");\n\n${phase4cMarker}`;
+
+content = content.replace(phase4cMarker, block);
 fs.writeFileSync(file, content, "utf8");
 
 const verify = fs.readFileSync(file, "utf8");
 const checks = [
   verify.includes("Phase4WalkForwardService"),
-  verify.includes("const phase4WalkForwardService = new Phase4WalkForwardService();"),
+  verify.includes(phase4eBlockMarker),
   verify.includes("phase4WalkForwardService.format"),
   verify.includes("PHASE4E_PRODUCTION_MUTATION=false"),
+  verify.includes("PHASE4C_RESEARCH_ONLY=PASS"),
 ];
 
 if (!checks.every(Boolean)) {
