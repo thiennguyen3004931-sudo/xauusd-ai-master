@@ -78,11 +78,13 @@ export interface Phase6TradeResult extends Phase6Signal {
 
 export interface Phase6Metrics {
   m15Bars: number;
+  datasetDays: number;
   engulfingTriggers: number;
   trendAligned: number;
   confluencePassed: number;
   riskBlocked: number;
   signals: number;
+  tradesPer30Days: number;
   buySignals: number;
   sellSignals: number;
   filledTrades: number;
