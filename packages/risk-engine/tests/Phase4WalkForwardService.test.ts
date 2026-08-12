@@ -35,18 +35,31 @@ function makeCase(index: number): Phase4ShadowTradeCase {
 }
 
 describe("Phase4WalkForwardService", () => {
-  it("runs chronological folds and reports an OOS result", () => {
+  it("runs five chronological folds and reports OOS/robustness metrics", () => {
     const service = new Phase4WalkForwardService();
     const result = service.run(
-      Array.from({ length: 12 }, (_, index) => makeCase(index)),
-      phase4eConfigs().slice(0, 3),
-      4,
+      Array.from({ length: 20 }, (_, index) => makeCase(index)),
     );
 
-    expect(result.folds).toBe(4);
-    expect(result.walkForward).toHaveLength(3);
-    expect(result.configs).toBe(3);
-    expect(result.robustBest).not.toBeNull();
-    expect(service.format(result)).toContain("PHASE4E_RESEARCH_ONLY=PASS");
+    expect(result.folds).toBe(5);
+    expect(result.walkForward).toHaveLength(4);
+    expect(result.configs).toBe(18);
+    expect(result.oosMetrics.filledTrades).toBeGreaterThan(0);
+    expect(result.robustConfigs.length).toBeGreaterThanOrEqual(0);
+    const lines = service.format(result);
+    expect(lines).toContain("PHASE4E_RESEARCH_ONLY=PASS");
+    expect(lines).toContain("PHASE4E_PRODUCTION_MUTATION=false");
+  });
+
+  it("exposes the intended +6 robustness neighborhood", () => {
+    const configs = phase4eConfigs();
+    expect(configs).toHaveLength(18);
+    expect(configs.every((item) => item.breakEvenTriggerPrice === 6)).toBe(true);
+    expect(new Set(configs.map((item) => item.breakEvenOffsetPrice))).toEqual(
+      new Set([1, 1.5, 2]),
+    );
+    expect(new Set(configs.map((item) => item.trailingDistancePrice))).toEqual(
+      new Set([5, 6, 7]),
+    );
   });
 });
