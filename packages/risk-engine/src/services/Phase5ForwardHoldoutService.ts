@@ -29,13 +29,20 @@ export interface Phase5ForwardHoldoutResult {
 
 /**
  * Pre-registered real UTC research cutoff from Phase 4F/H.
- * The dataset may encode broker-local timestamps as epoch-like UTC values;
- * when so, the Phase 5 runner passes a broker-adjusted dataset cutoff through
- * ZIQ_PHASE5_DATASET_CUTOFF_MS while this real cutoff remains immutable.
  */
 export const PHASE5_FORWARD_CUTOFF_TIMESTAMP = Date.parse(
   "2026-08-12T12:45:00.000Z",
 );
+
+/**
+ * The Phase 4/5 replay dataset encodes this broker feed's +03:00 server clock
+ * as epoch-like UTC timestamps. Therefore the immutable real cutoff above maps
+ * to 15:45 in dataset timestamp space. This is a time-coordinate correction,
+ * not a change to the research cutoff.
+ */
+export const PHASE5_FORWARD_DATASET_OFFSET_MS = 3 * 60 * 60 * 1000;
+export const PHASE5_FORWARD_DATASET_CUTOFF_TIMESTAMP =
+  PHASE5_FORWARD_CUTOFF_TIMESTAMP + PHASE5_FORWARD_DATASET_OFFSET_MS;
 
 /**
  * Pre-registered management. Do not retune on the Phase 5 holdout.
@@ -158,7 +165,7 @@ export function resolvePhase5DatasetCutoffTimestamp(): number {
     ? process.env.ZIQ_PHASE5_DATASET_CUTOFF_MS
     : undefined;
   if (raw === undefined || raw.trim() === "") {
-    return PHASE5_FORWARD_CUTOFF_TIMESTAMP;
+    return PHASE5_FORWARD_DATASET_CUTOFF_TIMESTAMP;
   }
 
   const parsed = Number(raw);
