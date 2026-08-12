@@ -44,7 +44,7 @@ if (!content.includes(phase4cMarker)) {
   throw new Error("Phase 4C research marker not found after Phase 4D sweep.");
 }
 
-const block = `const phase4WalkForwardService = new Phase4WalkForwardService();\nconst phase4WalkForwardResult = phase4WalkForwardService.run(phase4Research.shadowCases());\n\nfor (const line of phase4WalkForwardService.format(phase4WalkForwardResult)) {\n  console.log(line);\n}\n\nconsole.log("PHASE4E_PRODUCTION_MUTATION=false");\n\n${phase4cMarker}`;
+const block = `const phase4WalkForwardService = new Phase4WalkForwardService();\nconst phase4WalkForwardResult = phase4WalkForwardService.run(phase4Research.shadowCases());\n\nfor (const line of phase4WalkForwardService.format(phase4WalkForwardResult)) {\n  console.log(line);\n}\n\n${phase4cMarker}`;
 
 content = content.replace(phase4cMarker, block);
 fs.writeFileSync(file, content, "utf8");
@@ -54,7 +54,6 @@ const checks = [
   verify.includes("Phase4WalkForwardService"),
   verify.includes(phase4eBlockMarker),
   verify.includes("phase4WalkForwardService.format"),
-  verify.includes("PHASE4E_PRODUCTION_MUTATION=false"),
   verify.includes("PHASE4C_RESEARCH_ONLY=PASS"),
 ];
 
