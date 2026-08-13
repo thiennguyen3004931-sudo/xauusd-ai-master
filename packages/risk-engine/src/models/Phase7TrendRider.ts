@@ -76,7 +76,8 @@ export interface Phase7Metrics {
   engulfingTriggers: number;
   trendAligned: number;
   fvgConfirmed: number;
-  stopWidthBlocked: number;
+  stopFlooredToMin: number;
+  stopCappedToMax: number;
   signals: number;
   buySignals: number;
   sellSignals: number;
