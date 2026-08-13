@@ -169,10 +169,16 @@ export async function getMt5Telemetry(
 
     if (health.accountMode === "real") {
       status = "DEGRADED";
-      message = "REAL account detected. apps/api remains telemetry-only; no MT5 execution routes are exposed.";
-    } else if (health.tradingEnabled) {
+      message = "REAL account detected. Phase 7B DEMO must not execute on this account; apps/api remains telemetry-only.";
+    } else if (health.accountMode === "contest") {
       status = "DEGRADED";
-      message = "Bridge trading is enabled while apps/api is in telemetry-only integration phase.";
+      message = "Contest account detected. Phase 7B requires accountMode=demo.";
+    } else if (health.accountMode === "demo" && health.tradingEnabled) {
+      status = "HEALTHY";
+      message = `MT5 demo connected · Bridge trading enabled for the separate Phase 7B controller · apps/api remains read-only · ${positions.length} ${symbol} position(s).`;
+    } else if (health.accountMode === "demo") {
+      status = "DEGRADED";
+      message = "MT5 demo connected but Bridge trading is disabled; Phase 7B cannot auto-execute until its dedicated bridge is armed.";
     }
 
     return {
@@ -216,9 +222,9 @@ export async function getMt5SystemService(
   let message = telemetry.message;
   if (telemetry.reachable && telemetry.health) {
     if (controlMode === "SHADOW") {
-      message = `SHADOW · ${telemetry.message} No order submission from apps/api.`;
+      message = `Legacy SHADOW control · ${telemetry.message}`;
     } else if (controlMode === "DEMO") {
-      message = `DEMO control selected · ${telemetry.message} apps/api execution route is still absent.`;
+      message = `Legacy DEMO control selected · ${telemetry.message}`;
     }
   }
 
