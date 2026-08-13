@@ -53,7 +53,7 @@ function bullishTwoCandleM15(): Phase7Bar[] {
     closeTime: 202 * M15,
     open: 120.2,
     high: 121.1,
-    low: 120.0,
+    low: 119.2,
     close: 120.9,
     volume: 320,
   });
@@ -64,7 +64,7 @@ function bullishTwoCandleM15TooWeak(): Phase7Bar[] {
   const bars = bullishTwoCandleM15();
   bars[199] = { ...bars[199]!, open: 120.0, close: 119.0, high: 120.2, low: 118.9 };
   bars[200] = { ...bars[200]!, open: 119.6, close: 119.9, high: 120.1, low: 119.3 };
-  bars[201] = { ...bars[201]!, open: 119.9, close: 120.2, high: 120.4, low: 119.8 };
+  bars[201] = { ...bars[201]!, open: 119.9, close: 120.2, high: 120.4, low: 119.2 };
   return bars;
 }
 
