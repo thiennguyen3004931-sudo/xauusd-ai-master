@@ -10,7 +10,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $WorkDir = (Resolve-Path $WorkDir).Path
-$Exporter = Join-Path $WorkDir "extract_mt5_history.py"
+$Exporter = Join-Path $PSScriptRoot "export-phase6e-mt5-history.py"
 $Driver = Join-Path $PSScriptRoot "run-phase6e-historical-blind.ts"
 $Preparer = Join-Path $PSScriptRoot "prepare-phase6e-historical-blind-dataset.mjs"
 $BlindDays = 360
@@ -76,6 +76,7 @@ $env:ZIQ_MAX_RISK_USD = [string]$MaxRiskUsd
 
 Write-Host "PHASE6E_RUN_DIR=$runDir"
 Write-Host "PHASE6E_FROZEN_DIR=$FrozenDir"
+Write-Host "PHASE6E_EXPORTER=CHUNKED_COPY_RATES_RANGE"
 Write-Host "PHASE6E_EXPORT_DAYS=$ExportDays"
 Write-Host "PHASE6E_BLIND_DAYS=$BlindDays"
 Write-Host "PHASE6E_WARMUP_DAYS=$WarmupDays"
@@ -83,7 +84,7 @@ Write-Host "PHASE6E_MAX_RISK_USD=$MaxRiskUsd"
 Write-Host "PHASE6E_EXPORT_START"
 
 & $PythonExe $Exporter 2>&1 | Tee-Object -FilePath $exportLog
-if ($LASTEXITCODE -ne 0) { throw "Phase 6E MT5 history export failed with exit code $LASTEXITCODE" }
+if ($LASTEXITCODE -ne 0) { throw "Phase 6E chunked MT5 history export failed with exit code $LASTEXITCODE" }
 foreach ($output in @($rawM15, $rawM5, $rawMeta)) {
   if (-not (Test-Path $output)) { throw "Expected Phase 6E raw export missing: $output" }
 }
