@@ -18,6 +18,7 @@ export * from "./Phase6EHistoricalBlindService";
 export * from "./Phase7TrendRiderService";
 export * from "./Phase7ADiagnosticsService";
 export * from "./Phase7A2ManagementCounterfactualService";
+export * from "./Phase7BDualPatternTrendRiderService";
 export * from "./ExposureService";
 export * from "./MarginService";
 export * from "./PositionSizeService";
