@@ -3,11 +3,38 @@ import { Chip } from "@mui/material";
 export function StatusChip({ value }: { value: string }) {
   const normalized = value.toUpperCase();
   const color =
-    ["BUY", "CONFIRM", "APPROVED", "HEALTHY", "EXECUTE", "WAITING_SIGNAL", "MANAGING"].includes(normalized)
+    [
+      "BUY",
+      "CONFIRM",
+      "APPROVED",
+      "HEALTHY",
+      "EXECUTE",
+      "WAITING_SIGNAL",
+      "MANAGING",
+      "PASS",
+      "GUARD PASS",
+      "DEMO ONLY",
+    ].includes(normalized)
       ? "success"
-      : ["SELL", "REJECT", "BLOCKED", "OFFLINE", "MT5_OFFLINE", "BOT_STALE", "POSITION_NOT_MANAGED"].includes(normalized)
+      : [
+          "SELL",
+          "REJECT",
+          "BLOCKED",
+          "OFFLINE",
+          "MT5_OFFLINE",
+          "BOT_STALE",
+          "POSITION_NOT_MANAGED",
+          "GUARD BLOCKED",
+        ].includes(normalized)
         ? "error"
-        : ["WAIT", "DEGRADED", "DOWNGRADE_TO_WAIT", "READY_NOT_ARMED", "STARTING"].includes(normalized)
+        : [
+            "WAIT",
+            "DEGRADED",
+            "DOWNGRADE_TO_WAIT",
+            "READY_NOT_ARMED",
+            "STARTING",
+            "HISTORY",
+          ].includes(normalized)
           ? "warning"
           : "default";
 
