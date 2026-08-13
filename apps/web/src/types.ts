@@ -212,6 +212,7 @@ export interface Mt5TelemetrySnapshot {
   positions: Mt5TelemetryPosition[];
   checkedAt: number;
 }
+
 export interface Mt5PerformanceMetrics {
   totalTrades: number;
   wins: number;
@@ -273,7 +274,7 @@ export interface Mt5PerformanceSnapshot {
   generatedAt: number;
   safety: {
     accountMode: "demo";
-    bridgeTradingEnabled: false;
+    bridgeTradingEnabled: boolean;
     strategyAutoChange: false;
     liveUnlockAvailable: false;
   };
