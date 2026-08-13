@@ -11,6 +11,7 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $WorkDir = (Resolve-Path $WorkDir).Path
 $Exporter = Join-Path $PSScriptRoot "export-phase6e-mt5-history.py"
+$MaxBarsProbe = Join-Path $PSScriptRoot "probe-phase6e-mt5-maxbars.py"
 $Driver = Join-Path $PSScriptRoot "run-phase6e-historical-blind.ts"
 $Preparer = Join-Path $PSScriptRoot "prepare-phase6e-historical-blind-dataset.mjs"
 $BlindDays = 360
@@ -47,14 +48,22 @@ if ([string]::IsNullOrWhiteSpace($FrozenDir)) {
 $FrozenDir = (Resolve-Path $FrozenDir).Path
 $FrozenM15 = Join-Path $FrozenDir "phase4-m15.json"
 
-foreach ($required in @($Exporter, $Driver, $Preparer, $BridgeEnv, $FrozenM15)) {
+foreach ($required in @($Exporter, $MaxBarsProbe, $Driver, $Preparer, $BridgeEnv, $FrozenM15)) {
   if (-not (Test-Path $required)) { throw "Required Phase 6E input not found: $required" }
 }
 
 $env:ZIQ_BRIDGE_ENV = $BridgeEnv
-$maxBarsProbe = & $PythonExe -c "import os; from pathlib import Path; p=Path(os.environ['ZIQ_BRIDGE_ENV']); [os.environ.setdefault(k.strip(),v.strip().strip(chr(34)).strip(chr(39))) for line in p.read_text(encoding='utf-8-sig').splitlines() if (line:=line.strip()) and not line.startswith('#') and '=' in line for k,v in [line.split('=',1)]]; import MetaTrader5 as mt5; kw={'timeout':int(os.getenv('MT5_INITIALIZE_TIMEOUT_MS','60000')),'portable':os.getenv('MT5_PORTABLE','false').lower() in ('1','true','yes','on')}; path=os.getenv('MT5_TERMINAL_PATH','').strip(); login=os.getenv('MT5_LOGIN','').strip(); password=os.getenv('MT5_PASSWORD','').strip(); server=os.getenv('MT5_SERVER','').strip(); kw.update({'path':path} if path else {}); kw.update({'login':int(login)} if login else {}); kw.update({'password':password} if password else {}); kw.update({'server':server} if server else {}); ok=mt5.initialize(**kw); info=mt5.terminal_info() if ok else None; print(getattr(info,'maxbars',0) if info else 0); mt5.shutdown()" 2>&1
-if ($LASTEXITCODE -ne 0) { throw "Phase 6E could not query MT5 terminal max bars: $maxBarsProbe" }
-$terminalMaxBars = [int](($maxBarsProbe | Select-Object -Last 1).ToString().Trim())
+$maxBarsProbeOutput = & $PythonExe $MaxBarsProbe 2>&1
+if ($LASTEXITCODE -ne 0) {
+  throw "Phase 6E could not query MT5 terminal max bars: $($maxBarsProbeOutput -join ' | ')"
+}
+$maxBarsLine = $maxBarsProbeOutput |
+  Where-Object { $_.ToString() -match '^PHASE6E_MAXBARS_PROBE_VALUE=' } |
+  Select-Object -Last 1
+if ($null -eq $maxBarsLine) {
+  throw "Phase 6E max-bars probe did not report PHASE6E_MAXBARS_PROBE_VALUE. Output: $($maxBarsProbeOutput -join ' | ')"
+}
+$terminalMaxBars = [int](($maxBarsLine.ToString() -split "=", 2)[1])
 Write-Host "PHASE6E_TERMINAL_MAX_BARS=$terminalMaxBars"
 Write-Host "PHASE6E_MINIMUM_TERMINAL_MAX_BARS=$MinimumTerminalMaxBars"
 if ($terminalMaxBars -lt $MinimumTerminalMaxBars) {
