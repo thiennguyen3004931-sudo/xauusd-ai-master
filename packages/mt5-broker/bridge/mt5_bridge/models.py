@@ -12,7 +12,9 @@ class OrderRequest(BaseModel):
     volume: float = Field(gt=0)
     requestedPrice: float = Field(gt=0)
     stopLoss: float = Field(gt=0)
-    takeProfit: float = Field(gt=0)
+    # MT5 uses tp=0 to mean no fixed take-profit. Phase 7B manages exits
+    # dynamically, so zero is a valid and intentional value.
+    takeProfit: float = Field(ge=0)
     deviationPoints: int = Field(gt=0, le=10000)
     magicNumber: int = Field(gt=0)
     comment: str = Field(default="xauusd-ai-master", max_length=128)
