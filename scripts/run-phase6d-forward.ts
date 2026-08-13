@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import {
+  Phase6ADiagnosticsService,
   Phase6DForwardHoldoutService,
   Phase6M15TrendEngulfingService,
+  resolvePhase6DDatasetCutoffTimestamp,
 } from "@xauusd/risk-engine";
 
 function requiredEnv(name: string): string {
@@ -51,6 +53,38 @@ console.log(`PHASE6D_BASELINE_SIGNALS=${baseline.metrics.signals}`);
 console.log(`PHASE6D_BASELINE_BUY_SIGNALS=${baseline.metrics.buySignals}`);
 console.log(`PHASE6D_BASELINE_SELL_SIGNALS=${baseline.metrics.sellSignals}`);
 console.log(`PHASE6D_BASELINE_RISK_BLOCKED=${baseline.metrics.riskBlocked}`);
+
+const cutoffTimestamp = resolvePhase6DDatasetCutoffTimestamp();
+const diagnostics = new Phase6ADiagnosticsService().run(baseline, request);
+const postCutoffRiskBlocked = diagnostics.riskBlockedSetups.filter(
+  (setup) => setup.signalTimestamp > cutoffTimestamp,
+);
+const postCutoffRiskBlockedBuy = postCutoffRiskBlocked.filter(
+  (setup) => setup.side === "BUY",
+).length;
+const postCutoffRiskBlockedSell = postCutoffRiskBlocked.filter(
+  (setup) => setup.side === "SELL",
+).length;
+const postCutoffRiskFeasible = baseline.trades.filter(
+  (trade) => trade.signalTimestamp > cutoffTimestamp,
+);
+const postCutoffRiskFeasibleBuy = postCutoffRiskFeasible.filter(
+  (trade) => trade.side === "BUY",
+).length;
+const postCutoffRiskFeasibleSell = postCutoffRiskFeasible.filter(
+  (trade) => trade.side === "SELL",
+).length;
+
+console.log(`PHASE6D_POST_CUTOFF_CONFLUENCE_PASSED=${postCutoffRiskBlocked.length + postCutoffRiskFeasible.length}`);
+console.log(`PHASE6D_POST_CUTOFF_CONFLUENCE_BUY=${postCutoffRiskBlockedBuy + postCutoffRiskFeasibleBuy}`);
+console.log(`PHASE6D_POST_CUTOFF_CONFLUENCE_SELL=${postCutoffRiskBlockedSell + postCutoffRiskFeasibleSell}`);
+console.log(`PHASE6D_POST_CUTOFF_RISK_BLOCKED=${postCutoffRiskBlocked.length}`);
+console.log(`PHASE6D_POST_CUTOFF_RISK_BLOCKED_BUY=${postCutoffRiskBlockedBuy}`);
+console.log(`PHASE6D_POST_CUTOFF_RISK_BLOCKED_SELL=${postCutoffRiskBlockedSell}`);
+console.log(`PHASE6D_POST_CUTOFF_RISK_FEASIBLE=${postCutoffRiskFeasible.length}`);
+console.log(`PHASE6D_POST_CUTOFF_RISK_FEASIBLE_BUY=${postCutoffRiskFeasibleBuy}`);
+console.log(`PHASE6D_POST_CUTOFF_RISK_FEASIBLE_SELL=${postCutoffRiskFeasibleSell}`);
+console.log("PHASE6D_POST_CUTOFF_RISK_FUNNEL=PASS");
 
 const holdout = new Phase6DForwardHoldoutService();
 const result = holdout.run(baseline);
