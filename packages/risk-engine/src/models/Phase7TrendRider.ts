@@ -13,7 +13,7 @@ export interface Phase7Bar {
 export interface Phase7RunRequest {
   m15Bars: readonly Phase7Bar[];
   m5Bars: readonly Phase7Bar[];
-  riskCapUsd: number;
+  fixedVolume: number;
   tickSize: number;
   tickValuePerLot: number;
   minVolume?: number;
@@ -77,7 +77,6 @@ export interface Phase7Metrics {
   trendAligned: number;
   fvgConfirmed: number;
   stopWidthBlocked: number;
-  riskBlocked: number;
   signals: number;
   buySignals: number;
   sellSignals: number;
