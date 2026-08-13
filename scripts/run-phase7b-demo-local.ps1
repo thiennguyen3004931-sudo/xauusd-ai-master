@@ -57,7 +57,9 @@ function Write-DemoRuntimeState {
     intervalSeconds = $IntervalSeconds
   }
   $tmp = "$RuntimePath.tmp"
-  $payload | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding utf8
+  $json = $payload | ConvertTo-Json -Depth 4
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($tmp, $json, $utf8NoBom)
   Move-Item -Path $tmp -Destination $RuntimePath -Force
 }
 
