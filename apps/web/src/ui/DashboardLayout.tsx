@@ -19,6 +19,7 @@ import ShieldRounded from "@mui/icons-material/ShieldRounded";
 import PsychologyRounded from "@mui/icons-material/PsychologyRounded";
 import AssessmentRounded from "@mui/icons-material/AssessmentRounded";
 import InsightsRounded from "@mui/icons-material/InsightsRounded";
+import SmartToyRounded from "@mui/icons-material/SmartToyRounded";
 import DnsRounded from "@mui/icons-material/DnsRounded";
 import SettingsRounded from "@mui/icons-material/SettingsRounded";
 import MenuRounded from "@mui/icons-material/MenuRounded";
@@ -34,6 +35,7 @@ const links = [
   ["/ai", "AI Review", PsychologyRounded],
   ["/backtest", "Backtest", AssessmentRounded],
   ["/performance", "MT5 Performance", InsightsRounded],
+  ["/phase7b-demo", "Phase 7B Demo", SmartToyRounded],
   ["/system", "Hệ thống", DnsRounded],
   ["/settings", "Cài đặt", SettingsRounded],
 ] as const;
