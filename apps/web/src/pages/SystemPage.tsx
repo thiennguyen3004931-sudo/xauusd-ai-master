@@ -4,358 +4,117 @@ import {
   Card,
   CardContent,
   Grid,
-  LinearProgress,
   Stack,
   Typography,
 } from "@mui/material";
 import { useDashboard, useMt5Telemetry } from "../hooks";
 import { dateTime, price } from "../format";
-import { ErrorState, LoadingState } from "../ui/PageState";
+import { LoadingState } from "../ui/PageState";
 import { StatusChip } from "../ui/StatusChip";
-import type { Mt5TelemetrySnapshot } from "../types";
 
 export function SystemPage() {
   const dashboard = useDashboard();
   const mt5 = useMt5Telemetry("XAUUSD");
 
-  if (dashboard.isLoading) return <LoadingState />;
-  if (!dashboard.data) {
-    return (
-      <ErrorState
-        message={
-          dashboard.error instanceof Error
-            ? dashboard.error.message
-            : "Không có system health."
-        }
-      />
-    );
-  }
+  if (mt5.isLoading && !mt5.data) return <LoadingState />;
+
+  const telemetry = mt5.data;
+  const health = telemetry?.health;
 
   return (
     <Stack spacing={2}>
       <Box>
         <Typography variant="overline" color="primary" fontWeight={800}>
-          OPERATIONS
+          DEMO OPERATIONS
         </Typography>
-        <Typography variant="h5" fontWeight={800}>
-          System health
-        </Typography>
+        <Typography variant="h5" fontWeight={800}>System health</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          Pipeline health và MT5 broker telemetry. Dashboard không có route đặt,
-          sửa hoặc đóng lệnh MT5.
+          MT5/Bridge là health vận hành của Phase 7B. Canonical dashboard bên dưới chỉ là research/legacy và không điều khiển bot DEMO.
         </Typography>
       </Box>
 
-      <Mt5TelemetryCard
-        telemetry={mt5.data}
-        loading={mt5.isLoading}
-        error={mt5.error}
-        pipelineSource={dashboard.data.source}
-      />
+      <Card>
+        <CardContent>
+          <Stack direction="row" justifyContent="space-between" gap={2} alignItems="center">
+            <Box>
+              <Typography fontWeight={800}>MT5 Bridge / Phase 7B execution path</Typography>
+              <Typography variant="caption" color="text.secondary">
+                API web chỉ đọc telemetry; lệnh DEMO do controller Phase 7B riêng quản lý.
+              </Typography>
+            </Box>
+            <StatusChip value={telemetry?.reachable ? "HEALTHY" : "OFFLINE"} />
+          </Stack>
 
-      <Grid container spacing={2}>
-        {dashboard.data.services.map((service) => (
-          <Grid key={service.id} size={{ xs: 12, sm: 6, xl: 4 }}>
-            <Card sx={{ height: "100%" }}>
-              <CardContent>
-                <Stack direction="row" justifyContent="space-between" gap={2}>
-                  <Typography fontWeight={800}>{service.name}</Typography>
-                  <StatusChip value={service.status} />
-                </Stack>
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={{ mt: 2, minHeight: 42 }}
-                >
-                  {service.message}
-                </Typography>
-                <Stack
-                  direction="row"
-                  justifyContent="space-between"
-                  sx={{ mt: 2 }}
-                >
-                  <Typography variant="caption" color="text.secondary">
-                    Latency
-                  </Typography>
-                  <Typography variant="caption" fontWeight={800}>
-                    {service.latencyMs === null
-                      ? "—"
-                      : `${service.latencyMs} ms`}
-                  </Typography>
-                </Stack>
-                <Typography variant="caption" color="text.secondary">
-                  {dateTime(service.checkedAt)}
-                </Typography>
-              </CardContent>
-            </Card>
+          <Grid container spacing={1.5} sx={{ mt: 1 }}>
+            <Info label="Reachable" value={telemetry?.reachable ? "YES" : "NO"} />
+            <Info label="Account mode" value={health?.accountMode?.toUpperCase() ?? "UNKNOWN"} />
+            <Info label="Bridge trading" value={health?.tradingEnabled ? "ENABLED" : "DISABLED"} />
+            <Info label="Terminal algo" value={health?.terminalTradeAllowed ? "ALLOWED" : "BLOCKED"} />
+            <Info label="Expert trading" value={health?.expertTradeAllowed ? "ALLOWED" : "BLOCKED"} />
+            <Info label="Server" value={health?.server ?? "—"} />
+            <Info label="XAUUSD Bid" value={price(telemetry?.quote?.bid ?? null)} />
+            <Info label="XAUUSD Ask" value={price(telemetry?.quote?.ask ?? null)} />
+            <Info label="Open XAUUSD" value={String(telemetry?.positions.length ?? 0)} />
+            <Info label="Checked" value={telemetry?.checkedAt ? dateTime(telemetry.checkedAt) : "—"} />
           </Grid>
-        ))}
-      </Grid>
+
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 2 }}>
+            {telemetry?.message ?? (mt5.error instanceof Error ? mt5.error.message : "MT5 telemetry unavailable.")}
+          </Typography>
+        </CardContent>
+      </Card>
+
+      {dashboard.data ? (
+        <>
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Box>
+              <Typography fontWeight={800}>Canonical research pipeline</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Tham khảo nghiên cứu; không phải trạng thái execution của Phase 7B.
+              </Typography>
+            </Box>
+            <StatusChip value={dashboard.data.source} />
+          </Stack>
+          <Grid container spacing={2}>
+            {dashboard.data.services.map((service) => (
+              <Grid key={service.id} size={{ xs: 12, sm: 6, xl: 4 }}>
+                <Card sx={{ height: "100%" }}>
+                  <CardContent>
+                    <Stack direction="row" justifyContent="space-between" gap={2}>
+                      <Typography fontWeight={800}>{service.name}</Typography>
+                      <StatusChip value={service.status} />
+                    </Stack>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 2, minHeight: 42 }}>
+                      {service.message}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 2 }}>
+                      Latency {service.latencyMs} ms · {dateTime(service.checkedAt)}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+        </>
+      ) : (
+        <Alert severity="info">
+          Canonical research dashboard hiện không khả dụng. Điều này không ảnh hưởng Phase 7B DEMO nếu trang Phase 7B vẫn hiển thị WAITING SIGNAL/MANAGING và MT5 Guard đều PASS.
+        </Alert>
+      )}
+
+      <Alert severity="warning">
+        LIVE vẫn khóa. Không dùng trang Hệ thống hoặc Cài đặt legacy để suy ra rằng Phase 7B đã được phép giao dịch tài khoản thật.
+      </Alert>
     </Stack>
   );
 }
 
-function Mt5TelemetryCard({
-  telemetry,
-  loading,
-  error,
-  pipelineSource,
-}: {
-  telemetry: Mt5TelemetrySnapshot | undefined;
-  loading: boolean;
-  error: unknown;
-  pipelineSource: string;
-}) {
-  if (loading) {
-    return (
-      <Card>
-        <CardContent>
-          <Typography fontWeight={800}>MT5 Real Telemetry</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Đang đọc MT5 Bridge…
-          </Typography>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!telemetry) {
-    return (
-      <Card>
-        <CardContent>
-          <Typography fontWeight={800}>MT5 Real Telemetry</Typography>
-          <Alert severity="error" sx={{ mt: 2 }}>
-            {error instanceof Error
-              ? error.message
-              : "Không đọc được MT5 telemetry."}
-          </Alert>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const health = telemetry.health;
-  const quote = telemetry.quote;
-  const spec = telemetry.spec;
-  const spreadRatio =
-    quote && spec && spec.maxSpread > 0
-      ? Math.min(100, (quote.spread / spec.maxSpread) * 100)
-      : 0;
-  const spreadSafe =
-    quote && spec ? quote.spread <= spec.maxSpread : false;
-
+function Info({ label, value }: { label: string; value: string }) {
   return (
-    <Card>
-      <CardContent>
-        <Stack
-          direction={{ xs: "column", md: "row" }}
-          justifyContent="space-between"
-          gap={2}
-        >
-          <Box>
-            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-              <Typography fontWeight={800}>MT5 Real Telemetry</Typography>
-              <StatusChip value={telemetry.status} />
-              {health?.accountMode && (
-                <StatusChip value={health.accountMode.toUpperCase()} />
-              )}
-              <StatusChip value="READ ONLY" />
-            </Stack>
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{ mt: 1 }}
-            >
-              {telemetry.message}
-            </Typography>
-          </Box>
-
-          <Stack alignItems={{ xs: "flex-start", md: "flex-end" }}>
-            <Typography variant="caption" color="text.secondary">
-              Bridge latency
-            </Typography>
-            <Typography fontWeight={800}>
-              {telemetry.latencyMs === null
-                ? "—"
-                : `${telemetry.latencyMs} ms`}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {dateTime(telemetry.checkedAt)}
-            </Typography>
-          </Stack>
-        </Stack>
-
-        {health?.accountMode === "real" && (
-          <Alert severity="error" sx={{ mt: 2 }}>
-            REAL account detected. Không tiếp tục execution integration.
-          </Alert>
-        )}
-
-        {health?.tradingEnabled && (
-          <Alert severity="warning" sx={{ mt: 2 }}>
-            MT5 Bridge đang bật trading. Giai đoạn Dashboard hiện tại chỉ yêu cầu
-            telemetry/read-only.
-          </Alert>
-        )}
-
-        <Alert severity="info" sx={{ mt: 2 }}>
-          Broker quote bên dưới là dữ liệu MT5 thật. Market pipeline hiện vẫn là{" "}
-          <strong>{pipelineSource}</strong>; quote MT5 chưa được đưa vào
-          Analysis → Signal → Risk → Strategy.
-        </Alert>
-
-        <Grid container spacing={1.5} sx={{ mt: 0.5 }}>
-          <TelemetryMetric
-            label="Connection"
-            value={health?.connected ? "CONNECTED" : "DISCONNECTED"}
-          />
-          <TelemetryMetric
-            label="Bridge trading"
-            value={health?.tradingEnabled ? "ENABLED" : "LOCKED"}
-          />
-          <TelemetryMetric
-            label="Terminal Algo"
-            value={health?.terminalTradeAllowed ? "ALLOWED" : "BLOCKED"}
-          />
-          <TelemetryMetric
-            label="Expert trading"
-            value={health?.expertTradeAllowed ? "ALLOWED" : "BLOCKED"}
-          />
-          <TelemetryMetric
-            label="Open positions"
-            value={String(telemetry.positions.length)}
-          />
-          <TelemetryMetric
-            label="API execution"
-            value="NOT EXPOSED"
-          />
-        </Grid>
-
-        <Grid container spacing={2} sx={{ mt: 0.5 }}>
-          <Grid size={{ xs: 12, md: 6 }}>
-            <Box className="mini-card">
-              <Typography variant="caption" color="text.secondary">
-                MT5 XAUUSD quote
-              </Typography>
-              <Stack
-                direction="row"
-                spacing={3}
-                alignItems="end"
-                sx={{ mt: 1 }}
-              >
-                <Box>
-                  <Typography variant="caption" color="text.secondary">
-                    Bid
-                  </Typography>
-                  <Typography variant="h5" fontWeight={800}>
-                    {price(quote?.bid ?? null)}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="caption" color="text.secondary">
-                    Ask
-                  </Typography>
-                  <Typography variant="h6" fontWeight={800}>
-                    {price(quote?.ask ?? null)}
-                  </Typography>
-                </Box>
-              </Stack>
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: "block", mt: 1 }}
-              >
-                Broker symbol {quote?.brokerSymbol ?? "—"} · Server{" "}
-                {health?.server ?? "—"}
-              </Typography>
-            </Box>
-          </Grid>
-
-          <Grid size={{ xs: 12, md: 6 }}>
-            <Box className="mini-card">
-              <Stack direction="row" justifyContent="space-between" gap={2}>
-                <Box>
-                  <Typography variant="caption" color="text.secondary">
-                    Current spread
-                  </Typography>
-                  <Typography variant="h5" fontWeight={800}>
-                    {price(quote?.spread ?? null)}
-                  </Typography>
-                </Box>
-                <Box textAlign="right">
-                  <Typography variant="caption" color="text.secondary">
-                    Spread guard
-                  </Typography>
-                  <Typography variant="h6" fontWeight={800}>
-                    {price(spec?.maxSpread ?? null)}
-                  </Typography>
-                </Box>
-              </Stack>
-
-              <LinearProgress
-                variant="determinate"
-                value={spreadRatio}
-                color={spreadSafe ? "success" : "error"}
-                sx={{ mt: 2, height: 7, borderRadius: 10 }}
-              />
-
-              <Stack
-                direction="row"
-                justifyContent="space-between"
-                sx={{ mt: 1 }}
-              >
-                <Typography variant="caption" color="text.secondary">
-                  Utilization
-                </Typography>
-                <Typography variant="caption" fontWeight={800}>
-                  {quote && spec
-                    ? `${((quote.spread / spec.maxSpread) * 100).toFixed(1)}%`
-                    : "—"}
-                </Typography>
-              </Stack>
-            </Box>
-          </Grid>
-        </Grid>
-
-        <Stack
-          direction={{ xs: "column", md: "row" }}
-          spacing={3}
-          sx={{ mt: 2 }}
-        >
-          <Typography variant="caption" color="text.secondary">
-            Tick size {spec ? price(spec.tickSize) : "—"}
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            Min lot {spec?.minVolume ?? "—"}
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            Volume step {spec?.volumeStep ?? "—"}
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            Terminal {health?.terminalVersion ?? "—"}
-          </Typography>
-        </Stack>
-      </CardContent>
-    </Card>
-  );
-}
-
-function TelemetryMetric({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <Grid size={{ xs: 6, md: 4, xl: 2 }}>
-      <Box className="mini-card">
-        <Typography variant="caption" color="text.secondary">
-          {label}
-        </Typography>
-        <Typography fontWeight={800} sx={{ mt: 0.5 }}>
-          {value}
-        </Typography>
+    <Grid size={{ xs: 12, sm: 6, md: 4, xl: 3 }}>
+      <Box className="mini-card" sx={{ height: "100%" }}>
+        <Typography variant="caption" color="text.secondary">{label}</Typography>
+        <Typography fontWeight={800} sx={{ mt: .5, overflowWrap: "anywhere" }}>{value}</Typography>
       </Box>
     </Grid>
   );
