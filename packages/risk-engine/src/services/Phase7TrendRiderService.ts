@@ -15,10 +15,10 @@ const DEFAULT_CONFIG: Phase7Config = {
   minStopDistancePrice: 6,
   maxStopDistancePrice: 10,
   partial1TriggerPrice: 6,
-  partial1Fraction: 0.3,
+  partial1Fraction: 1 / 3,
   protectedProfitOffsetPrice: 2,
   partial2TriggerPrice: 10,
-  partial2Fraction: 0.3,
+  partial2Fraction: 1 / 3,
   trailingDistancePrice: 5,
 };
 
@@ -40,8 +40,8 @@ export class Phase7TrendRiderService {
     let engulfingTriggers = 0;
     let trendAligned = 0;
     let fvgConfirmed = 0;
-    let stopWidthBlocked = 0;
-    let riskBlocked = 0;
+    let stopFlooredToMin = 0;
+    let stopCappedToMax = 0;
     const signals: Phase7Signal[] = [];
 
     for (let index = 200; index < m15.length; index += 1) {
@@ -67,35 +67,17 @@ export class Phase7TrendRiderService {
       const structuralStopDistance = side === "BUY"
         ? entry - engulfingExtreme
         : engulfingExtreme - entry;
+      if (!(structuralStopDistance > 0)) continue;
 
-      if (!Number.isFinite(structuralStopDistance) || structuralStopDistance <= 0 ||
-          structuralStopDistance > this.config.maxStopDistancePrice) {
-        stopWidthBlocked += 1;
-        continue;
-      }
-
-      const stopDistance = Math.max(
-        this.config.minStopDistancePrice,
+      if (structuralStopDistance < this.config.minStopDistancePrice) stopFlooredToMin += 1;
+      if (structuralStopDistance > this.config.maxStopDistancePrice) stopCappedToMax += 1;
+      const stopDistance = clamp(
         structuralStopDistance,
+        this.config.minStopDistancePrice,
+        this.config.maxStopDistancePrice,
       );
-      if (stopDistance > this.config.maxStopDistancePrice) {
-        stopWidthBlocked += 1;
-        continue;
-      }
       const stopLoss = side === "BUY" ? entry - stopDistance : entry + stopDistance;
-      const volume = sizeForRisk(
-        entry,
-        stopLoss,
-        request.riskCapUsd,
-        request.tickSize,
-        request.tickValuePerLot,
-        minVolume,
-        volumeStep,
-      );
-      if (volume < minVolume) {
-        riskBlocked += 1;
-        continue;
-      }
+      const volume = round(request.fixedVolume, 4);
       const initialRiskUsd = riskUsd(
         entry,
         stopLoss,
@@ -113,7 +95,7 @@ export class Phase7TrendRiderService {
         structuralStopDistance: round(structuralStopDistance, 5),
         stopDistance: round(stopDistance, 5),
         stopLoss: round(stopLoss, 5),
-        volume: round(volume, 4),
+        volume,
         initialRiskUsd: round(initialRiskUsd, 4),
         ma20: round(ma20, 5),
         ma50: round(ma50, 5),
@@ -130,8 +112,8 @@ export class Phase7TrendRiderService {
         engulfingTriggers,
         trendAligned,
         fvgConfirmed,
-        stopWidthBlocked,
-        riskBlocked,
+        stopFlooredToMin,
+        stopCappedToMax,
         signals,
         trades,
       ),
@@ -150,13 +132,16 @@ export class Phase7TrendRiderService {
       "PHASE7_TRIGGER=M15_BODY_ENGULFING_MANDATORY",
       "PHASE7_MA_TREND=MANDATORY",
       "PHASE7_FVG=MANDATORY_SAME_DIRECTION",
-      `PHASE7_CONFIG=SL_MIN=${c.minStopDistancePrice}|SL_MAX=${c.maxStopDistancePrice}|P1_TRIGGER=${c.partial1TriggerPrice}|P1_FRACTION=${c.partial1Fraction}|PROTECTED_SL_OFFSET=${c.protectedProfitOffsetPrice}|P2_TRIGGER=${c.partial2TriggerPrice}|P2_FRACTION=${c.partial2Fraction}|TRAIL_DISTANCE=${c.trailingDistancePrice}`,
+      "PHASE7_RISK_CAP=OFF",
+      "PHASE7_VOLUME_MODE=FIXED",
+      "PHASE7_STOP_MODE=PRICE_DISTANCE_CLAMPED_6_TO_10",
+      `PHASE7_CONFIG=SL_MIN=${c.minStopDistancePrice}|SL_MAX=${c.maxStopDistancePrice}|P1_TRIGGER=${c.partial1TriggerPrice}|P1_FRACTION=${round(c.partial1Fraction, 4)}|PROTECTED_SL_OFFSET=${c.protectedProfitOffsetPrice}|P2_TRIGGER=${c.partial2TriggerPrice}|P2_FRACTION=${round(c.partial2Fraction, 4)}|TRAIL_DISTANCE=${c.trailingDistancePrice}`,
       `PHASE7_M15_BARS=${m.m15Bars}`,
       `PHASE7_ENGULFING_TRIGGERS=${m.engulfingTriggers}`,
       `PHASE7_TREND_ALIGNED=${m.trendAligned}`,
       `PHASE7_FVG_CONFIRMED=${m.fvgConfirmed}`,
-      `PHASE7_STOP_WIDTH_BLOCKED=${m.stopWidthBlocked}`,
-      `PHASE7_RISK_BLOCKED=${m.riskBlocked}`,
+      `PHASE7_STOP_FLOORED_TO_6=${m.stopFlooredToMin}`,
+      `PHASE7_STOP_CAPPED_TO_10=${m.stopCappedToMax}`,
       `PHASE7_SIGNALS=${m.signals}`,
       `PHASE7_BUY_SIGNALS=${m.buySignals}`,
       `PHASE7_SELL_SIGNALS=${m.sellSignals}`,
@@ -215,74 +200,31 @@ export class Phase7TrendRiderService {
       }
 
       if (touchesPrice(bar, activeStop)) {
-        return closeTrade(
-          signal,
-          entryTime,
-          bar.closeTime,
-          activeStop,
-          activeStop,
-          remainingVolume,
-          partial1Applied,
-          partial1Volume,
-          partial1Pnl,
-          protectedStopApplied,
-          partial2Applied,
-          partial2Volume,
-          partial2Pnl,
-          trailingActivated,
-          request,
-          "STOP",
-        );
+        return closeTrade(signal, entryTime, bar.closeTime, activeStop, activeStop, remainingVolume,
+          partial1Applied, partial1Volume, partial1Pnl, protectedStopApplied,
+          partial2Applied, partial2Volume, partial2Pnl, trailingActivated, request, "STOP");
       }
 
       if (trendExit !== null && bar.closeTime >= trendExit.timestamp) {
-        return closeTrade(
-          signal,
-          entryTime,
-          trendExit.timestamp,
-          trendExit.price,
-          activeStop,
-          remainingVolume,
-          partial1Applied,
-          partial1Volume,
-          partial1Pnl,
-          protectedStopApplied,
-          partial2Applied,
-          partial2Volume,
-          partial2Pnl,
-          trailingActivated,
-          request,
-          "TREND_MA20",
-        );
+        return closeTrade(signal, entryTime, trendExit.timestamp, trendExit.price, activeStop, remainingVolume,
+          partial1Applied, partial1Volume, partial1Pnl, protectedStopApplied,
+          partial2Applied, partial2Volume, partial2Pnl, trailingActivated, request, "TREND_MA20");
       }
 
-      const favorable = signal.side === "BUY"
-        ? bar.high - signal.entry
-        : signal.entry - bar.low;
+      const favorable = signal.side === "BUY" ? bar.high - signal.entry : signal.entry - bar.low;
 
       if (!partial1Processed && favorable >= this.config.partial1TriggerPrice) {
         partial1Processed = true;
         const triggerPrice = signal.side === "BUY"
           ? signal.entry + this.config.partial1TriggerPrice
           : signal.entry - this.config.partial1TriggerPrice;
-        const closeVolume = partialCloseVolume(
-          signal.volume,
-          this.config.partial1Fraction,
-          remainingVolume,
-          minVolume,
-          volumeStep,
-        );
+        const closeVolume = partialCloseVolume(signal.volume, this.config.partial1Fraction,
+          remainingVolume, minVolume, volumeStep);
         if (closeVolume > 0) {
           partial1Applied = true;
           partial1Volume = closeVolume;
-          partial1Pnl = pnlUsd(
-            signal.side,
-            signal.entry,
-            triggerPrice,
-            closeVolume,
-            request.tickSize,
-            request.tickValuePerLot,
-          );
+          partial1Pnl = pnlUsd(signal.side, signal.entry, triggerPrice, closeVolume,
+            request.tickSize, request.tickValuePerLot);
           remainingVolume = normalizeVolume(remainingVolume - closeVolume, volumeStep);
         }
         const protectedStop = signal.side === "BUY"
@@ -297,24 +239,13 @@ export class Phase7TrendRiderService {
         const triggerPrice = signal.side === "BUY"
           ? signal.entry + this.config.partial2TriggerPrice
           : signal.entry - this.config.partial2TriggerPrice;
-        const closeVolume = partialCloseVolume(
-          signal.volume,
-          this.config.partial2Fraction,
-          remainingVolume,
-          minVolume,
-          volumeStep,
-        );
+        const closeVolume = partialCloseVolume(signal.volume, this.config.partial2Fraction,
+          remainingVolume, minVolume, volumeStep);
         if (closeVolume > 0) {
           partial2Applied = true;
           partial2Volume = closeVolume;
-          partial2Pnl = pnlUsd(
-            signal.side,
-            signal.entry,
-            triggerPrice,
-            closeVolume,
-            request.tickSize,
-            request.tickValuePerLot,
-          );
+          partial2Pnl = pnlUsd(signal.side, signal.entry, triggerPrice, closeVolume,
+            request.tickSize, request.tickValuePerLot);
           remainingVolume = normalizeVolume(remainingVolume - closeVolume, volumeStep);
         }
         trailingActivated = true;
@@ -354,24 +285,9 @@ export class Phase7TrendRiderService {
 
     const last = bars.at(-1);
     if (!last) throw new Error("Phase 7 filled a trade without M5 bars.");
-    return closeTrade(
-      signal,
-      entryTime,
-      last.closeTime,
-      last.close,
-      activeStop,
-      remainingVolume,
-      partial1Applied,
-      partial1Volume,
-      partial1Pnl,
-      protectedStopApplied,
-      partial2Applied,
-      partial2Volume,
-      partial2Pnl,
-      trailingActivated,
-      request,
-      "END_OF_DATA",
-    );
+    return closeTrade(signal, entryTime, last.closeTime, last.close, activeStop, remainingVolume,
+      partial1Applied, partial1Volume, partial1Pnl, protectedStopApplied,
+      partial2Applied, partial2Volume, partial2Pnl, trailingActivated, request, "END_OF_DATA");
   }
 }
 
@@ -379,14 +295,9 @@ function validateConfig(config: Phase7Config): void {
   if (!(config.minStopDistancePrice > 0 && config.maxStopDistancePrice >= config.minStopDistancePrice)) {
     throw new Error("Phase 7 requires 0 < minStopDistancePrice <= maxStopDistancePrice.");
   }
-  for (const [name, value] of Object.entries({
-    partial1Fraction: config.partial1Fraction,
-    partial2Fraction: config.partial2Fraction,
-  })) {
-    if (!(value > 0 && value < 1)) throw new Error(`Phase 7 ${name} must be between 0 and 1.`);
-  }
-  if (config.partial1Fraction + config.partial2Fraction >= 1) {
-    throw new Error("Phase 7 partial fractions must leave a trend-rider remainder.");
+  if (!(config.partial1Fraction > 0 && config.partial2Fraction > 0 &&
+      config.partial1Fraction + config.partial2Fraction < 1)) {
+    throw new Error("Phase 7 partial fractions must be positive and leave a trend-rider remainder.");
   }
   if (!(config.partial1TriggerPrice > 0 && config.partial2TriggerPrice > config.partial1TriggerPrice)) {
     throw new Error("Phase 7 partial trigger ordering is invalid.");
@@ -398,14 +309,21 @@ function validateConfig(config: Phase7Config): void {
 }
 
 function validateRequest(request: Phase7RunRequest): void {
+  const minVolume = request.minVolume ?? 0.01;
+  const volumeStep = request.volumeStep ?? minVolume;
   for (const [name, value] of Object.entries({
-    riskCapUsd: request.riskCapUsd,
+    fixedVolume: request.fixedVolume,
     tickSize: request.tickSize,
     tickValuePerLot: request.tickValuePerLot,
-    minVolume: request.minVolume ?? 0.01,
-    volumeStep: request.volumeStep ?? request.minVolume ?? 0.01,
+    minVolume,
+    volumeStep,
   })) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`Phase 7 requires positive ${name}.`);
+  }
+  if (request.fixedVolume + 1e-9 < minVolume) throw new Error("Phase 7 fixedVolume is below broker minimum volume.");
+  const steps = request.fixedVolume / volumeStep;
+  if (Math.abs(steps - Math.round(steps)) > 1e-8) {
+    throw new Error("Phase 7 fixedVolume must align to broker volumeStep.");
   }
 }
 
@@ -414,12 +332,8 @@ function engulfingSide(previous: Phase7Bar, current: Phase7Bar): Phase7Side | nu
   const previousBullish = previous.close > previous.open;
   const currentBullish = current.close > current.open;
   const currentBearish = current.close < current.open;
-  if (previousBearish && currentBullish && current.open <= previous.close && current.close >= previous.open) {
-    return "BUY";
-  }
-  if (previousBullish && currentBearish && current.open >= previous.close && current.close <= previous.open) {
-    return "SELL";
-  }
+  if (previousBearish && currentBullish && current.open <= previous.close && current.close >= previous.open) return "BUY";
+  if (previousBullish && currentBearish && current.open >= previous.close && current.close <= previous.open) return "SELL";
   return null;
 }
 
@@ -429,23 +343,14 @@ function trendMatches(side: Phase7Side, close: number, ma20: number, ma50: numbe
     : ma20 < ma50 && ma50 < ma200 && close < ma20;
 }
 
-function hasRelevantFvg(
-  bars: readonly Phase7Bar[],
-  index: number,
-  side: Phase7Side,
-  lookback: number,
-): boolean {
+function hasRelevantFvg(bars: readonly Phase7Bar[], index: number, side: Phase7Side, lookback: number): boolean {
   const start = Math.max(2, index - lookback);
   const current = bars[index]!;
   for (let i = start; i < index; i += 1) {
     const first = bars[i - 2]!;
     const third = bars[i]!;
-    if (side === "BUY" && third.low > first.high) {
-      if (current.low <= third.low && current.high >= first.high) return true;
-    }
-    if (side === "SELL" && third.high < first.low) {
-      if (current.high >= third.high && current.low <= first.low) return true;
-    }
+    if (side === "BUY" && third.low > first.high && current.low <= third.low && current.high >= first.high) return true;
+    if (side === "SELL" && third.high < first.low && current.high >= third.high && current.low <= first.low) return true;
   }
   return false;
 }
@@ -476,29 +381,7 @@ function improveStop(side: Phase7Side, current: number, candidate: number): numb
   return side === "BUY" ? Math.max(current, candidate) : Math.min(current, candidate);
 }
 
-function sizeForRisk(
-  entry: number,
-  stop: number,
-  riskCapUsd: number,
-  tickSize: number,
-  tickValuePerLot: number,
-  minVolume: number,
-  volumeStep: number,
-): number {
-  const perLotRisk = riskUsd(entry, stop, 1, tickSize, tickValuePerLot);
-  if (!(perLotRisk > 0)) return 0;
-  const raw = riskCapUsd / perLotRisk;
-  const sized = floorToStep(raw, volumeStep);
-  return sized + 1e-9 >= minVolume ? sized : 0;
-}
-
-function riskUsd(
-  entry: number,
-  stop: number,
-  volume: number,
-  tickSize: number,
-  tickValuePerLot: number,
-): number {
+function riskUsd(entry: number, stop: number, volume: number, tickSize: number, tickValuePerLot: number): number {
   return Math.abs(entry - stop) / tickSize * tickValuePerLot * volume;
 }
 
@@ -522,17 +405,10 @@ function normalizeVolume(volume: number, step: number): number {
 }
 
 function floorToStep(value: number, step: number): number {
-  return Math.floor((value + 1e-12) / step) * step;
+  return Math.floor((value + 1e-9) / step) * step;
 }
 
-function pnlUsd(
-  side: Phase7Side,
-  entry: number,
-  exit: number,
-  volume: number,
-  tickSize: number,
-  tickValuePerLot: number,
-): number {
+function pnlUsd(side: Phase7Side, entry: number, exit: number, volume: number, tickSize: number, tickValuePerLot: number): number {
   const priceMove = side === "BUY" ? exit - entry : entry - exit;
   return priceMove / tickSize * tickValuePerLot * volume;
 }
@@ -555,14 +431,8 @@ function closeTrade(
   request: Phase7RunRequest,
   exitReason: Phase7TradeResult["exitReason"],
 ): Phase7TradeResult {
-  const remainingPnl = pnlUsd(
-    signal.side,
-    signal.entry,
-    exit,
-    remainingVolume,
-    request.tickSize,
-    request.tickValuePerLot,
-  );
+  const remainingPnl = pnlUsd(signal.side, signal.entry, exit, remainingVolume,
+    request.tickSize, request.tickValuePerLot);
   const pnl = partial1Pnl + partial2Pnl + remainingPnl;
   return {
     ...signal,
@@ -592,8 +462,8 @@ function buildMetrics(
   engulfingTriggers: number,
   trendAligned: number,
   fvgConfirmed: number,
-  stopWidthBlocked: number,
-  riskBlocked: number,
+  stopFlooredToMin: number,
+  stopCappedToMax: number,
   signals: readonly Phase7Signal[],
   trades: readonly Phase7TradeResult[],
 ): Phase7Metrics {
@@ -612,8 +482,8 @@ function buildMetrics(
     engulfingTriggers,
     trendAligned,
     fvgConfirmed,
-    stopWidthBlocked,
-    riskBlocked,
+    stopFlooredToMin,
+    stopCappedToMax,
     signals: signals.length,
     buySignals: signals.filter((signal) => signal.side === "BUY").length,
     sellSignals: signals.filter((signal) => signal.side === "SELL").length,
@@ -662,6 +532,10 @@ function summarizeTrades(trades: readonly Phase7TradeResult[]): {
     expectancy: round(filled.length ? netPnl / filled.length : 0, 4),
     averageRMultiple: round(filled.length ? filled.reduce((sum, trade) => sum + trade.rMultiple, 0) / filled.length : 0, 4),
   };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function round(value: number, digits: number): number {
