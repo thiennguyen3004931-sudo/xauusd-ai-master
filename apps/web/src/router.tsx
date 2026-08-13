@@ -8,6 +8,7 @@ import { BacktestPage } from "./pages/BacktestPage";
 import { PerformancePage } from "./pages/PerformancePage";
 import { SystemPage } from "./pages/SystemPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { Phase7BDemoPage } from "./pages/Phase7BDemoPage";
 
 export const router = createBrowserRouter([
   {
@@ -20,6 +21,7 @@ export const router = createBrowserRouter([
       { path: "ai", element: <AiPage /> },
       { path: "backtest", element: <BacktestPage /> },
       { path: "performance", element: <PerformancePage /> },
+      { path: "phase7b-demo", element: <Phase7BDemoPage /> },
       { path: "system", element: <SystemPage /> },
       { path: "settings", element: <SettingsPage /> },
     ],
