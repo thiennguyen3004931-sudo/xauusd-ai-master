@@ -39,14 +39,19 @@ if ([string]::IsNullOrWhiteSpace($apiKey) -or $apiKey.Length -lt 16) {
   throw "MT5_API_KEY in the DEMO bridge env is invalid."
 }
 
+$systemMagic = [string]$values["MT5_MAGIC_NUMBER"]
+if ([string]::IsNullOrWhiteSpace($systemMagic)) { $systemMagic = "270713" }
+$systemMagicNumber = 0
+if (-not [int]::TryParse($systemMagic, [ref]$systemMagicNumber) -or $systemMagicNumber -le 0) {
+  throw "MT5_MAGIC_NUMBER in the DEMO bridge env is invalid."
+}
+
 $bridgeHost = if ([string]::IsNullOrWhiteSpace([string]$values["MT5_BRIDGE_HOST"])) { "127.0.0.1" } else { [string]$values["MT5_BRIDGE_HOST"] }
 $bridgePort = if ([string]::IsNullOrWhiteSpace([string]$values["MT5_BRIDGE_PORT"])) { "8765" } else { [string]$values["MT5_BRIDGE_PORT"] }
 $bridgeBase = "http://${bridgeHost}:${bridgePort}"
 $demoDir = Join-Path $WorkDir "phase7b-demo-forward"
 New-Item -ItemType Directory -Path $demoDir -Force | Out-Null
 
-# Fail immediately if the exact key from .env.phase7b-demo cannot authenticate
-# against the running bridge. Never print the key itself.
 try {
   $bridgeHealth = Invoke-RestMethod -Uri "$bridgeBase/health" -Headers @{ "x-mt5-api-key" = $apiKey } -Method Get -TimeoutSec 5
 } catch {
@@ -55,12 +60,14 @@ try {
 if (-not $bridgeHealth.connected) {
   throw "Phase 7B WEB bridge is reachable but MT5 terminal is disconnected."
 }
+if ($bridgeHealth.accountMode -ne "demo") {
+  throw "Phase 7B WEB requires MT5 accountMode=demo, got $($bridgeHealth.accountMode)."
+}
 Write-Host "PHASE7B_WEB_BRIDGE_AUTH=PASS"
 Write-Host "PHASE7B_WEB_BRIDGE_ACCOUNT_MODE=$($bridgeHealth.accountMode)"
 Write-Host "PHASE7B_WEB_BRIDGE_SERVER=$($bridgeHealth.server)"
+Write-Host "PHASE7B_WEB_SYSTEM_MAGIC=$systemMagicNumber"
 
-# Dedicated Phase 7B ports isolate this monitor from any legacy dashboard/API
-# process still listening or being respawned on 3001/5173.
 $apiUrl = "http://127.0.0.1:${ApiPort}"
 $webUrl = "http://127.0.0.1:${WebPort}"
 
@@ -72,22 +79,20 @@ foreach ($port in @($ApiPort, $WebPort)) {
   }
 }
 
-# Pass broker credentials only to the API child process. The browser never receives
-# MT5_BRIDGE_API_KEY; Vite only exposes variables prefixed with VITE_.
+# Credentials/config are inherited only by the API child. The browser never
+# receives the bridge API key or execution credentials.
 $env:MT5_BRIDGE_ENABLED = "true"
 $env:MT5_BRIDGE_BASE_URL = $bridgeBase
 $env:MT5_BRIDGE_API_KEY = $apiKey
 $env:MT5_BRIDGE_REQUEST_TIMEOUT_MS = "3000"
 $env:MT5_BRIDGE_HEALTH_TIMEOUT_MS = "1500"
+$env:MT5_MAGIC_NUMBER = [string]$systemMagicNumber
 $env:PHASE7B_DEMO_WORK_DIR = $demoDir
 $env:HOST = "127.0.0.1"
 $env:PORT = [string]$ApiPort
 $env:WEB_ORIGIN = $webUrl
 
-# Important: do NOT start the dedicated API through root `pnpm dev:api`
-# because that route goes through Turborepo. The Phase 7B launcher relies on
-# process-scoped PORT / MT5 bridge / workdir variables, so run the API package
-# directly to preserve the exact child environment.
+# Run API package directly so all process-scoped Phase 7B env vars reach it.
 $apiCommand = "Set-Location '$ProjectRoot'; Write-Host 'PHASE7B_WEB_API=$apiUrl'; pnpm --filter @xauusd/api dev"
 $apiProcess = Start-Process powershell.exe -PassThru -ArgumentList @(
   "-NoExit",
@@ -95,11 +100,11 @@ $apiProcess = Start-Process powershell.exe -PassThru -ArgumentList @(
   "-Command", $apiCommand
 )
 
-# Do not leave the bridge API key in the parent environment before launching web.
 Remove-Item Env:MT5_BRIDGE_API_KEY -ErrorAction SilentlyContinue
+Remove-Item Env:MT5_MAGIC_NUMBER -ErrorAction SilentlyContinue
 
-# Bypass Vite's legacy /api -> 3001 proxy. The DEMO page talks directly to the
-# dedicated API port instead.
+# The dedicated web talks directly to the dedicated API rather than the legacy
+# Vite /api -> 3001 proxy.
 $env:VITE_API_BASE_URL = $apiUrl
 $webCommand = "Set-Location '$ProjectRoot'; Write-Host 'PHASE7B_WEB_UI=$webUrl/phase7b-demo'; pnpm --filter @xauusd/web dev -- --host 127.0.0.1 --port $WebPort --strictPort"
 $webProcess = Start-Process powershell.exe -PassThru -ArgumentList @(
@@ -118,8 +123,6 @@ Write-Host "PHASE7B_WEB_READ_ONLY=PASS"
 Write-Host "PHASE7B_WEB_LEGACY_PORTS_3001_5173=BYPASSED"
 Write-Host "PHASE7B_WEB_API_TURBO=OFF"
 
-# Give API enough time to enter watch mode, then verify the complete read-only
-# endpoint before opening the browser.
 $apiReady = $false
 for ($attempt = 1; $attempt -le 16; $attempt++) {
   Start-Sleep -Milliseconds 750
@@ -139,8 +142,25 @@ for ($attempt = 1; $attempt -le 16; $attempt++) {
   }
 }
 
-if (-not $apiReady) {
-  Write-Warning "Web processes were started, but API self-test is not PASS. Inspect the API child window before trusting the monitor."
+if ($apiReady) {
+  try {
+    $mt5Status = Invoke-RestMethod -Uri "$apiUrl/api/v1/mt5/status?symbol=XAUUSD" -Method Get -TimeoutSec 5
+    Write-Host "PHASE7B_WEB_MT5_SECTION=PASS"
+    Write-Host "PHASE7B_WEB_MT5_SECTION_STATUS=$($mt5Status.status)"
+  } catch {
+    Write-Warning "MT5/System section self-test failed: $($_.Exception.Message)"
+  }
+
+  try {
+    $performance = Invoke-RestMethod -Uri "$apiUrl/api/v1/mt5/performance?symbol=XAUUSD&days=30" -Method Get -TimeoutSec 8
+    Write-Host "PHASE7B_WEB_PERFORMANCE_SECTION=PASS"
+    Write-Host "PHASE7B_WEB_PERFORMANCE_SYSTEM_TRADES=$($performance.systemOwned.metrics.totalTrades)"
+    Write-Host "PHASE7B_WEB_PERFORMANCE_SAMPLE_READY=$($performance.systemOwned.sampleReady)"
+  } catch {
+    Write-Warning "MT5 Performance section self-test failed: $($_.Exception.Message)"
+  }
+} else {
+  Write-Warning "Web processes were started, but Phase 7B API self-test is not PASS. Inspect the API child window before trusting the monitor."
 }
 
 Start-Process "$webUrl/phase7b-demo"
