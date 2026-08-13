@@ -18,6 +18,7 @@ if (!Number.isFinite(warmupDays) || warmupDays <= 0) throw new Error("warmupDays
 if (!Number.isFinite(datasetOffsetMs)) throw new Error("datasetOffsetMs must be finite.");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_EDGE_GAP_MS = 4 * DAY_MS;
 const frozenM15 = readArray(args.frozenM15);
 const rawM15 = readArray(args.rawM15);
 const rawM5 = readArray(args.rawM5);
@@ -42,6 +43,10 @@ const preparedM5 = rawM5
     return open >= warmupStart && open < blindEnd;
   })
   .sort((a, b) => barOpenTime(a) - barOpenTime(b));
+
+if (preparedM15.length === 0 || preparedM5.length === 0) {
+  throw new Error("Phase 6E prepared historical dataset is empty.");
+}
 
 const warmupM15Bars = preparedM15.filter((bar) => barCloseTime(bar, 15 * 60_000) <= blindStart).length;
 const blindM15Bars = preparedM15.filter((bar) => {
@@ -68,6 +73,19 @@ const earliestPreparedM15 = Math.min(...preparedM15.map((bar) => barOpenTime(bar
 const latestPreparedM15 = Math.max(...preparedM15.map((bar) => barCloseTime(bar, 15 * 60_000)));
 const earliestPreparedM5 = Math.min(...preparedM5.map((bar) => barOpenTime(bar)));
 const latestPreparedM5 = Math.max(...preparedM5.map((bar) => barCloseTime(bar, 5 * 60_000)));
+
+if (earliestPreparedM15 > warmupStart + MAX_EDGE_GAP_MS ||
+    earliestPreparedM5 > warmupStart + MAX_EDGE_GAP_MS) {
+  throw new Error(
+    "Phase 6E historical export does not reach the beginning of the fixed warm-up window. Increase broker history/export depth.",
+  );
+}
+if (latestPreparedM15 < blindEnd - MAX_EDGE_GAP_MS ||
+    latestPreparedM5 < blindEnd - MAX_EDGE_GAP_MS) {
+  throw new Error(
+    "Phase 6E historical export does not reach the end of the fixed blind window. Historical coverage is incomplete.",
+  );
+}
 
 writeJson(args.outM15, preparedM15);
 writeJson(args.outM5, preparedM5);
@@ -100,6 +118,8 @@ writeJson(args.outMeta, {
     latestPreparedM15: new Date(latestPreparedM15).toISOString(),
     earliestPreparedM5: new Date(earliestPreparedM5).toISOString(),
     latestPreparedM5: new Date(latestPreparedM5).toISOString(),
+    maxAllowedEdgeGapMs: MAX_EDGE_GAP_MS,
+    fullCoverage: true,
     strictNoOverlap: true,
   },
 });
@@ -114,6 +134,7 @@ console.log(`PHASE6E_PREP_BLIND_M15_BARS=${blindM15Bars}`);
 console.log(`PHASE6E_PREP_BLIND_M5_BARS=${blindM5Bars}`);
 console.log(`PHASE6E_PREP_PREPARED_M15_BARS=${preparedM15.length}`);
 console.log(`PHASE6E_PREP_PREPARED_M5_BARS=${preparedM5.length}`);
+console.log("PHASE6E_PREP_FULL_COVERAGE=PASS");
 console.log("PHASE6E_PREP_STRICT_NO_OVERLAP=PASS");
 console.log("PHASE6E_PREP_STATUS=PASS");
 
