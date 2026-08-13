@@ -17,6 +17,7 @@ $BlindDays = 360
 $WarmupDays = 30
 $ExpectedDatasetOffsetMs = 10800000
 $AllowedObservedOffsetDeviationMs = 300000
+$MinimumTerminalMaxBars = 100000
 
 if ([math]::Abs([double]$MaxRiskUsd - 10.0) -gt 0.000001) {
   throw "Phase 6E risk is pre-registered at exactly USD 10. Do not retune MaxRiskUsd."
@@ -50,6 +51,18 @@ foreach ($required in @($Exporter, $Driver, $Preparer, $BridgeEnv, $FrozenM15)) 
   if (-not (Test-Path $required)) { throw "Required Phase 6E input not found: $required" }
 }
 
+$env:ZIQ_BRIDGE_ENV = $BridgeEnv
+$maxBarsProbe = & $PythonExe -c "import os; from pathlib import Path; p=Path(os.environ['ZIQ_BRIDGE_ENV']); [os.environ.setdefault(k.strip(),v.strip().strip(chr(34)).strip(chr(39))) for line in p.read_text(encoding='utf-8-sig').splitlines() if (line:=line.strip()) and not line.startswith('#') and '=' in line for k,v in [line.split('=',1)]]; import MetaTrader5 as mt5; kw={'timeout':int(os.getenv('MT5_INITIALIZE_TIMEOUT_MS','60000')),'portable':os.getenv('MT5_PORTABLE','false').lower() in ('1','true','yes','on')}; path=os.getenv('MT5_TERMINAL_PATH','').strip(); login=os.getenv('MT5_LOGIN','').strip(); password=os.getenv('MT5_PASSWORD','').strip(); server=os.getenv('MT5_SERVER','').strip(); kw.update({'path':path} if path else {}); kw.update({'login':int(login)} if login else {}); kw.update({'password':password} if password else {}); kw.update({'server':server} if server else {}); ok=mt5.initialize(**kw); info=mt5.terminal_info() if ok else None; print(getattr(info,'maxbars',0) if info else 0); mt5.shutdown()" 2>&1
+if ($LASTEXITCODE -ne 0) { throw "Phase 6E could not query MT5 terminal max bars: $maxBarsProbe" }
+$terminalMaxBars = [int](($maxBarsProbe | Select-Object -Last 1).ToString().Trim())
+Write-Host "PHASE6E_TERMINAL_MAX_BARS=$terminalMaxBars"
+Write-Host "PHASE6E_MINIMUM_TERMINAL_MAX_BARS=$MinimumTerminalMaxBars"
+if ($terminalMaxBars -lt $MinimumTerminalMaxBars) {
+  Write-Host "PHASE6E_TERMINAL_MAX_BARS_STATUS=FAIL"
+  throw "Phase 6E requires MT5 Max. bars in chart >= $MinimumTerminalMaxBars for the fixed 360-day M5 blind window. Current=$terminalMaxBars. Set 200000 in MT5 Tools > Options > Charts, restart MT5, then rerun."
+}
+Write-Host "PHASE6E_TERMINAL_MAX_BARS_STATUS=PASS"
+
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $runDir = Join-Path $WorkDir "phase6e-historical-runs\$stamp"
 New-Item -ItemType Directory -Path $runDir -Force | Out-Null
@@ -66,7 +79,6 @@ $consoleLog = Join-Path $runDir "phase6e-console.log"
 $auditCsv = Join-Path $runDir "phase6e-trade-audit.csv"
 $latestAuditCsv = Join-Path $WorkDir "phase6e-historical-trade-audit-latest.csv"
 
-$env:ZIQ_BRIDGE_ENV = $BridgeEnv
 $env:ZIQ_M15_JSON = $rawM15
 $env:ZIQ_M5_JSON = $rawM5
 $env:ZIQ_META_JSON = $rawMeta
