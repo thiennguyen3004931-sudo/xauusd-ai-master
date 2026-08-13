@@ -26,6 +26,16 @@ type BotState = {
   managed: ManagedState | null;
 };
 
+type RuntimeState = {
+  version: number;
+  status: "STARTING" | "RUNNING" | "STOPPED" | string;
+  armed: boolean;
+  pid: number | null;
+  heartbeatAt: number;
+  startedAt: number | null;
+  intervalSeconds: number;
+};
+
 type DemoEvent = Record<string, unknown> & {
   timestamp?: string;
   type?: string;
@@ -39,21 +49,34 @@ router.get("/", async (_req: Request, res: Response) => {
     const telemetry = await getMt5Telemetry("XAUUSD");
     const statePath = demoDir ? path.join(demoDir, "phase7b-demo-state.json") : null;
     const journalPath = demoDir ? path.join(demoDir, "phase7b-demo-events.jsonl") : null;
+    const runtimePath = demoDir ? path.join(demoDir, "phase7b-demo-runtime.json") : null;
     const state = statePath && fs.existsSync(statePath) ? readJson<BotState>(statePath) : null;
+    const runtime = runtimePath && fs.existsSync(runtimePath) ? readJson<RuntimeState>(runtimePath) : null;
     const events = journalPath && fs.existsSync(journalPath) ? readRecentEvents(journalPath, 80) : [];
     const latestEvent = events.at(-1) ?? null;
     const latestEventAt = latestEvent?.timestamp ? Date.parse(String(latestEvent.timestamp)) : null;
     const activityAgeMs = latestEventAt && Number.isFinite(latestEventAt) ? Math.max(0, Date.now() - latestEventAt) : null;
+    const heartbeatAgeMs = runtime?.heartbeatAt && Number.isFinite(runtime.heartbeatAt)
+      ? Math.max(0, Date.now() - runtime.heartbeatAt)
+      : null;
+    const heartbeatLimitMs = Math.max(15_000, Math.max(1, runtime?.intervalSeconds ?? 5) * 3_000);
+    const runtimeAlive = Boolean(
+      runtime?.armed &&
+      runtime.status === "RUNNING" &&
+      heartbeatAgeMs !== null &&
+      heartbeatAgeMs <= heartbeatLimitMs,
+    );
     const managedPosition = state?.managed
       ? telemetry.positions.find((position) => String(position.ticket) === String(state.managed?.ticket)) ?? null
       : null;
 
-    let botStatus = "IDLE";
+    let botStatus = "READY_NOT_ARMED";
     if (!demoDir) botStatus = "NOT_CONFIGURED";
     else if (!telemetry.reachable) botStatus = "MT5_OFFLINE";
-    else if (state?.managed) botStatus = "MANAGING";
-    else if (activityAgeMs !== null && activityAgeMs <= 20 * 60_000) botStatus = "ACTIVE";
-    else botStatus = "READY";
+    else if (state?.managed && !runtimeAlive) botStatus = "POSITION_NOT_MANAGED";
+    else if (runtimeAlive && state?.managed) botStatus = "MANAGING";
+    else if (runtimeAlive) botStatus = "WAITING_SIGNAL";
+    else if (runtime?.armed) botStatus = "BOT_STALE";
 
     const recentEventCounts: Record<string, number> = {};
     for (const event of events) {
@@ -69,6 +92,13 @@ router.get("/", async (_req: Request, res: Response) => {
         demoDir,
         statePath,
         journalPath,
+        runtimePath,
+      },
+      runtime: {
+        ...runtime,
+        alive: runtimeAlive,
+        heartbeatAgeMs,
+        heartbeatLimitMs,
       },
       strategy: {
         name: "M15_DUAL_PATTERN_MA_FVG_STRUCTURE_RIDER",
@@ -131,9 +161,10 @@ function findLatestDemoDir(): string | null {
       if (!entry.isDirectory()) continue;
       const demo = path.join(base, entry.name, "phase7b-demo-forward");
       if (!fs.existsSync(demo)) continue;
+      const runtime = path.join(demo, "phase7b-demo-runtime.json");
       const state = path.join(demo, "phase7b-demo-state.json");
       const journal = path.join(demo, "phase7b-demo-events.jsonl");
-      const probe = fs.existsSync(journal) ? journal : fs.existsSync(state) ? state : demo;
+      const probe = fs.existsSync(runtime) ? runtime : fs.existsSync(journal) ? journal : fs.existsSync(state) ? state : demo;
       found.push({ dir: demo, mtimeMs: fs.statSync(probe).mtimeMs });
     }
   }
