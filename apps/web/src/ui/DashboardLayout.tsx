@@ -146,19 +146,32 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
 export function DashboardLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
-  const isPhase7BDemo = location.pathname.startsWith("/phase7b-demo");
-  const dashboard = useDashboard(!isPhase7BDemo);
+  const isPhase7B = location.pathname.startsWith("/phase7b-demo");
+  const isPerformance = location.pathname.startsWith("/performance");
+  const isSystem = location.pathname.startsWith("/system");
+  const isOperational = isPhase7B || isPerformance || isSystem;
+  const dashboard = useDashboard(!isOperational);
   const mode = dashboard.data?.control.mode ?? "SHADOW";
 
-  const headerTitle = isPhase7BDemo
-    ? "Phase 7B DEMO Operations"
-    : "Research / Legacy Dashboard";
-  const headerSubtitle = isPhase7BDemo
-    ? "Forward execution monitor · MT5 DEMO · read-only web"
-    : dashboard.isError
-      ? "Legacy research API unavailable · Phase 7B DEMO is independent"
-      : "Canonical research snapshot · polling 5s";
-  const headerMode = isPhase7BDemo ? "DEMO ONLY" : mode;
+  let headerTitle = "Research / Legacy Dashboard";
+  let headerSubtitle = dashboard.isError
+    ? "Legacy research API unavailable · Phase 7B DEMO is independent"
+    : "Canonical research snapshot · polling 5s";
+  let headerMode = mode;
+
+  if (isPhase7B) {
+    headerTitle = "Phase 7B DEMO Operations";
+    headerSubtitle = "Forward execution monitor · MT5 DEMO · read-only web";
+    headerMode = "DEMO ONLY";
+  } else if (isPerformance) {
+    headerTitle = "MT5 DEMO Performance";
+    headerSubtitle = "System-owned forward results · read-only analytics";
+    headerMode = "DEMO ONLY";
+  } else if (isSystem) {
+    headerTitle = "DEMO System Health";
+    headerSubtitle = "MT5 / Bridge / Phase 7B operational telemetry";
+    headerMode = "DEMO ONLY";
+  }
 
   return (
     <Box sx={{ display: "flex", minHeight: "100vh" }}>
