@@ -84,7 +84,11 @@ $env:HOST = "127.0.0.1"
 $env:PORT = [string]$ApiPort
 $env:WEB_ORIGIN = $webUrl
 
-$apiCommand = "Set-Location '$ProjectRoot'; Write-Host 'PHASE7B_WEB_API=$apiUrl'; pnpm dev:api"
+# Important: do NOT start the dedicated API through root `pnpm dev:api`
+# because that route goes through Turborepo. The Phase 7B launcher relies on
+# process-scoped PORT / MT5 bridge / workdir variables, so run the API package
+# directly to preserve the exact child environment.
+$apiCommand = "Set-Location '$ProjectRoot'; Write-Host 'PHASE7B_WEB_API=$apiUrl'; pnpm --filter @xauusd/api dev"
 $apiProcess = Start-Process powershell.exe -PassThru -ArgumentList @(
   "-NoExit",
   "-ExecutionPolicy", "Bypass",
@@ -112,11 +116,12 @@ Write-Host "PHASE7B_WEB_API=$apiUrl/api/v1/phase7b-demo"
 Write-Host "PHASE7B_WEB_UI=$webUrl/phase7b-demo"
 Write-Host "PHASE7B_WEB_READ_ONLY=PASS"
 Write-Host "PHASE7B_WEB_LEGACY_PORTS_3001_5173=BYPASSED"
+Write-Host "PHASE7B_WEB_API_TURBO=OFF"
 
 # Give API enough time to enter watch mode, then verify the complete read-only
 # endpoint before opening the browser.
 $apiReady = $false
-for ($attempt = 1; $attempt -le 12; $attempt++) {
+for ($attempt = 1; $attempt -le 16; $attempt++) {
   Start-Sleep -Milliseconds 750
   try {
     $snapshot = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7b-demo" -Method Get -TimeoutSec 3
@@ -128,7 +133,7 @@ for ($attempt = 1; $attempt -le 12; $attempt++) {
       break
     }
   } catch {
-    if ($attempt -eq 12) {
+    if ($attempt -eq 16) {
       Write-Warning "Phase 7B WEB API self-test did not pass yet: $($_.Exception.Message)"
     }
   }
