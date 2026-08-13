@@ -30,10 +30,26 @@ if (-not (Test-Path $BridgeEnv)) {
 if ($FixedVolume -le 0) { throw "FixedVolume must be positive." }
 if ($IntervalSeconds -lt 1) { throw "IntervalSeconds must be >= 1." }
 
+$BridgeEnv = (Resolve-Path $BridgeEnv).Path
 $DemoWorkDir = Join-Path $WorkDir "phase7b-demo-forward"
 New-Item -ItemType Directory -Path $DemoWorkDir -Force | Out-Null
 
-$env:ZIQ_BRIDGE_ENV = (Resolve-Path $BridgeEnv).Path
+# Load the dedicated DEMO bridge env into this process. This is intentionally
+# separate from the default bridge env so the DEMO controller cannot inherit a
+# real-account opt-in accidentally.
+Get-Content $BridgeEnv | ForEach-Object {
+  $line = $_.Trim()
+  if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) { return }
+  $parts = $line -split "=", 2
+  $name = $parts[0].Trim()
+  $value = $parts[1].Trim()
+  if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+    $value = $value.Substring(1, $value.Length - 2)
+  }
+  [Environment]::SetEnvironmentVariable($name, $value, "Process")
+}
+
+$env:ZIQ_BRIDGE_ENV = $BridgeEnv
 $env:ZIQ_DEMO_WORK_DIR = $DemoWorkDir
 $env:ZIQ_FIXED_VOLUME = [string]$FixedVolume
 $env:ZIQ_DEMO_INTERVAL_SECONDS = [string]$IntervalSeconds
@@ -42,11 +58,56 @@ $env:ZIQ_DEMO_ONCE = if ($Once) { "true" } else { "false" }
 $env:ZIQ_DEMO_SYMBOL = "XAUUSD"
 
 Write-Host "PHASE7B_DEMO_WORK_DIR=$DemoWorkDir"
-Write-Host "PHASE7B_DEMO_BRIDGE_ENV=$($env:ZIQ_BRIDGE_ENV)"
+Write-Host "PHASE7B_DEMO_BRIDGE_ENV=$BridgeEnv"
 Write-Host "PHASE7B_DEMO_FIXED_VOLUME=$FixedVolume"
 Write-Host "PHASE7B_DEMO_INTERVAL_SECONDS=$IntervalSeconds"
 Write-Host "PHASE7B_DEMO_ARM_REQUESTED=$($ArmDemoTrading.IsPresent)"
 Write-Host "PHASE7B_DEMO_REAL_ACCOUNT_ALLOWED=false"
+
+if ($env:MT5_ALLOW_REAL_ACCOUNT -match '^(?i:true|1|yes|on)$') {
+  throw "Phase 7B DEMO refuses MT5_ALLOW_REAL_ACCOUNT=true."
+}
+if ([string]::IsNullOrWhiteSpace($env:MT5_API_KEY) -or $env:MT5_API_KEY.Length -lt 16) {
+  throw "Phase 7B DEMO requires MT5_API_KEY with at least 16 characters."
+}
+
+$BridgeHost = if ([string]::IsNullOrWhiteSpace($env:MT5_BRIDGE_HOST)) { "127.0.0.1" } else { $env:MT5_BRIDGE_HOST }
+$BridgePort = if ([string]::IsNullOrWhiteSpace($env:MT5_BRIDGE_PORT)) { "8765" } else { $env:MT5_BRIDGE_PORT }
+$BridgeBase = "http://${BridgeHost}:${BridgePort}"
+$Headers = @{ "x-mt5-api-key" = $env:MT5_API_KEY }
+
+# Read-only preflight deliberately avoids Node/tsx on Windows. This isolates
+# broker/account validation from a libuv shutdown assertion seen in Node 24 + tsx.
+if (-not $ArmDemoTrading -and $Once) {
+  Write-Host "PHASE7B_DEMO_PREFLIGHT_ENGINE=POWERSHELL_HTTP"
+  try {
+    $health = Invoke-RestMethod -Uri "$BridgeBase/health" -Headers $Headers -Method Get -TimeoutSec 8
+  } catch {
+    throw "Phase 7B DEMO bridge health request failed: $($_.Exception.Message)"
+  }
+
+  Write-Host "PHASE7B_DEMO_ACCOUNT_LOGIN=$($health.accountLogin)"
+  Write-Host "PHASE7B_DEMO_ACCOUNT_MODE=$($health.accountMode)"
+  Write-Host "PHASE7B_DEMO_SERVER=$($health.server)"
+  Write-Host "PHASE7B_DEMO_BRIDGE_TRADING_ENABLED=$(if ($health.tradingEnabled) { 'YES' } else { 'NO' })"
+  Write-Host "PHASE7B_DEMO_TERMINAL_TRADE_ALLOWED=$(if ($health.terminalTradeAllowed) { 'YES' } else { 'NO' })"
+  Write-Host "PHASE7B_DEMO_EXPERT_TRADE_ALLOWED=$(if ($health.expertTradeAllowed) { 'YES' } else { 'NO' })"
+
+  if (-not $health.connected -or $health.status -ne "ok") {
+    throw "MT5 bridge is not healthy/connected."
+  }
+  if ($health.accountMode -ne "demo") {
+    throw "Phase 7B DEMO requires accountMode=demo, got $($health.accountMode)."
+  }
+  if ($null -eq $health.accountLogin) {
+    throw "MT5 DEMO account login is unavailable."
+  }
+
+  Write-Host "PHASE7B_DEMO_PREFLIGHT_STATUS=PASS"
+  Write-Host "PHASE7B_DEMO_ORDER_SEND=DISABLED_NOT_ARMED"
+  Write-Host "PHASE7B_DEMO_RUN_STATUS=PASS"
+  exit 0
+}
 
 $ControllerTs = Join-Path $ProjectRoot "scripts\run-phase7b-demo-controller.ts"
 $ControllerMts = Join-Path $ProjectRoot "scripts\.phase7b-demo-controller.mts"
@@ -62,10 +123,10 @@ try {
 
   if (-not (Test-Path $RiskEngineEsm)) { throw "Phase 7B DEMO risk-engine ESM build missing: $RiskEngineEsm" }
 
-  # The repository is CommonJS-oriented. Create a temporary .mts entrypoint so
-  # tsx treats top-level await as ESM on Windows/Node 24. The root workspace does
-  # not expose @xauusd/risk-engine to scripts/ as a resolvable package, so point
-  # the temporary controller directly at the ESM artifact built immediately above.
+  # Node 24 can strip erasable TypeScript types natively. Create a temporary
+  # .mts entrypoint so the controller is ESM, then point its workspace import
+  # directly at the risk-engine ESM artifact built above. This removes tsx from
+  # the DEMO runtime path entirely.
   $ControllerText = Get-Content $ControllerTs -Raw
   $ControllerText = $ControllerText.Replace('from "@xauusd/risk-engine";', 'from "../packages/risk-engine/dist/index.js";')
   if ($ControllerText -match '@xauusd/risk-engine') {
@@ -73,34 +134,11 @@ try {
   }
   Set-Content -Path $ControllerMts -Value $ControllerText -Encoding UTF8
 
-  Write-Host "PHASE7B_DEMO_CONTROLLER_MODULE=ESM_MTS"
+  Write-Host "PHASE7B_DEMO_CONTROLLER_MODULE=NODE24_NATIVE_TS_MTS"
   Write-Host "PHASE7B_DEMO_RISK_ENGINE_IMPORT=../packages/risk-engine/dist/index.js"
-
-  # Capture output so Windows/Node 24's known libuv shutdown assertion can be
-  # distinguished from a real controller failure. This assertion can occur only
-  # after the non-armed preflight has already printed both PASS markers and called
-  # process.exit(0). It is never accepted for an armed run.
-  $ControllerOutput = @(& pnpm exec tsx $ControllerMts 2>&1)
-  $ControllerExitCode = $LASTEXITCODE
-  $ControllerOutput | ForEach-Object { Write-Host $_ }
-
-  if ($ControllerExitCode -ne 0) {
-    $OutputText = ($ControllerOutput | Out-String)
-    $KnownPreflightShutdownCrash = (
-      (-not $ArmDemoTrading.IsPresent) -and
-      $Once.IsPresent -and
-      ($OutputText -match 'PHASE7B_DEMO_PREFLIGHT_STATUS=PASS') -and
-      ($OutputText -match 'PHASE7B_DEMO_ORDER_SEND=DISABLED_NOT_ARMED') -and
-      ($OutputText -match 'UV_HANDLE_CLOSING')
-    )
-
-    if ($KnownPreflightShutdownCrash) {
-      Write-Host "PHASE7B_DEMO_PREFLIGHT_PROCESS_EXIT_WORKAROUND=PASS" -ForegroundColor Yellow
-      Write-Host "PHASE7B_DEMO_PREFLIGHT_EFFECTIVE_STATUS=PASS"
-    } else {
-      throw "Phase 7B DEMO controller exited with code $ControllerExitCode"
-    }
-  }
+  Write-Host "PHASE7B_DEMO_TSX_RUNTIME=OFF"
+  & node $ControllerMts
+  if ($LASTEXITCODE -ne 0) { throw "Phase 7B DEMO controller exited with code $LASTEXITCODE" }
 }
 finally {
   Remove-Item $ControllerMts -Force -ErrorAction SilentlyContinue
