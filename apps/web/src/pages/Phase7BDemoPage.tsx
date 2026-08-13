@@ -178,7 +178,7 @@ export function Phase7BDemoPage() {
         <Alert severity="error">REAL account detected. Không sử dụng Phase 7B DEMO trên tài khoản này.</Alert>
       ) : (
         <Alert severity="info">
-          Strategy: Engulfing hoặc 2 nến cùng màu thắng thân nến ngược trước đó · MA20/50/200 + FVG cùng trend · +6 về Entry · +10 chốt 1/3 · runner theo cấu trúc M15.
+          Entry: Engulfing hoặc 2 nến cùng màu thắng thân nến ngược trước đó + MA20/50/200 đúng trend. FVG không còn bắt buộc để vào lệnh; FVG cùng hướng dùng để xác nhận giữ lệnh và phát add-on SHADOW, không tăng lot thật. +6 về Entry · +10 chốt 1/3 · runner theo cấu trúc M15.
         </Alert>
       )}
 
@@ -236,7 +236,7 @@ export function Phase7BDemoPage() {
               {!managed ? (
                 <Box className="mini-card" sx={{ mt: 2 }}>
                   <Typography variant="body2" color="text.secondary">
-                    Chưa có lệnh do Phase 7B quản lý. Bot sẽ chờ cây M15 đóng đủ Pattern + MA + FVG.
+                    Chưa có lệnh do Phase 7B quản lý. Bot chờ cây M15 đóng đủ Pattern + MA20/50/200 đúng trend. FVG là xác nhận bổ sung, không chặn entry.
                   </Typography>
                 </Box>
               ) : (
@@ -250,6 +250,7 @@ export function Phase7BDemoPage() {
                   <Value label="SL ban đầu" value={`${managed.stopDistance.toFixed(2)} giá`} />
                   <Value label="+6 → Entry" value={managed.breakEvenApplied ? "ĐÃ DỜI" : "CHƯA"} />
                   <Value label="+10 → chốt 1/3" value={managed.partialApplied ? "ĐÃ CHỐT" : "CHƯA"} />
+                  <Value label="FVG add-on" value="SHADOW ONLY" />
                   <Value label="Runner" value={managed.partialApplied ? "STRUCTURE M15" : "CHỜ +10"} />
                   <Value label="Floating P&L" value={money(position?.profit ?? 0, currency)} />
                   <Value label="Signal time" value={safeDateTime(managed.signalTimestamp)} />
@@ -294,12 +295,15 @@ export function Phase7BDemoPage() {
           <Grid container spacing={1.5} sx={{ mt: 0.5 }}>
             <Value label="Trigger" value="Engulfing OR Two-candle body dominance" />
             <Value label="Trend" value="MA20 > MA50 > MA200 / reverse SELL" />
-            <Value label="FVG" value="Same direction mandatory" />
+            <Value label="Entry gate" value="Pattern + MA" />
+            <Value label="FVG" value="Optional entry · HOLD + ADD-ON SHADOW" />
+            <Value label="Add-on thật" value="OFF" />
+            <Value label="DCA khi âm" value="OFF" />
             <Value label="Initial SL" value="6–10 giá" />
             <Value label="+6" value="SL → Entry" />
             <Value label="+10" value="Close 1/3" />
             <Value label="Runner" value="M15 swing structure" />
-            <Value label="Reversal exit" value="Opposing FVG + rejection" />
+            <Value label="Reversal exit" value="Opposing FVG + rejection sau +10" />
           </Grid>
         </CardContent>
       </Card>
@@ -343,6 +347,7 @@ export function Phase7BDemoPage() {
                             {String(event.type ?? "UNKNOWN")}
                           </Typography>
                           {historicalGuardBlock ? <StatusChip value="HISTORY" /> : null}
+                          {event.type === "FVG_ADDON_SIGNAL_SHADOW" ? <StatusChip value="SHADOW ONLY" /> : null}
                         </Stack>
                       </TableCell>
                       <TableCell>
@@ -393,13 +398,15 @@ function safeDateTime(timestamp: number | null): string {
 function eventLabel(type: unknown, currentGuardPass: boolean): string {
   const value = String(type ?? "UNKNOWN");
   const labels: Record<string, string> = {
-    M15_NO_ENTRY_SIGNAL: "Không có tín hiệu M15",
+    M15_NO_ENTRY_SIGNAL: "Không có tín hiệu Pattern + MA trên M15",
     ENTRY_SUBMIT: "Đã gửi lệnh vào MT5",
     ENTRY_FILLED: "Đã khớp lệnh",
     ENTRY_REJECTED: "Lệnh bị từ chối",
     ENTRY_ACCEPTED_POSITION_NOT_RESOLVED: "Lệnh đã nhận nhưng chưa xác định được vị thế",
     SIGNAL_EXPIRED: "Tín hiệu đã hết hạn",
     INITIAL_SL_BROKER_DISTANCE_BLOCK: "SL ban đầu không đạt khoảng cách broker",
+    FVG_HOLD_CONFIRMED: "FVG cùng hướng xác nhận giữ lệnh",
+    FVG_ADDON_SIGNAL_SHADOW: "FVG phát tín hiệu add-on SHADOW",
     PLUS6_SL_TO_ENTRY: "Đã dời SL về Entry tại +6",
     PLUS6_SL_REJECTED: "Dời SL về Entry bị từ chối",
     PLUS10_PARTIAL_ONE_THIRD: "Đã chốt 1/3 tại +10",
