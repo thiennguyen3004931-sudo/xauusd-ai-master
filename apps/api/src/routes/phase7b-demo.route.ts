@@ -174,7 +174,10 @@ function findLatestDemoDir(): string | null {
 }
 
 function readJson<T>(file: string): T {
-  return JSON.parse(fs.readFileSync(file, "utf8")) as T;
+  // Windows PowerShell 5.1 writes `-Encoding utf8` with a UTF-8 BOM.
+  // Strip the BOM defensively so runtime/state files remain valid JSON to Node.
+  const text = fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "");
+  return JSON.parse(text) as T;
 }
 
 function readRecentEvents(file: string, limit: number): DemoEvent[] {
