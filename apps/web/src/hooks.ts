@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { getDashboard, getMt5Performance, getMt5Telemetry } from "./api";
 
-export function useDashboard() {
+export function useDashboard(enabled = true) {
   return useQuery({
     queryKey: ["dashboard-snapshot"],
     queryFn: getDashboard,
-    refetchInterval: 5_000,
+    refetchInterval: enabled ? 5_000 : false,
+    enabled,
   });
 }
 
@@ -17,6 +18,7 @@ export function useMt5Telemetry(symbol = "XAUUSD") {
     retry: false,
   });
 }
+
 export function useMt5Performance(days = 90) {
   return useQuery({
     queryKey: ["mt5-performance", days],
