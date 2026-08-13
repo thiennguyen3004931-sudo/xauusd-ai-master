@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)] [string]$WorkDir,
-  [decimal]$MaxRiskUsd = 10,
+  [decimal]$FixedVolume = 0.03,
   [string]$DataDir = ""
 )
 
@@ -9,8 +9,8 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $WorkDir = (Resolve-Path $WorkDir).Path
 $Driver = Join-Path $PSScriptRoot "run-phase7-trend-rider.ts"
 
-if ([math]::Abs([double]$MaxRiskUsd - 10.0) -gt 0.000001) {
-  throw "Phase 7 research risk is locked at exactly USD 10."
+if ($FixedVolume -le 0) {
+  throw "Phase 7 FixedVolume must be > 0."
 }
 
 if ([string]::IsNullOrWhiteSpace($DataDir)) {
@@ -44,11 +44,12 @@ $consoleLog = Join-Path $runDir "phase7-console.log"
 $env:ZIQ_M15_JSON = $m15
 $env:ZIQ_M5_JSON = $m5
 $env:ZIQ_META_JSON = $meta
-$env:ZIQ_MAX_RISK_USD = [string]$MaxRiskUsd
+$env:ZIQ_FIXED_VOLUME = [string]$FixedVolume
 
 Write-Host "PHASE7_RUN_DIR=$runDir"
 Write-Host "PHASE7_DATA_DIR=$DataDir"
-Write-Host "PHASE7_MAX_RISK_USD=$MaxRiskUsd"
+Write-Host "PHASE7_FIXED_VOLUME=$FixedVolume"
+Write-Host "PHASE7_RISK_CAP=OFF"
 Write-Host "PHASE7_VALIDATION_STATUS=RESEARCH_REPLAY_NOT_INDEPENDENT_HOLDOUT"
 
 Push-Location $ProjectRoot
