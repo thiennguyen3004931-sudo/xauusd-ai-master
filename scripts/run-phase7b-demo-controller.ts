@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Phase7BDualPatternTrendRiderService, type Phase7Bar, type Phase7BSignal } from "@xauusd/risk-engine";
+import { type Phase7Bar, type Phase7BSignal } from "@xauusd/risk-engine";
 
 type Health = {
   status: "ok" | "degraded";
@@ -131,11 +131,15 @@ const statePath = path.join(workDir, "phase7b-demo-state.json");
 const journalPath = path.join(workDir, "phase7b-demo-events.jsonl");
 let state = loadState(statePath);
 
-console.log("PHASE7B_DEMO_STRATEGY=M15_DUAL_PATTERN_MA_FVG_STRUCTURE_RIDER");
+console.log("PHASE7B_DEMO_STRATEGY=M15_DUAL_PATTERN_MA_STRUCTURE_RIDER_FVG_CONFIRMATION");
 console.log(`PHASE7B_DEMO_SYMBOL=${symbol}`);
 console.log(`PHASE7B_DEMO_FIXED_VOLUME=${fixedVolume}`);
 console.log(`PHASE7B_DEMO_INTERVAL_SECONDS=${intervalSeconds}`);
 console.log(`PHASE7B_DEMO_ARMED=${armed ? "YES" : "NO"}`);
+console.log("PHASE7B_DEMO_ENTRY_GATE=PATTERN_PLUS_MA_ONLY");
+console.log("PHASE7B_DEMO_FVG_ENTRY_GATE=OFF");
+console.log("PHASE7B_DEMO_FVG_ROLE=HOLD_CONFIRMATION_PLUS_ADDON_SHADOW");
+console.log("PHASE7B_DEMO_FVG_ADDON_EXECUTION=SHADOW_ONLY_NO_ORDER");
 console.log("PHASE7B_DEMO_INITIAL_SL=PRICE_DISTANCE_CLAMPED_6_TO_10");
 console.log("PHASE7B_DEMO_PLUS6=SL_TO_ENTRY");
 console.log("PHASE7B_DEMO_PLUS10=PARTIAL_ONE_THIRD");
@@ -211,7 +215,8 @@ async function previewLatestSignal(): Promise<void> {
     console.log("PHASE7B_DEMO_LATEST_SIGNAL=NONE");
     return;
   }
-  console.log(`PHASE7B_DEMO_LATEST_SIGNAL=${signal.side}|PATTERN=${signal.pattern}|ENTRY=${signal.entry}|SL_DISTANCE=${signal.stopDistance}`);
+  const fvgConfirmed = hasRelevantFvg(m15, m15.length - 1, signal.side, 12);
+  console.log(`PHASE7B_DEMO_LATEST_SIGNAL=${signal.side}|PATTERN=${signal.pattern}|ENTRY=${signal.entry}|SL_DISTANCE=${signal.stopDistance}|FVG_CONFIRM=${fvgConfirmed ? "YES" : "NO"}`);
 }
 
 async function cycle(): Promise<void> {
@@ -288,7 +293,7 @@ async function cycle(): Promise<void> {
 
   const signal = latestSignal(m15, spec);
   if (!signal || signal.signalTimestamp !== latest.closeTime) {
-    journal("M15_NO_ENTRY_SIGNAL", { closeTime: latest.closeTime, close: latest.close });
+    journal("M15_NO_ENTRY_SIGNAL", { closeTime: latest.closeTime, close: latest.close, entryRule: "PATTERN_PLUS_MA" });
     return;
   }
 
@@ -309,6 +314,7 @@ async function cycle(): Promise<void> {
     return;
   }
 
+  const fvgConfirmedAtEntry = hasRelevantFvg(m15, m15.length - 1, signal.side, 12);
   const orderId = `p7b-${signal.signalTimestamp}-${signal.side}`;
   journal("ENTRY_SUBMIT", {
     signalId: signal.id,
@@ -319,6 +325,9 @@ async function cycle(): Promise<void> {
     stopDistance: signal.stopDistance,
     stopLoss,
     volume: fixedVolume,
+    entryRule: "PATTERN_PLUS_MA",
+    fvgConfirmedAtEntry,
+    fvgRequiredForEntry: false,
   });
 
   const order = await post<OrderResponse>("/v1/orders", {
@@ -374,20 +383,101 @@ async function cycle(): Promise<void> {
     structureAttempt: 0,
   };
   saveState();
-  journal("ENTRY_FILLED", { signalId: signal.id, position: opened, fillPrice: order.fillPrice });
+  journal("ENTRY_FILLED", {
+    signalId: signal.id,
+    position: opened,
+    fillPrice: order.fillPrice,
+    fvgConfirmedAtEntry,
+  });
 }
 
 function latestSignal(m15: Phase7Bar[], spec: SymbolSpec): Phase7BSignal | null {
-  const result = new Phase7BDualPatternTrendRiderService().run({
-    m15Bars: m15,
-    m5Bars: [],
-    fixedVolume,
-    tickSize: spec.tickSize,
-    tickValuePerLot: spec.effectiveTickValuePerLot,
-    minVolume: spec.minVolume,
-    volumeStep: spec.volumeStep,
-  });
-  return result.signals.at(-1) ?? null;
+  const index = m15.length - 1;
+  if (index < 200) return null;
+  const current = m15[index]!;
+  const trigger = detectEntryPattern(m15, index);
+  if (!trigger) return null;
+
+  const closes = m15.slice(0, index + 1).map((bar) => bar.close);
+  const ma20 = smaPeriod(closes, 20);
+  const ma50 = smaPeriod(closes, 50);
+  const ma200 = smaPeriod(closes, 200);
+  if (!trendMatches(trigger.side, current.close, ma20, ma50, ma200)) return null;
+
+  const entry = current.close;
+  const structuralStopDistance = trigger.side === "BUY"
+    ? entry - trigger.patternExtreme
+    : trigger.patternExtreme - entry;
+  if (!(structuralStopDistance > 0)) return null;
+
+  const stopDistance = Math.min(10, Math.max(6, structuralStopDistance));
+  const stopLoss = trigger.side === "BUY" ? entry - stopDistance : entry + stopDistance;
+  const initialRiskUsd = spec.tickSize > 0
+    ? Math.abs(entry - stopLoss) / spec.tickSize * spec.effectiveTickValuePerLot * fixedVolume
+    : 0;
+
+  return {
+    id: `phase7b-demo-${current.closeTime}-${trigger.side}-${trigger.pattern}`,
+    side: trigger.side,
+    pattern: trigger.pattern,
+    signalTimestamp: current.closeTime,
+    entry: roundValue(entry, 5),
+    patternExtreme: roundValue(trigger.patternExtreme, 5),
+    structuralStopDistance: roundValue(structuralStopDistance, 5),
+    stopDistance: roundValue(stopDistance, 5),
+    stopLoss: roundValue(stopLoss, 5),
+    volume: roundValue(fixedVolume, 4),
+    initialRiskUsd: roundValue(initialRiskUsd, 4),
+    ma20: roundValue(ma20, 5),
+    ma50: roundValue(ma50, 5),
+    ma200: roundValue(ma200, 5),
+  };
+}
+
+function detectEntryPattern(
+  bars: Phase7Bar[],
+  index: number,
+): { side: "BUY" | "SELL"; pattern: Phase7BSignal["pattern"]; patternExtreme: number } | null {
+  const current = bars[index]!;
+  const previous = bars[index - 1]!;
+
+  if (
+    isBearish(previous) &&
+    isBullish(current) &&
+    current.open <= previous.close &&
+    current.close >= previous.open
+  ) {
+    return { side: "BUY", pattern: "ENGULFING", patternExtreme: current.low };
+  }
+  if (
+    isBullish(previous) &&
+    isBearish(current) &&
+    current.open >= previous.close &&
+    current.close <= previous.open
+  ) {
+    return { side: "SELL", pattern: "ENGULFING", patternExtreme: current.high };
+  }
+
+  if (index < 2) return null;
+  const priorOpposite = bars[index - 2]!;
+  const first = bars[index - 1]!;
+  const combinedBody = bodySize(first) + bodySize(current);
+
+  if (isBearish(priorOpposite) && isBullish(first) && isBullish(current) && combinedBody > bodySize(priorOpposite)) {
+    return {
+      side: "BUY",
+      pattern: "TWO_CANDLE_BODY_DOMINANCE",
+      patternExtreme: Math.min(priorOpposite.low, first.low, current.low),
+    };
+  }
+  if (isBullish(priorOpposite) && isBearish(first) && isBearish(current) && combinedBody > bodySize(priorOpposite)) {
+    return {
+      side: "SELL",
+      pattern: "TWO_CANDLE_BODY_DOMINANCE",
+      patternExtreme: Math.max(priorOpposite.high, first.high, current.high),
+    };
+  }
+  return null;
 }
 
 async function managePosition(position: Position, quote: Quote, spec: SymbolSpec, m15: Phase7Bar[]): Promise<void> {
@@ -488,9 +578,40 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
   }
 
   if (latest.closeTime > managed.lastTrendM15CloseChecked && latest.closeTime > managed.signalTimestamp) {
+    const closes = m15.map((bar) => bar.close);
+    const ma20 = smaPeriod(closes, 20);
+    const ma50 = smaPeriod(closes, 50);
+    const ma200 = smaPeriod(closes, 200);
+    const trendStillAligned = trendMatches(managed.side, latest.close, ma20, ma50, ma200);
+    const sameDirectionFvg = hasRelevantFvg(m15, m15.length - 1, managed.side, 12);
+
+    if (sameDirectionFvg && trendStillAligned) {
+      journal("FVG_HOLD_CONFIRMED", {
+        ticket: managed.ticket,
+        side: managed.side,
+        m15CloseTime: latest.closeTime,
+        favorable,
+        ma20: roundValue(ma20, 5),
+        ma50: roundValue(ma50, 5),
+        ma200: roundValue(ma200, 5),
+      });
+
+      if (favorable > 0) {
+        journal("FVG_ADDON_SIGNAL_SHADOW", {
+          ticket: managed.ticket,
+          side: managed.side,
+          m15CloseTime: latest.closeTime,
+          favorable,
+          referenceVolume: fixedVolume,
+          shadowOnly: true,
+          orderSent: false,
+          reason: "SAME_DIRECTION_FVG_PLUS_MA_WHILE_POSITION_WINNING",
+        });
+      }
+    }
+
     managed.lastTrendM15CloseChecked = latest.closeTime;
     saveState();
-    const ma20 = sma(m15.slice(-20).map((bar) => bar.close));
     const trendBroken = managed.side === "BUY" ? latest.close < ma20 : latest.close > ma20;
     if (trendBroken) {
       await closeAll(position, "TREND_MA20", latest.closeTime);
@@ -514,6 +635,19 @@ async function closeAll(position: Position, reason: string, m15CloseTime: number
   journal("EXIT_EXECUTED", { ticket: managed.ticket, reason, volume: position.volume, response });
   state.managed = null;
   saveState();
+}
+
+function hasRelevantFvg(bars: Phase7Bar[], index: number, side: "BUY" | "SELL", lookback: number): boolean {
+  if (index < 2) return false;
+  const start = Math.max(2, index - lookback);
+  const current = bars[index]!;
+  for (let i = index - 1; i >= start; i -= 1) {
+    const first = bars[i - 2]!;
+    const third = bars[i]!;
+    if (side === "BUY" && third.low > first.high && current.low <= third.low && current.high >= first.high) return true;
+    if (side === "SELL" && third.high < first.low && current.high >= third.high && current.low <= first.low) return true;
+  }
+  return false;
 }
 
 function latestConfirmedStructureStop(
@@ -565,6 +699,24 @@ function opposingFvgRejectionAt(
   return false;
 }
 
+function trendMatches(side: "BUY" | "SELL", close: number, ma20: number, ma50: number, ma200: number): boolean {
+  return side === "BUY"
+    ? ma20 > ma50 && ma50 > ma200 && close > ma20
+    : ma20 < ma50 && ma50 < ma200 && close < ma20;
+}
+
+function isBullish(bar: Phase7Bar): boolean {
+  return bar.close > bar.open;
+}
+
+function isBearish(bar: Phase7Bar): boolean {
+  return bar.close < bar.open;
+}
+
+function bodySize(bar: Phase7Bar): number {
+  return Math.abs(bar.close - bar.open);
+}
+
 function improvesStop(side: "BUY" | "SELL", current: number, candidate: number): boolean {
   if (!(candidate > 0)) return false;
   if (!(current > 0)) return true;
@@ -599,9 +751,18 @@ function roundPrice(value: number, digits: number): number {
   return Math.round((value + Number.EPSILON) * factor) / factor;
 }
 
+function roundValue(value: number, digits: number): number {
+  const factor = 10 ** digits;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
 function sma(values: number[]): number {
-  if (values.length < 20) throw new Error("Not enough M15 bars for MA20.");
-  return values.slice(-20).reduce((sum, value) => sum + value, 0) / 20;
+  return smaPeriod(values, 20);
+}
+
+function smaPeriod(values: number[], period: number): number {
+  if (values.length < period) throw new Error(`Not enough M15 bars for MA${period}.`);
+  return values.slice(-period).reduce((sum, value) => sum + value, 0) / period;
 }
 
 function loadState(file: string): BotState {
