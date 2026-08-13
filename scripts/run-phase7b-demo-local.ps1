@@ -75,8 +75,32 @@ try {
 
   Write-Host "PHASE7B_DEMO_CONTROLLER_MODULE=ESM_MTS"
   Write-Host "PHASE7B_DEMO_RISK_ENGINE_IMPORT=../packages/risk-engine/dist/index.js"
-  & pnpm exec tsx $ControllerMts
-  if ($LASTEXITCODE -ne 0) { throw "Phase 7B DEMO controller exited with code $LASTEXITCODE" }
+
+  # Capture output so Windows/Node 24's known libuv shutdown assertion can be
+  # distinguished from a real controller failure. This assertion can occur only
+  # after the non-armed preflight has already printed both PASS markers and called
+  # process.exit(0). It is never accepted for an armed run.
+  $ControllerOutput = @(& pnpm exec tsx $ControllerMts 2>&1)
+  $ControllerExitCode = $LASTEXITCODE
+  $ControllerOutput | ForEach-Object { Write-Host $_ }
+
+  if ($ControllerExitCode -ne 0) {
+    $OutputText = ($ControllerOutput | Out-String)
+    $KnownPreflightShutdownCrash = (
+      (-not $ArmDemoTrading.IsPresent) -and
+      $Once.IsPresent -and
+      ($OutputText -match 'PHASE7B_DEMO_PREFLIGHT_STATUS=PASS') -and
+      ($OutputText -match 'PHASE7B_DEMO_ORDER_SEND=DISABLED_NOT_ARMED') -and
+      ($OutputText -match 'UV_HANDLE_CLOSING')
+    )
+
+    if ($KnownPreflightShutdownCrash) {
+      Write-Host "PHASE7B_DEMO_PREFLIGHT_PROCESS_EXIT_WORKAROUND=PASS" -ForegroundColor Yellow
+      Write-Host "PHASE7B_DEMO_PREFLIGHT_EFFECTIVE_STATUS=PASS"
+    } else {
+      throw "Phase 7B DEMO controller exited with code $ControllerExitCode"
+    }
+  }
 }
 finally {
   Remove-Item $ControllerMts -Force -ErrorAction SilentlyContinue
