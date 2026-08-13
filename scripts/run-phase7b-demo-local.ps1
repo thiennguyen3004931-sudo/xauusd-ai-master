@@ -48,6 +48,10 @@ Write-Host "PHASE7B_DEMO_INTERVAL_SECONDS=$IntervalSeconds"
 Write-Host "PHASE7B_DEMO_ARM_REQUESTED=$($ArmDemoTrading.IsPresent)"
 Write-Host "PHASE7B_DEMO_REAL_ACCOUNT_ALLOWED=false"
 
+$ControllerTs = Join-Path $ProjectRoot "scripts\run-phase7b-demo-controller.ts"
+$ControllerMts = Join-Path $ProjectRoot "scripts\.phase7b-demo-controller.mts"
+if (-not (Test-Path $ControllerTs)) { throw "Phase 7B DEMO controller missing: $ControllerTs" }
+
 Push-Location $ProjectRoot
 try {
   Write-Host "PHASE7B_DEMO_BUILD_START"
@@ -55,9 +59,14 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Phase 7B DEMO risk-engine build failed with exit code $LASTEXITCODE" }
   Write-Host "PHASE7B_DEMO_BUILD_STATUS=PASS"
 
-  & pnpm exec tsx ".\scripts\run-phase7b-demo-controller.ts"
+  # The repository is CommonJS-oriented. Copy the controller to a temporary
+  # .mts entrypoint so tsx treats top-level await as ESM on Windows/Node 24.
+  Copy-Item $ControllerTs $ControllerMts -Force
+  Write-Host "PHASE7B_DEMO_CONTROLLER_MODULE=ESM_MTS"
+  & pnpm exec tsx $ControllerMts
   if ($LASTEXITCODE -ne 0) { throw "Phase 7B DEMO controller exited with code $LASTEXITCODE" }
 }
 finally {
+  Remove-Item $ControllerMts -Force -ErrorAction SilentlyContinue
   Pop-Location
 }
