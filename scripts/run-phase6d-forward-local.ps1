@@ -17,6 +17,7 @@ $RealCutoffUtc = "2026-08-12T16:25:00.000Z"
 $PreRegisteredDatasetOffsetMs = 10800000
 $AllowedObservedOffsetDeviationMs = 300000
 $ProgressCsv = Join-Path $WorkDir "phase6d-progress.csv"
+$LatestTradeAuditCsv = Join-Path $WorkDir "phase6d-trade-audit-latest.csv"
 
 function Get-Phase6DValue {
   param([string]$Name, [string]$LogPath)
@@ -64,6 +65,7 @@ $mergedM5 = Join-Path $runDir "phase6d-forward-m5.json"
 $mergedMeta = Join-Path $runDir "phase6d-forward-meta.json"
 $exportLog = Join-Path $runDir "phase6d-forward-export.log"
 $consoleLog = Join-Path $runDir "phase6d-forward-console.log"
+$tradeAuditCsv = Join-Path $runDir "phase6d-trade-audit.csv"
 
 $env:ZIQ_BRIDGE_ENV = $BridgeEnv
 $env:ZIQ_M15_JSON = $rawM15
@@ -72,6 +74,7 @@ $env:ZIQ_META_JSON = $rawMeta
 $env:ZIQ_RESULT_JSON = $rawResult
 $env:ZIQ_DAYS = [string]$Days
 $env:ZIQ_MAX_RISK_USD = [string]$MaxRiskUsd
+$env:ZIQ_PHASE6D_TRADE_AUDIT_CSV = $tradeAuditCsv
 $realCutoffMs = [DateTimeOffset]::Parse($RealCutoffUtc).ToUnixTimeMilliseconds()
 $datasetCutoffMs = $realCutoffMs + $PreRegisteredDatasetOffsetMs
 $datasetCutoffIso = [DateTimeOffset]::FromUnixTimeMilliseconds($datasetCutoffMs).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
@@ -134,8 +137,15 @@ try {
 }
 finally { Pop-Location }
 
+if (-not (Test-Path $tradeAuditCsv)) {
+  throw "Phase 6D trade audit CSV was not produced: $tradeAuditCsv"
+}
+Copy-Item -Path $tradeAuditCsv -Destination $LatestTradeAuditCsv -Force
+
 Write-Host "PHASE6D_FORWARD_REPLAY_STATUS=PASS"
 Write-Host "PHASE6D_FORWARD_LOG=$consoleLog"
+Write-Host "PHASE6D_FORWARD_TRADE_AUDIT=$tradeAuditCsv"
+Write-Host "PHASE6D_FORWARD_TRADE_AUDIT_LATEST=$LatestTradeAuditCsv"
 Write-Host "PHASE6D_FORWARD_RESULT_BEGIN"
 Select-String -Path $consoleLog -Pattern "^PHASE6D_" | ForEach-Object { $_.Line }
 Write-Host "PHASE6D_FORWARD_RESULT_END"
@@ -159,14 +169,19 @@ if ($minimumFilled -lt 1) { throw "Phase 6D progress tracker could not resolve m
 $progressPercent = [math]::Min(100, [math]::Round(($filledTrades * 100.0) / $minimumFilled, 1))
 $remainingTrades = [math]::Max(0, $minimumFilled - $filledTrades)
 $barWidth = 30
-$filledWidth = [int][math]::Floor(($progressPercent / 100.0) * $barWidth)
+if ($filledTrades -gt 0) {
+  $filledWidth = [math]::Min($barWidth, [math]::Max(1, [int][math]::Floor(($filledTrades * 1.0 / $minimumFilled) * $barWidth)))
+}
+else {
+  $filledWidth = 0
+}
 $progressBar = ("#" * $filledWidth) + ("-" * ($barWidth - $filledWidth))
 $record = [pscustomobject]@{
   RunLocalTime=(Get-Date).ToString("yyyy-MM-dd HH:mm:ss"); RunDir=$runDir; Candidate="BASELINE_BUY_SELL";
   PostCutoffCases=$postCutoffCases; EligibleCases=$eligibleCases; EligibleBuyCases=$eligibleBuy; EligibleSellCases=$eligibleSell;
   FilledTrades=$filledTrades; MinimumFilledTrades=$minimumFilled; ProgressPercent=$progressPercent; RemainingTrades=$remainingTrades;
   WinRate=$winRate; NetPnl=$netPnl; ProfitFactor=$profitFactor; Expectancy=$expectancy; AvgR=$avgR; Status=$status;
-  FirstEligible=$firstEligible; LastEligible=$lastEligible
+  FirstEligible=$firstEligible; LastEligible=$lastEligible; TradeAuditCsv=$LatestTradeAuditCsv
 }
 if (Test-Path $ProgressCsv) { $record | Export-Csv $ProgressCsv -NoTypeInformation -Append -Encoding UTF8 }
 else { $record | Export-Csv $ProgressCsv -NoTypeInformation -Encoding UTF8 }
@@ -187,5 +202,6 @@ Write-Host "PHASE6D_PROGRESS_EXPECTANCY=$expectancy"
 Write-Host "PHASE6D_PROGRESS_AVG_R=$avgR"
 Write-Host "PHASE6D_PROGRESS_STATUS=$status"
 Write-Host "PHASE6D_PROGRESS_TRACKER=$ProgressCsv"
+Write-Host "PHASE6D_PROGRESS_TRADE_AUDIT=$LatestTradeAuditCsv"
 Write-Host "PHASE6D_PROGRESS_END"
 Write-Host "PHASE6D_FORWARD_RUN_STATUS=PASS"
