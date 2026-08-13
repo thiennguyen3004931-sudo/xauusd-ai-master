@@ -15,6 +15,7 @@ export * from "./Phase6BRescueOutcomeService";
 export * from "./Phase6CForwardHoldoutService";
 export * from "./Phase6DForwardHoldoutService";
 export * from "./Phase6EHistoricalBlindService";
+export * from "./Phase7TrendRiderService";
 export * from "./ExposureService";
 export * from "./MarginService";
 export * from "./PositionSizeService";
