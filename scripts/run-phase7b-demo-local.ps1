@@ -50,6 +50,7 @@ Write-Host "PHASE7B_DEMO_REAL_ACCOUNT_ALLOWED=false"
 
 $ControllerTs = Join-Path $ProjectRoot "scripts\run-phase7b-demo-controller.ts"
 $ControllerMts = Join-Path $ProjectRoot "scripts\.phase7b-demo-controller.mts"
+$RiskEngineEsm = Join-Path $ProjectRoot "packages\risk-engine\dist\index.js"
 if (-not (Test-Path $ControllerTs)) { throw "Phase 7B DEMO controller missing: $ControllerTs" }
 
 Push-Location $ProjectRoot
@@ -59,10 +60,21 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Phase 7B DEMO risk-engine build failed with exit code $LASTEXITCODE" }
   Write-Host "PHASE7B_DEMO_BUILD_STATUS=PASS"
 
-  # The repository is CommonJS-oriented. Copy the controller to a temporary
-  # .mts entrypoint so tsx treats top-level await as ESM on Windows/Node 24.
-  Copy-Item $ControllerTs $ControllerMts -Force
+  if (-not (Test-Path $RiskEngineEsm)) { throw "Phase 7B DEMO risk-engine ESM build missing: $RiskEngineEsm" }
+
+  # The repository is CommonJS-oriented. Create a temporary .mts entrypoint so
+  # tsx treats top-level await as ESM on Windows/Node 24. The root workspace does
+  # not expose @xauusd/risk-engine to scripts/ as a resolvable package, so point
+  # the temporary controller directly at the ESM artifact built immediately above.
+  $ControllerText = Get-Content $ControllerTs -Raw
+  $ControllerText = $ControllerText.Replace('from "@xauusd/risk-engine";', 'from "../packages/risk-engine/dist/index.js";')
+  if ($ControllerText -match '@xauusd/risk-engine') {
+    throw "Phase 7B DEMO temporary controller still contains unresolved @xauusd/risk-engine import."
+  }
+  Set-Content -Path $ControllerMts -Value $ControllerText -Encoding UTF8
+
   Write-Host "PHASE7B_DEMO_CONTROLLER_MODULE=ESM_MTS"
+  Write-Host "PHASE7B_DEMO_RISK_ENGINE_IMPORT=../packages/risk-engine/dist/index.js"
   & pnpm exec tsx $ControllerMts
   if ($LASTEXITCODE -ne 0) { throw "Phase 7B DEMO controller exited with code $LASTEXITCODE" }
 }
