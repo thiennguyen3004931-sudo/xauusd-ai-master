@@ -157,7 +157,7 @@ export function DashboardLayout() {
   let headerSubtitle = dashboard.isError
     ? "Legacy research API unavailable · Phase 7B DEMO is independent"
     : "Canonical research snapshot · polling 5s";
-  let headerMode = mode;
+  let headerMode: string = mode;
 
   if (isPhase7B) {
     headerTitle = "Phase 7B DEMO Operations";
