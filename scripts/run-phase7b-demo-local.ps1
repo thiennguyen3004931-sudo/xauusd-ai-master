@@ -33,6 +33,33 @@ if ($IntervalSeconds -lt 1) { throw "IntervalSeconds must be >= 1." }
 $BridgeEnv = (Resolve-Path $BridgeEnv).Path
 $DemoWorkDir = Join-Path $WorkDir "phase7b-demo-forward"
 New-Item -ItemType Directory -Path $DemoWorkDir -Force | Out-Null
+$RuntimePath = Join-Path $DemoWorkDir "phase7b-demo-runtime.json"
+
+function Get-EpochMs {
+  return [long](([DateTime]::UtcNow - [DateTime]'1970-01-01T00:00:00Z').TotalMilliseconds)
+}
+
+function Write-DemoRuntimeState {
+  param(
+    [Parameter(Mandatory = $true)] [string]$Status,
+    [Parameter(Mandatory = $true)] [bool]$Armed,
+    [object]$ProcessId,
+    [object]$StartedAt
+  )
+
+  $payload = [ordered]@{
+    version = 1
+    status = $Status
+    armed = $Armed
+    pid = $ProcessId
+    heartbeatAt = Get-EpochMs
+    startedAt = $StartedAt
+    intervalSeconds = $IntervalSeconds
+  }
+  $tmp = "$RuntimePath.tmp"
+  $payload | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding utf8
+  Move-Item -Path $tmp -Destination $RuntimePath -Force
+}
 
 # Load the dedicated DEMO bridge env into this process. This is intentionally
 # separate from the default bridge env so the DEMO controller cannot inherit a
@@ -63,6 +90,7 @@ Write-Host "PHASE7B_DEMO_FIXED_VOLUME=$FixedVolume"
 Write-Host "PHASE7B_DEMO_INTERVAL_SECONDS=$IntervalSeconds"
 Write-Host "PHASE7B_DEMO_ARM_REQUESTED=$($ArmDemoTrading.IsPresent)"
 Write-Host "PHASE7B_DEMO_REAL_ACCOUNT_ALLOWED=false"
+Write-Host "PHASE7B_DEMO_RUNTIME_STATE=$RuntimePath"
 
 if ($env:MT5_ALLOW_REAL_ACCOUNT -match '^(?i:true|1|yes|on)$') {
   throw "Phase 7B DEMO refuses MT5_ALLOW_REAL_ACCOUNT=true."
@@ -114,6 +142,9 @@ $ControllerMts = Join-Path $ProjectRoot "scripts\.phase7b-demo-controller.mts"
 $RiskEngineEsm = Join-Path $ProjectRoot "packages\risk-engine\dist\index.js"
 if (-not (Test-Path $ControllerTs)) { throw "Phase 7B DEMO controller missing: $ControllerTs" }
 
+$BotProcess = $null
+$RuntimeStartedAt = $null
+
 Push-Location $ProjectRoot
 try {
   Write-Host "PHASE7B_DEMO_BUILD_START"
@@ -137,10 +168,44 @@ try {
   Write-Host "PHASE7B_DEMO_CONTROLLER_MODULE=NODE24_NATIVE_TS_MTS"
   Write-Host "PHASE7B_DEMO_RISK_ENGINE_IMPORT=../packages/risk-engine/dist/index.js"
   Write-Host "PHASE7B_DEMO_TSX_RUNTIME=OFF"
-  & node $ControllerMts
-  if ($LASTEXITCODE -ne 0) { throw "Phase 7B DEMO controller exited with code $LASTEXITCODE" }
+
+  if ($ArmDemoTrading) {
+    $RuntimeStartedAt = Get-EpochMs
+    Write-DemoRuntimeState -Status "STARTING" -Armed $true -ProcessId $null -StartedAt $RuntimeStartedAt
+    $NodeExe = (Get-Command node -ErrorAction Stop).Source
+    $QuotedController = "`"$ControllerMts`""
+    $BotProcess = Start-Process -FilePath $NodeExe -ArgumentList $QuotedController -NoNewWindow -PassThru
+    Write-DemoRuntimeState -Status "RUNNING" -Armed $true -ProcessId $BotProcess.Id -StartedAt $RuntimeStartedAt
+    Write-Host "PHASE7B_DEMO_RUNTIME_ARMED=YES"
+    Write-Host "PHASE7B_DEMO_RUNTIME_PID=$($BotProcess.Id)"
+    Write-Host "PHASE7B_DEMO_RUNTIME_HEARTBEAT=ON"
+
+    while (-not $BotProcess.HasExited) {
+      Write-DemoRuntimeState -Status "RUNNING" -Armed $true -ProcessId $BotProcess.Id -StartedAt $RuntimeStartedAt
+      Start-Sleep -Seconds ([Math]::Max(1, [Math]::Min($IntervalSeconds, 5)))
+      $BotProcess.Refresh()
+    }
+
+    $exitCode = $BotProcess.ExitCode
+    Write-DemoRuntimeState -Status "STOPPED" -Armed $false -ProcessId $BotProcess.Id -StartedAt $RuntimeStartedAt
+    if ($exitCode -ne 0) { throw "Phase 7B DEMO controller exited with code $exitCode" }
+  } else {
+    & node $ControllerMts
+    if ($LASTEXITCODE -ne 0) { throw "Phase 7B DEMO controller exited with code $LASTEXITCODE" }
+  }
 }
 finally {
+  if ($ArmDemoTrading -and $null -ne $BotProcess) {
+    try {
+      $BotProcess.Refresh()
+      if (-not $BotProcess.HasExited) {
+        Stop-Process -Id $BotProcess.Id -Force -ErrorAction SilentlyContinue
+      }
+    } catch {}
+    try {
+      Write-DemoRuntimeState -Status "STOPPED" -Armed $false -ProcessId $BotProcess.Id -StartedAt $RuntimeStartedAt
+    } catch {}
+  }
   Remove-Item $ControllerMts -Force -ErrorAction SilentlyContinue
   Pop-Location
 }
