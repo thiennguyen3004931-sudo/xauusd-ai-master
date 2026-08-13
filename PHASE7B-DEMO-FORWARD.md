@@ -1,13 +1,18 @@
 # Phase 7B DEMO Forward Execution
 
-This lane runs the locked Phase 7B strategy on an MT5 **DEMO** account only. It is intentionally separate from historical replay and does not authorize LIVE trading.
+This lane runs the current Phase 7B strategy on an MT5 **DEMO** account only. It is intentionally separate from historical replay and does not authorize LIVE trading.
 
-## Locked strategy
+## Current strategy
 
 - XAUUSD, BUY and SELL.
 - M15 trigger: body engulfing **or** two consecutive same-color candles whose combined bodies exceed the body of the immediately preceding opposite-color candle.
 - MA20/MA50/MA200 trend alignment is mandatory.
-- Same-direction M15 FVG is mandatory.
+- Entry gate is **Pattern + MA trend**. Same-direction M15 FVG is **not mandatory for initial entry**.
+- Same-direction FVG remains active as a post-entry confirmation signal:
+  - `FVG_HOLD_CONFIRMED` records confirmation to keep following the trend while MA alignment remains valid.
+  - `FVG_ADDON_SIGNAL_SHADOW` records an add-on/pyramiding opportunity only when the managed position is already favorable.
+  - add-on execution is **SHADOW ONLY**: it never sends another MT5 order or increases volume.
+  - averaging down / DCA into a losing position is disabled.
 - Initial SL distance: 6–10 price units from the actual demo fill.
 - +6 price units: move SL to actual entry; no partial close.
 - +10 price units: close one third when the broker volume step permits it.
@@ -69,7 +74,7 @@ powershell -ExecutionPolicy Bypass -File ".\scripts\run-phase7b-demo-local.ps1" 
   -Once
 ```
 
-The preflight prints `PHASE7B_DEMO_ACCOUNT_LOGIN`, `PHASE7B_DEMO_ACCOUNT_MODE`, server, trading flags, and the latest closed-M15 signal preview. It does not send orders.
+The preflight prints `PHASE7B_DEMO_ACCOUNT_LOGIN`, `PHASE7B_DEMO_ACCOUNT_MODE`, server, trading flags, and the latest closed-M15 signal preview. The preview also reports whether FVG confirmation is present, but FVG does not block the entry signal. It does not send orders.
 
 ### 4. Allow-list the exact DEMO login
 
@@ -115,4 +120,10 @@ View them with:
 powershell -ExecutionPolicy Bypass -File ".\scripts\show-phase7b-demo-status.ps1" -WorkDir "$work" -Tail 40
 ```
 
-These records are the basis for later recommendations. Strategy changes should be proposed only after forward-demo evidence has accumulated; this lane does not mutate LIVE/production execution.
+Important events for the new FVG role:
+
+- `ENTRY_SUBMIT` / `ENTRY_FILLED`: initial order based on Pattern + MA; the journal records `fvgConfirmedAtEntry` for analysis.
+- `FVG_HOLD_CONFIRMED`: same-direction FVG plus valid MA trend while the position is managed.
+- `FVG_ADDON_SIGNAL_SHADOW`: same-direction FVG plus valid MA trend while the position is already winning. This is research telemetry only; `orderSent=false`.
+
+These records are the basis for later recommendations. LIVE/production execution remains unchanged.
