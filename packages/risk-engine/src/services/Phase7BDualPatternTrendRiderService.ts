@@ -1,7 +1,12 @@
 import type { Phase7Bar, Phase7RunRequest, Phase7Side } from "../models";
 
 export type Phase7BPattern = "ENGULFING" | "TWO_CANDLE_BODY_DOMINANCE";
-export type Phase7BExitReason = "ENTRY_NOT_FILLED" | "STOP" | "TREND_MA20" | "REVERSAL_FVG_REJECTION" | "END_OF_DATA";
+export type Phase7BExitReason =
+  | "ENTRY_NOT_FILLED"
+  | "STOP"
+  | "TREND_MA20"
+  | "REVERSAL_FVG_REJECTION"
+  | "END_OF_DATA";
 
 export interface Phase7BConfig {
   fvgLookbackBars: number;
@@ -163,7 +168,15 @@ export class Phase7BDualPatternTrendRiderService {
     const trades = signals.map((signal) => this.simulate(signal, m15, m5, request));
     return {
       config: this.config,
-      metrics: buildMetrics(m15.length, engulfingTriggers, twoCandleTriggers, trendAligned, fvgConfirmed, signals, trades),
+      metrics: buildMetrics(
+        m15.length,
+        engulfingTriggers,
+        twoCandleTriggers,
+        trendAligned,
+        fvgConfirmed,
+        signals,
+        trades,
+      ),
       signals,
       trades,
     };
@@ -178,13 +191,14 @@ export class Phase7BDualPatternTrendRiderService {
     return [
       "PHASE7B_STRATEGY=M15_DUAL_PATTERN_MA_FVG_STRUCTURE_RIDER",
       "PHASE7B_TRIGGER=ENGULFING_OR_TWO_SAME_COLOR_BODY_DOMINANCE",
+      "PHASE7B_TWO_CANDLE_RULE=PREVIOUS_OPPOSITE_BODY_LT_SUM_OF_NEXT_TWO_SAME_COLOR_BODIES",
       "PHASE7B_MA_TREND=MANDATORY",
       "PHASE7B_FVG=MANDATORY_SAME_DIRECTION",
       "PHASE7B_INITIAL_SL=PRICE_DISTANCE_CLAMPED_6_TO_10",
       "PHASE7B_PLUS6=SL_TO_ENTRY",
       "PHASE7B_PLUS10=PARTIAL_ONE_THIRD",
       "PHASE7B_POST_PLUS10_SL=M15_CONFIRMED_SWING_STRUCTURE_ONLY_TIGHTEN",
-      "PHASE7B_REVERSAL_EXIT=OPPOSING_M15_FVG_PLUS_REJECTION_CLOSE",
+      "PHASE7B_REVERSAL_EXIT=OPPOSING_M15_FVG_PLUS_REJECTION_CLOSE_AFTER_PLUS10",
       "PHASE7B_RISK_CAP=OFF",
       "PHASE7B_VOLUME_MODE=FIXED",
       `PHASE7B_M15_BARS=${m.m15Bars}`,
@@ -212,6 +226,7 @@ export class Phase7BDualPatternTrendRiderService {
       `PHASE7B_PATTERN_ENGULFING=FILLED=${engulf.filled}|WR=${engulf.winRatePercent}|NET=${engulf.netPnl}|PF=${engulf.profitFactor ?? "INF"}|EXP=${engulf.expectancy}|AVG_R=${engulf.averageR}`,
       `PHASE7B_PATTERN_TWO_CANDLE=FILLED=${two.filled}|WR=${two.winRatePercent}|NET=${two.netPnl}|PF=${two.profitFactor ?? "INF"}|EXP=${two.expectancy}|AVG_R=${two.averageR}`,
       "PHASE7B_NO_LOOKAHEAD_ENTRY=PASS",
+      "PHASE7B_REVERSAL_EXIT_AFTER_PLUS10_ONLY=PASS",
       "PHASE7B_RESEARCH_ONLY=PASS",
       "PHASE7B_PRODUCTION_MUTATION=false",
     ];
@@ -228,16 +243,17 @@ export class Phase7BDualPatternTrendRiderService {
     const expiry = signal.signalTimestamp + this.config.entryExpiryMinutes * 60_000;
     const bars = m5.filter((bar) => bar.openTime >= signal.signalTimestamp);
     const trendExit = findTrendExit(signal, m15);
-    const reversalExit = findOpposingFvgRejectionExit(signal, m15, this.config.reversalFvgLookbackBars);
 
     let entryTime: number | null = null;
     let activeStop = signal.stopLoss;
     let remainingVolume = signal.volume;
     let breakEvenApplied = false;
+    let plus10Activated = false;
     let partialApplied = false;
     let partialVolume = 0;
     let partialPnl = 0;
     let structuralTrailUpdates = 0;
+    let lastReversalM15CloseChecked = -1;
 
     for (const bar of bars) {
       if (entryTime === null) {
@@ -247,8 +263,22 @@ export class Phase7BDualPatternTrendRiderService {
       }
 
       if (touchesPrice(bar, activeStop)) {
-        return closeTrade(signal, entryTime, bar.closeTime, activeStop, activeStop, remainingVolume,
-          breakEvenApplied, partialApplied, partialVolume, partialPnl, structuralTrailUpdates, false, request, "STOP");
+        return closeTrade(
+          signal,
+          entryTime,
+          bar.closeTime,
+          activeStop,
+          activeStop,
+          remainingVolume,
+          breakEvenApplied,
+          partialApplied,
+          partialVolume,
+          partialPnl,
+          structuralTrailUpdates,
+          false,
+          request,
+          "STOP",
+        );
       }
 
       const favorable = signal.side === "BUY" ? bar.high - signal.entry : signal.entry - bar.low;
@@ -258,20 +288,34 @@ export class Phase7BDualPatternTrendRiderService {
         breakEvenApplied = true;
       }
 
-      if (!partialApplied && favorable >= this.config.partialTriggerPrice) {
-        const closeVolume = partialCloseVolume(signal.volume, this.config.partialFraction, remainingVolume, minVolume, volumeStep);
+      if (!plus10Activated && favorable >= this.config.partialTriggerPrice) {
+        plus10Activated = true;
+        const closeVolume = partialCloseVolume(
+          signal.volume,
+          this.config.partialFraction,
+          remainingVolume,
+          minVolume,
+          volumeStep,
+        );
         if (closeVolume > 0) {
           const triggerPrice = signal.side === "BUY"
             ? signal.entry + this.config.partialTriggerPrice
             : signal.entry - this.config.partialTriggerPrice;
           partialApplied = true;
           partialVolume = closeVolume;
-          partialPnl = pnlUsd(signal.side, signal.entry, triggerPrice, closeVolume, request.tickSize, request.tickValuePerLot);
+          partialPnl = pnlUsd(
+            signal.side,
+            signal.entry,
+            triggerPrice,
+            closeVolume,
+            request.tickSize,
+            request.tickValuePerLot,
+          );
           remainingVolume = normalizeVolume(remainingVolume - closeVolume, volumeStep);
         }
       }
 
-      if (partialApplied) {
+      if (plus10Activated) {
         const structure = latestConfirmedStructureStop(signal.side, m15, signal.signalTimestamp, bar.closeTime);
         if (structure !== null) {
           const improved = improveStop(signal.side, activeStop, structure);
@@ -279,15 +323,53 @@ export class Phase7BDualPatternTrendRiderService {
           activeStop = improved;
         }
 
-        if (reversalExit !== null && bar.closeTime >= reversalExit.timestamp) {
-          return closeTrade(signal, entryTime, reversalExit.timestamp, reversalExit.price, activeStop, remainingVolume,
-            breakEvenApplied, partialApplied, partialVolume, partialPnl, structuralTrailUpdates, true, request, "REVERSAL_FVG_REJECTION");
+        const reversal = opposingFvgRejectionAt(
+          signal,
+          m15,
+          bar.closeTime,
+          this.config.reversalFvgLookbackBars,
+          lastReversalM15CloseChecked,
+        );
+        if (reversal.checkedCloseTime > lastReversalM15CloseChecked) {
+          lastReversalM15CloseChecked = reversal.checkedCloseTime;
+        }
+        if (reversal.exit !== null) {
+          return closeTrade(
+            signal,
+            entryTime,
+            reversal.exit.timestamp,
+            reversal.exit.price,
+            activeStop,
+            remainingVolume,
+            breakEvenApplied,
+            partialApplied,
+            partialVolume,
+            partialPnl,
+            structuralTrailUpdates,
+            true,
+            request,
+            "REVERSAL_FVG_REJECTION",
+          );
         }
       }
 
       if (trendExit !== null && bar.closeTime >= trendExit.timestamp) {
-        return closeTrade(signal, entryTime, trendExit.timestamp, trendExit.price, activeStop, remainingVolume,
-          breakEvenApplied, partialApplied, partialVolume, partialPnl, structuralTrailUpdates, false, request, "TREND_MA20");
+        return closeTrade(
+          signal,
+          entryTime,
+          trendExit.timestamp,
+          trendExit.price,
+          activeStop,
+          remainingVolume,
+          breakEvenApplied,
+          partialApplied,
+          partialVolume,
+          partialPnl,
+          structuralTrailUpdates,
+          false,
+          request,
+          "TREND_MA20",
+        );
       }
     }
 
@@ -315,34 +397,54 @@ export class Phase7BDualPatternTrendRiderService {
 
     const last = bars.at(-1);
     if (!last) throw new Error("Phase 7B filled a trade without M5 bars.");
-    return closeTrade(signal, entryTime, last.closeTime, last.close, activeStop, remainingVolume,
-      breakEvenApplied, partialApplied, partialVolume, partialPnl, structuralTrailUpdates, false, request, "END_OF_DATA");
+    return closeTrade(
+      signal,
+      entryTime,
+      last.closeTime,
+      last.close,
+      activeStop,
+      remainingVolume,
+      breakEvenApplied,
+      partialApplied,
+      partialVolume,
+      partialPnl,
+      structuralTrailUpdates,
+      false,
+      request,
+      "END_OF_DATA",
+    );
   }
 }
 
-function detectPattern(bars: readonly Phase7Bar[], index: number): { side: Phase7Side; pattern: Phase7BPattern; patternExtreme: number } | null {
+function detectPattern(
+  bars: readonly Phase7Bar[],
+  index: number,
+): { side: Phase7Side; pattern: Phase7BPattern; patternExtreme: number } | null {
   const current = bars[index]!;
   const previous = bars[index - 1]!;
   const engulf = engulfingSide(previous, current);
   if (engulf) {
-    return { side: engulf, pattern: "ENGULFING", patternExtreme: engulf === "BUY" ? current.low : current.high };
+    return {
+      side: engulf,
+      pattern: "ENGULFING",
+      patternExtreme: engulf === "BUY" ? current.low : current.high,
+    };
   }
 
   if (index < 2) return null;
   const priorOpposite = bars[index - 2]!;
   const first = bars[index - 1]!;
   const second = current;
-  const priorBody = bodySize(priorOpposite);
-  const combined = bodySize(first) + bodySize(second);
+  const combinedBody = bodySize(first) + bodySize(second);
 
-  if (isBearish(priorOpposite) && isBullish(first) && isBullish(second) && combined > priorBody) {
+  if (isBearish(priorOpposite) && isBullish(first) && isBullish(second) && combinedBody > bodySize(priorOpposite)) {
     return {
       side: "BUY",
       pattern: "TWO_CANDLE_BODY_DOMINANCE",
       patternExtreme: Math.min(priorOpposite.low, first.low, second.low),
     };
   }
-  if (isBullish(priorOpposite) && isBearish(first) && isBearish(second) && combined > priorBody) {
+  if (isBullish(priorOpposite) && isBearish(first) && isBearish(second) && combinedBody > bodySize(priorOpposite)) {
     return {
       side: "SELL",
       pattern: "TWO_CANDLE_BODY_DOMINANCE",
@@ -353,14 +455,20 @@ function detectPattern(bars: readonly Phase7Bar[], index: number): { side: Phase
 }
 
 function engulfingSide(previous: Phase7Bar, current: Phase7Bar): Phase7Side | null {
-  if (isBearish(previous) && isBullish(current) && current.open <= previous.close && current.close >= previous.open) return "BUY";
-  if (isBullish(previous) && isBearish(current) && current.open >= previous.close && current.close <= previous.open) return "SELL";
+  if (
+    isBearish(previous) &&
+    isBullish(current) &&
+    current.open <= previous.close &&
+    current.close >= previous.open
+  ) return "BUY";
+  if (
+    isBullish(previous) &&
+    isBearish(current) &&
+    current.open >= previous.close &&
+    current.close <= previous.open
+  ) return "SELL";
   return null;
 }
-
-function isBullish(bar: Phase7Bar): boolean { return bar.close > bar.open; }
-function isBearish(bar: Phase7Bar): boolean { return bar.close < bar.open; }
-function bodySize(bar: Phase7Bar): number { return Math.abs(bar.close - bar.open); }
 
 function trendMatches(side: Phase7Side, close: number, ma20: number, ma50: number, ma200: number): boolean {
   return side === "BUY"
@@ -380,7 +488,12 @@ function hasRelevantFvg(bars: readonly Phase7Bar[], index: number, side: Phase7S
   return false;
 }
 
-function latestConfirmedStructureStop(side: Phase7Side, bars: readonly Phase7Bar[], afterTimestamp: number, atOrBefore: number): number | null {
+function latestConfirmedStructureStop(
+  side: Phase7Side,
+  bars: readonly Phase7Bar[],
+  afterTimestamp: number,
+  atOrBefore: number,
+): number | null {
   let latest: number | null = null;
   for (let i = 1; i < bars.length - 1; i += 1) {
     const left = bars[i - 1]!;
@@ -393,49 +506,55 @@ function latestConfirmedStructureStop(side: Phase7Side, bars: readonly Phase7Bar
   return latest;
 }
 
-function findOpposingFvgRejectionExit(
+function opposingFvgRejectionAt(
   signal: Phase7BSignal,
   bars: readonly Phase7Bar[],
+  atOrBefore: number,
   lookback: number,
-): { timestamp: number; price: number } | null {
-  const signalIndex = bars.findIndex((bar) => bar.closeTime === signal.signalTimestamp);
-  if (signalIndex < 0) return null;
-  const zones: Array<{ low: number; high: number }> = [];
-  const start = Math.max(2, signalIndex - lookback);
-  for (let i = start; i < signalIndex; i += 1) {
+  lastCheckedCloseTime: number,
+): { checkedCloseTime: number; exit: { timestamp: number; price: number } | null } {
+  let currentIndex = -1;
+  for (let i = 0; i < bars.length; i += 1) {
+    if (bars[i]!.closeTime <= atOrBefore) currentIndex = i;
+    else break;
+  }
+  if (currentIndex < 2) return { checkedCloseTime: lastCheckedCloseTime, exit: null };
+  const current = bars[currentIndex]!;
+  if (current.closeTime <= signal.signalTimestamp || current.closeTime <= lastCheckedCloseTime) {
+    return { checkedCloseTime: Math.max(lastCheckedCloseTime, current.closeTime), exit: null };
+  }
+
+  const rejectionDirection = signal.side === "BUY" ? isBearish(current) : isBullish(current);
+  if (!rejectionDirection) return { checkedCloseTime: current.closeTime, exit: null };
+
+  const start = Math.max(2, currentIndex - lookback);
+  for (let i = currentIndex - 1; i >= start; i -= 1) {
     const first = bars[i - 2]!;
     const third = bars[i]!;
     if (signal.side === "BUY" && third.high < first.low) {
-      const low = third.high;
-      const high = first.low;
-      if (high > signal.entry) zones.push({ low, high });
+      const zoneLow = third.high;
+      const zoneHigh = first.low;
+      if (current.high >= zoneLow && current.low <= zoneHigh && current.close < zoneHigh) {
+        return { checkedCloseTime: current.closeTime, exit: { timestamp: current.closeTime, price: current.close } };
+      }
     }
     if (signal.side === "SELL" && third.low > first.high) {
-      const low = first.high;
-      const high = third.low;
-      if (low < signal.entry) zones.push({ low, high });
+      const zoneLow = first.high;
+      const zoneHigh = third.low;
+      if (current.high >= zoneLow && current.low <= zoneHigh && current.close > zoneLow) {
+        return { checkedCloseTime: current.closeTime, exit: { timestamp: current.closeTime, price: current.close } };
+      }
     }
   }
-  if (!zones.length) return null;
-  zones.sort((a, b) => signal.side === "BUY" ? a.low - b.low : b.high - a.high);
-
-  for (let i = signalIndex + 1; i < bars.length; i += 1) {
-    const bar = bars[i]!;
-    for (const zone of zones) {
-      const touched = bar.high >= zone.low && bar.low <= zone.high;
-      const rejected = signal.side === "BUY" ? isBearish(bar) && bar.close < zone.high : isBullish(bar) && bar.close > zone.low;
-      if (touched && rejected) return { timestamp: bar.closeTime, price: bar.close };
-    }
-  }
-  return null;
+  return { checkedCloseTime: current.closeTime, exit: null };
 }
 
 function findTrendExit(signal: Phase7BSignal, bars: readonly Phase7Bar[]): { timestamp: number; price: number } | null {
   const start = bars.findIndex((bar) => bar.closeTime === signal.signalTimestamp);
   if (start < 0) return null;
   for (let i = start + 1; i < bars.length; i += 1) {
-    if (i < 19) continue;
     const closes = bars.slice(0, i + 1).map((bar) => bar.close);
+    if (closes.length < 20) continue;
     const ma20 = sma(closes, 20);
     const bar = bars[i]!;
     if (signal.side === "BUY" && bar.close < ma20) return { timestamp: bar.closeTime, price: bar.close };
@@ -460,7 +579,14 @@ function closeTrade(
   request: Phase7RunRequest,
   exitReason: Phase7BExitReason,
 ): Phase7BTradeResult {
-  const remainingPnl = pnlUsd(signal.side, signal.entry, exit, remainingVolume, request.tickSize, request.tickValuePerLot);
+  const remainingPnl = pnlUsd(
+    signal.side,
+    signal.entry,
+    exit,
+    remainingVolume,
+    request.tickSize,
+    request.tickValuePerLot,
+  );
   const pnl = partialPnl + remainingPnl;
   return {
     ...signal,
@@ -529,7 +655,14 @@ function buildMetrics(
   };
 }
 
-function summarize(trades: readonly Phase7BTradeResult[]): { filled: number; winRatePercent: number; netPnl: number; profitFactor: number | null; expectancy: number; averageR: number } {
+function summarize(trades: readonly Phase7BTradeResult[]): {
+  filled: number;
+  winRatePercent: number;
+  netPnl: number;
+  profitFactor: number | null;
+  expectancy: number;
+  averageR: number;
+} {
   const filled = trades.filter((trade) => trade.filled);
   const wins = filled.filter((trade) => trade.pnl > 0);
   const grossProfit = filled.reduce((sum, trade) => sum + Math.max(0, trade.pnl), 0);
@@ -545,7 +678,13 @@ function summarize(trades: readonly Phase7BTradeResult[]): { filled: number; win
   };
 }
 
-function partialCloseVolume(total: number, fraction: number, remaining: number, minVolume: number, step: number): number {
+function partialCloseVolume(
+  total: number,
+  fraction: number,
+  remaining: number,
+  minVolume: number,
+  step: number,
+): number {
   const raw = total * fraction;
   const stepped = Math.floor((raw + 1e-9) / step) * step;
   if (stepped < minVolume) return 0;
@@ -562,9 +701,19 @@ function improveStop(side: Phase7Side, current: number, candidate: number): numb
   return side === "BUY" ? Math.max(current, candidate) : Math.min(current, candidate);
 }
 
+function isBullish(bar: Phase7Bar): boolean { return bar.close > bar.open; }
+function isBearish(bar: Phase7Bar): boolean { return bar.close < bar.open; }
+function bodySize(bar: Phase7Bar): number { return Math.abs(bar.close - bar.open); }
 function touchesPrice(bar: Phase7Bar, price: number): boolean { return bar.low <= price && bar.high >= price; }
 
-function pnlUsd(side: Phase7Side, entry: number, exit: number, volume: number, tickSize: number, tickValuePerLot: number): number {
+function pnlUsd(
+  side: Phase7Side,
+  entry: number,
+  exit: number,
+  volume: number,
+  tickSize: number,
+  tickValuePerLot: number,
+): number {
   const move = side === "BUY" ? exit - entry : entry - exit;
   return move / tickSize * tickValuePerLot * volume;
 }
@@ -580,9 +729,15 @@ function sma(values: readonly number[], period: number): number {
 }
 
 function validateConfig(config: Phase7BConfig): void {
-  if (!(config.minStopDistancePrice > 0 && config.maxStopDistancePrice >= config.minStopDistancePrice)) throw new Error("Phase 7B invalid SL range.");
-  if (!(config.breakEvenTriggerPrice > 0 && config.partialTriggerPrice > config.breakEvenTriggerPrice)) throw new Error("Phase 7B invalid management trigger ordering.");
-  if (!(config.partialFraction > 0 && config.partialFraction < 1)) throw new Error("Phase 7B partial fraction must be between 0 and 1.");
+  if (!(config.minStopDistancePrice > 0 && config.maxStopDistancePrice >= config.minStopDistancePrice)) {
+    throw new Error("Phase 7B invalid SL range.");
+  }
+  if (!(config.breakEvenTriggerPrice > 0 && config.partialTriggerPrice > config.breakEvenTriggerPrice)) {
+    throw new Error("Phase 7B invalid management trigger ordering.");
+  }
+  if (!(config.partialFraction > 0 && config.partialFraction < 1)) {
+    throw new Error("Phase 7B partial fraction must be between 0 and 1.");
+  }
 }
 
 function validateRequest(request: Phase7RunRequest): void {
@@ -599,4 +754,7 @@ function validateRequest(request: Phase7RunRequest): void {
 
 function clamp(value: number, min: number, max: number): number { return Math.min(max, Math.max(min, value)); }
 function avg(values: readonly number[]): number { return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0; }
-function round(value: number, digits: number): number { const factor = 10 ** digits; return Math.round((value + Number.EPSILON) * factor) / factor; }
+function round(value: number, digits: number): number {
+  const factor = 10 ** digits;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
