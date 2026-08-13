@@ -14,7 +14,7 @@ function readJson<T>(file: string): T {
 const m15Path = requiredEnv("ZIQ_M15_JSON");
 const m5Path = requiredEnv("ZIQ_M5_JSON");
 const metaPath = requiredEnv("ZIQ_META_JSON");
-const maxRiskUsd = Number(process.env.ZIQ_MAX_RISK_USD ?? "10");
+const fixedVolume = Number(process.env.ZIQ_FIXED_VOLUME ?? "0.03");
 
 const m15 = readJson<any[]>(m15Path);
 const m5 = readJson<any[]>(m5Path);
@@ -27,18 +27,15 @@ const volumeStep = Number(meta.volumeStep ?? minVolume);
 if (!Array.isArray(m15) || !Array.isArray(m5)) {
   throw new Error("Phase 7 inputs must be JSON arrays.");
 }
-if (![tickSize, tickValuePerLot, minVolume, volumeStep, maxRiskUsd].every((v) => Number.isFinite(v) && v > 0)) {
-  throw new Error("Phase 7 metadata/risk inputs are invalid.");
-}
-if (Math.abs(maxRiskUsd - 10) > 1e-9) {
-  throw new Error("Phase 7 research risk cap is locked at USD 10.");
+if (![tickSize, tickValuePerLot, minVolume, volumeStep, fixedVolume].every((v) => Number.isFinite(v) && v > 0)) {
+  throw new Error("Phase 7 metadata/fixed-volume inputs are invalid.");
 }
 
 const service = new Phase7TrendRiderService();
 const result = service.run({
   m15Bars: m15,
   m5Bars: m5,
-  riskCapUsd: maxRiskUsd,
+  fixedVolume,
   tickSize,
   tickValuePerLot,
   minVolume,
@@ -46,6 +43,8 @@ const result = service.run({
 });
 
 for (const line of service.format(result)) console.log(line);
+console.log(`PHASE7_FIXED_VOLUME=${fixedVolume}`);
+console.log("PHASE7_RISK_CAP=OFF");
 console.log(`PHASE7_INPUT_M15=${m15Path}`);
 console.log(`PHASE7_INPUT_M5=${m5Path}`);
 console.log(`PHASE7_BROKER_MIN_VOLUME=${minVolume}`);
