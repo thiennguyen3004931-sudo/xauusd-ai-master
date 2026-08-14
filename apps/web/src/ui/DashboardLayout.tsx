@@ -26,6 +26,7 @@ import DnsRounded from "@mui/icons-material/DnsRounded";
 import SettingsRounded from "@mui/icons-material/SettingsRounded";
 import MenuRounded from "@mui/icons-material/MenuRounded";
 import LockRounded from "@mui/icons-material/LockRounded";
+import TuneRounded from "@mui/icons-material/TuneRounded";
 import { useDashboard } from "../hooks";
 import { StatusChip } from "./StatusChip";
 
@@ -45,6 +46,7 @@ const tradingLinks = [
 
 const researchLinks = [
   ["/phase7c-backtest", "Canonical Backtest", AssessmentRounded],
+  ["/phase7c-auto-lot", "Auto Lot vs Fixed", TuneRounded],
 ] as const;
 
 const performanceLinks = [
@@ -142,10 +144,11 @@ export function DashboardLayout() {
   const isPatternCheck = location.pathname.startsWith("/phase7b-pattern-check");
   const isPhase7BOps = location.pathname.startsWith("/phase7b-ops");
   const isPhase7CBacktest = location.pathname.startsWith("/phase7c-backtest");
+  const isPhase7CAutoLot = location.pathname.startsWith("/phase7c-auto-lot");
   const isPhase7CRisk = location.pathname.startsWith("/phase7c-risk");
   const isPerformance = location.pathname.startsWith("/performance");
   const isSystem = location.pathname.startsWith("/system");
-  const isOperational = isControlCenter || isPhase7B || isPatternCheck || isPhase7BOps || isPhase7CBacktest || isPhase7CRisk || isPerformance || isSystem;
+  const isOperational = isControlCenter || isPhase7B || isPatternCheck || isPhase7BOps || isPhase7CBacktest || isPhase7CAutoLot || isPhase7CRisk || isPerformance || isSystem;
   const dashboard = useDashboard(!isOperational);
   const mode = dashboard.data?.control.mode ?? "SHADOW";
 
@@ -175,6 +178,10 @@ export function DashboardLayout() {
     headerTitle = "Canonical Phase 7B Backtest";
     headerSubtitle = "Broker-native MT5 history · selectable date range · closed-bar replay";
     headerMode = "RESEARCH";
+  } else if (isPhase7CAutoLot) {
+    headerTitle = "Auto Lot SHADOW vs Fixed";
+    headerSubtitle = "Risk-based sizing overlay · exact one-third management compatibility · no execution mutation";
+    headerMode = "SHADOW";
   } else if (isPhase7CRisk) {
     headerTitle = "Risk & Auto Lot SHADOW";
     headerSubtitle = "Broker-native XAUUSD sizing · no execution mutation";
