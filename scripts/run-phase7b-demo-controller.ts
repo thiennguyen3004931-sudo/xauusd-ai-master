@@ -461,16 +461,31 @@ function detectEntryPattern(
   if (index < 2) return null;
   const priorOpposite = bars[index - 2]!;
   const first = bars[index - 1]!;
-  const combinedBody = bodySize(first) + bodySize(current);
+  const priorBody = bodySize(priorOpposite);
+  const firstBody = bodySize(first);
+  const combinedBody = firstBody + bodySize(current);
+  const firstBodyStillSmaller = firstBody < priorBody;
 
-  if (isBearish(priorOpposite) && isBullish(first) && isBullish(current) && combinedBody > bodySize(priorOpposite)) {
+  if (
+    isBearish(priorOpposite) &&
+    isBullish(first) &&
+    isBullish(current) &&
+    firstBodyStillSmaller &&
+    combinedBody > priorBody
+  ) {
     return {
       side: "BUY",
       pattern: "TWO_CANDLE_BODY_DOMINANCE",
       patternExtreme: Math.min(priorOpposite.low, first.low, current.low),
     };
   }
-  if (isBullish(priorOpposite) && isBearish(first) && isBearish(current) && combinedBody > bodySize(priorOpposite)) {
+  if (
+    isBullish(priorOpposite) &&
+    isBearish(first) &&
+    isBearish(current) &&
+    firstBodyStillSmaller &&
+    combinedBody > priorBody
+  ) {
     return {
       side: "SELL",
       pattern: "TWO_CANDLE_BODY_DOMINANCE",
