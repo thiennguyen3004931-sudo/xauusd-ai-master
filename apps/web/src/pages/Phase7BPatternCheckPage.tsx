@@ -195,7 +195,9 @@ export function Phase7BPatternCheckPage() {
   });
 
   if (query.isLoading) return <LoadingState />;
-  if (query.isError || !query.data) return <ErrorState error={query.error} />;
+  if (query.isError || !query.data) {
+    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được M15 Pattern Check."} />;
+  }
   const data = query.data;
 
   return (
