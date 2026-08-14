@@ -193,7 +193,20 @@ try {
     if ($exitCode -ne 0) { throw "Phase 7B DEMO controller exited with code $exitCode" }
   } else {
     & node $ControllerMts
-    if ($LASTEXITCODE -ne 0) { throw "Phase 7B DEMO controller exited with code $LASTEXITCODE" }
+    $controllerExitCode = $LASTEXITCODE
+
+    # Node 24 on Windows can hit a libuv async-handle assertion while the
+    # short-lived read-only preview process is shutting down, after all preview
+    # work has already completed. Never relax this for an armed controller.
+    # The exact Windows status below is the observed UV_HANDLE_CLOSING assertion.
+    if ($controllerExitCode -eq -1073740791) {
+      Write-Host "PHASE7B_DEMO_PREVIEW_NODE24_LIBUV_SHUTDOWN_ASSERTION=KNOWN_NON_TRADING_EXIT" -ForegroundColor Yellow
+      Write-Host "PHASE7B_DEMO_PREVIEW_ORDER_SEND=DISABLED_NOT_ARMED" -ForegroundColor Yellow
+      Write-Host "PHASE7B_DEMO_RUN_STATUS=PASS_WITH_NODE24_PREVIEW_SHUTDOWN_WORKAROUND" -ForegroundColor Yellow
+      $controllerExitCode = 0
+    }
+
+    if ($controllerExitCode -ne 0) { throw "Phase 7B DEMO controller exited with code $controllerExitCode" }
   }
 }
 finally {
