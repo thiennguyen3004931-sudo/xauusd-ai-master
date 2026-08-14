@@ -103,6 +103,25 @@ if (-not $dailyResearch.decision -or $dailyResearch.decision.executionEligible -
 if (-not $dailyResearch.trendPlusLock) { throw "Phase 7D Trend+Lock isolation lane is missing." }
 if (-not $dailyResearch.decision.lockIsolation) { throw "Phase 7D Lock isolation diagnostics are missing." }
 
+$managementBody = @{
+  from = $fromDate
+  to = $toDate
+  fixedVolume = 0.03
+} | ConvertTo-Json
+$managementResearch = Invoke-RestMethod `
+  -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7d/management-backtest" `
+  -Method Post -ContentType "application/json" -Body $managementBody -TimeoutSec 180
+
+if ($managementResearch.source -ne "PHASE7D_BE_PARTIAL_MANAGEMENT_RESEARCH") { throw "Phase 7D management self-test returned an unexpected source." }
+if ($managementResearch.replayMode -ne "EXACT_PER_VARIANT_SIGNAL_CONTENTION_WITH_M5_APPROXIMATION") { throw "Phase 7D management exact replay mode is not active." }
+if ($managementResearch.safety.executionMutation -ne $false -or $managementResearch.safety.phase7bStrategyMutation -ne $false) { throw "Phase 7D management research unexpectedly allows execution/strategy mutation." }
+if (-not $managementResearch.decision -or $managementResearch.decision.executionEligible -ne $false) { throw "Phase 7D management safety contract is invalid." }
+
+$currentManagement = $managementResearch.variants | Where-Object { $_.name -eq "CURRENT_BE6_PARTIAL_THIRD" } | Select-Object -First 1
+$be10Third = $managementResearch.variants | Where-Object { $_.name -eq "BE10_PARTIAL_THIRD" } | Select-Object -First 1
+$be10Half = $managementResearch.variants | Where-Object { $_.name -eq "BE10_PARTIAL_HALF_THEORETICAL" } | Select-Object -First 1
+if (-not $currentManagement -or -not $be10Third -or -not $be10Half) { throw "Phase 7D management variants are incomplete." }
+
 Write-Host "PHASE7C_WEB_REFRESH_API=PASS"
 Write-Host "PHASE7C_WEB_REFRESH_WEB=PASS"
 Write-Host "PHASE7C_WEB_REFRESH_BOT_STATUS=$($demo.botStatus)"
@@ -141,9 +160,21 @@ Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_VERDICT=$($dailyResearch.decision.verd
 Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_RECOMMENDED=$($dailyResearch.decision.recommendedLane)"
 Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_EXECUTION_ELIGIBLE=$($dailyResearch.decision.executionEligible)"
 
+Write-Host "PHASE7D_WEB_REFRESH_MANAGEMENT_BACKTEST=PASS"
+Write-Host "PHASE7D_WEB_REFRESH_MANAGEMENT_REPLAY=$($managementResearch.replayMode)"
+Write-Host "PHASE7D_WEB_REFRESH_MANAGEMENT_SIGNALS=$($managementResearch.signals)"
+Write-Host "PHASE7D_WEB_REFRESH_CURRENT_BE_BEFORE10=$($currentManagement.metrics.beStopBeforePlus10)"
+Write-Host "PHASE7D_WEB_REFRESH_BE10_FULLSTOP_AFTER6=$($be10Third.metrics.plus6ThenFullStopBefore10)"
+Write-Host "PHASE7D_WEB_REFRESH_BE10_NET_DELTA=$($managementResearch.decision.deltaBe10ThirdVsCurrent.netPnl)"
+Write-Host "PHASE7D_WEB_REFRESH_BE10_DD_DELTA=$($managementResearch.decision.deltaBe10ThirdVsCurrent.maxDrawdownUsd)"
+Write-Host "PHASE7D_WEB_REFRESH_BE10_VERDICT=$($managementResearch.decision.verdict)"
+Write-Host "PHASE7D_WEB_REFRESH_HALF_EXECUTABLE=$($be10Half.config.executableWithBrokerStep)"
+Write-Host "PHASE7D_WEB_REFRESH_MANAGEMENT_EXECUTION_ELIGIBLE=$($managementResearch.decision.executionEligible)"
+
 Write-Host "PHASE7C_WEB_REFRESH_CONTROL_CENTER=http://127.0.0.1:$WebPort/"
 Write-Host "PHASE7C_WEB_REFRESH_BACKTEST=http://127.0.0.1:$WebPort/phase7c-backtest"
 Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL=http://127.0.0.1:$WebPort/phase7d-daily-pnl"
+Write-Host "PHASE7D_WEB_REFRESH_MANAGEMENT=http://127.0.0.1:$WebPort/phase7d-management"
 Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_COMPARE=http://127.0.0.1:$WebPort/phase7c-auto-lot"
 Write-Host "PHASE7C_WEB_REFRESH_RISK=http://127.0.0.1:$WebPort/phase7c-risk"
 Write-Host "PHASE7C_WEB_REFRESH_STATUS=PASS"
