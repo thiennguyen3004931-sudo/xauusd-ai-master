@@ -19,6 +19,7 @@ import { Phase7DDailyPnlPage } from "./pages/Phase7DDailyPnlPage";
 import { Phase7DManagementPage } from "./pages/Phase7DManagementPage";
 import { Phase7DDailyScalePage } from "./pages/Phase7DDailyScalePage";
 import { Phase7ESupertrendPage } from "./pages/Phase7ESupertrendPage";
+import { Phase7ERealignmentPage } from "./pages/Phase7ERealignmentPage";
 
 export const router = createBrowserRouter([
   {
@@ -34,6 +35,7 @@ export const router = createBrowserRouter([
       { path: "phase7d-management", element: <Phase7DManagementPage /> },
       { path: "phase7d-daily-scale", element: <Phase7DDailyScalePage /> },
       { path: "phase7e-supertrend", element: <Phase7ESupertrendPage /> },
+      { path: "phase7e-realignment", element: <Phase7ERealignmentPage /> },
       { path: "phase7c-auto-lot", element: <Phase7CAutoLotBacktestPage /> },
       { path: "phase7c-risk", element: <Phase7CRiskPage /> },
       { path: "performance", element: <PerformancePage /> },
