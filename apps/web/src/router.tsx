@@ -9,6 +9,7 @@ import { PerformancePage } from "./pages/PerformancePage";
 import { SystemPage } from "./pages/SystemPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { Phase7BDemoPage } from "./pages/Phase7BDemoPage";
+import { Phase7BPatternCheckPage } from "./pages/Phase7BPatternCheckPage";
 
 export const router = createBrowserRouter([
   {
@@ -22,6 +23,7 @@ export const router = createBrowserRouter([
       { path: "backtest", element: <BacktestPage /> },
       { path: "performance", element: <PerformancePage /> },
       { path: "phase7b-demo", element: <Phase7BDemoPage /> },
+      { path: "phase7b-pattern-check", element: <Phase7BPatternCheckPage /> },
       { path: "system", element: <SystemPage /> },
       { path: "settings", element: <SettingsPage /> },
     ],
