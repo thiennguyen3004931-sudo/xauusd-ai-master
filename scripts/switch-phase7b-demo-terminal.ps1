@@ -214,6 +214,12 @@ try {
     throw "DBGMarkets DEMO is connected, but Algo Trading / Expert trading is not enabled. Enable Algo Trading in MT5, then run this switch script again."
   }
 
+  $targetPositions = Invoke-RestMethod -Uri "$bridgeBase/v1/positions?symbol=XAUUSD" -Headers @{ "x-mt5-api-key" = $apiKey } -Method Get -TimeoutSec 5
+  if (@($targetPositions).Count -gt 0) {
+    throw "Target DBGMarkets DEMO account already has XAUUSD position(s). Close them before switching Phase 7B."
+  }
+  Write-Host "PHASE7B_SWITCH_TARGET_XAUUSD_POSITIONS=0"
+
   $validated = $true
 }
 catch {
