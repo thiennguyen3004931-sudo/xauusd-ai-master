@@ -33,9 +33,7 @@ Start-Sleep -Seconds 1
 $listenerPids = Get-NetTCPConnection -LocalPort @($ApiPort, $WebPort) -State Listen -ErrorAction SilentlyContinue |
   Select-Object -ExpandProperty OwningProcess -Unique
 foreach ($processId in $listenerPids) {
-  if ($processId -gt 0) {
-    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-  }
+  if ($processId -gt 0) { Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue }
 }
 
 Start-ScheduledTask -TaskName $WebTaskName
@@ -78,20 +76,11 @@ $compareBody = @{
 } | ConvertTo-Json
 $autoCompare = Invoke-RestMethod `
   -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7c/auto-lot-backtest" `
-  -Method Post `
-  -ContentType "application/json" `
-  -Body $compareBody `
-  -TimeoutSec 90
+  -Method Post -ContentType "application/json" -Body $compareBody -TimeoutSec 90
 
-if ($autoCompare.source -ne "PHASE7C_AUTO_LOT_SHADOW_COMPARISON") {
-  throw "Phase 7C Auto Lot comparison self-test returned an unexpected source."
-}
-if ($autoCompare.safety.executionMutation -ne $false) {
-  throw "Phase 7C Auto Lot comparison unexpectedly allows execution mutation."
-}
-if (-not $autoCompare.decision -or $autoCompare.decision.executionEligible -ne $false) {
-  throw "Phase 7C Auto Lot research decision safety contract is invalid."
-}
+if ($autoCompare.source -ne "PHASE7C_AUTO_LOT_SHADOW_COMPARISON") { throw "Phase 7C Auto Lot comparison self-test returned an unexpected source." }
+if ($autoCompare.safety.executionMutation -ne $false) { throw "Phase 7C Auto Lot comparison unexpectedly allows execution mutation." }
+if (-not $autoCompare.decision -or $autoCompare.decision.executionEligible -ne $false) { throw "Phase 7C Auto Lot research decision safety contract is invalid." }
 
 $dailyBody = @{
   from = $fromDate
@@ -105,23 +94,14 @@ $dailyBody = @{
 } | ConvertTo-Json
 $dailyResearch = Invoke-RestMethod `
   -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7d/daily-pnl-backtest" `
-  -Method Post `
-  -ContentType "application/json" `
-  -Body $dailyBody `
-  -TimeoutSec 180
+  -Method Post -ContentType "application/json" -Body $dailyBody -TimeoutSec 180
 
-if ($dailyResearch.source -ne "PHASE7D_DAILY_PNL_RESEARCH") {
-  throw "Phase 7D Daily P/L self-test returned an unexpected source."
-}
-if ($dailyResearch.replayMode -ne "EXACT_PER_LANE_SIGNAL_CONTENTION_WITH_M5_APPROXIMATION") {
-  throw "Phase 7D Daily P/L exact replay mode is not active."
-}
-if ($dailyResearch.safety.executionMutation -ne $false -or $dailyResearch.safety.phase7bStrategyMutation -ne $false) {
-  throw "Phase 7D Daily P/L research unexpectedly allows execution/strategy mutation."
-}
-if (-not $dailyResearch.decision -or $dailyResearch.decision.executionEligible -ne $false) {
-  throw "Phase 7D Daily P/L research safety contract is invalid."
-}
+if ($dailyResearch.source -ne "PHASE7D_DAILY_PNL_RESEARCH") { throw "Phase 7D Daily P/L self-test returned an unexpected source." }
+if ($dailyResearch.replayMode -ne "EXACT_PER_LANE_SIGNAL_CONTENTION_WITH_M5_APPROXIMATION") { throw "Phase 7D exact replay mode is not active." }
+if ($dailyResearch.safety.executionMutation -ne $false -or $dailyResearch.safety.phase7bStrategyMutation -ne $false) { throw "Phase 7D unexpectedly allows execution/strategy mutation." }
+if (-not $dailyResearch.decision -or $dailyResearch.decision.executionEligible -ne $false) { throw "Phase 7D safety contract is invalid." }
+if (-not $dailyResearch.trendPlusLock) { throw "Phase 7D Trend+Lock isolation lane is missing." }
+if (-not $dailyResearch.decision.lockIsolation) { throw "Phase 7D Lock isolation diagnostics are missing." }
 
 Write-Host "PHASE7C_WEB_REFRESH_API=PASS"
 Write-Host "PHASE7C_WEB_REFRESH_WEB=PASS"
@@ -138,20 +118,29 @@ Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_BLOCKED=$($autoCompare.autoLot.blockedT
 Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_SCORE=$($autoCompare.decision.score)"
 Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_VERDICT=$($autoCompare.decision.verdict)"
 Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_EXECUTION_ELIGIBLE=$($autoCompare.decision.executionEligible)"
+
 Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_BACKTEST=PASS"
 Write-Host "PHASE7D_WEB_REFRESH_REPLAY_MODE=$($dailyResearch.replayMode)"
 Write-Host "PHASE7D_WEB_REFRESH_SIGNALS=$($dailyResearch.configuration.signals)"
 Write-Host "PHASE7D_WEB_REFRESH_FILLED_CANDIDATES=$($dailyResearch.configuration.filledCandidateTrades)"
 Write-Host "PHASE7D_WEB_REFRESH_BASELINE_TRADES=$($dailyResearch.baseline.metrics.trades)"
 Write-Host "PHASE7D_WEB_REFRESH_RECOVERY_TRADES=$($dailyResearch.recovery.metrics.trades)"
-Write-Host "PHASE7D_WEB_REFRESH_LOCK_TRADES=$($dailyResearch.recoveryPlusLock.metrics.trades)"
+Write-Host "PHASE7D_WEB_REFRESH_TREND_LOCK_TRADES=$($dailyResearch.trendPlusLock.metrics.trades)"
+Write-Host "PHASE7D_WEB_REFRESH_RECOVERY_LOCK_TRADES=$($dailyResearch.recoveryPlusLock.metrics.trades)"
 Write-Host "PHASE7D_WEB_REFRESH_BASELINE_BUSY_SKIPS=$($dailyResearch.baseline.metrics.skippedPositionBusy)"
 Write-Host "PHASE7D_WEB_REFRESH_RECOVERY_BUSY_SKIPS=$($dailyResearch.recovery.metrics.skippedPositionBusy)"
-Write-Host "PHASE7D_WEB_REFRESH_LOCK_BUSY_SKIPS=$($dailyResearch.recoveryPlusLock.metrics.skippedPositionBusy)"
+Write-Host "PHASE7D_WEB_REFRESH_TREND_LOCK_BUSY_SKIPS=$($dailyResearch.trendPlusLock.metrics.skippedPositionBusy)"
+Write-Host "PHASE7D_WEB_REFRESH_RECOVERY_LOCK_BUSY_SKIPS=$($dailyResearch.recoveryPlusLock.metrics.skippedPositionBusy)"
+Write-Host "PHASE7D_WEB_REFRESH_TREND_LOCK_BLOCKED=$($dailyResearch.trendPlusLock.metrics.positiveLockBlockedTrades)"
+Write-Host "PHASE7D_WEB_REFRESH_TREND_LOCK_BLOCKED_PNL=$($dailyResearch.trendPlusLock.metrics.blockedCounterfactualNetPnl)"
+Write-Host "PHASE7D_WEB_REFRESH_RECOVERY_LOCK_BLOCKED=$($dailyResearch.recoveryPlusLock.metrics.positiveLockBlockedTrades)"
+Write-Host "PHASE7D_WEB_REFRESH_RECOVERY_LOCK_BLOCKED_PNL=$($dailyResearch.recoveryPlusLock.metrics.blockedCounterfactualNetPnl)"
+Write-Host "PHASE7D_WEB_REFRESH_LOCK_INTERPRETATION=$($dailyResearch.decision.lockIsolation.interpretation)"
 Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_SCORE=$($dailyResearch.decision.bestResearchScore)"
 Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_VERDICT=$($dailyResearch.decision.verdict)"
 Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_RECOMMENDED=$($dailyResearch.decision.recommendedLane)"
 Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_EXECUTION_ELIGIBLE=$($dailyResearch.decision.executionEligible)"
+
 Write-Host "PHASE7C_WEB_REFRESH_CONTROL_CENTER=http://127.0.0.1:$WebPort/"
 Write-Host "PHASE7C_WEB_REFRESH_BACKTEST=http://127.0.0.1:$WebPort/phase7c-backtest"
 Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL=http://127.0.0.1:$WebPort/phase7d-daily-pnl"
