@@ -21,17 +21,69 @@ if (-not (Test-Path $Notifier)) {
   throw "Telegram notifier not found: $Notifier"
 }
 
-if (-not $SendTest -and -not $Once) {
+$demoDir = if ((Split-Path -Leaf $WorkDir) -eq "phase7b-demo-forward") {
+  $WorkDir
+} else {
+  Join-Path $WorkDir "phase7b-demo-forward"
+}
+New-Item -ItemType Directory -Path $demoDir -Force | Out-Null
+
+$journal = Join-Path $demoDir "phase7b-demo-events.jsonl"
+$state = Join-Path $demoDir "phase7b-telegram-state.json"
+$runtime = Join-Path $demoDir "phase7b-telegram-runtime.json"
+if (-not (Test-Path $journal)) {
+  New-Item -ItemType File -Path $journal -Force | Out-Null
+}
+
+function Read-TelegramRuntime {
+  if (-not (Test-Path $runtime)) { return $null }
+  try { return Get-Content $runtime -Raw | ConvertFrom-Json } catch { return $null }
+}
+
+function Test-TelegramRuntimeAlive {
+  param($Snapshot)
+  if ($null -eq $Snapshot -or $Snapshot.status -ne "RUNNING" -or $null -eq $Snapshot.pid) { return $false }
   try {
-    $existing = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-      Where-Object { $_.CommandLine -like '*run-phase7b-telegram-notifier.mjs*' } |
-      Select-Object -First 1
-    if ($null -ne $existing) {
-      Write-Host "PHASE7B_TELEGRAM_NOTIFIER=ALREADY_RUNNING"
-      Write-Host "PHASE7B_TELEGRAM_EXISTING_PID=$($existing.ProcessId)"
-      exit 0
-    }
-  } catch {}
+    $heartbeatAge = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [int64]$Snapshot.heartbeatAt
+    if ($heartbeatAge -gt 10000) { return $false }
+    Get-Process -Id ([int]$Snapshot.pid) -ErrorAction Stop | Out-Null
+    return $true
+  } catch { return $false }
+}
+
+function Write-TelegramRuntime {
+  param(
+    [Parameter(Mandatory = $true)] [string]$Status,
+    [int]$Pid = 0,
+    [int]$ExitCode = 0,
+    [string]$StartedAt = ""
+  )
+  $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  $payload = [ordered]@{
+    version = 1
+    status = $Status
+    pid = if ($Pid -gt 0) { $Pid } else { $null }
+    wrapperPid = $PID
+    startedAt = if ($StartedAt) { $StartedAt } else { $null }
+    heartbeatAt = $now
+    heartbeatAgeMs = 0
+    intervalSeconds = [Math]::Max(1, $IntervalSeconds)
+    sendTest = $SendTest.IsPresent
+    once = $Once.IsPresent
+    exitCode = if ($Status -eq "STOPPED") { $ExitCode } else { $null }
+  }
+  $temp = "$runtime.tmp"
+  $payload | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 $temp
+  Move-Item -Force $temp $runtime
+}
+
+if (-not $SendTest -and -not $Once) {
+  $existingRuntime = Read-TelegramRuntime
+  if (Test-TelegramRuntimeAlive $existingRuntime) {
+    Write-Host "PHASE7B_TELEGRAM_NOTIFIER=ALREADY_RUNNING"
+    Write-Host "PHASE7B_TELEGRAM_EXISTING_PID=$($existingRuntime.pid)"
+    exit 0
+  }
 }
 
 foreach ($raw in Get-Content $EnvFile) {
@@ -50,19 +102,6 @@ if ([string]::IsNullOrWhiteSpace($env:ZIQ_TELEGRAM_CHAT_ID)) {
   throw "ZIQ_TELEGRAM_CHAT_ID is missing in $EnvFile"
 }
 
-$demoDir = if ((Split-Path -Leaf $WorkDir) -eq "phase7b-demo-forward") {
-  $WorkDir
-} else {
-  Join-Path $WorkDir "phase7b-demo-forward"
-}
-New-Item -ItemType Directory -Path $demoDir -Force | Out-Null
-
-$journal = Join-Path $demoDir "phase7b-demo-events.jsonl"
-$state = Join-Path $demoDir "phase7b-telegram-state.json"
-if (-not (Test-Path $journal)) {
-  New-Item -ItemType File -Path $journal -Force | Out-Null
-}
-
 $env:ZIQ_TELEGRAM_JOURNAL_PATH = $journal
 $env:ZIQ_TELEGRAM_STATE_PATH = $state
 $env:ZIQ_TELEGRAM_INTERVAL_MS = [string]([math]::Max(1, $IntervalSeconds) * 1000)
@@ -72,15 +111,34 @@ $env:ZIQ_TELEGRAM_ONCE = if ($Once) { "true" } else { "false" }
 Write-Host "PHASE7B_TELEGRAM_ENV=$EnvFile"
 Write-Host "PHASE7B_TELEGRAM_JOURNAL=$journal"
 Write-Host "PHASE7B_TELEGRAM_STATE=$state"
+Write-Host "PHASE7B_TELEGRAM_RUNTIME=$runtime"
 Write-Host "PHASE7B_TELEGRAM_INTERVAL_SECONDS=$IntervalSeconds"
 Write-Host "PHASE7B_TELEGRAM_SEND_TEST=$($SendTest.IsPresent)"
 Write-Host "PHASE7B_TELEGRAM_ORDER_PERMISSION=NONE_READ_ONLY_JOURNAL"
 
+$nodeCommand = Get-Command node -ErrorAction Stop
+$nodeExe = $nodeCommand.Source
+$startedAt = [DateTimeOffset]::UtcNow.ToString("o")
+
 Push-Location $ProjectRoot
 try {
-  & node $Notifier
-  if ($LASTEXITCODE -ne 0) {
-    throw "Phase 7B Telegram notifier exited with code $LASTEXITCODE"
+  $nodeProcess = Start-Process -FilePath $nodeExe -ArgumentList @($Notifier) -NoNewWindow -PassThru
+  Write-TelegramRuntime -Status "RUNNING" -Pid $nodeProcess.Id -StartedAt $startedAt
+  Write-Host "PHASE7B_TELEGRAM_NOTIFIER=RUNNING"
+  Write-Host "PHASE7B_TELEGRAM_PID=$($nodeProcess.Id)"
+
+  while (-not $nodeProcess.HasExited) {
+    Start-Sleep -Seconds ([Math]::Max(1, $IntervalSeconds))
+    $nodeProcess.Refresh()
+    if (-not $nodeProcess.HasExited) {
+      Write-TelegramRuntime -Status "RUNNING" -Pid $nodeProcess.Id -StartedAt $startedAt
+    }
+  }
+
+  $exitCode = $nodeProcess.ExitCode
+  Write-TelegramRuntime -Status "STOPPED" -Pid $nodeProcess.Id -ExitCode $exitCode -StartedAt $startedAt
+  if ($exitCode -ne 0) {
+    throw "Phase 7B Telegram notifier exited with code $exitCode"
   }
 }
 finally {
