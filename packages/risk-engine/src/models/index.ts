@@ -8,6 +8,7 @@ export * from "./Phase6CForwardHoldout";
 export * from "./Phase6DForwardHoldout";
 export * from "./Phase6EHistoricalBlind";
 export * from "./Phase7TrendRider";
+export * from "./Phase7BPullbackEntry";
 export * from "./ExposureProjection";
 export * from "./InstrumentRiskSpec";
 export * from "./MarginProjection";
