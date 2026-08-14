@@ -8,6 +8,8 @@ import { getMt5Telemetry } from "../services/mt5.service";
 const execFileAsync = promisify(execFile);
 const router = Router();
 const TELEGRAM_HEARTBEAT_STALE_MS = 10_000;
+const BOT_START_TIMEOUT_MS = 30_000;
+const TELEGRAM_START_TIMEOUT_MS = 15_000;
 const BOT_TASK = "XAUUSD-Phase7B-Bot";
 const TELEGRAM_TASK = "XAUUSD-Phase7B-Telegram";
 
@@ -90,6 +92,8 @@ router.get("/status", async (req: Request, res: Response) => {
         directOrderRouteExposed: false,
         botStopBlockedWhileManaging: true,
         controlTransport: "LOCALHOST_ONLY",
+        botStartVerification: "RUNTIME_PID_AND_HEARTBEAT",
+        telegramStartVerification: "RUNTIME_PID_AND_HEARTBEAT",
       },
     });
   } catch (error) {
@@ -102,9 +106,10 @@ router.post("/bot/start", async (req: Request, res: Response) => {
 
   try {
     const demoDir = requireDemoDir();
-    const runtime = readJsonIfExists<RuntimeState>(path.join(demoDir, "phase7b-demo-runtime.json"));
-    if (runtime?.armed && isPidAlive(runtime.pid)) {
-      return res.json({ accepted: true, action: "BOT_ALREADY_RUNNING", message: "Bot DEMO đang chạy." });
+    const runtimePath = path.join(demoDir, "phase7b-demo-runtime.json");
+    const currentRuntime = readJsonIfExists<RuntimeState>(runtimePath);
+    if (currentRuntime?.armed && isPidAlive(currentRuntime.pid)) {
+      return res.json({ accepted: true, action: "BOT_ALREADY_RUNNING", message: "Bot DEMO đang chạy.", pid: currentRuntime.pid });
     }
 
     const telemetry = await getMt5Telemetry("XAUUSD");
@@ -116,12 +121,31 @@ router.post("/bot/start", async (req: Request, res: Response) => {
 
     const workRoot = path.dirname(demoDir);
     const fixedVolume = process.env.PHASE7B_FIXED_VOLUME?.trim() || "0.03";
-    launchPowerShell(script, ["-WorkDir", workRoot, "-FixedVolume", fixedVolume, "-ArmDemoTrading"]);
+    const logPath = path.join(demoDir, "phase7b-web-bot-start.log");
+    const requestedAt = Date.now();
+    prepareStartLog(logPath, `BOT START ${new Date(requestedAt).toISOString()} · volume=${fixedVolume}`);
+    const launcherPid = launchPowerShellLogged(
+      script,
+      ["-WorkDir", workRoot, "-FixedVolume", fixedVolume, "-ArmDemoTrading"],
+      logPath,
+    );
+
+    const runtime = await waitForBotRuntime(runtimePath, requestedAt, BOT_START_TIMEOUT_MS);
+    if (!runtime) {
+      if (isPidAlive(launcherPid)) await killProcessTree(launcherPid);
+      const tail = readLogTail(logPath, 32);
+      return res.status(503).json({
+        error: `Bot DEMO không lên RUNNING trong ${BOT_START_TIMEOUT_MS / 1000} giây.\n\nLog cuối:\n${tail || "Không có log."}`,
+        code: "BOT_START_VERIFICATION_FAILED",
+        logPath,
+      });
+    }
 
     return res.json({
       accepted: true,
-      action: "BOT_START_REQUESTED",
-      message: `Đã yêu cầu chạy Bot DEMO ${fixedVolume} lot.`,
+      action: "BOT_STARTED",
+      message: `Bot DEMO đã RUNNING · ${fixedVolume} lot · PID ${runtime.pid}.`,
+      pid: runtime.pid,
       demoOnly: true,
       realAccountAllowed: false,
     });
@@ -161,10 +185,11 @@ router.post("/telegram/start", async (req: Request, res: Response) => {
 
   try {
     const demoDir = requireDemoDir();
-    const runtime = readJsonIfExists<TelegramRuntimeState>(path.join(demoDir, "phase7b-telegram-runtime.json"));
-    const status = getTelegramRuntimeStatus(runtime);
-    if (status.alive) {
-      return res.json({ accepted: true, action: "TELEGRAM_ALREADY_RUNNING", message: "Telegram đang bật." });
+    const runtimePath = path.join(demoDir, "phase7b-telegram-runtime.json");
+    const currentRuntime = readJsonIfExists<TelegramRuntimeState>(runtimePath);
+    const currentStatus = getTelegramRuntimeStatus(currentRuntime);
+    if (currentStatus.alive) {
+      return res.json({ accepted: true, action: "TELEGRAM_ALREADY_RUNNING", message: "Telegram đang bật.", pid: currentStatus.pid });
     }
 
     const projectRoot = findProjectRoot();
@@ -173,8 +198,32 @@ router.post("/telegram/start", async (req: Request, res: Response) => {
     if (!fs.existsSync(script)) return res.status(500).json({ error: `Missing Telegram script: ${script}` });
     if (!fs.existsSync(envFile)) return res.status(409).json({ error: `Missing Telegram env: ${envFile}` });
 
-    launchPowerShell(script, ["-WorkDir", path.dirname(demoDir), "-EnvFile", envFile]);
-    return res.json({ accepted: true, action: "TELEGRAM_START_REQUESTED", message: "Đã bật thông báo Telegram." });
+    const logPath = path.join(demoDir, "phase7b-web-telegram-start.log");
+    const requestedAt = Date.now();
+    prepareStartLog(logPath, `TELEGRAM START ${new Date(requestedAt).toISOString()}`);
+    const launcherPid = launchPowerShellLogged(
+      script,
+      ["-WorkDir", path.dirname(demoDir), "-EnvFile", envFile],
+      logPath,
+    );
+
+    const telegram = await waitForTelegramRuntime(runtimePath, requestedAt, TELEGRAM_START_TIMEOUT_MS);
+    if (!telegram) {
+      if (isPidAlive(launcherPid)) await killProcessTree(launcherPid);
+      const tail = readLogTail(logPath, 32);
+      return res.status(503).json({
+        error: `Telegram không lên RUNNING trong ${TELEGRAM_START_TIMEOUT_MS / 1000} giây.\n\nLog cuối:\n${tail || "Không có log."}`,
+        code: "TELEGRAM_START_VERIFICATION_FAILED",
+        logPath,
+      });
+    }
+
+    return res.json({
+      accepted: true,
+      action: "TELEGRAM_STARTED",
+      message: `Telegram notifier đã ONLINE · PID ${telegram.pid}.`,
+      pid: telegram.pid,
+    });
   } catch (error) {
     return res.status(503).json({ error: errorMessage(error) });
   }
@@ -243,13 +292,65 @@ function findProjectRoot(): string {
   throw new Error(`Cannot locate project root from ${process.cwd()}.`);
 }
 
-function launchPowerShell(script: string, args: string[]): void {
-  const child = spawn(
-    "powershell.exe",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, ...args],
-    { detached: true, windowsHide: true, stdio: "ignore" },
-  );
-  child.unref();
+function prepareStartLog(file: string, header: string): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, `\n=== ${header} ===\n`, "utf8");
+}
+
+function launchPowerShellLogged(script: string, args: string[], logPath: string): number {
+  const fd = fs.openSync(logPath, "a");
+  try {
+    const child = spawn(
+      "powershell.exe",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, ...args],
+      { detached: true, windowsHide: true, stdio: ["ignore", fd, fd] },
+    );
+    child.unref();
+    return child.pid ?? 0;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+async function waitForBotRuntime(file: string, requestedAt: number, timeoutMs: number): Promise<RuntimeState | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const runtime = readJsonIfExists<RuntimeState>(file);
+    const startedAt = Number(runtime?.startedAt ?? 0);
+    const heartbeatAge = runtime?.heartbeatAt ? Math.max(0, Date.now() - Number(runtime.heartbeatAt)) : Number.POSITIVE_INFINITY;
+    if (
+      runtime?.status === "RUNNING" &&
+      runtime.armed === true &&
+      startedAt >= requestedAt - 2_000 &&
+      heartbeatAge <= 10_000 &&
+      isPidAlive(runtime.pid)
+    ) {
+      return runtime;
+    }
+    await sleep(500);
+  }
+  return null;
+}
+
+async function waitForTelegramRuntime(file: string, requestedAt: number, timeoutMs: number): Promise<TelegramRuntimeState | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const runtime = readJsonIfExists<TelegramRuntimeState>(file);
+    const startedAt = runtime?.startedAt ? Date.parse(runtime.startedAt) : 0;
+    const status = getTelegramRuntimeStatus(runtime);
+    if (status.alive && startedAt >= requestedAt - 2_000) return runtime;
+    await sleep(500);
+  }
+  return null;
+}
+
+function readLogTail(file: string, maxLines: number): string {
+  if (!fs.existsSync(file)) return "";
+  try {
+    return fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "").split(/\r?\n/).slice(-maxLines).join("\n").trim();
+  } catch {
+    return "";
+  }
 }
 
 function assertDemoTradingReady(telemetry: Awaited<ReturnType<typeof getMt5Telemetry>>): void {
@@ -342,6 +443,10 @@ function isPidAlive(pid: number | null | undefined): boolean {
   } catch {
     return false;
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function errorMessage(error: unknown): string {
