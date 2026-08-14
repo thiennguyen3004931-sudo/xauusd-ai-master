@@ -23,6 +23,7 @@ import type {
   Phase7DDailyScaleLane,
   Phase7DDailyScaleMetrics,
   Phase7DDailyScaleResult,
+  Phase7DReconciliationCheck,
 } from "../phase7d-daily-scale-types";
 
 const DAY_MS = 86_400_000;
@@ -87,7 +88,7 @@ export function Phase7DDailyScalePage() {
       </Box>
 
       <Alert severity="warning">
-        Research only. Không thay đổi Phase 7B DEMO. Với fixed 0.03 lot: +10 đóng 0.01, +20 đóng 0.01, runner còn 0.01. Kết quả M5 là intrabar approximation, không bảo đảm ngày nào cũng dương.
+        Research only. Không thay đổi Phase 7B DEMO. Mọi verdict BE6/BE10 hiện bị khóa nếu Reconciliation Gate không PASS trên đúng cùng khoảng dữ liệu.
       </Alert>
 
       <Card><CardContent component="form" onSubmit={run}>
@@ -102,7 +103,7 @@ export function Phase7DDailyScalePage() {
           <Grid size={{ xs: 6, md: 1.5 }}><TextField fullWidth size="small" type="number" label="Recovery max" value={recoveryMaxPrice} onChange={(e) => setRecoveryMaxPrice(Number(e.target.value))} /></Grid>
           <Grid size={{ xs: 6, md: 1.5 }}><TextField fullWidth size="small" type="number" label="Buffer $" value={profitBufferUsd} onChange={(e) => setProfitBufferUsd(Number(e.target.value))} /></Grid>
           <Grid size={{ xs: 6, md: 2 }}><TextField fullWidth size="small" type="number" label="Positive Lock floor $" value={positiveLockFloorUsd} onChange={(e) => setPositiveLockFloorUsd(Number(e.target.value))} /></Grid>
-          <Grid size={{ xs: 12, md: 2 }}><Button fullWidth type="submit" variant="contained" startIcon={<PlayArrowRounded />} disabled={running} sx={{ height: 40 }}>{running ? "Đang replay..." : "Đánh giá 4 lane"}</Button></Grid>
+          <Grid size={{ xs: 12, md: 2 }}><Button fullWidth type="submit" variant="contained" startIcon={<PlayArrowRounded />} disabled={running} sx={{ height: 40 }}>{running ? "Đang reconcile..." : "Reconcile + đánh giá"}</Button></Grid>
         </Grid>
       </CardContent></Card>
 
@@ -121,6 +122,8 @@ function ResultView({ result }: { result: Phase7DDailyScaleResult }) {
   ] as const;
 
   return <Stack spacing={2}>
+    <ReconciliationCard result={result} />
+
     <Card><CardContent>
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2}>
         <Box>
@@ -162,7 +165,7 @@ function ResultView({ result }: { result: Phase7DDailyScaleResult }) {
       <Grid size={{ xs: 12, lg: 6 }}><PnlBreakdown title="+10/+20 SCALE · BE10" metrics={result.scaleBe10.metrics} /></Grid>
     </Grid>
 
-    <Card><CardContent>
+    {result.reconciliation.passed ? <Card><CardContent>
       <Typography fontWeight={900}>Điểm nghiên cứu so với Recovery + Lock hiện tại</Typography>
       <Grid container spacing={2} sx={{ mt: 0.5 }}>
         {result.decision.candidates.map((item) => <Grid key={item.lane} size={{ xs: 12, md: 6 }}>
@@ -173,10 +176,45 @@ function ResultView({ result }: { result: Phase7DDailyScaleResult }) {
           </Box>
         </Grid>)}
       </Grid>
-    </CardContent></Card>
+    </CardContent></Card> : <Alert severity="error">Không chấm BE6/BE10 vì baseline chưa reconcile. Dùng bảng Reconciliation Gate ở trên để xác định engine nào đang lệch.</Alert>}
 
     {result.notes.map((note) => <Alert key={note} severity="info">{note}</Alert>)}
   </Stack>;
+}
+
+function ReconciliationCard({ result }: { result: Phase7DDailyScaleResult }) {
+  const r = result.reconciliation;
+  return <Card sx={{ border: `1px solid ${r.passed ? "rgba(46,204,113,.35)" : "rgba(244,67,54,.35)"}` }}><CardContent>
+    <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2}>
+      <Box>
+        <Typography variant="overline" color="text.secondary" fontWeight={800}>RECONCILIATION GATE</Typography>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          <Typography variant="h6" fontWeight={900}>{r.status}</Typography>
+          <Chip size="small" color={r.passed ? "success" : "error"} label={r.passed ? "DECISION UNLOCKED" : "DECISION LOCKED"} />
+        </Stack>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{r.note}</Typography>
+      </Box>
+      <Box>
+        <Typography variant="caption" color="text.secondary">Failed checks</Typography>
+        <Typography fontWeight={900}>{r.failedKeys.length ? r.failedKeys.length : 0}</Typography>
+      </Box>
+    </Stack>
+    <TableContainer sx={{ mt: 1.5 }}><Table size="small">
+      <TableHead><TableRow><TableCell>Check</TableCell><TableCell>Status</TableCell><TableCell align="right">Expected</TableCell><TableCell align="right">Actual</TableCell><TableCell align="right">Delta</TableCell></TableRow></TableHead>
+      <TableBody>{r.checks.map((check) => <ReconciliationRow key={check.key} check={check} />)}</TableBody>
+    </Table></TableContainer>
+  </CardContent></Card>;
+}
+
+function ReconciliationRow({ check }: { check: Phase7DReconciliationCheck }) {
+  const value = (input: number | string | null) => input === null ? "—" : typeof input === "number" ? input.toFixed(4).replace(/\.0000$/, "") : input;
+  return <TableRow>
+    <TableCell sx={{ fontFamily: "monospace", fontSize: 12 }}>{check.key}</TableCell>
+    <TableCell><Chip size="small" color={check.pass ? "success" : "error"} variant="outlined" label={check.pass ? "PASS" : "FAIL"} /></TableCell>
+    <TableCell align="right">{value(check.expected)}</TableCell>
+    <TableCell align="right">{value(check.actual)}</TableCell>
+    <TableCell align="right">{check.delta === null ? "—" : check.delta.toFixed(4)}</TableCell>
+  </TableRow>;
 }
 
 function LaneCard({ title, lane }: { title: string; lane: Phase7DDailyScaleLane }) {
