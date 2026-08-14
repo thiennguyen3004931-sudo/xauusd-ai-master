@@ -2,6 +2,8 @@ param(
   [Parameter(Mandatory = $true)] [string]$WorkDir,
   [decimal]$FixedVolume = 0.03,
   [int]$IntervalSeconds = 5,
+  [int]$PreCloseMinSeconds = 5,
+  [int]$PreCloseMaxSeconds = 10,
   [string]$BridgeEnv = "",
   [switch]$ArmDemoTrading,
   [switch]$Once
@@ -29,6 +31,15 @@ if (-not (Test-Path $BridgeEnv)) {
 
 if ($FixedVolume -le 0) { throw "FixedVolume must be positive." }
 if ($IntervalSeconds -lt 1) { throw "IntervalSeconds must be >= 1." }
+if ($PreCloseMinSeconds -lt 1) { throw "PreCloseMinSeconds must be >= 1." }
+if ($PreCloseMaxSeconds -le $PreCloseMinSeconds -or $PreCloseMaxSeconds -gt 30) {
+  throw "Pre-close window must satisfy 1 <= min < max <= 30 seconds."
+}
+
+# Pre-close detection must sample more frequently than the 5-10 second entry
+# window. Keep the user's normal interval for management, but run the armed
+# controller at one-second cadence so the provisional window is not skipped.
+$EffectiveIntervalSeconds = if ($ArmDemoTrading) { 1 } else { $IntervalSeconds }
 
 $BridgeEnv = (Resolve-Path $BridgeEnv).Path
 $DemoWorkDir = Join-Path $WorkDir "phase7b-demo-forward"
@@ -54,7 +65,7 @@ function Write-DemoRuntimeState {
     pid = $ProcessId
     heartbeatAt = Get-EpochMs
     startedAt = $StartedAt
-    intervalSeconds = $IntervalSeconds
+    intervalSeconds = $EffectiveIntervalSeconds
   }
   $tmp = "$RuntimePath.tmp"
   $json = $payload | ConvertTo-Json -Depth 4
@@ -81,15 +92,22 @@ Get-Content $BridgeEnv | ForEach-Object {
 $env:ZIQ_BRIDGE_ENV = $BridgeEnv
 $env:ZIQ_DEMO_WORK_DIR = $DemoWorkDir
 $env:ZIQ_FIXED_VOLUME = [string]$FixedVolume
-$env:ZIQ_DEMO_INTERVAL_SECONDS = [string]$IntervalSeconds
+$env:ZIQ_DEMO_INTERVAL_SECONDS = [string]$EffectiveIntervalSeconds
 $env:ZIQ_DEMO_ARMED = if ($ArmDemoTrading) { "true" } else { "false" }
 $env:ZIQ_DEMO_ONCE = if ($Once) { "true" } else { "false" }
 $env:ZIQ_DEMO_SYMBOL = "XAUUSD"
+$env:ZIQ_PRE_CLOSE_ENTRY_ENABLED = "true"
+$env:ZIQ_PRE_CLOSE_MIN_SECONDS = [string]$PreCloseMinSeconds
+$env:ZIQ_PRE_CLOSE_MAX_SECONDS = [string]$PreCloseMaxSeconds
 
 Write-Host "PHASE7B_DEMO_WORK_DIR=$DemoWorkDir"
 Write-Host "PHASE7B_DEMO_BRIDGE_ENV=$BridgeEnv"
 Write-Host "PHASE7B_DEMO_FIXED_VOLUME=$FixedVolume"
-Write-Host "PHASE7B_DEMO_INTERVAL_SECONDS=$IntervalSeconds"
+Write-Host "PHASE7B_DEMO_INTERVAL_SECONDS_REQUESTED=$IntervalSeconds"
+Write-Host "PHASE7B_DEMO_INTERVAL_SECONDS_EFFECTIVE=$EffectiveIntervalSeconds"
+Write-Host "PHASE7B_DEMO_PRE_CLOSE_ENTRY=ENABLED"
+Write-Host "PHASE7B_DEMO_PRE_CLOSE_WINDOW_SECONDS=$PreCloseMinSeconds-$PreCloseMaxSeconds"
+Write-Host "PHASE7B_DEMO_PRE_CLOSE_CANDLE=FORMING_M15_PROVISIONAL"
 Write-Host "PHASE7B_DEMO_ARM_REQUESTED=$($ArmDemoTrading.IsPresent)"
 Write-Host "PHASE7B_DEMO_REAL_ACCOUNT_ALLOWED=false"
 Write-Host "PHASE7B_DEMO_RUNTIME_STATE=$RuntimePath"
@@ -141,8 +159,10 @@ if (-not $ArmDemoTrading -and $Once) {
 
 $ControllerTs = Join-Path $ProjectRoot "scripts\run-phase7b-demo-controller.ts"
 $ControllerMts = Join-Path $ProjectRoot "scripts\.phase7b-demo-controller.mts"
+$PreCloseHook = Join-Path $ProjectRoot "scripts\phase7b-preclose-fetch-hook.mts"
 $RiskEngineEsm = Join-Path $ProjectRoot "packages\risk-engine\dist\index.js"
 if (-not (Test-Path $ControllerTs)) { throw "Phase 7B DEMO controller missing: $ControllerTs" }
+if (-not (Test-Path $PreCloseHook)) { throw "Phase 7B DEMO pre-close hook missing: $PreCloseHook" }
 
 $BotProcess = $null
 $RuntimeStartedAt = $null
@@ -170,13 +190,14 @@ try {
   Write-Host "PHASE7B_DEMO_CONTROLLER_MODULE=NODE24_NATIVE_TS_MTS"
   Write-Host "PHASE7B_DEMO_RISK_ENGINE_IMPORT=../packages/risk-engine/dist/index.js"
   Write-Host "PHASE7B_DEMO_TSX_RUNTIME=OFF"
+  Write-Host "PHASE7B_DEMO_PRE_CLOSE_HOOK=$PreCloseHook"
 
   if ($ArmDemoTrading) {
     $RuntimeStartedAt = Get-EpochMs
     Write-DemoRuntimeState -Status "STARTING" -Armed $true -ProcessId $null -StartedAt $RuntimeStartedAt
     $NodeExe = (Get-Command node -ErrorAction Stop).Source
-    $QuotedController = "`"$ControllerMts`""
-    $BotProcess = Start-Process -FilePath $NodeExe -ArgumentList $QuotedController -NoNewWindow -PassThru
+    $ImportArg = "--import=$PreCloseHook"
+    $BotProcess = Start-Process -FilePath $NodeExe -ArgumentList @($ImportArg, $ControllerMts) -NoNewWindow -PassThru
     Write-DemoRuntimeState -Status "RUNNING" -Armed $true -ProcessId $BotProcess.Id -StartedAt $RuntimeStartedAt
     Write-Host "PHASE7B_DEMO_RUNTIME_ARMED=YES"
     Write-Host "PHASE7B_DEMO_RUNTIME_PID=$($BotProcess.Id)"
@@ -184,7 +205,7 @@ try {
 
     while (-not $BotProcess.HasExited) {
       Write-DemoRuntimeState -Status "RUNNING" -Armed $true -ProcessId $BotProcess.Id -StartedAt $RuntimeStartedAt
-      Start-Sleep -Seconds ([Math]::Max(1, [Math]::Min($IntervalSeconds, 5)))
+      Start-Sleep -Seconds ([Math]::Max(1, [Math]::Min($EffectiveIntervalSeconds, 5)))
       $BotProcess.Refresh()
     }
 
@@ -192,7 +213,7 @@ try {
     Write-DemoRuntimeState -Status "STOPPED" -Armed $false -ProcessId $BotProcess.Id -StartedAt $RuntimeStartedAt
     if ($exitCode -ne 0) { throw "Phase 7B DEMO controller exited with code $exitCode" }
   } else {
-    & node $ControllerMts
+    & node "--import=$PreCloseHook" $ControllerMts
     $controllerExitCode = $LASTEXITCODE
 
     # Node 24 on Windows can hit a libuv async-handle assertion while the
