@@ -7,6 +7,11 @@ on:
   pull_request:
     paths:
       - "packages/risk-engine/**"
+      - "scripts/run-phase7b-demo-controller.ts"
+      - "scripts/run-phase7b-wait-pullback-shadow.ts"
+      - "scripts/run-phase7b-wait-pullback-shadow-local.ps1"
+      - "scripts/apply-phase7b-wait-pullback-demo-controller-hook.mjs"
+      - "scripts/templates/phase7b-wait-pullback-entry-subsystem.ts.txt"
       - ".github/workflows/phase7b-wait-pullback-ci.yml"
 
 jobs:
@@ -40,3 +45,49 @@ jobs:
 
       - name: Test risk-engine
         run: pnpm --filter @xauusd/risk-engine test
+
+      - name: Dry-run demo-controller WAIT_PULLBACK upgrade
+        shell: bash
+        run: |
+          cp scripts/run-phase7b-demo-controller.ts .phase7b-controller-ci.ts
+          node scripts/apply-phase7b-wait-pullback-demo-controller-hook.mjs .phase7b-controller-ci.ts
+          node scripts/apply-phase7b-wait-pullback-demo-controller-hook.mjs .phase7b-controller-ci.ts
+
+          grep -q 'PHASE7B_DEMO_STRUCTURAL_SL_GT_10=WAIT_PULLBACK' .phase7b-controller-ci.ts
+          grep -q '3_PATTERNS_PLUS_SUPERTREND_M15_M5_10_3' .phase7b-controller-ci.ts
+          grep -q 'THREE_CANDLE_BODY_DOMINANCE' .phase7b-controller-ci.ts
+          grep -q 'pendingPullback' .phase7b-controller-ci.ts
+          grep -q 'if (allowReal) throw new Error' .phase7b-controller-ci.ts
+          grep -q 'PLUS6_SL_TO_ENTRY' .phase7b-controller-ci.ts
+          grep -q 'PLUS10_PARTIAL_ONE_THIRD' .phase7b-controller-ci.ts
+          grep -q 'REVERSAL_FVG_REJECTION' .phase7b-controller-ci.ts
+          grep -q 'TREND_MA20' .phase7b-controller-ci.ts
+
+          if grep -q 'PRICE_DISTANCE_CLAMPED_6_TO_10' .phase7b-controller-ci.ts; then exit 1; fi
+          if grep -q 'PATTERN_PLUS_MA_ONLY' .phase7b-controller-ci.ts; then exit 1; fi
+          if grep -q 'Math.min(10, Math.max(6' .phase7b-controller-ci.ts; then exit 1; fi
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const ts = require('typescript');
+          const file = '.phase7b-controller-ci.ts';
+          const source = fs.readFileSync(file, 'utf8');
+          const result = ts.transpileModule(source, {
+            fileName: file,
+            reportDiagnostics: true,
+            compilerOptions: {
+              target: ts.ScriptTarget.ES2022,
+              module: ts.ModuleKind.ESNext,
+            },
+          });
+          const errors = (result.diagnostics ?? []).filter((d) => d.category === ts.DiagnosticCategory.Error);
+          if (errors.length) {
+            for (const diagnostic of errors) {
+              console.error(ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'));
+            }
+            process.exit(1);
+          }
+          console.log('PHASE7B_DEMO_CONTROLLER_TRANSPILE=PASS');
+          NODE
+
+          rm -f .phase7b-controller-ci.ts .phase7b-controller-ci.ts.phase7b-wait-pullback.bak
