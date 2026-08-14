@@ -3,8 +3,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$toDate = (Get-Date).ToString("yyyy-MM-dd")
-$fromDate = (Get-Date).AddDays(-6).ToString("yyyy-MM-dd")
+$toDate = (Get-Date).AddDays(-1).ToString("yyyy-MM-dd")
+$fromDate = (Get-Date).AddDays(-7).ToString("yyyy-MM-dd")
 
 $body = @{
   from = $fromDate
@@ -39,6 +39,7 @@ if ($r.reconciliation.passed -eq $true -and $r.decision.verdict -eq "RECONCILIAT
 }
 
 Write-Host "PHASE7D_DAILY_SCALE_TEST=PASS"
+Write-Host "PHASE7D_DAILY_SCALE_WINDOW=$fromDate..$toDate"
 Write-Host "PHASE7D_DAILY_SCALE_REPLAY=$($r.replayMode)"
 Write-Host "PHASE7D_DAILY_SCALE_RECONCILIATION=$($r.reconciliation.status)"
 Write-Host "PHASE7D_DAILY_SCALE_RECONCILIATION_FAILED_COUNT=$($r.reconciliation.failedKeys.Count)"
