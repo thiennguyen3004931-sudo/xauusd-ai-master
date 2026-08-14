@@ -10,6 +10,20 @@ param(
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $WorkDir = (Resolve-Path $WorkDir).Path
+$demoDir = if ((Split-Path -Leaf $WorkDir) -eq "phase7b-demo-forward") { $WorkDir } else { Join-Path $WorkDir "phase7b-demo-forward" }
+$runtimePath = Join-Path $demoDir "phase7b-demo-runtime.json"
+
+if (Test-Path $runtimePath) {
+  try {
+    $runtime = Get-Content $runtimePath -Raw | ConvertFrom-Json
+    if ($runtime.armed -and $runtime.status -eq "RUNNING" -and $null -ne $runtime.pid) {
+      Get-Process -Id ([int]$runtime.pid) -ErrorAction Stop | Out-Null
+      Write-Host "PHASE7B_AUTOSTART_BOT=ALREADY_RUNNING"
+      Write-Host "PHASE7B_AUTOSTART_BOT_PID=$($runtime.pid)"
+      exit 0
+    }
+  } catch {}
+}
 
 if ([string]::IsNullOrWhiteSpace($BridgeEnv)) {
   $BridgeEnv = Join-Path $ProjectRoot "packages\mt5-broker\bridge\.env.phase7b-demo"
