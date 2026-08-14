@@ -12,7 +12,7 @@ const messages = [
     previewTag,
     "",
     `🟢 <b>BUY SIGNAL · ${esc(symbol)}</b>`,
-    "<code>PHASE 7B · DEMO ONLY</code>",
+    "<b>PHASE 7B · DEMO ONLY</b>",
     "",
     line("🧠", "Pattern", "ENGULFING"),
     line("🎯", "Entry", "4324.15"),
@@ -25,7 +25,7 @@ const messages = [
     previewTag,
     "",
     `✅🟢 <b>BUY FILLED · ${esc(symbol)}</b>`,
-    "<code>PHASE 7B · DEMO ONLY</code>",
+    "<b>PHASE 7B · DEMO ONLY</b>",
     "",
     line("💵", "Entry", "4324.20"),
     line("📦", "Volume", "0.03 lot"),
@@ -35,32 +35,32 @@ const messages = [
   ].join("\n"),
 
   compact("🛡", "🟢", "BUY · +6 → BE", [
-    "📈 <b>Hiện:</b> <code>+6.15 giá</code> · 💵 <code>+$18.45</code>",
-    "🔒 <b>SL:</b> <code>4324.20</code> · khóa <code>+0.00 giá</code> · <code>$0.00</code>",
+    "📈 <b>Hiện: +6.15 giá</b> · 💵 <b>+$18.45</b>",
+    "🔒 <b>SL: 4324.20</b> · khóa <b>+0.00 giá</b> · <b>$0.00</b>",
   ]),
 
   compact("💰", "🟢", "BUY · CHỐT 1/3", [
-    "📈 <b>Chốt tại:</b> <code>+10.10 giá</code> · <b>Lãi:</b> <code>≈ +$10.10</code>",
-    "📤 <b>Đóng:</b> <code>0.01 lot</code> · còn <code>0.02 lot</code>",
-    "🛡 <b>SL:</b> <code>4324.20</code> · khóa <code>+0.00 giá</code> · <code>$0.00</code>",
-    "💵 <b>P&L runner:</b> <code>+$20.20</code>",
+    "📈 <b>Chốt tại: +10.10 giá</b> · 💰 <b>Lãi: ≈ +$10.10</b>",
+    "📤 <b>Đóng: 0.01 lot</b> · còn <b>0.02 lot</b>",
+    "🛡 <b>SL: 4324.20</b> · khóa <b>+0.00 giá</b> · <b>$0.00</b>",
+    "💵 <b>P&L runner: +$20.20</b>",
   ]),
 
   compact("🧩", "🟢", "BUY · HOLD", [
-    "📈 <b>Hiện:</b> <code>+12.40 giá</code> · 💵 <code>+$24.80</code>",
-    "🛡 <b>SL khóa:</b> <code>+0.00 giá</code> · <code>$0.00</code>",
+    "📈 <b>Hiện: +12.40 giá</b> · 💵 <b>+$24.80</b>",
+    "🛡 <b>SL khóa: +0.00 giá</b> · <b>$0.00</b>",
     "✅ FVG cùng hướng · tiếp tục giữ.",
   ]),
 
   compact("🔒", "🟢", "BUY · TRAIL SL", [
-    "🛡 <b>SL mới:</b> <code>4330.80</code> · khóa <code>+6.60 giá</code> · <code>≈ +$13.20</code>",
-    "📈 <b>Hiện:</b> <code>+14.50 giá</code> · 💵 <code>+$29.00</code>",
+    "🛡 <b>SL mới: 4330.80</b> · khóa <b>+6.60 giá</b> · <b>≈ +$13.20</b>",
+    "📈 <b>Hiện: +14.50 giá</b> · 💵 <b>+$29.00</b>",
   ]),
 
   compact("🏁", "🟢", "BUY · CHỐT LỆNH", [
-    "💵 <b>P&L tổng:</b> <code>+$39.10</code>",
-    "📈 <b>Biến động TB:</b> <code>+13.03 giá</code>",
-    "🎯 <b>Exit TB:</b> <code>4337.23</code>",
+    "💵 <b>P&L tổng: +$39.10</b>",
+    "📈 <b>Biến động TB: +13.03 giá</b>",
+    "🎯 <b>Exit TB: 4337.23</b>",
     "🧠 <b>Lý do:</b> đóng M15 phá MA20",
   ]),
 
@@ -68,7 +68,7 @@ const messages = [
     previewTag,
     "",
     `🔴 <b>SELL SIGNAL · ${esc(symbol)}</b>`,
-    "<code>PHASE 7B · DEMO ONLY</code>",
+    "<b>PHASE 7B · DEMO ONLY</b>",
     "",
     line("🧠", "Pattern", "TWO_CANDLE_BODY_DOMINANCE"),
     line("🎯", "Entry", "4312.60"),
@@ -81,7 +81,7 @@ const messages = [
     previewTag,
     "",
     `✅🔴 <b>SELL FILLED · ${esc(symbol)}</b>`,
-    "<code>PHASE 7B · DEMO ONLY</code>",
+    "<b>PHASE 7B · DEMO ONLY</b>",
     "",
     line("💵", "Entry", "4312.55"),
     line("📦", "Volume", "0.03 lot"),
@@ -91,23 +91,23 @@ const messages = [
   ].join("\n"),
 
   compact("💰", "🔴", "SELL · CHỐT 1/3", [
-    "📈 <b>Chốt tại:</b> <code>+10.30 giá</code> · <b>Lãi:</b> <code>≈ +$10.30</code>",
-    "📤 <b>Đóng:</b> <code>0.01 lot</code> · còn <code>0.02 lot</code>",
-    "🛡 <b>SL:</b> <code>4312.55</code> · khóa <code>+0.00 giá</code> · <code>$0.00</code>",
-    "💵 <b>P&L runner:</b> <code>+$20.60</code>",
+    "📈 <b>Chốt tại: +10.30 giá</b> · 💰 <b>Lãi: ≈ +$10.30</b>",
+    "📤 <b>Đóng: 0.01 lot</b> · còn <b>0.02 lot</b>",
+    "🛡 <b>SL: 4312.55</b> · khóa <b>+0.00 giá</b> · <b>$0.00</b>",
+    "💵 <b>P&L runner: +$20.60</b>",
   ]),
 
   compact("🏁", "🔴", "SELL · CHỐT LỆNH", [
-    "💵 <b>P&L tổng:</b> <code>+$38.75</code>",
-    "📈 <b>Biến động TB:</b> <code>+12.92 giá</code>",
-    "🎯 <b>Exit TB:</b> <code>4299.63</code>",
+    "💵 <b>P&L tổng: +$38.75</b>",
+    "📈 <b>Biến động TB: +12.92 giá</b>",
+    "🎯 <b>Exit TB: 4299.63</b>",
     "🧠 <b>Lý do:</b> FVG ngược hướng + rejection sau +10",
   ]),
 
   compact("🛑", "🔴", "SELL · CLOSED / STOP", [
-    "💵 <b>P&L tổng:</b> <code>−$24.00</code>",
-    "📉 <b>Biến động TB:</b> <code>−8.00 giá</code>",
-    "🎯 <b>Exit:</b> <code>4320.55</code>",
+    "💵 <b>P&L tổng: −$24.00</b>",
+    "📉 <b>Biến động TB: −8.00 giá</b>",
+    "🎯 <b>Exit: 4320.55</b>",
     "🧠 <b>Lý do:</b> STOPLOSS",
   ]),
 
@@ -115,7 +115,7 @@ const messages = [
     previewTag,
     "",
     "⚠️ <b>ACTION REJECTED</b>",
-    "<code>Broker từ chối sửa SL · bot giữ fail-closed</code>",
+    "<b>Broker từ chối sửa SL · bot giữ fail-closed</b>",
   ].join("\n"),
 ];
 
@@ -137,13 +137,13 @@ function compact(icon, sideMarker, title, lines) {
     previewTag,
     "",
     `${icon} ${sideMarker} <b>${esc(title)}</b>`,
-    "<code>PHASE 7B · DEMO</code>",
+    "<b>PHASE 7B · DEMO</b>",
     ...lines,
   ].join("\n");
 }
 
 function line(icon, label, raw) {
-  return `${icon} <b>${esc(label)}:</b> <code>${esc(raw)}</code>`;
+  return `${icon} <b>${esc(label)}: ${esc(raw)}</b>`;
 }
 
 async function sendHtml(text) {
