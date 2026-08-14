@@ -9,6 +9,7 @@ from .auth import api_key_dependency
 from .config import Settings
 from .errors import BridgeError
 from .forming_candles import candles_with_forming
+from .historical_candles import historical_candles
 from .ledger import IdempotencyLedger
 from .models import CloseRequest, ModifyRequest, OrderRequest
 from .mt5_gateway import Mt5Gateway
@@ -69,6 +70,16 @@ def candles(
     if includeForming:
         return candles_with_forming(gateway, symbol, timeframe, count)
     return gateway.candles(symbol, timeframe, count)
+
+
+@app.get("/v1/history/candles/{symbol}", dependencies=[Depends(verify_api_key)])
+def candle_history(
+    symbol: str,
+    fromMs: int,
+    toMs: int,
+    timeframe: str = "M15",
+):
+    return historical_candles(gateway, symbol, timeframe, fromMs, toMs)
 
 
 @app.get("/v1/symbols/{symbol}/spec", dependencies=[Depends(verify_api_key)])
