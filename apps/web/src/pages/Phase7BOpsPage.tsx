@@ -34,7 +34,7 @@ type DemoSnapshot = {
 };
 
 type TaskStatus = {
-  key: "bridge" | "bot" | "telegram";
+  key: "bridge" | "bot" | "telegram" | "web";
   name: string;
   exists: boolean;
   state: string;
@@ -45,7 +45,7 @@ type OpsStatus = {
   controlEnabled: boolean;
   generatedAt: number;
   tasks: TaskStatus[];
-  processes: { botAlive: boolean; telegramAlive: boolean };
+  processes: { botAlive: boolean; telegramAlive: boolean; webAlive: boolean };
   bridge: {
     reachable: boolean;
     status: string;
@@ -135,7 +135,9 @@ export function Phase7BOpsPage() {
   const botTask = taskByKey(o.tasks, "bot");
   const telegramTask = taskByKey(o.tasks, "telegram");
   const bridgeTask = taskByKey(o.tasks, "bridge");
+  const webTask = taskByKey(o.tasks, "web");
   const allTasksInstalled = o.tasks.every((task) => task.exists);
+  const coreTasksInstalled = o.tasks.filter((task) => task.key !== "web").every((task) => task.exists);
   const demoGuard = Boolean(
     d.mt5.reachable &&
       d.mt5.health?.accountMode === "demo" &&
@@ -150,7 +152,7 @@ export function Phase7BOpsPage() {
         <Typography variant="overline" color="primary" fontWeight={900}>VẬN HÀNH TỰ ĐỘNG</Typography>
         <Typography variant="h5" fontWeight={900}>Bot & Telegram</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          Khởi động các tiến trình Phase 7B DEMO bằng Windows Scheduled Tasks. Trang này không có API đặt, sửa hoặc đóng lệnh MT5.
+          Khởi động Phase 7B DEMO bằng Windows Scheduled Tasks. Web chỉ điều khiển task local; không có API đặt, sửa hoặc đóng lệnh MT5.
         </Typography>
       </Box>
 
@@ -160,7 +162,7 @@ export function Phase7BOpsPage() {
 
       {!allTasksInstalled && (
         <Alert severity="warning">
-          Chưa cài đủ Scheduled Task. Chạy <code>scripts/install-phase7b-autostart.ps1</code> một lần để tự chạy Bot + Telegram + Bridge sau khi đăng nhập Windows.
+          Chưa cài đủ Scheduled Task. Chạy lại <code>scripts/install-phase7b-autostart.ps1</code> để cài Bot + Telegram + Bridge + Web tự khởi động khi đăng nhập Windows.
         </Alert>
       )}
 
@@ -214,10 +216,17 @@ export function Phase7BOpsPage() {
             <CardContent>
               <ScheduleRounded color={allTasksInstalled ? "success" : "disabled"} />
               <Typography variant="caption" color="text.secondary" display="block" mt={1}>WINDOWS AUTOSTART</Typography>
-              <Typography variant="h6" fontWeight={900}>{allTasksInstalled ? "INSTALLED" : "NOT INSTALLED"}</Typography>
+              <Typography variant="h6" fontWeight={900}>{allTasksInstalled ? "INSTALLED" : "INCOMPLETE"}</Typography>
               <Typography variant="body2" color="text.secondary" mt={1}>
-                Bridge {bridgeTask?.state ?? "—"} · Bot {botTask?.state ?? "—"} · Telegram {telegramTask?.state ?? "—"}
+                Bridge {bridgeTask?.state ?? "—"} · Bot {botTask?.state ?? "—"} · Telegram {telegramTask?.state ?? "—"} · Web {webTask?.state ?? "—"}
               </Typography>
+              <Chip
+                size="small"
+                sx={{ mt: 1 }}
+                label={o.processes.webAlive ? "WEB ONLINE" : "WEB OFFLINE"}
+                color={statusColor(o.processes.webAlive)}
+                variant="outlined"
+              />
             </CardContent>
           </Card>
         </Grid>
@@ -229,14 +238,14 @@ export function Phase7BOpsPage() {
             <Box>
               <Typography variant="h6" fontWeight={900}>Khởi động DEMO stack</Typography>
               <Typography variant="body2" color="text.secondary" mt={0.5}>
-                Idempotent: nếu Bot hoặc Telegram đã chạy thì không tạo thêm bản sao. Nếu Bridge offline, hệ thống yêu cầu task Bridge khởi động trước.
+                Idempotent: nếu Bot hoặc Telegram đã chạy thì không tạo thêm bản sao. Web có task autostart riêng để lần mở máy sau không cần chạy PowerShell.
               </Typography>
             </Box>
             <Button
               variant="contained"
               size="large"
               startIcon={<PlayArrowRounded />}
-              disabled={start.isPending || !o.controlEnabled || !allTasksInstalled || d.mt5.health?.accountMode === "real"}
+              disabled={start.isPending || !o.controlEnabled || !coreTasksInstalled || d.mt5.health?.accountMode === "real"}
               onClick={() => start.mutate()}
               sx={{ minWidth: 250, fontWeight: 900 }}
             >
