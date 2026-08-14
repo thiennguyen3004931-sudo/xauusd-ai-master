@@ -9,6 +9,7 @@ import systemRouter from "./routes/system.route";
 import mt5Router from "./routes/mt5.route";
 import soakRouter from "./routes/soak.route";
 import phase7bDemoRouter from "./routes/phase7b-demo.route";
+import phase7bPatternCheckRouter from "./routes/phase7b-pattern-check.route";
 
 const app = express();
 
@@ -30,6 +31,7 @@ app.use("/api/v1/system", systemRouter);
 app.use("/api/v1/mt5", mt5Router);
 app.use("/api/v1/soak", soakRouter);
 app.use("/api/v1/phase7b-demo", phase7bDemoRouter);
+app.use("/api/v1/phase7b-pattern-check", phase7bPatternCheckRouter);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: "Route not found." });
