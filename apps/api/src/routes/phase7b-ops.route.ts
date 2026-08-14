@@ -12,6 +12,7 @@ const TASKS = {
   bridge: "XAUUSD-Phase7B-Bridge",
   bot: "XAUUSD-Phase7B-Bot",
   telegram: "XAUUSD-Phase7B-Telegram",
+  web: "XAUUSD-Phase7B-Web",
 } as const;
 
 type RuntimeState = {
@@ -39,9 +40,10 @@ router.get("/status", async (req: Request, res: Response) => {
     const demoDir = resolveDemoDir();
     const runtime = demoDir ? readJsonIfExists<RuntimeState>(path.join(demoDir, "phase7b-demo-runtime.json")) : null;
     const botProcessAlive = Boolean(runtime?.armed && isPidAlive(runtime.pid));
-    const [tasks, telegramProcessAlive, telemetry] = await Promise.all([
+    const [tasks, telegramProcessAlive, webUiAlive, telemetry] = await Promise.all([
       readTaskStatuses(),
       isTelegramNotifierAlive(),
+      isWebUiAlive(),
       getMt5Telemetry("XAUUSD").catch(() => null),
     ]);
 
@@ -54,6 +56,7 @@ router.get("/status", async (req: Request, res: Response) => {
       processes: {
         botAlive: botProcessAlive,
         telegramAlive: telegramProcessAlive,
+        webAlive: webUiAlive,
       },
       bridge: telemetry
         ? {
@@ -94,9 +97,10 @@ router.post("/start", async (req: Request, res: Response) => {
 
     const runtime = readJsonIfExists<RuntimeState>(path.join(demoDir, "phase7b-demo-runtime.json"));
     const botProcessAlive = Boolean(runtime?.armed && isPidAlive(runtime.pid));
-    const [tasks, telegramProcessAlive, telemetry] = await Promise.all([
+    const [tasks, telegramProcessAlive, webUiAlive, telemetry] = await Promise.all([
       readTaskStatuses(),
       isTelegramNotifierAlive(),
+      isWebUiAlive(),
       getMt5Telemetry("XAUUSD").catch(() => null),
     ]);
 
@@ -106,7 +110,8 @@ router.post("/start", async (req: Request, res: Response) => {
       });
     }
 
-    const missing = tasks.filter((task) => !task.exists);
+    const requiredForStart = tasks.filter((task) => task.key !== "web");
+    const missing = requiredForStart.filter((task) => !task.exists);
     if (missing.length > 0) {
       return res.status(409).json({
         error: `Autostart tasks are not installed: ${missing.map((task) => task.name).join(", ")}. Run scripts/install-phase7b-autostart.ps1 once.`,
@@ -136,6 +141,8 @@ router.post("/start", async (req: Request, res: Response) => {
     } else {
       actions.push("BOT_ALREADY_RUNNING");
     }
+
+    actions.push(webUiAlive ? "WEB_ALREADY_RUNNING" : "WEB_NOT_RUNNING_USE_AUTOSTART_TASK");
 
     return res.json({
       accepted: true,
@@ -186,14 +193,10 @@ async function readTaskStatuses(): Promise<TaskStatus[]> {
     "    [pscustomobject]@{ name=$name; exists=$false; state='NOT_INSTALLED' }",
     "  }",
     "}",
-    "$rows | ConvertTo-Json -Compress",
-  ].join("\n");
+    "@($rows) | ConvertTo-Json -Compress",
+  ].join("\r\n");
 
-  const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", script], {
-    windowsHide: true,
-    timeout: 5_000,
-    maxBuffer: 64 * 1024,
-  });
+  const stdout = await execPowerShell(script, 5_000, 64 * 1024);
   const raw = JSON.parse(stdout.trim()) as Array<{ name: string; exists: boolean; state: string }> | { name: string; exists: boolean; state: string };
   const parsed = Array.isArray(raw) ? raw : [raw];
   const byName = new Map(parsed.map((item) => [item.name, item]));
@@ -210,11 +213,17 @@ async function readTaskStatuses(): Promise<TaskStatus[]> {
 
 async function startScheduledTask(taskName: string): Promise<void> {
   const escaped = taskName.replace(/'/g, "''");
-  await execFileAsync(
+  await execPowerShell(`Start-ScheduledTask -TaskName '${escaped}' -ErrorAction Stop`, 5_000, 32 * 1024);
+}
+
+async function execPowerShell(script: string, timeout: number, maxBuffer: number): Promise<string> {
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  const { stdout } = await execFileAsync(
     "powershell.exe",
-    ["-NoProfile", "-Command", `Start-ScheduledTask -TaskName '${escaped}' -ErrorAction Stop`],
-    { windowsHide: true, timeout: 5_000, maxBuffer: 32 * 1024 },
+    ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+    { windowsHide: true, timeout, maxBuffer },
   );
+  return stdout;
 }
 
 async function isTelegramNotifierAlive(): Promise<boolean> {
@@ -226,14 +235,27 @@ async function isTelegramNotifierAlive(): Promise<boolean> {
     "if ($null -ne $p) { 'true' } else { 'false' }",
   ].join(" ");
   try {
-    const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", script], {
-      windowsHide: true,
-      timeout: 5_000,
-      maxBuffer: 16 * 1024,
-    });
+    const stdout = await execPowerShell(script, 5_000, 16 * 1024);
     return stdout.trim().toLowerCase() === "true";
   } catch {
     return false;
+  }
+}
+
+async function isWebUiAlive(): Promise<boolean> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1_500);
+  try {
+    const response = await fetch("http://127.0.0.1:5717/phase7b-ops", {
+      method: "GET",
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
