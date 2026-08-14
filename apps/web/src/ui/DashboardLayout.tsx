@@ -46,6 +46,7 @@ const tradingLinks = [
 
 const researchLinks = [
   ["/phase7c-backtest", "Canonical Backtest", AssessmentRounded],
+  ["/phase7e-supertrend", "Pattern + Supertrend", CandlestickChartRounded],
   ["/phase7d-daily-pnl", "Daily P/L Optimizer", ShowChartRounded],
   ["/phase7d-management", "BE + Partial Optimizer", TuneRounded],
   ["/phase7d-daily-scale", "Daily 10/20 Scale", InsightsRounded],
@@ -132,7 +133,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
           <Typography variant="caption" fontWeight={800}>LIVE LOCKED</Typography>
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, lineHeight: 1.5 }}>
-          Phase 7B chỉ giao dịch DEMO allow-list. Phase 7C/7D Control, Backtest, Daily P/L, Management, Scale và Auto Lot là research/read-only, không tự thay đổi execution.
+          Phase 7B chỉ giao dịch DEMO allow-list. Phase 7C/7D/7E Control, Backtest, Supertrend, Daily P/L, Management, Scale và Auto Lot là research/read-only, không tự thay đổi execution.
         </Typography>
       </Box>
     </Box>
@@ -150,11 +151,12 @@ export function DashboardLayout() {
   const isPhase7DDailyPnl = location.pathname.startsWith("/phase7d-daily-pnl");
   const isPhase7DManagement = location.pathname.startsWith("/phase7d-management");
   const isPhase7DDailyScale = location.pathname.startsWith("/phase7d-daily-scale");
+  const isPhase7ESupertrend = location.pathname.startsWith("/phase7e-supertrend");
   const isPhase7CAutoLot = location.pathname.startsWith("/phase7c-auto-lot");
   const isPhase7CRisk = location.pathname.startsWith("/phase7c-risk");
   const isPerformance = location.pathname.startsWith("/performance");
   const isSystem = location.pathname.startsWith("/system");
-  const isOperational = isControlCenter || isPhase7B || isPatternCheck || isPhase7BOps || isPhase7CBacktest || isPhase7DDailyPnl || isPhase7DManagement || isPhase7DDailyScale || isPhase7CAutoLot || isPhase7CRisk || isPerformance || isSystem;
+  const isOperational = isControlCenter || isPhase7B || isPatternCheck || isPhase7BOps || isPhase7CBacktest || isPhase7DDailyPnl || isPhase7DManagement || isPhase7DDailyScale || isPhase7ESupertrend || isPhase7CAutoLot || isPhase7CRisk || isPerformance || isSystem;
   const dashboard = useDashboard(!isOperational);
   const mode = dashboard.data?.control.mode ?? "SHADOW";
 
@@ -183,6 +185,10 @@ export function DashboardLayout() {
   } else if (isPhase7CBacktest) {
     headerTitle = "Canonical Phase 7B Backtest";
     headerSubtitle = "Broker-native MT5 history · selectable date range · closed-bar replay";
+    headerMode = "RESEARCH";
+  } else if (isPhase7ESupertrend) {
+    headerTitle = "Phase 7E Pattern + Dual Supertrend";
+    headerSubtitle = "Engulfing / Two-candle + closed M5/M15 Supertrend alignment · MA entry filter removed";
     headerMode = "RESEARCH";
   } else if (isPhase7DDailyPnl) {
     headerTitle = "Phase 7D Daily P/L Optimizer";
