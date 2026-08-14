@@ -10,6 +10,9 @@ on:
       - "scripts/run-phase7b-demo-controller.ts"
       - "scripts/run-phase7b-wait-pullback-shadow.ts"
       - "scripts/run-phase7b-wait-pullback-shadow-local.ps1"
+      - "scripts/upgrade-phase7b-wait-pullback-demo-local.ps1"
+      - "scripts/activate-phase7b-wait-pullback-demo-local.ps1"
+      - "scripts/summarize-phase7b-wait-pullback-journal-local.mjs"
       - "scripts/apply-phase7b-wait-pullback-demo-controller-hook.mjs"
       - "scripts/templates/phase7b-wait-pullback-entry-subsystem.ts.txt"
       - ".github/workflows/phase7b-wait-pullback-ci.yml"
@@ -45,6 +48,52 @@ jobs:
 
       - name: Test risk-engine
         run: pnpm --filter @xauusd/risk-engine test
+
+      - name: Parse Phase7B Node scripts
+        shell: bash
+        run: |
+          node --check scripts/apply-phase7b-wait-pullback-demo-controller-hook.mjs
+          node --check scripts/summarize-phase7b-wait-pullback-journal-local.mjs
+
+      - name: Parse Phase7B PowerShell scripts
+        shell: pwsh
+        run: |
+          $files = @(
+            "scripts/run-phase7b-wait-pullback-shadow-local.ps1",
+            "scripts/upgrade-phase7b-wait-pullback-demo-local.ps1",
+            "scripts/activate-phase7b-wait-pullback-demo-local.ps1"
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "$file :: $($_.Message)" }
+              exit 1
+            }
+            Write-Host "PHASE7B_POWERSHELL_PARSE_PASS=$file"
+          }
+
+      - name: Smoke-test WAIT_PULLBACK journal summary
+        shell: bash
+        run: |
+          cat > .phase7b-journal-ci.jsonl <<'EOF'
+          {"timestamp":"2026-08-15T00:00:00.000Z","type":"WAIT_PULLBACK","signalId":"s1"}
+          {"timestamp":"2026-08-15T00:05:00.000Z","type":"PULLBACK_STILL_TOO_WIDE","signalId":"s1"}
+          {"timestamp":"2026-08-15T00:10:00.000Z","type":"PULLBACK_ENTRY","signalId":"s1"}
+          {"timestamp":"2026-08-15T00:10:01.000Z","type":"ENTRY_FILLED","signalId":"s1","entryState":"PULLBACK_ENTRY"}
+          {"timestamp":"2026-08-15T00:15:00.000Z","type":"WAIT_PULLBACK","signalId":"s2"}
+          {"timestamp":"2026-08-15T00:30:01.000Z","type":"PULLBACK_EXPIRED","signalId":"s2"}
+          EOF
+          node scripts/summarize-phase7b-wait-pullback-journal-local.mjs \
+            --file=.phase7b-journal-ci.jsonl \
+            --out=.phase7b-summary-ci.json
+          node -e 'const s=require("./.phase7b-summary-ci.json"); if(s.waitPullbackSetups!==2||s.pullbackRecovered!==1||s.pullbackExpired!==1||s.entryFilled!==1) process.exit(1)'
+          rm -f .phase7b-journal-ci.jsonl .phase7b-summary-ci.json
 
       - name: Dry-run demo-controller WAIT_PULLBACK upgrade
         shell: bash
