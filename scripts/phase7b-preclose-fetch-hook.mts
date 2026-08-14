@@ -30,6 +30,7 @@ const symbol = process.env.ZIQ_DEMO_SYMBOL ?? "XAUUSD";
 const workDir = process.env.ZIQ_DEMO_WORK_DIR ?? "";
 const originalFetch = globalThis.fetch.bind(globalThis);
 const m15Ms = 15 * 60_000;
+const ENGULF_BODY_TOLERANCE_PRICE = 0.1;
 let lastExposedCloseTime = -1;
 
 if (!(minSeconds > 0 && maxSeconds > minSeconds && maxSeconds <= 30)) {
@@ -38,6 +39,7 @@ if (!(minSeconds > 0 && maxSeconds > minSeconds && maxSeconds <= 30)) {
 
 console.log(`PHASE7B_PRE_CLOSE_ENTRY=${enabled ? "ENABLED" : "DISABLED"}`);
 console.log(`PHASE7B_PRE_CLOSE_WINDOW_SECONDS=${minSeconds}-${maxSeconds}`);
+console.log(`PHASE7B_PRE_CLOSE_ENGULF_BODY_TOLERANCE_PRICE=${ENGULF_BODY_TOLERANCE_PRICE}`);
 console.log("PHASE7B_PRE_CLOSE_SIGNAL=PROVISIONAL_FORMING_M15");
 console.log("PHASE7B_PRE_CLOSE_FALLBACK=CLOSED_M15_IF_NO_PRE_CLOSE_SIGNAL");
 
@@ -116,6 +118,7 @@ globalThis.fetch = async function phase7bPreCloseFetch(
       secondsBeforeClose,
       provisional: true,
       entryRule: "PATTERN_PLUS_MA",
+      engulfBodyTolerancePrice: ENGULF_BODY_TOLERANCE_PRICE,
       fvgRequiredForEntry: false,
     };
     appendJournal(event);
@@ -176,16 +179,16 @@ function detectPattern(bars: Bar[], index: number): Pattern | null {
   if (
     isBearish(previous) &&
     isBullish(current) &&
-    current.open <= previous.close &&
-    current.close >= previous.open
+    current.open <= previous.close + ENGULF_BODY_TOLERANCE_PRICE + 1e-9 &&
+    current.close + ENGULF_BODY_TOLERANCE_PRICE + 1e-9 >= previous.open
   ) {
     return { side: "BUY", pattern: "ENGULFING", extreme: current.low };
   }
   if (
     isBullish(previous) &&
     isBearish(current) &&
-    current.open >= previous.close &&
-    current.close <= previous.open
+    current.open + ENGULF_BODY_TOLERANCE_PRICE + 1e-9 >= previous.close &&
+    current.close <= previous.open + ENGULF_BODY_TOLERANCE_PRICE + 1e-9
   ) {
     return { side: "SELL", pattern: "ENGULFING", extreme: current.high };
   }
