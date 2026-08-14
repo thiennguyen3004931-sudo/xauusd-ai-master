@@ -29,6 +29,11 @@ type ShadowTrade = {
   reason: string;
 };
 
+type FixedScheduleTrade = {
+  pnl: number;
+  volume: number;
+};
+
 export async function runPhase7CAutoLotBacktestComparison(input: Phase7CAutoLotBacktestRequest) {
   const fixedVolume = Number(input.fixedVolume ?? 0.03);
   const riskPercent = Number(input.riskPercent ?? 0.25);
@@ -61,6 +66,17 @@ export async function runPhase7CAutoLotBacktestComparison(input: Phase7CAutoLotB
     throw new Error("Broker volume/risk specification is invalid for Auto Lot comparison.");
   }
 
+  const fixedCompatible = canonicalCompatibleLot(fixedVolume, minVolume, step);
+  if (Math.abs(fixedCompatible - fixedVolume) > step / 100) {
+    throw new Error(
+      `Fixed volume ${fixedVolume} does not preserve exact one-third partial management at broker volumeStep ${step}. Use a compatible volume such as 0.03, 0.06, 0.09...`,
+    );
+  }
+
+  // Canonical backtest intentionally limits the returned journal to the latest
+  // 500 selected trades. Both sizing lanes below use exactly that same schedule
+  // so the comparison is apples-to-apples even when the full-period metrics
+  // contain more historical trades.
   const chronological = [...backtest.trades].sort((left, right) => left.entryTime - right.entryTime);
   const shadowTrades: ShadowTrade[] = [];
   let balance = startingBalance;
@@ -122,16 +138,7 @@ export async function runPhase7CAutoLotBacktestComparison(input: Phase7CAutoLotB
 
   const executed = shadowTrades.filter((trade) => trade.status === "EXECUTE");
   const autoMetrics = summarizeShadow(executed, startingBalance);
-  const fixedMetrics = {
-    trades: backtest.metrics.trades,
-    winRatePercent: backtest.metrics.winRatePercent,
-    netPnl: backtest.metrics.netPnl,
-    profitFactor: backtest.metrics.profitFactor,
-    expectancy: backtest.metrics.expectancy,
-    maxDrawdownUsd: backtest.metrics.maxDrawdownUsd,
-    endingBalance: round(startingBalance + backtest.metrics.netPnl, 2),
-    averageLot: round(avg(backtest.trades.map((trade) => trade.volume)), 4),
-  };
+  const fixedMetrics = summarizeFixedSchedule(chronological, startingBalance);
 
   return {
     source: "PHASE7C_AUTO_LOT_SHADOW_COMPARISON",
@@ -152,6 +159,9 @@ export async function runPhase7CAutoLotBacktestComparison(input: Phase7CAutoLotB
       volumeStep: step,
       minVolume,
       managementCompatibility: "EXACT_ONE_THIRD_PARTIAL_ONLY",
+      comparedTradeSchedule: chronological.length,
+      fullPeriodCanonicalTrades: backtest.metrics.trades,
+      journalTradeLimitApplied: backtest.metrics.trades > chronological.length,
     },
     fixed: fixedMetrics,
     autoLot: {
@@ -178,11 +188,12 @@ export async function runPhase7CAutoLotBacktestComparison(input: Phase7CAutoLotB
       endingBalance: round(autoMetrics.endingBalance - fixedMetrics.endingBalance, 2),
     },
     backtest,
-    shadowTrades: shadowTrades.slice(-500).reverse(),
+    shadowTrades: shadowTrades.slice().reverse(),
     notes: [
       "Auto Lot is a SHADOW sizing overlay only. It never changes Phase 7B DEMO orders.",
       "Only lot sizes that preserve exact one-third partial management at broker volumeStep are allowed; otherwise the shadow trade is BLOCKED.",
-      "The Auto Lot lane reuses the canonical fixed-lane selected trade schedule so price path and management remain comparable. BLOCKED trades do not re-open signal contention; this is a sizing study, not production-equivalent execution replay.",
+      "Fixed and Auto metrics are computed on the same returned canonical trade schedule. If the full-period canonical run exceeds the journal limit, the comparison explicitly reports that limitation.",
+      "BLOCKED trades do not re-open signal contention; this is a sizing study, not production-equivalent execution replay.",
       "Balance compounds only from shadow executed P/L. Commission, swap and tick-level slippage remain outside the Phase 7C replay.",
     ],
   };
@@ -199,6 +210,31 @@ function canonicalCompatibleLot(cap: number, minVolume: number, step: number): n
     units -= 1;
   }
   return 0;
+}
+
+function summarizeFixedSchedule(trades: FixedScheduleTrade[], startingBalance: number) {
+  const wins = trades.filter((trade) => trade.pnl > 0).length;
+  const grossProfit = trades.reduce((sum, trade) => sum + Math.max(0, trade.pnl), 0);
+  const grossLoss = Math.abs(trades.reduce((sum, trade) => sum + Math.min(0, trade.pnl), 0));
+  const netPnl = trades.reduce((sum, trade) => sum + trade.pnl, 0);
+  let equity = startingBalance;
+  let peak = startingBalance;
+  let maxDrawdownUsd = 0;
+  for (const trade of trades) {
+    equity += trade.pnl;
+    peak = Math.max(peak, equity);
+    maxDrawdownUsd = Math.max(maxDrawdownUsd, peak - equity);
+  }
+  return {
+    trades: trades.length,
+    winRatePercent: round(trades.length ? wins / trades.length * 100 : 0, 2),
+    netPnl: round(netPnl, 2),
+    profitFactor: grossLoss > 0 ? round(grossProfit / grossLoss, 4) : grossProfit > 0 ? null : 0,
+    expectancy: round(trades.length ? netPnl / trades.length : 0, 4),
+    maxDrawdownUsd: round(maxDrawdownUsd, 2),
+    endingBalance: round(startingBalance + netPnl, 2),
+    averageLot: round(avg(trades.map((trade) => trade.volume)), 4),
+  };
 }
 
 function summarizeShadow(trades: ShadowTrade[], startingBalance: number) {
