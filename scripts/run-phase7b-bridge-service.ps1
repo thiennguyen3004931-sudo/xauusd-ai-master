@@ -40,6 +40,16 @@ if ([string]::IsNullOrWhiteSpace($env:MT5_API_KEY) -or $env:MT5_API_KEY.Length -
 if ([string]::IsNullOrWhiteSpace($env:MT5_BRIDGE_HOST)) { $env:MT5_BRIDGE_HOST = "127.0.0.1" }
 if ([string]::IsNullOrWhiteSpace($env:MT5_BRIDGE_PORT)) { $env:MT5_BRIDGE_PORT = "8765" }
 
+$bridgeBase = "http://$($env:MT5_BRIDGE_HOST):$($env:MT5_BRIDGE_PORT)"
+try {
+  $existing = Invoke-RestMethod -Uri "$bridgeBase/health" -Headers @{ "x-mt5-api-key" = $env:MT5_API_KEY } -Method Get -TimeoutSec 3
+  if ($null -ne $existing) {
+    Write-Host "PHASE7B_BRIDGE_SERVICE=ALREADY_RUNNING"
+    Write-Host "PHASE7B_BRIDGE_EXISTING_ACCOUNT_MODE=$($existing.accountMode)"
+    exit 0
+  }
+} catch {}
+
 Write-Host "PHASE7B_BRIDGE_SERVICE=STARTING"
 Write-Host "PHASE7B_BRIDGE_ENV=$EnvFile"
 Write-Host "PHASE7B_BRIDGE_BIND=$($env:MT5_BRIDGE_HOST):$($env:MT5_BRIDGE_PORT)"
