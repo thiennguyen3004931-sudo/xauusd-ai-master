@@ -179,18 +179,23 @@ async function readTaskStatuses(): Promise<TaskStatus[]> {
   const script = [
     `$names=@(${psNames})`,
     "$rows = foreach ($name in $names) {",
-    "  try { $task = Get-ScheduledTask -TaskName $name -ErrorAction Stop; [pscustomobject]@{ name=$name; exists=$true; state=[string]$task.State } }",
-    "  catch { [pscustomobject]@{ name=$name; exists=$false; state='NOT_INSTALLED' } }",
+    "  try {",
+    "    $task = Get-ScheduledTask -TaskName $name -ErrorAction Stop",
+    "    [pscustomobject]@{ name=$name; exists=$true; state=[string]$task.State }",
+    "  } catch {",
+    "    [pscustomobject]@{ name=$name; exists=$false; state='NOT_INSTALLED' }",
+    "  }",
     "}",
     "$rows | ConvertTo-Json -Compress",
-  ].join("; ");
+  ].join("\n");
 
   const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", script], {
     windowsHide: true,
     timeout: 5_000,
     maxBuffer: 64 * 1024,
   });
-  const parsed = JSON.parse(stdout.trim()) as Array<{ name: string; exists: boolean; state: string }>;
+  const raw = JSON.parse(stdout.trim()) as Array<{ name: string; exists: boolean; state: string }> | { name: string; exists: boolean; state: string };
+  const parsed = Array.isArray(raw) ? raw : [raw];
   const byName = new Map(parsed.map((item) => [item.name, item]));
   return Object.entries(TASKS).map(([key, name]) => {
     const item = byName.get(name);
