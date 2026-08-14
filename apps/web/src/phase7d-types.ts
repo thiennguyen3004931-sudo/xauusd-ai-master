@@ -36,6 +36,7 @@ export interface Phase7DOutcome {
 export interface Phase7DLaneMetrics {
   trades: number;
   blockedTrades: number;
+  skippedPositionBusy: number;
   winRatePercent: number;
   netPnl: number;
   profitFactor: number | null;
@@ -70,6 +71,7 @@ export interface Phase7DLaneResult {
 export interface Phase7DDailyPnlResult {
   source: "PHASE7D_DAILY_PNL_RESEARCH";
   generatedAt: number;
+  replayMode?: "EXACT_PER_LANE_SIGNAL_CONTENTION_WITH_M5_APPROXIMATION";
   safety: {
     researchOnly: true;
     executionMutation: false;
@@ -90,6 +92,13 @@ export interface Phase7DDailyPnlResult {
     comparedTradeSchedule: number;
     fullPeriodCanonicalTrades: number;
     journalTradeLimitApplied: boolean;
+    signals?: number;
+    filledCandidateTrades?: number;
+    baselineSkippedPositionBusy?: number;
+    recoverySkippedPositionBusy?: number;
+    recoveryPlusLockSkippedPositionBusy?: number;
+    accountLogin?: number | null;
+    server?: string | null;
   };
   baseline: Phase7DLaneResult;
   recovery: Phase7DLaneResult;
