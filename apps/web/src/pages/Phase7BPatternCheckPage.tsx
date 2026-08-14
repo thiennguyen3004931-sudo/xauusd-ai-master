@@ -60,8 +60,22 @@ async function getSnapshot(): Promise<Snapshot> {
   return JSON.parse(text) as Snapshot;
 }
 
-function GateCard({ label, value, status, detail }: { label: string; value: string; status: "PASS" | "WAIT" | "INFO"; detail: string }) {
-  const color = status === "PASS" ? "success" : status === "WAIT" ? "warning" : "default";
+function tenHuong(side: Side | null | undefined) {
+  if (side === "BUY") return "MUA";
+  if (side === "SELL") return "BÁN";
+  return "—";
+}
+
+function tenMoHinh(name: string | null | undefined) {
+  if (name === "ENGULFING") return "Nến nhấn chìm";
+  if (name === "TWO_CANDLE_BODY_DOMINANCE") return "Hai nến thân chiếm ưu thế";
+  return "Chưa có mô hình";
+}
+
+type GateStatus = "ĐẠT" | "CHỜ" | "THÔNG TIN";
+
+function GateCard({ label, value, status, detail }: { label: string; value: string; status: GateStatus; detail: string }) {
+  const color = status === "ĐẠT" ? "success" : status === "CHỜ" ? "warning" : "default";
   return (
     <Card variant="outlined" sx={{ height: "100%" }}>
       <CardContent>
@@ -96,37 +110,69 @@ export function Phase7BPatternCheckPage() {
   const progress = useMemo(() => d ? Math.max(0, Math.min(100, ((15 * 60_000 - remainingMs) / (15 * 60_000)) * 100)) : 0, [d, remainingMs]);
 
   if (query.isLoading) return <LoadingState />;
-  if (query.isError || !query.data) return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được Live Entry Gate."} />;
-  if (!d) return <ErrorState message={query.data.entryDiagnosticsError ?? "Entry diagnostics chưa sẵn sàng."} />;
+  if (query.isError || !query.data) return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được điều kiện vào lệnh."} />;
+  if (!d) return <ErrorState message={query.data.entryDiagnosticsError ?? "Dữ liệu điều kiện vào lệnh chưa sẵn sàng."} />;
 
   const wanted = d.pattern.side;
   const m15Pass = Boolean(wanted && d.trend.m15Supertrend === wanted);
-  const m5Pass = Boolean(wanted && d.trend.m5Supertrend === wanted && d.trend.m5FreshAligned);
+  const m5DirectionPass = Boolean(wanted && d.trend.m5Supertrend === wanted);
+  const m5FreshPass = Boolean(wanted && d.trend.m5FreshAligned && d.trend.m5FlipAgeBars !== null && d.trend.m5FlipAgeBars <= 2);
+  const m5Pass = m5DirectionPass && m5FreshPass;
+  const stopPass = d.entry.stopDistance !== null && d.entry.stopDistance >= 6 && d.entry.stopDistance <= 10;
   const quote = query.data.mt5?.quote;
   const mid = quote?.bid !== undefined && quote?.ask !== undefined ? (Number(quote.bid) + Number(quote.ask)) / 2 : null;
+
+  const reasons = [
+    {
+      ok: d.pattern.matched,
+      text: d.pattern.matched
+        ? `Mô hình ${tenMoHinh(d.pattern.name)} theo hướng ${tenHuong(d.pattern.side)} đã xuất hiện trên nến đóng.`
+        : "Chưa xuất hiện một trong 2 mô hình nến bắt buộc.",
+    },
+    {
+      ok: m15Pass,
+      text: wanted
+        ? (m15Pass ? `Supertrend M15 đang cùng hướng ${tenHuong(wanted)}.` : `Supertrend M15 chưa cùng hướng ${tenHuong(wanted)}.`)
+        : "Chưa có hướng mô hình để đối chiếu Supertrend M15.",
+    },
+    {
+      ok: m5Pass,
+      text: wanted
+        ? (m5Pass
+          ? `M5 cùng hướng ${tenHuong(wanted)} và fresh flip còn ${d.trend.m5FlipAgeBars ?? "—"} nến đóng (yêu cầu ≤ 2).`
+          : `M5 chưa đạt đồng thời cùng hướng và fresh flip ≤ 2 nến đóng.`)
+        : "Chưa có hướng mô hình để đối chiếu M5.",
+    },
+    {
+      ok: stopPass,
+      text: stopPass
+        ? `Khoảng dừng lỗ hợp lệ: ${d.entry.stopDistance?.toFixed(2)} giá.`
+        : "Chưa xác định được khoảng dừng lỗ hợp lệ trong vùng 6–10 giá.",
+    },
+  ];
 
   return (
     <Stack spacing={2.2}>
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1.5} alignItems={{ md: "center" }}>
         <Box>
-          <Typography variant="overline" color="primary" fontWeight={900}>ENTRY CHECK</Typography>
-          <Typography variant="h4" fontWeight={950}>Live Entry Gate</Typography>
-          <Typography variant="body2" color="text.secondary" mt={0.5}>Chỉ dùng dữ liệu nến đã đóng.</Typography>
+          <Typography variant="overline" color="primary" fontWeight={900}>KIỂM TRA TÍN HIỆU</Typography>
+          <Typography variant="h4" fontWeight={950}>Điều kiện vào lệnh</Typography>
+          <Typography variant="body2" color="text.secondary" mt={0.5}>Chỉ đánh giá dữ liệu nến M15/M5 đã đóng, không dùng nến đang hình thành.</Typography>
         </Box>
-        <Chip label={d.entry.eligible ? `${d.entry.side} READY` : "WAIT SIGNAL"} color={d.entry.eligible ? "success" : "default"} sx={{ fontWeight: 900 }} />
+        <Chip label={d.entry.eligible ? `${tenHuong(d.entry.side)} · ĐỦ ĐIỀU KIỆN` : "CHƯA ĐỦ ĐIỀU KIỆN"} color={d.entry.eligible ? "success" : "default"} sx={{ fontWeight: 900 }} />
       </Stack>
 
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, md: 4 }}>
           <Card variant="outlined"><CardContent>
-            <Typography variant="caption" color="text.secondary" fontWeight={900}>XAUUSD</Typography>
+            <Typography variant="caption" color="text.secondary" fontWeight={900}>GIÁ XAUUSD</Typography>
             <Typography variant="h4" fontWeight={950}>{mid === null ? "—" : price(mid)}</Typography>
             <Typography variant="caption" color="text.secondary">Bid {quote?.bid === undefined ? "—" : price(Number(quote.bid))} · Ask {quote?.ask === undefined ? "—" : price(Number(quote.ask))}</Typography>
           </CardContent></Card>
         </Grid>
         <Grid size={{ xs: 12, md: 4 }}>
           <Card variant="outlined"><CardContent>
-            <Typography variant="caption" color="text.secondary" fontWeight={900}>M15 CLOSE IN</Typography>
+            <Typography variant="caption" color="text.secondary" fontWeight={900}>CÒN LẠI ĐẾN KHI ĐÓNG NẾN M15</Typography>
             <Typography variant="h4" fontWeight={950}>{countdown(remainingMs)}</Typography>
             <LinearProgress value={progress} variant="determinate" sx={{ mt: 1.5, height: 7, borderRadius: 99 }} />
             <Typography variant="caption" color="text.secondary" display="block" mt={1}>Nến vừa đóng: {dateTime(d.closeTime)}</Typography>
@@ -134,30 +180,53 @@ export function Phase7BPatternCheckPage() {
         </Grid>
         <Grid size={{ xs: 12, md: 4 }}>
           <Card variant="outlined" sx={{ borderColor: d.entry.eligible ? "success.main" : undefined }}><CardContent>
-            <Typography variant="caption" color="text.secondary" fontWeight={900}>ENTRY PREVIEW</Typography>
-            <Typography variant="h6" fontWeight={950}>{d.entry.eligible ? `${d.entry.side} READY` : "WAIT"}</Typography>
-            <Typography variant="body2" color="text.secondary" mt={0.5}>Entry {price(d.entry.referenceEntry)} · SL {d.entry.stopDistance === null ? "—" : `${d.entry.stopDistance.toFixed(2)} giá`}</Typography>
+            <Typography variant="caption" color="text.secondary" fontWeight={900}>DỰ KIẾN VÀO LỆNH</Typography>
+            <Typography variant="h6" fontWeight={950}>{d.entry.eligible ? `${tenHuong(d.entry.side)} · SẴN SÀNG` : "CHỜ TÍN HIỆU"}</Typography>
+            <Typography variant="body2" color="text.secondary" mt={0.5}>Giá tham chiếu {price(d.entry.referenceEntry)} · SL {d.entry.stopDistance === null ? "—" : `${d.entry.stopDistance.toFixed(2)} giá`}</Typography>
           </CardContent></Card>
         </Grid>
       </Grid>
 
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <GateCard label="1 · PATTERN" value={d.pattern.name?.replaceAll("_", " ") ?? "NONE"} status={d.pattern.matched ? "PASS" : "WAIT"} detail={d.pattern.side ? `Hướng ${d.pattern.side}` : "Chờ Engulfing / Two-candle"} />
+          <GateCard label="1 · MÔ HÌNH NẾN" value={tenMoHinh(d.pattern.name)} status={d.pattern.matched ? "ĐẠT" : "CHỜ"} detail={d.pattern.side ? `Hướng ${tenHuong(d.pattern.side)}` : "Chờ nến nhấn chìm hoặc hai nến thân chiếm ưu thế"} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <GateCard label="2 · SUPERTREND M15" value={d.trend.m15Supertrend ?? "—"} status={wanted ? (m15Pass ? "PASS" : "WAIT") : "INFO"} detail={wanted ? `Cần cùng hướng ${wanted}` : "Đánh giá khi có pattern"} />
+          <GateCard label="2 · SUPERTREND M15" value={tenHuong(d.trend.m15Supertrend)} status={wanted ? (m15Pass ? "ĐẠT" : "CHỜ") : "THÔNG TIN"} detail={wanted ? `Phải cùng hướng ${tenHuong(wanted)}` : "Đối chiếu sau khi có mô hình nến"} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <GateCard label="3 · M5 FRESH FLIP" value={d.trend.m5Supertrend ?? "—"} status={wanted ? (m5Pass ? "PASS" : "WAIT") : "INFO"} detail={d.trend.m5FlipAgeBars === null ? "Chưa có fresh flip" : `Flip age ${d.trend.m5FlipAgeBars} bar · 2 nến đóng gần nhất`} />
+          <GateCard label="3 · M5 CÙNG HƯỚNG + FRESH FLIP" value={tenHuong(d.trend.m5Supertrend)} status={wanted ? (m5Pass ? "ĐẠT" : "CHỜ") : "THÔNG TIN"} detail={d.trend.m5FlipAgeBars === null ? "Chưa có fresh flip" : `Fresh flip cách ${d.trend.m5FlipAgeBars} nến đóng · yêu cầu ≤ 2`} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <GateCard label="4 · FVG" value={d.fvg.sameDirectionConfirmed ? "CONTEXT YES" : "CONTEXT NO"} status="INFO" detail="Không phải entry gate" />
+          <GateCard label="4 · DỪNG LỖ" value={d.entry.stopDistance === null ? "—" : `${d.entry.stopDistance.toFixed(2)} giá`} status={stopPass ? "ĐẠT" : "CHỜ"} detail="Khoảng SL vận hành: 6–10 giá" />
         </Grid>
       </Grid>
 
-      <Alert severity={d.entry.eligible ? "success" : "info"}>{d.entry.reason}</Alert>
-      <Alert severity="info">Management: SL 6–10 giá · +6 → BE · +10 → chốt 1/3 · phần còn lại tiếp tục runner.</Alert>
+      <Card variant="outlined">
+        <CardContent>
+          <Stack direction="row" justifyContent="space-between" gap={1} alignItems="center">
+            <Typography variant="h6" fontWeight={900}>{d.entry.eligible ? "Vì sao hệ thống được phép vào lệnh?" : "Vì sao hệ thống chưa vào lệnh?"}</Typography>
+            <Chip label={d.entry.eligible ? "ĐỦ 4 ĐIỀU KIỆN" : `${reasons.filter((item) => !item.ok).length} ĐIỀU KIỆN CHƯA ĐẠT`} color={d.entry.eligible ? "success" : "warning"} variant="outlined" />
+          </Stack>
+          <Stack spacing={1.1} mt={2}>
+            {reasons.map((item, index) => (
+              <Typography key={index} variant="body2" color={item.ok ? "success.main" : "warning.main"} fontWeight={700}>
+                {item.ok ? "✓" : "•"} {item.text}
+              </Typography>
+            ))}
+            <Typography variant="body2" color="text.secondary" fontWeight={700}>
+              ℹ FVG cùng hướng: {d.fvg.sameDirectionConfirmed ? "CÓ" : "KHÔNG"}. FVG chỉ là bối cảnh chất lượng, <b>không phải điều kiện bắt buộc để vào lệnh</b>.
+            </Typography>
+          </Stack>
+        </CardContent>
+      </Card>
+
+      <Alert severity={d.entry.eligible ? "success" : "info"}>
+        {d.entry.eligible
+          ? `KẾT LUẬN: Có thể vào ${tenHuong(d.entry.side)} vì mô hình nến, Supertrend M15, M5 fresh flip và khoảng SL đều đạt.`
+          : "KẾT LUẬN: Chưa gửi lệnh. Bot tiếp tục chờ đến khi tất cả điều kiện bắt buộc cùng đạt trên dữ liệu nến đã đóng."}
+      </Alert>
+      <Alert severity="info">Quản lý sau khi khớp: +6 giá → dời SL về hòa vốn · +10 giá → chốt 1/3 · phần còn lại tiếp tục runner theo quản lý canonical. H1/H4 và FVG không phải TP cứng.</Alert>
     </Stack>
   );
 }
