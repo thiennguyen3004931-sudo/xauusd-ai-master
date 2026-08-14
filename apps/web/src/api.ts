@@ -13,6 +13,7 @@ import type {
   Phase7CBacktestResult,
 } from "./phase7c-types";
 import type { Phase7CForwardRangeResult } from "./phase7c-forward-types";
+import type { Phase7CAutoLotPreview } from "./phase7c-autolot-types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
@@ -109,6 +110,19 @@ export async function getPhase7CAccountRisk(
   return read<Phase7CAccountRiskSnapshot>(
     await fetch(
       `${API_BASE}/api/v1/phase7c/account-risk?riskPercent=${encodeURIComponent(riskPercent)}&maxLot=${encodeURIComponent(maxLot)}`,
+      { cache: "no-store" },
+    ),
+  );
+}
+
+export async function getPhase7CAutoLotPreview(
+  stopDistance: number,
+  riskPercent = 0.25,
+  maxLot = 0.03,
+): Promise<Phase7CAutoLotPreview> {
+  return read<Phase7CAutoLotPreview>(
+    await fetch(
+      `${API_BASE}/api/v1/phase7c/auto-lot-preview?stopDistance=${encodeURIComponent(stopDistance)}&riskPercent=${encodeURIComponent(riskPercent)}&maxLot=${encodeURIComponent(maxLot)}`,
       { cache: "no-store" },
     ),
   );
