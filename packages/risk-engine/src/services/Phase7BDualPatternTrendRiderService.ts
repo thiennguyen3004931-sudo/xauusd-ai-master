@@ -191,7 +191,7 @@ export class Phase7BDualPatternTrendRiderService {
     return [
       "PHASE7B_STRATEGY=M15_DUAL_PATTERN_MA_FVG_STRUCTURE_RIDER",
       "PHASE7B_TRIGGER=ENGULFING_OR_TWO_SAME_COLOR_BODY_DOMINANCE",
-      "PHASE7B_TWO_CANDLE_RULE=PREVIOUS_OPPOSITE_BODY_LT_SUM_OF_NEXT_TWO_SAME_COLOR_BODIES",
+      "PHASE7B_TWO_CANDLE_RULE=FIRST_SAME_COLOR_BODY_LT_PREVIOUS_OPPOSITE_BODY_AND_SUM_TWO_GT_PREVIOUS_OPPOSITE_BODY",
       "PHASE7B_MA_TREND=MANDATORY",
       "PHASE7B_FVG=MANDATORY_SAME_DIRECTION",
       "PHASE7B_INITIAL_SL=PRICE_DISTANCE_CLAMPED_6_TO_10",
@@ -435,16 +435,31 @@ function detectPattern(
   const priorOpposite = bars[index - 2]!;
   const first = bars[index - 1]!;
   const second = current;
-  const combinedBody = bodySize(first) + bodySize(second);
+  const priorBody = bodySize(priorOpposite);
+  const firstBody = bodySize(first);
+  const combinedBody = firstBody + bodySize(second);
+  const firstBodyStillSmaller = firstBody < priorBody;
 
-  if (isBearish(priorOpposite) && isBullish(first) && isBullish(second) && combinedBody > bodySize(priorOpposite)) {
+  if (
+    isBearish(priorOpposite) &&
+    isBullish(first) &&
+    isBullish(second) &&
+    firstBodyStillSmaller &&
+    combinedBody > priorBody
+  ) {
     return {
       side: "BUY",
       pattern: "TWO_CANDLE_BODY_DOMINANCE",
       patternExtreme: Math.min(priorOpposite.low, first.low, second.low),
     };
   }
-  if (isBullish(priorOpposite) && isBearish(first) && isBearish(second) && combinedBody > bodySize(priorOpposite)) {
+  if (
+    isBullish(priorOpposite) &&
+    isBearish(first) &&
+    isBearish(second) &&
+    firstBodyStillSmaller &&
+    combinedBody > priorBody
+  ) {
     return {
       side: "SELL",
       pattern: "TWO_CANDLE_BODY_DOMINANCE",
