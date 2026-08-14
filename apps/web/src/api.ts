@@ -18,6 +18,10 @@ import type {
   Phase7CAutoLotBacktestRequest,
   Phase7CAutoLotBacktestResult,
 } from "./phase7c-auto-lot-types";
+import type {
+  Phase7DDailyPnlRequest,
+  Phase7DDailyPnlResult,
+} from "./phase7d-types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
@@ -161,6 +165,18 @@ export async function runPhase7CAutoLotBacktest(
 ): Promise<Phase7CAutoLotBacktestResult> {
   return read<Phase7CAutoLotBacktestResult>(
     await fetch(`${API_BASE}/api/v1/phase7c/auto-lot-backtest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
+}
+
+export async function runPhase7DDailyPnlBacktest(
+  input: Phase7DDailyPnlRequest,
+): Promise<Phase7DDailyPnlResult> {
+  return read<Phase7DDailyPnlResult>(
+    await fetch(`${API_BASE}/api/v1/phase7d/daily-pnl-backtest`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),
