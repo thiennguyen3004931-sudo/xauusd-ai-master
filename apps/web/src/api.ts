@@ -6,6 +6,12 @@ import type {
   TradingMode,
 } from "./types";
 import type { Mt5PerformanceSnapshot } from "./types";
+import type {
+  Phase7BDemoSnapshot,
+  Phase7CAccountRiskSnapshot,
+  Phase7CBacktestRequest,
+  Phase7CBacktestResult,
+} from "./phase7c-types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
@@ -37,9 +43,6 @@ export async function getMt5Telemetry(
 
   const payload = (await response.json()) as Mt5TelemetrySnapshot;
 
-  // The API intentionally returns HTTP 503 when MT5 is offline.
-  // Preserve that telemetry payload so the Dashboard can render OFFLINE
-  // rather than hiding the useful diagnostic state behind a generic error.
   if (
     payload &&
     typeof payload === "object" &&
@@ -80,6 +83,7 @@ export async function runBacktest(
     }),
   );
 }
+
 export async function getMt5Performance(
   days = 90,
 ): Promise<Mt5PerformanceSnapshot> {
@@ -88,5 +92,35 @@ export async function getMt5Performance(
       `${API_BASE}/api/v1/mt5/performance?symbol=XAUUSD&days=${days}`,
       { cache: "no-store" },
     ),
+  );
+}
+
+export async function getPhase7BDemo(): Promise<Phase7BDemoSnapshot> {
+  return read<Phase7BDemoSnapshot>(
+    await fetch(`${API_BASE}/api/v1/phase7b-demo`, { cache: "no-store" }),
+  );
+}
+
+export async function getPhase7CAccountRisk(
+  riskPercent = 0.25,
+  maxLot = 0.03,
+): Promise<Phase7CAccountRiskSnapshot> {
+  return read<Phase7CAccountRiskSnapshot>(
+    await fetch(
+      `${API_BASE}/api/v1/phase7c/account-risk?riskPercent=${encodeURIComponent(riskPercent)}&maxLot=${encodeURIComponent(maxLot)}`,
+      { cache: "no-store" },
+    ),
+  );
+}
+
+export async function runPhase7CBacktest(
+  input: Phase7CBacktestRequest,
+): Promise<Phase7CBacktestResult> {
+  return read<Phase7CBacktestResult>(
+    await fetch(`${API_BASE}/api/v1/phase7c/backtest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
   );
 }
