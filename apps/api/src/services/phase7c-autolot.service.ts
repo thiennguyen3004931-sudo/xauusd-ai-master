@@ -55,9 +55,17 @@ function round(value: number, digits: number): number {
   return Math.round((value + Number.EPSILON) * scale) / scale;
 }
 
-function floorToStep(value: number, step: number): number {
-  if (!(step > 0)) return 0;
-  return Math.floor((value + 1e-12) / step) * step;
+function canonicalCompatibleLot(cap: number, minVolume: number, step: number): number {
+  if (!(cap > 0) || !(minVolume > 0) || !(step > 0)) return 0;
+  const minUnits = Math.max(1, Math.ceil((minVolume - 1e-12) / step));
+  let units = Math.floor((cap + 1e-12) / step);
+  while (units >= minUnits * 3) {
+    if (units % 3 === 0 && units / 3 >= minUnits && (units * 2) / 3 >= minUnits) {
+      return round(units * step, 8);
+    }
+    units -= 1;
+  }
+  return 0;
 }
 
 export async function getPhase7CAutoLotPreview(
@@ -102,10 +110,11 @@ export async function getPhase7CAutoLotPreview(
   const rawLot = targetRiskUsd / lossAtSlOneLot;
   const effectiveMaxLot = Math.min(maxLot, spec.maxVolume);
   const cappedLot = Math.min(rawLot, effectiveMaxLot);
-  const steppedLot = floorToStep(cappedLot, spec.volumeStep);
-  const recommendedLot = steppedLot >= spec.minVolume - 1e-9 ? steppedLot : 0;
+  const recommendedLot = canonicalCompatibleLot(cappedLot, spec.minVolume, spec.volumeStep);
   const estimatedRiskUsd = recommendedLot * lossAtSlOneLot;
   const approved = recommendedLot >= spec.minVolume - 1e-9;
+  const partialVolume = approved ? round(recommendedLot / 3, 8) : 0;
+  const runnerVolume = approved ? round(recommendedLot - partialVolume, 8) : 0;
 
   return {
     source: "MT5_DEMO_READ_ONLY",
@@ -136,18 +145,21 @@ export async function getPhase7CAutoLotPreview(
       maxLot,
       currentFixedVolume: 0.03,
       targetRiskUsd: round(targetRiskUsd, 2),
+      managementCompatibility: "EXACT_ONE_THIRD_PARTIAL_ONLY",
     },
     preview: {
       stopDistance: round(stopDistance, 5),
       lossAtSlOneLot: round(lossAtSlOneLot, 2),
       rawLot: round(rawLot, 4),
       recommendedLot: round(recommendedLot, 4),
+      partialVolume,
+      runnerVolume,
       estimatedRiskUsd: round(estimatedRiskUsd, 2),
       estimatedRiskPercent: round(estimatedRiskUsd / balance * 100, 4),
       approved,
       reason: approved
-        ? "SHADOW only; exact canonical stop distance used. Phase 7B execution remains fixed at 0.03 lot."
-        : "Broker minimum lot would exceed the configured risk target; shadow recommendation is BLOCK.",
+        ? "SHADOW only; lot preserves exact +10 one-third partial and runner management. Phase 7B execution remains fixed at 0.03 lot."
+        : "Risk/cap cannot support a broker-step lot that preserves exact one-third partial management; shadow recommendation is BLOCK.",
     },
   };
 }
