@@ -67,6 +67,29 @@ $risk = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7c/account
 $preview = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7c/auto-lot-preview?stopDistance=8&riskPercent=0.25&maxLot=0.03" -Method Get -TimeoutSec 5
 $demo = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7b-demo" -Method Get -TimeoutSec 5
 
+$toDate = (Get-Date).ToString("yyyy-MM-dd")
+$fromDate = (Get-Date).AddDays(-6).ToString("yyyy-MM-dd")
+$compareBody = @{
+  from = $fromDate
+  to = $toDate
+  fixedVolume = 0.03
+  riskPercent = 0.25
+  maxAutoLot = 0.03
+} | ConvertTo-Json
+$autoCompare = Invoke-RestMethod `
+  -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7c/auto-lot-backtest" `
+  -Method Post `
+  -ContentType "application/json" `
+  -Body $compareBody `
+  -TimeoutSec 90
+
+if ($autoCompare.source -ne "PHASE7C_AUTO_LOT_SHADOW_COMPARISON") {
+  throw "Phase 7C Auto Lot comparison self-test returned an unexpected source."
+}
+if ($autoCompare.safety.executionMutation -ne $false) {
+  throw "Phase 7C Auto Lot comparison unexpectedly allows execution mutation."
+}
+
 Write-Host "PHASE7C_WEB_REFRESH_API=PASS"
 Write-Host "PHASE7C_WEB_REFRESH_WEB=PASS"
 Write-Host "PHASE7C_WEB_REFRESH_BOT_STATUS=$($demo.botStatus)"
@@ -75,7 +98,12 @@ Write-Host "PHASE7C_WEB_REFRESH_SERVER=$($risk.account.server)"
 Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_MODE=$($preview.safety.mode)"
 Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_EXECUTION_MUTATION=$($preview.safety.executionMutation)"
 Write-Host "PHASE7C_WEB_REFRESH_FIXED_VOLUME_UNCHANGED=$($preview.safety.phase7bFixedVolumeUnchanged)"
+Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_BACKTEST=PASS"
+Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_ATTEMPTED=$($autoCompare.autoLot.attemptedTrades)"
+Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_EXECUTED=$($autoCompare.autoLot.executedTrades)"
+Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_BLOCKED=$($autoCompare.autoLot.blockedTrades)"
 Write-Host "PHASE7C_WEB_REFRESH_CONTROL_CENTER=http://127.0.0.1:$WebPort/"
 Write-Host "PHASE7C_WEB_REFRESH_BACKTEST=http://127.0.0.1:$WebPort/phase7c-backtest"
+Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_COMPARE=http://127.0.0.1:$WebPort/phase7c-auto-lot"
 Write-Host "PHASE7C_WEB_REFRESH_RISK=http://127.0.0.1:$WebPort/phase7c-risk"
 Write-Host "PHASE7C_WEB_REFRESH_STATUS=PASS"
