@@ -26,12 +26,16 @@ if ($r.replayMode -ne "EXACT_PER_LANE_SIGNAL_CONTENTION_WITH_M5_APPROXIMATION") 
 if ($r.safety.executionMutation -ne $false -or $r.safety.phase7bStrategyMutation -ne $false) { throw "Daily scale research unexpectedly allows strategy/execution mutation." }
 if ($r.decision.executionEligible -ne $false) { throw "Daily scale research execution must remain disabled." }
 if (-not $r.current -or -not $r.recoveryLockCurrent -or -not $r.scaleBe6 -or -not $r.scaleBe10) { throw "Daily scale lanes are incomplete." }
+if ($r.configuration.recoveryStopPolicy -ne "STRUCTURAL_SL_UNTIL_DYNAMIC_FULL_TP") { throw "Recovery must keep structural SL until dynamic full TP." }
+if ($r.recoveryLockCurrent.metrics.recoveryBeExits -ne 0 -or $r.scaleBe6.metrics.recoveryBeExits -ne 0 -or $r.scaleBe10.metrics.recoveryBeExits -ne 0) { throw "Recovery lane unexpectedly contains BE exits." }
 if ([math]::Abs($r.configuration.firstPartialVolume - 0.01) -gt 0.000001) { throw "Expected +10 partial 0.01 lot for fixed 0.03." }
 if ([math]::Abs($r.configuration.secondPartialVolume - 0.01) -gt 0.000001) { throw "Expected +20 partial 0.01 lot for fixed 0.03." }
 if ([math]::Abs($r.configuration.finalRunnerVolume - 0.01) -gt 0.000001) { throw "Expected final runner 0.01 lot for fixed 0.03." }
 
 Write-Host "PHASE7D_DAILY_SCALE_TEST=PASS"
 Write-Host "PHASE7D_DAILY_SCALE_REPLAY=$($r.replayMode)"
+Write-Host "PHASE7D_DAILY_SCALE_RECOVERY_STOP_POLICY=$($r.configuration.recoveryStopPolicy)"
+Write-Host "PHASE7D_DAILY_SCALE_RECOVERY_BE_EXITS=$($r.recoveryLockCurrent.metrics.recoveryBeExits)"
 Write-Host "PHASE7D_DAILY_SCALE_SIGNALS=$($r.configuration.signals)"
 Write-Host "PHASE7D_DAILY_SCALE_CANDIDATES=$($r.configuration.filledCandidates)"
 Write-Host "PHASE7D_DAILY_SCALE_CURRENT_NET=$($r.current.metrics.netPnl)"
