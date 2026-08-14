@@ -274,7 +274,7 @@ function buildEntryDiagnostics(bars: M15Bar[]): EntryDiagnostics {
     ? clamp(structuralStopDistance, 6, 10)
     : null;
 
-  let reason = "Chưa có Engulfing hoặc Two-candle body dominance trên cây M15 vừa đóng.";
+  let reason = "Chưa có Engulfing hoặc Two-candle hợp lệ: thân nến đầu tiên phải nhỏ hơn thân nến ngược màu trước đó, và tổng hai thân cùng màu phải lớn hơn thân nến trước.";
   if (pattern && !matchedPatternSide) {
     reason = `${pattern.side} pattern đã xuất hiện nhưng MA20/50/200 chưa đồng thuận cùng hướng.`;
   } else if (pattern && matchedPatternSide && !validStructure) {
@@ -354,16 +354,31 @@ function detectEntryPattern(
   if (index < 2) return null;
   const priorOpposite = bars[index - 2]!;
   const first = bars[index - 1]!;
-  const combinedBody = bodySize(first) + bodySize(current);
+  const priorBody = bodySize(priorOpposite);
+  const firstBody = bodySize(first);
+  const combinedBody = firstBody + bodySize(current);
+  const firstBodyStillSmaller = firstBody < priorBody;
 
-  if (isBearish(priorOpposite) && isBullish(first) && isBullish(current) && combinedBody > bodySize(priorOpposite)) {
+  if (
+    isBearish(priorOpposite) &&
+    isBullish(first) &&
+    isBullish(current) &&
+    firstBodyStillSmaller &&
+    combinedBody > priorBody
+  ) {
     return {
       side: "BUY",
       name: "TWO_CANDLE_BODY_DOMINANCE",
       extreme: Math.min(priorOpposite.low, first.low, current.low),
     };
   }
-  if (isBullish(priorOpposite) && isBearish(first) && isBearish(current) && combinedBody > bodySize(priorOpposite)) {
+  if (
+    isBullish(priorOpposite) &&
+    isBearish(first) &&
+    isBearish(current) &&
+    firstBodyStillSmaller &&
+    combinedBody > priorBody
+  ) {
     return {
       side: "SELL",
       name: "TWO_CANDLE_BODY_DOMINANCE",
