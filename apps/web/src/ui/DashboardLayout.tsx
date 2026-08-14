@@ -48,6 +48,7 @@ const researchLinks = [
   ["/phase7c-backtest", "Canonical Backtest", AssessmentRounded],
   ["/phase7d-daily-pnl", "Daily P/L Optimizer", ShowChartRounded],
   ["/phase7d-management", "BE + Partial Optimizer", TuneRounded],
+  ["/phase7d-daily-scale", "Daily 10/20 Scale", InsightsRounded],
   ["/phase7c-auto-lot", "Auto Lot vs Fixed", TuneRounded],
 ] as const;
 
@@ -131,7 +132,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
           <Typography variant="caption" fontWeight={800}>LIVE LOCKED</Typography>
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, lineHeight: 1.5 }}>
-          Phase 7B chỉ giao dịch DEMO allow-list. Phase 7C/7D Control, Backtest, Daily P/L, Management và Auto Lot là research/read-only, không tự thay đổi execution.
+          Phase 7B chỉ giao dịch DEMO allow-list. Phase 7C/7D Control, Backtest, Daily P/L, Management, Scale và Auto Lot là research/read-only, không tự thay đổi execution.
         </Typography>
       </Box>
     </Box>
@@ -148,11 +149,12 @@ export function DashboardLayout() {
   const isPhase7CBacktest = location.pathname.startsWith("/phase7c-backtest");
   const isPhase7DDailyPnl = location.pathname.startsWith("/phase7d-daily-pnl");
   const isPhase7DManagement = location.pathname.startsWith("/phase7d-management");
+  const isPhase7DDailyScale = location.pathname.startsWith("/phase7d-daily-scale");
   const isPhase7CAutoLot = location.pathname.startsWith("/phase7c-auto-lot");
   const isPhase7CRisk = location.pathname.startsWith("/phase7c-risk");
   const isPerformance = location.pathname.startsWith("/performance");
   const isSystem = location.pathname.startsWith("/system");
-  const isOperational = isControlCenter || isPhase7B || isPatternCheck || isPhase7BOps || isPhase7CBacktest || isPhase7DDailyPnl || isPhase7DManagement || isPhase7CAutoLot || isPhase7CRisk || isPerformance || isSystem;
+  const isOperational = isControlCenter || isPhase7B || isPatternCheck || isPhase7BOps || isPhase7CBacktest || isPhase7DDailyPnl || isPhase7DManagement || isPhase7DDailyScale || isPhase7CAutoLot || isPhase7CRisk || isPerformance || isSystem;
   const dashboard = useDashboard(!isOperational);
   const mode = dashboard.data?.control.mode ?? "SHADOW";
 
@@ -189,6 +191,10 @@ export function DashboardLayout() {
   } else if (isPhase7DManagement) {
     headerTitle = "Phase 7D BE + Partial Optimizer";
     headerSubtitle = "+6 BE vs +10 BE · one-third vs theoretical half · exact per-variant contention";
+    headerMode = "RESEARCH";
+  } else if (isPhase7DDailyScale) {
+    headerTitle = "Phase 7D Daily 10/20 Scale Optimizer";
+    headerSubtitle = "Negative-day Recovery 6–10 · Positive Lock · +10/+20 thirds · final runner";
     headerMode = "RESEARCH";
   } else if (isPhase7CAutoLot) {
     headerTitle = "Auto Lot SHADOW vs Fixed";
