@@ -26,6 +26,7 @@ export type Phase7DDailyScaleMetrics = {
   recoveredDays: number;
   recoveryTrades: number;
   recoveryTpHits: number;
+  recoveryBeExits?: number;
   plus10Hits: number;
   plus10RatePercent: number;
   plus20Hits: number;
@@ -41,6 +42,15 @@ export type Phase7DDailyScaleLane = {
   metrics: Phase7DDailyScaleMetrics;
   days: Array<{ day: string; pnl: number; trades: number; blocked: number; wentNegative: boolean; recoveredFromNegative: boolean }>;
   outcomes: Array<Record<string, unknown>>;
+};
+
+export type Phase7DReconciliationCheck = {
+  key: string;
+  pass: boolean;
+  expected: number | string | null;
+  actual: number | string | null;
+  delta: number | null;
+  tolerance: number | null;
 };
 
 export type Phase7DDailyScaleResult = {
@@ -65,6 +75,7 @@ export type Phase7DDailyScaleResult = {
     profitBufferUsd: number;
     positiveLockFloorUsd: number;
     dayUtcOffsetHours: number;
+    recoveryStopPolicy?: string;
     signals: number;
     filledCandidates: number;
     accountLogin: number | null;
@@ -78,11 +89,21 @@ export type Phase7DDailyScaleResult = {
   recoveryLockCurrent: Phase7DDailyScaleLane;
   scaleBe6: Phase7DDailyScaleLane;
   scaleBe10: Phase7DDailyScaleLane;
+  reconciliation: {
+    status: "PASS" | "FAIL";
+    passed: boolean;
+    decisionAllowed: boolean;
+    canonicalReference: string;
+    checks: Phase7DReconciliationCheck[];
+    failedKeys: string[];
+    references: Record<string, unknown>;
+    note: string;
+  };
   decision: {
     sampleTrades: number;
     sampleDays: number;
     sufficientSample: boolean;
-    verdict: "INSUFFICIENT_SAMPLE" | "SCALE_RESEARCH_PROMISING" | "KEEP_CURRENT_RECOVERY_LOCK";
+    verdict: "INSUFFICIENT_SAMPLE" | "SCALE_RESEARCH_PROMISING" | "KEEP_CURRENT_RECOVERY_LOCK" | "RECONCILIATION_FAILED";
     preferredResearchLane: string;
     executionEligible: false;
     candidates: Array<{
