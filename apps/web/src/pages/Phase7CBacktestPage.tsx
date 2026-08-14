@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import {
   Alert,
   Box,
@@ -19,8 +18,9 @@ import {
   Typography,
 } from "@mui/material";
 import PlayArrowRounded from "@mui/icons-material/PlayArrowRounded";
-import { getMt5Performance, runPhase7CBacktest } from "../api";
+import { getPhase7CForwardRange, runPhase7CBacktest } from "../api";
 import type { Phase7CBacktestResult } from "../phase7c-types";
+import type { Phase7CForwardRangeResult } from "../phase7c-forward-types";
 import { MetricCard } from "../ui/MetricCard";
 import { Sparkline } from "../ui/Sparkline";
 
@@ -52,21 +52,21 @@ export function Phase7CBacktestPage() {
   const [to, setTo] = useState(range.to);
   const [fixedVolume, setFixedVolume] = useState(0.03);
   const [result, setResult] = useState<Phase7CBacktestResult | null>(null);
+  const [forward, setForward] = useState<Phase7CForwardRangeResult | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const forward = useQuery({
-    queryKey: ["phase7c-forward-90"],
-    queryFn: () => getMt5Performance(90),
-    refetchInterval: 30_000,
-    retry: false,
-  });
 
   async function run(event: React.FormEvent) {
     event.preventDefault();
     setRunning(true);
     setError(null);
     try {
-      setResult(await runPhase7CBacktest({ from, to, fixedVolume }));
+      const [backtest, forwardResult] = await Promise.all([
+        runPhase7CBacktest({ from, to, fixedVolume }),
+        getPhase7CForwardRange(from, to).catch(() => null),
+      ]);
+      setResult(backtest);
+      setForward(forwardResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Backtest failed.");
     } finally {
@@ -91,7 +91,7 @@ export function Phase7CBacktestPage() {
       </Stack>
 
       <Alert severity="warning">
-        Replay này chạy đúng rule Phase 7B trên M15 đóng + M5 execution approximation. Nó không thể tái tạo chính xác cửa sổ pre-close 5–10 giây nếu không có snapshot/tick lịch sử, nên <b>productionEquivalent=false</b>.
+        Replay chạy rule Phase 7B trên M15 đóng + M5 execution approximation. Nó không thể tái tạo chính xác cửa sổ pre-close 5–10 giây nếu không có snapshot/tick lịch sử, nên <b>productionEquivalent=false</b>.
       </Alert>
 
       <Card>
@@ -113,18 +113,18 @@ export function Phase7CBacktestPage() {
             </Grid>
           </Grid>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
-            Giới hạn hiện tại: tối đa 370 ngày/lần để tránh tải quá nặng M5 history. Volume chỉ áp dụng cho research, không đổi bot DEMO.
+            Tối đa 370 ngày/lần. Web đồng thời đọc SYSTEM-owned forward trades đúng cùng khoảng ngày để đối chiếu.
           </Typography>
         </CardContent>
       </Card>
 
       {error ? <Alert severity="error">{error}</Alert> : null}
-      {result ? <BacktestResultView result={result} forward={forward.data?.systemOwned.metrics ?? null} /> : null}
+      {result ? <BacktestResultView result={result} forward={forward} /> : null}
     </Stack>
   );
 }
 
-function BacktestResultView({ result, forward }: { result: Phase7CBacktestResult; forward: { totalTrades: number; winRatePercent: number; netPnl: number; profitFactor: number | null } | null }) {
+function BacktestResultView({ result, forward }: { result: Phase7CBacktestResult; forward: Phase7CForwardRangeResult | null }) {
   const m = result.metrics;
   return (
     <Stack spacing={2}>
@@ -170,19 +170,20 @@ function BacktestResultView({ result, forward }: { result: Phase7CBacktestResult
         <Grid size={{ xs: 12, md: 6 }}><Breakdown title="TWO-CANDLE" item={result.breakdown.twoCandle} /></Grid>
       </Grid>
 
-      {forward ? (
-        <Card><CardContent>
-          <Typography fontWeight={900}>Forward vs Backtest</Typography>
-          <Typography variant="caption" color="text.secondary">Forward bên dưới là SYSTEM-owned 90 ngày hiện tại; khoảng thời gian có thể khác backtest nên chỉ dùng như bảng đối chiếu nhanh, không phải A/B đồng kỳ.</Typography>
-          <Table size="small" sx={{ mt: 1 }}>
-            <TableHead><TableRow><TableCell>Lane</TableCell><TableCell align="right">Trades</TableCell><TableCell align="right">Win %</TableCell><TableCell align="right">Net P/L</TableCell><TableCell align="right">PF</TableCell></TableRow></TableHead>
-            <TableBody>
-              <TableRow><TableCell>Backtest selected range</TableCell><TableCell align="right">{m.trades}</TableCell><TableCell align="right">{m.winRatePercent.toFixed(1)}%</TableCell><TableCell align="right">{money(m.netPnl)}</TableCell><TableCell align="right">{pf(m.profitFactor)}</TableCell></TableRow>
-              <TableRow><TableCell>Forward SYSTEM · 90d</TableCell><TableCell align="right">{forward.totalTrades}</TableCell><TableCell align="right">{forward.winRatePercent.toFixed(1)}%</TableCell><TableCell align="right">{money(forward.netPnl)}</TableCell><TableCell align="right">{pf(forward.profitFactor)}</TableCell></TableRow>
-            </TableBody>
-          </Table>
-        </CardContent></Card>
-      ) : null}
+      <Card><CardContent>
+        <Typography fontWeight={900}>Forward vs Backtest · cùng khoảng ngày</Typography>
+        <Typography variant="caption" color="text.secondary">
+          Backtest = broker historical replay. Forward = deal MT5 thật có system magic {forward?.magic ?? "—"} trong chính {result.range.from} → {result.range.to}.
+        </Typography>
+        <Table size="small" sx={{ mt: 1 }}>
+          <TableHead><TableRow><TableCell>Lane</TableCell><TableCell align="right">Trades</TableCell><TableCell align="right">Win %</TableCell><TableCell align="right">Net P/L</TableCell><TableCell align="right">PF</TableCell><TableCell align="right">Expectancy</TableCell></TableRow></TableHead>
+          <TableBody>
+            <TableRow><TableCell>Backtest selected range</TableCell><TableCell align="right">{m.trades}</TableCell><TableCell align="right">{m.winRatePercent.toFixed(1)}%</TableCell><TableCell align="right">{money(m.netPnl)}</TableCell><TableCell align="right">{pf(m.profitFactor)}</TableCell><TableCell align="right">{money(m.expectancy)}</TableCell></TableRow>
+            <TableRow><TableCell>Forward SYSTEM exact range</TableCell><TableCell align="right">{forward?.metrics.totalTrades ?? 0}</TableCell><TableCell align="right">{(forward?.metrics.winRatePercent ?? 0).toFixed(1)}%</TableCell><TableCell align="right">{money(forward?.metrics.netPnl ?? 0)}</TableCell><TableCell align="right">{pf(forward?.metrics.profitFactor ?? 0)}</TableCell><TableCell align="right">{money(forward?.metrics.expectancy ?? 0)}</TableCell></TableRow>
+          </TableBody>
+        </Table>
+        {!forward ? <Alert severity="info" sx={{ mt: 2 }}>Không đọc được forward range hoặc chưa có deal; backtest vẫn hợp lệ độc lập.</Alert> : null}
+      </CardContent></Card>
 
       <Card><CardContent>
         <Typography fontWeight={900}>Trade Journal · backtest</Typography>
