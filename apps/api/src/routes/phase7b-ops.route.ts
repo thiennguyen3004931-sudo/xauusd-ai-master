@@ -75,6 +75,7 @@ router.get("/status", async (req: Request, res: Response) => {
         demoOnly: true,
         directOrderRouteExposed: false,
         startAction: "WINDOWS_SCHEDULED_TASKS_ONLY",
+        taskBackend: "SCHTASKS_EXE",
       },
     });
   } catch (error) {
@@ -178,52 +179,56 @@ function isLoopback(req: Request): boolean {
 
 async function readTaskStatuses(): Promise<TaskStatus[]> {
   if (process.platform !== "win32") {
-    return Object.entries(TASKS).map(([key, name]) => ({ key: key as keyof typeof TASKS, name, exists: false, state: "UNSUPPORTED" }));
-  }
-
-  const names = Object.values(TASKS);
-  const psNames = names.map((name) => `'${name.replace(/'/g, "''")}'`).join(",");
-  const script = [
-    `$names=@(${psNames})`,
-    "$rows = foreach ($name in $names) {",
-    "  try {",
-    "    $task = Get-ScheduledTask -TaskName $name -ErrorAction Stop",
-    "    [pscustomobject]@{ name=$name; exists=$true; state=[string]$task.State }",
-    "  } catch {",
-    "    [pscustomobject]@{ name=$name; exists=$false; state='NOT_INSTALLED' }",
-    "  }",
-    "}",
-    "@($rows) | ConvertTo-Json -Compress",
-  ].join("\r\n");
-
-  const stdout = await execPowerShell(script, 5_000, 64 * 1024);
-  const raw = JSON.parse(stdout.trim()) as Array<{ name: string; exists: boolean; state: string }> | { name: string; exists: boolean; state: string };
-  const parsed = Array.isArray(raw) ? raw : [raw];
-  const byName = new Map(parsed.map((item) => [item.name, item]));
-  return Object.entries(TASKS).map(([key, name]) => {
-    const item = byName.get(name);
-    return {
+    return Object.entries(TASKS).map(([key, name]) => ({
       key: key as keyof typeof TASKS,
       name,
-      exists: Boolean(item?.exists),
-      state: item?.state ?? "UNKNOWN",
-    };
-  });
+      exists: false,
+      state: "UNSUPPORTED",
+    }));
+  }
+
+  return Promise.all(
+    Object.entries(TASKS).map(async ([key, name]) => {
+      try {
+        const { stdout } = await execFileAsync(
+          "schtasks.exe",
+          ["/Query", "/TN", name, "/FO", "LIST", "/V"],
+          { windowsHide: true, timeout: 5_000, maxBuffer: 64 * 1024 },
+        );
+        return {
+          key: key as keyof typeof TASKS,
+          name,
+          exists: true,
+          state: parseScheduledTaskState(stdout),
+        };
+      } catch {
+        return {
+          key: key as keyof typeof TASKS,
+          name,
+          exists: false,
+          state: "NOT_INSTALLED",
+        };
+      }
+    }),
+  );
+}
+
+function parseScheduledTaskState(stdout: string): string {
+  const status = stdout.match(/^Status:\s*(.+)$/im)?.[1]?.trim();
+  if (status) return status.toUpperCase();
+
+  const scheduledState = stdout.match(/^Scheduled Task State:\s*(.+)$/im)?.[1]?.trim();
+  if (scheduledState) return scheduledState.toUpperCase();
+
+  return "INSTALLED";
 }
 
 async function startScheduledTask(taskName: string): Promise<void> {
-  const escaped = taskName.replace(/'/g, "''");
-  await execPowerShell(`Start-ScheduledTask -TaskName '${escaped}' -ErrorAction Stop`, 5_000, 32 * 1024);
-}
-
-async function execPowerShell(script: string, timeout: number, maxBuffer: number): Promise<string> {
-  const encoded = Buffer.from(script, "utf16le").toString("base64");
-  const { stdout } = await execFileAsync(
-    "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-    { windowsHide: true, timeout, maxBuffer },
+  await execFileAsync(
+    "schtasks.exe",
+    ["/Run", "/TN", taskName],
+    { windowsHide: true, timeout: 5_000, maxBuffer: 32 * 1024 },
   );
-  return stdout;
 }
 
 async function isTelegramNotifierAlive(): Promise<boolean> {
@@ -235,7 +240,12 @@ async function isTelegramNotifierAlive(): Promise<boolean> {
     "if ($null -ne $p) { 'true' } else { 'false' }",
   ].join(" ");
   try {
-    const stdout = await execPowerShell(script, 5_000, 16 * 1024);
+    const encoded = Buffer.from(script, "utf16le").toString("base64");
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+      { windowsHide: true, timeout: 5_000, maxBuffer: 16 * 1024 },
+    );
     return stdout.trim().toLowerCase() === "true";
   } catch {
     return false;
