@@ -33,6 +33,7 @@ type TelegramRuntimeState = {
 };
 
 type BotState = {
+  accountLogin?: number | null;
   managed?: unknown | null;
 };
 
@@ -67,7 +68,7 @@ router.get("/status", async (req: Request, res: Response) => {
             reachable: telemetry.reachable,
             status: telemetry.status,
             accountMode: telemetry.health?.accountMode ?? null,
-            accountLogin: telemetry.health?.accountLogin ?? null,
+            accountLogin: state?.accountLogin ?? null,
             server: telemetry.health?.server ?? null,
             tradingEnabled: telemetry.health?.tradingEnabled ?? null,
             terminalTradeAllowed: telemetry.health?.terminalTradeAllowed ?? null,
@@ -77,7 +78,7 @@ router.get("/status", async (req: Request, res: Response) => {
             reachable: false,
             status: "OFFLINE",
             accountMode: null,
-            accountLogin: null,
+            accountLogin: state?.accountLogin ?? null,
             server: null,
             tradingEnabled: null,
             terminalTradeAllowed: null,
@@ -202,7 +203,6 @@ router.post("/telegram/stop", async (req: Request, res: Response) => {
   }
 });
 
-// Backward-compatible combined start endpoint. New UI uses the independent controls above.
 router.post("/start", async (req: Request, res: Response) => {
   if (!controlEnabled(req)) return res.status(403).json({ error: "Local control disabled." });
   return res.status(410).json({ error: "Use /bot/start and /telegram/start separately." });
@@ -331,9 +331,7 @@ function readJsonIfExists<T>(file: string): T | null {
 
 function writeJson(file: string, value: unknown): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const temp = `${file}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(value, null, 2), "utf8");
-  fs.renameSync(temp, file);
+  fs.writeFileSync(file, JSON.stringify(value, null, 2), "utf8");
 }
 
 function isPidAlive(pid: number | null | undefined): boolean {
