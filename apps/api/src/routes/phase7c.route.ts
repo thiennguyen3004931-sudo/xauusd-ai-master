@@ -4,6 +4,7 @@ import {
   runPhase7CCanonicalBacktest,
   type Phase7CBacktestRequest,
 } from "../services/phase7c.service";
+import { getPhase7CForwardRange } from "../services/phase7c-forward.service";
 
 const router = Router();
 
@@ -14,6 +15,16 @@ router.get("/account-risk", async (req: Request, res: Response) => {
     res.json(await getPhase7CAccountRisk(riskPercent, maxLot));
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : "Phase 7C account/risk request failed." });
+  }
+});
+
+router.get("/forward-range", async (req: Request, res: Response) => {
+  try {
+    const from = String(req.query.from ?? "").trim();
+    const to = String(req.query.to ?? "").trim();
+    res.json(await getPhase7CForwardRange(from, to));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Phase 7C forward comparison failed." });
   }
 });
 
