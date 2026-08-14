@@ -20,6 +20,28 @@ type Check = {
   tolerance: number | null;
 };
 
+type ComparableTrade = {
+  entryTime: number;
+  exitTime: number;
+  pnl: number;
+  exitReason?: string;
+  blocked?: boolean;
+};
+
+type TradeDiff = {
+  entryTime: number;
+  expectedExitTime: number | null;
+  actualExitTime: number | null;
+  exitTimeDeltaMs: number | null;
+  expectedPnl: number | null;
+  actualPnl: number | null;
+  pnlDelta: number | null;
+  expectedReason: string | null;
+  actualReason: string | null;
+  reasonMatch: boolean;
+  missingSide: "EXPECTED" | "ACTUAL" | null;
+};
+
 function numericCheck(key: string, expected: number, actual: number, tolerance: number): Check {
   const delta = actual - expected;
   return {
@@ -46,6 +68,129 @@ function nullableNumberCheck(
     return { key, pass: expected === actual, expected, actual, delta: null, tolerance };
   }
   return numericCheck(key, expected, actual, tolerance);
+}
+
+function normalizeReason(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  return value
+    .replace(/^CANONICAL_/, "")
+    .replace("RECOVERY_CANONICAL_TIME_FALLBACK", "RECOVERY_FALLBACK");
+}
+
+function toComparable(value: unknown): ComparableTrade | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (row.blocked === true) return null;
+  const entryTime = Number(row.entryTime);
+  const exitTime = Number(row.exitTime);
+  const pnl = Number(row.pnl);
+  if (!Number.isFinite(entryTime) || !Number.isFinite(exitTime) || !Number.isFinite(pnl)) return null;
+  return {
+    entryTime,
+    exitTime,
+    pnl,
+    exitReason: typeof row.exitReason === "string" ? row.exitReason : undefined,
+  };
+}
+
+function compareTradePaths(expectedRows: unknown[], actualRows: unknown[]): {
+  expectedTrades: number;
+  actualTrades: number;
+  mismatchCount: number;
+  missingExpectedCount: number;
+  missingActualCount: number;
+  pnlMismatchCount: number;
+  exitTimeMismatchCount: number;
+  reasonMismatchCount: number;
+  totalPnlDelta: number;
+  topMismatches: TradeDiff[];
+} {
+  const expected = expectedRows.map(toComparable).filter((item): item is ComparableTrade => item !== null);
+  const actual = actualRows.map(toComparable).filter((item): item is ComparableTrade => item !== null);
+  const expectedByEntry = new Map(expected.map((item) => [item.entryTime, item]));
+  const actualByEntry = new Map(actual.map((item) => [item.entryTime, item]));
+  const entries = [...new Set([...expectedByEntry.keys(), ...actualByEntry.keys()])].sort((a, b) => a - b);
+  const diffs: TradeDiff[] = [];
+  let missingExpectedCount = 0;
+  let missingActualCount = 0;
+  let pnlMismatchCount = 0;
+  let exitTimeMismatchCount = 0;
+  let reasonMismatchCount = 0;
+  let totalPnlDelta = 0;
+
+  for (const entryTime of entries) {
+    const left = expectedByEntry.get(entryTime);
+    const right = actualByEntry.get(entryTime);
+    if (!left || !right) {
+      if (!left) missingExpectedCount += 1;
+      if (!right) missingActualCount += 1;
+      diffs.push({
+        entryTime,
+        expectedExitTime: left?.exitTime ?? null,
+        actualExitTime: right?.exitTime ?? null,
+        exitTimeDeltaMs: left && right ? right.exitTime - left.exitTime : null,
+        expectedPnl: left?.pnl ?? null,
+        actualPnl: right?.pnl ?? null,
+        pnlDelta: left && right ? round4(right.pnl - left.pnl) : null,
+        expectedReason: normalizeReason(left?.exitReason),
+        actualReason: normalizeReason(right?.exitReason),
+        reasonMatch: false,
+        missingSide: !left ? "EXPECTED" : "ACTUAL",
+      });
+      continue;
+    }
+
+    const pnlDelta = right.pnl - left.pnl;
+    totalPnlDelta += pnlDelta;
+    const exitTimeDeltaMs = right.exitTime - left.exitTime;
+    const expectedReason = normalizeReason(left.exitReason);
+    const actualReason = normalizeReason(right.exitReason);
+    const reasonMatch = expectedReason === actualReason;
+    const pnlMismatch = Math.abs(pnlDelta) > 0.011;
+    const exitMismatch = exitTimeDeltaMs !== 0;
+    const reasonMismatch = !reasonMatch;
+    if (pnlMismatch) pnlMismatchCount += 1;
+    if (exitMismatch) exitTimeMismatchCount += 1;
+    if (reasonMismatch) reasonMismatchCount += 1;
+    if (!pnlMismatch && !exitMismatch && !reasonMismatch) continue;
+
+    diffs.push({
+      entryTime,
+      expectedExitTime: left.exitTime,
+      actualExitTime: right.exitTime,
+      exitTimeDeltaMs,
+      expectedPnl: left.pnl,
+      actualPnl: right.pnl,
+      pnlDelta: round4(pnlDelta),
+      expectedReason,
+      actualReason,
+      reasonMatch,
+      missingSide: null,
+    });
+  }
+
+  diffs.sort((left, right) => {
+    const pnlGap = Math.abs(right.pnlDelta ?? 0) - Math.abs(left.pnlDelta ?? 0);
+    if (Math.abs(pnlGap) > 1e-9) return pnlGap;
+    return Math.abs(right.exitTimeDeltaMs ?? 0) - Math.abs(left.exitTimeDeltaMs ?? 0);
+  });
+
+  return {
+    expectedTrades: expected.length,
+    actualTrades: actual.length,
+    mismatchCount: diffs.length,
+    missingExpectedCount,
+    missingActualCount,
+    pnlMismatchCount,
+    exitTimeMismatchCount,
+    reasonMismatchCount,
+    totalPnlDelta: round4(totalPnlDelta),
+    topMismatches: diffs.slice(0, 25),
+  };
+}
+
+function round4(value: number): number {
+  return Math.round((value + Number.EPSILON) * 10_000) / 10_000;
 }
 
 export async function runPhase7DReconciledDailyScaleResearch(input: Phase7DDailyScaleRequest) {
@@ -86,6 +231,12 @@ export async function runPhase7DReconciledDailyScaleResearch(input: Phase7DDaily
     numericCheck("RECOVERY_LOCK_POSITIVE_DAY_RATE_DAILY_VS_SCALE", daily.recoveryPlusLock.metrics.positiveDayRatePercent, scale.recoveryLockCurrent.metrics.positiveDayRatePercent, 0.01),
   ];
 
+  const tradeDiffs = {
+    managementVsDailyCurrent: compareTradePaths(managementCurrent.trades as unknown[], daily.baseline.outcomes as unknown[]),
+    managementVsScaleCurrent: compareTradePaths(managementCurrent.trades as unknown[], scale.current.outcomes as unknown[]),
+    dailyVsScaleRecoveryLock: compareTradePaths(daily.recoveryPlusLock.outcomes as unknown[], scale.recoveryLockCurrent.outcomes as unknown[]),
+  };
+
   const passed = checks.every((check) => check.pass);
   const failedKeys = checks.filter((check) => !check.pass).map((check) => check.key);
 
@@ -96,6 +247,7 @@ export async function runPhase7DReconciledDailyScaleResearch(input: Phase7DDaily
     canonicalReference: "PHASE7D_MANAGEMENT_CURRENT_PLUS_PHASE7D_DAILY_PNL_RECOVERY_LOCK",
     checks,
     failedKeys,
+    tradeDiffs,
     references: {
       managementCurrent: managementCurrent.metrics,
       dailyBaseline: daily.baseline.metrics,
@@ -105,7 +257,7 @@ export async function runPhase7DReconciledDailyScaleResearch(input: Phase7DDaily
     },
     note: passed
       ? "Canonical CURRENT and Recovery+Lock baselines reconcile across research engines for this exact range. Scale-lane comparison may be evaluated."
-      : "Research engines do not reconcile on the same range. BE6/BE10 scale verdict is locked until every baseline check passes.",
+      : "Research engines do not reconcile on the same range. Trade-level diagnostics identify the exact entries/exits responsible. BE6/BE10 scale verdict is locked until every baseline check passes.",
   };
 
   return {
