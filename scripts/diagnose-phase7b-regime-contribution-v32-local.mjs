@@ -105,13 +105,13 @@ function buildShiftRows(a, b) {
       rows.push({
         Dimension: dim,
         Group: key,
-        EarlyTrades: sa.trades,
-        EarlyNetPnl: sa.netPnl,
-        EarlyPF: sa.profitFactor,
-        LateTrades: sb.trades,
-        LateNetPnl: sb.netPnl,
-        LatePF: sb.profitFactor,
-        NetShift: round(sb.netPnl - sa.netPnl, 2),
+        EarlyTrades: sa.Trades,
+        EarlyNetPnl: sa.NetPnl,
+        EarlyPF: sa.ProfitFactor,
+        LateTrades: sb.Trades,
+        LateNetPnl: sb.NetPnl,
+        LatePF: sb.ProfitFactor,
+        NetShift: round(sb.NetPnl - sa.NetPnl, 2),
         Verdict: shiftVerdict(sa, sb),
       });
     }
@@ -120,11 +120,11 @@ function buildShiftRows(a, b) {
 }
 
 function shiftVerdict(a, b) {
-  if (a.trades < 10 || b.trades < 10) return "LOW_SAMPLE";
-  if (a.netPnl > 0 && b.netPnl < 0) return "DEGRADED_TO_NEGATIVE";
-  if (Number(a.profitFactor ?? 0) >= 1 && Number(b.profitFactor ?? 0) < 1) return "PF_BROKE_BELOW_1";
-  if (b.netPnl < a.netPnl * 0.5) return "MATERIAL_DEGRADATION";
-  if (b.netPnl > a.netPnl) return "IMPROVED";
+  if (a.Trades < 10 || b.Trades < 10) return "LOW_SAMPLE";
+  if (a.NetPnl > 0 && b.NetPnl < 0) return "DEGRADED_TO_NEGATIVE";
+  if (Number(a.ProfitFactor ?? 0) >= 1 && Number(b.ProfitFactor ?? 0) < 1) return "PF_BROKE_BELOW_1";
+  if (b.NetPnl < a.NetPnl * 0.5) return "MATERIAL_DEGRADATION";
+  if (b.NetPnl > a.NetPnl) return "IMPROVED";
   return "STABLE_OR_MIXED";
 }
 
