@@ -61,11 +61,9 @@ if (-not (Test-Path $TelegramEnv)) {
   throw "Telegram env missing: $TelegramEnv. Configure ZIQ_TELEGRAM_BOT_TOKEN and ZIQ_TELEGRAM_CHAT_ID before starting the full stack."
 }
 
-# Read-only strategy preflight first. It cannot send orders without -ArmDemoTrading.
 & (Join-Path $PSScriptRoot "run-phase7b-demo-local.ps1") -WorkDir $WorkDir -FixedVolume $FixedVolume -Once
 if ($LASTEXITCODE -ne 0) { throw "Phase 7B read-only preflight failed." }
 
-# Send one Telegram connectivity test before arming DEMO trading.
 & (Join-Path $PSScriptRoot "run-phase7b-telegram-notifier-local.ps1") -WorkDir $WorkDir -EnvFile $TelegramEnv -SendTest -Once
 if ($LASTEXITCODE -ne 0) { throw "Telegram connectivity test failed." }
 Write-Host "PHASE7B_FORWARD_TELEGRAM_TEST=PASS"
@@ -94,7 +92,7 @@ if (-not $apiListener -and -not $webListener) {
   & (Join-Path $PSScriptRoot "run-phase7b-demo-web-local.ps1") -WorkDir $WorkDir -BridgeEnv $bridgeEnv -ApiPort $ApiPort -WebPort $WebPort
 } elseif ($apiListener -and -not $webListener) {
   $escapedRootForWeb = $Root.Replace("'", "''")
-  $webCommand = "Set-Location '$escapedRootForWeb'; `$env:VITE_API_BASE_URL='$apiUrl'; Write-Host 'PHASE7B_WEB_UI=$webUrl/phase7b-demo'; pnpm --filter @xauusd/web dev -- --host 127.0.0.1 --port $WebPort --strictPort"
+  $webCommand = "Set-Location '$escapedRootForWeb'; `$env:VITE_API_BASE_URL=''; `$env:VITE_DEV_API_PROXY_TARGET='$apiUrl'; Write-Host 'PHASE7B_WEB_API_TRANSPORT=SAME_ORIGIN_VITE_PROXY'; Write-Host 'PHASE7B_WEB_UI=$webUrl/phase7b-demo'; pnpm --filter @xauusd/web dev -- --host 127.0.0.1 --port $WebPort --strictPort"
   $webProcess = Start-Process powershell.exe -PassThru -ArgumentList @(
     "-NoExit",
     "-ExecutionPolicy", "Bypass",
@@ -114,15 +112,12 @@ $escapedRoot = $Root.Replace("'", "''")
 $escapedWork = $WorkDir.Replace("'", "''")
 $escapedTelegram = $TelegramEnv.Replace("'", "''")
 
-# Telegram journal notifier.
 $notifierCmd = "Set-Location '$escapedRoot'; & '.\scripts\run-phase7b-telegram-notifier-local.ps1' -WorkDir '$escapedWork' -EnvFile '$escapedTelegram'"
 $notifierWindow = Start-Process powershell.exe -PassThru -ArgumentList @("-NoExit", "-ExecutionPolicy", "Bypass", "-Command", $notifierCmd)
 
-# Bot online/offline Telegram watcher.
 $onlineCmd = "Set-Location '$escapedRoot'; & '.\scripts\run-phase7b-bot-online-telegram.ps1' -WorkDir '$escapedWork' -EnvFile '$escapedTelegram' -FixedVolume $FixedVolume"
 $onlineWindow = Start-Process powershell.exe -PassThru -ArgumentList @("-NoExit", "-ExecutionPolicy", "Bypass", "-Command", $onlineCmd)
 
-# DEMO controller. Real account remains hard-blocked by both launcher and controller.
 $botCmd = "Set-Location '$escapedRoot'; & '.\scripts\run-phase7b-demo-local.ps1' -WorkDir '$escapedWork' -FixedVolume $FixedVolume -ArmDemoTrading"
 $botWindow = Start-Process powershell.exe -PassThru -ArgumentList @("-NoExit", "-ExecutionPolicy", "Bypass", "-Command", $botCmd)
 
