@@ -29,39 +29,39 @@ export function SystemPage() {
   return (
     <Stack spacing={2.2}>
       <Box>
-        <Typography variant="overline" color="primary" fontWeight={900}>DEMO SYSTEM</Typography>
-        <Typography variant="h4" fontWeight={950}>System Health</Typography>
+        <Typography variant="overline" color="primary" fontWeight={900}>HỆ THỐNG DEMO</Typography>
+        <Typography variant="h4" fontWeight={950}>Trạng thái hệ thống</Typography>
         <Typography variant="body2" color="text.secondary" mt={0.5}>Chỉ hiển thị đường vận hành MT5 DEMO hiện tại.</Typography>
       </Box>
 
       <Alert severity={ready ? "success" : "warning"}>
-        {ready ? "MT5 DEMO / Bridge / Algo Trading đều sẵn sàng." : "Hệ thống chưa đủ điều kiện chạy Bot DEMO."}
+        {ready ? "MT5 DEMO, Bridge, Algo Trading và Expert Trading đều sẵn sàng." : "Hệ thống chưa đủ điều kiện chạy Bot DEMO."}
       </Alert>
 
       <Card variant="outlined">
         <CardContent>
           <Stack direction="row" justifyContent="space-between" gap={2} alignItems="center">
-            <Typography variant="h6" fontWeight={900}>MT5 Bridge</Typography>
-            <StatusChip value={telemetry?.reachable ? "ONLINE" : "OFFLINE"} />
+            <Typography variant="h6" fontWeight={900}>Kết nối MT5 Bridge</Typography>
+            <StatusChip value={telemetry?.reachable ? "ĐANG KẾT NỐI" : "MẤT KẾT NỐI"} />
           </Stack>
           <Grid container spacing={1.5} mt={0.5}>
-            <Info label="Account mode" value={health?.accountMode?.toUpperCase() ?? "UNKNOWN"} />
-            <Info label="Server" value={health?.server ?? "—"} />
-            <Info label="Bridge trading" value={health?.tradingEnabled ? "ON" : "OFF"} />
-            <Info label="Terminal Algo" value={health?.terminalTradeAllowed ? "ON" : "OFF"} />
-            <Info label="Expert Trading" value={health?.expertTradeAllowed ? "ON" : "OFF"} />
-            <Info label="XAUUSD Bid" value={price(telemetry?.quote?.bid ?? null)} />
-            <Info label="XAUUSD Ask" value={price(telemetry?.quote?.ask ?? null)} />
-            <Info label="Open XAUUSD" value={String(telemetry?.positions.length ?? 0)} />
-            <Info label="Checked" value={telemetry?.checkedAt ? dateTime(telemetry.checkedAt) : "—"} />
+            <Info label="Loại tài khoản" value={health?.accountMode === "demo" ? "DEMO" : health?.accountMode?.toUpperCase() ?? "KHÔNG RÕ"} />
+            <Info label="Máy chủ" value={health?.server ?? "—"} />
+            <Info label="Cho phép Bridge giao dịch" value={health?.tradingEnabled ? "CÓ" : "KHÔNG"} />
+            <Info label="Algo Trading trên MT5" value={health?.terminalTradeAllowed ? "ĐÃ BẬT" : "ĐANG TẮT"} />
+            <Info label="Quyền Expert Trading" value={health?.expertTradeAllowed ? "ĐƯỢC PHÉP" : "BỊ CHẶN"} />
+            <Info label="Giá Bid XAUUSD" value={price(telemetry?.quote?.bid ?? null)} />
+            <Info label="Giá Ask XAUUSD" value={price(telemetry?.quote?.ask ?? null)} />
+            <Info label="Số vị thế XAUUSD đang mở" value={String(telemetry?.positions.length ?? 0)} />
+            <Info label="Thời điểm kiểm tra" value={telemetry?.checkedAt ? dateTime(telemetry.checkedAt) : "—"} />
           </Grid>
           <Typography variant="caption" color="text.secondary" display="block" mt={2}>
-            {telemetry?.message ?? (mt5.error instanceof Error ? mt5.error.message : "MT5 telemetry unavailable.")}
+            {telemetry?.message ?? (mt5.error instanceof Error ? mt5.error.message : "Không đọc được dữ liệu MT5.")}
           </Typography>
         </CardContent>
       </Card>
 
-      <Alert severity="info">Real account luôn khóa trong DEMO Forward.</Alert>
+      <Alert severity="info">Tài khoản thật luôn bị khóa trong chế độ chạy thử DEMO.</Alert>
     </Stack>
   );
 }
