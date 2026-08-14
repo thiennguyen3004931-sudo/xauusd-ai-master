@@ -12,6 +12,7 @@ import type {
   Phase7CBacktestRequest,
   Phase7CBacktestResult,
 } from "./phase7c-types";
+import type { Phase7CForwardRangeResult } from "./phase7c-forward-types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
@@ -108,6 +109,18 @@ export async function getPhase7CAccountRisk(
   return read<Phase7CAccountRiskSnapshot>(
     await fetch(
       `${API_BASE}/api/v1/phase7c/account-risk?riskPercent=${encodeURIComponent(riskPercent)}&maxLot=${encodeURIComponent(maxLot)}`,
+      { cache: "no-store" },
+    ),
+  );
+}
+
+export async function getPhase7CForwardRange(
+  from: string,
+  to: string,
+): Promise<Phase7CForwardRangeResult> {
+  return read<Phase7CForwardRangeResult>(
+    await fetch(
+      `${API_BASE}/api/v1/phase7c/forward-range?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
       { cache: "no-store" },
     ),
   );
