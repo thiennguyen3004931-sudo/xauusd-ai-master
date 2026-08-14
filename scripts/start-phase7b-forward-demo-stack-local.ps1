@@ -70,13 +70,44 @@ if ($LASTEXITCODE -ne 0) { throw "Phase 7B read-only preflight failed." }
 if ($LASTEXITCODE -ne 0) { throw "Telegram connectivity test failed." }
 Write-Host "PHASE7B_FORWARD_TELEGRAM_TEST=PASS"
 
-# Dedicated API/web monitor. Refuse to silently kill any existing process.
+$apiUrl = "http://127.0.0.1:${ApiPort}"
+$webUrl = "http://127.0.0.1:${WebPort}"
+$expectedRule = "PATTERN_PLUS_M15_SUPERTREND_PLUS_M5_FLIP2"
 $apiListener = Get-NetTCPConnection -LocalPort $ApiPort -State Listen -ErrorAction SilentlyContinue
 $webListener = Get-NetTCPConnection -LocalPort $WebPort -State Listen -ErrorAction SilentlyContinue
+
+if ($apiListener) {
+  try {
+    $snapshot = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7b-demo" -Method Get -TimeoutSec 5
+    $actualRule = [string]$snapshot.entryDiagnostics.entry.rule
+    if ($actualRule -ne $expectedRule) {
+      throw "Existing API rule '$actualRule' does not match '$expectedRule'."
+    }
+    Write-Host "PHASE7B_FORWARD_EXISTING_API=VALIDATED"
+    Write-Host "PHASE7B_FORWARD_EXISTING_API_RULE=$actualRule"
+  } catch {
+    throw "Port $ApiPort is already in use but is not a validated Phase 7B forward API: $($_.Exception.Message)"
+  }
+}
+
 if (-not $apiListener -and -not $webListener) {
   & (Join-Path $PSScriptRoot "run-phase7b-demo-web-local.ps1") -WorkDir $WorkDir -BridgeEnv $bridgeEnv -ApiPort $ApiPort -WebPort $WebPort
+} elseif ($apiListener -and -not $webListener) {
+  $escapedRootForWeb = $Root.Replace("'", "''")
+  $webCommand = "Set-Location '$escapedRootForWeb'; `$env:VITE_API_BASE_URL='$apiUrl'; Write-Host 'PHASE7B_WEB_UI=$webUrl/phase7b-demo'; pnpm --filter @xauusd/web dev -- --host 127.0.0.1 --port $WebPort --strictPort"
+  $webProcess = Start-Process powershell.exe -PassThru -ArgumentList @(
+    "-NoExit",
+    "-ExecutionPolicy", "Bypass",
+    "-Command", $webCommand
+  )
+  Write-Host "PHASE7B_FORWARD_EXISTING_API_REUSED=True"
+  Write-Host "PHASE7B_FORWARD_WEB_STARTED=True"
+  Write-Host "PHASE7B_FORWARD_WEB_WINDOW_PID=$($webProcess.Id)"
+} elseif (-not $apiListener -and $webListener) {
+  throw "Web port $WebPort is already active but API port $ApiPort is not. Stop the stale web process and rerun."
 } else {
-  Write-Warning "API/Web port already in use (API=$([bool]$apiListener), WEB=$([bool]$webListener)). Existing monitor processes were left untouched."
+  Write-Host "PHASE7B_FORWARD_EXISTING_API_REUSED=True"
+  Write-Host "PHASE7B_FORWARD_EXISTING_WEB_REUSED=True"
 }
 
 $escapedRoot = $Root.Replace("'", "''")
@@ -105,5 +136,5 @@ Write-Host "PHASE7B_FORWARD_REAL_ACCOUNT_ALLOWED=False"
 Write-Host "PHASE7B_FORWARD_BOT_WINDOW_PID=$($botWindow.Id)"
 Write-Host "PHASE7B_FORWARD_TELEGRAM_WINDOW_PID=$($notifierWindow.Id)"
 Write-Host "PHASE7B_FORWARD_ONLINE_WATCHER_PID=$($onlineWindow.Id)"
-Write-Host "PHASE7B_FORWARD_WEB=http://127.0.0.1:${WebPort}/phase7b-demo"
-Write-Host "PHASE7B_FORWARD_API=http://127.0.0.1:${ApiPort}/api/v1/phase7b-demo"
+Write-Host "PHASE7B_FORWARD_WEB=$webUrl/phase7b-demo"
+Write-Host "PHASE7B_FORWARD_API=$apiUrl/api/v1/phase7b-demo"
