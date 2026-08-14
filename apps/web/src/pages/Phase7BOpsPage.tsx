@@ -14,6 +14,7 @@ import StopRounded from "@mui/icons-material/StopRounded";
 import SmartToyRounded from "@mui/icons-material/SmartToyRounded";
 import TelegramRounded from "@mui/icons-material/Telegram";
 import HubRounded from "@mui/icons-material/HubRounded";
+import SendRounded from "@mui/icons-material/SendRounded";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ErrorState, LoadingState } from "../ui/PageState";
 
@@ -92,13 +93,21 @@ async function runAction(path: string): Promise<ActionResponse> {
   }));
 }
 
+async function sendTelegramTest(): Promise<ActionResponse> {
+  return readJson<ActionResponse>(await fetch(`${API_BASE}/api/v1/phase7b-telegram-test`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  }));
+}
+
 function StatusCard({ icon, title, status, detail, online }: { icon: React.ReactNode; title: string; status: string; detail: string; online: boolean }) {
   return (
     <Card variant="outlined" sx={{ height: "100%" }}>
       <CardContent>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Box>{icon}</Box>
-          <Chip size="small" label={online ? "ONLINE" : "OFFLINE"} color={online ? "success" : "default"} variant="outlined" />
+          <Chip size="small" label={online ? "ĐANG CHẠY" : "ĐANG DỪNG"} color={online ? "success" : "default"} variant="outlined" />
         </Stack>
         <Typography variant="caption" color="text.secondary" display="block" mt={1.5}>{title}</Typography>
         <Typography variant="h6" fontWeight={900}>{status}</Typography>
@@ -123,10 +132,11 @@ export function Phase7BOpsPage() {
       await queryClient.invalidateQueries({ queryKey: ["phase7b-ops-status"] });
     },
   });
+  const testTelegram = useMutation({ mutationFn: sendTelegramTest });
 
   if (query.isLoading) return <LoadingState />;
   if (query.isError || !query.data) {
-    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được Bot & Telegram."} />;
+    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được trạng thái Bot & Telegram."} />;
   }
 
   const o = query.data;
@@ -148,10 +158,10 @@ export function Phase7BOpsPage() {
   return (
     <Stack spacing={2.5}>
       <Box>
-        <Typography variant="overline" color="primary" fontWeight={900}>DEMO CONTROL</Typography>
-        <Typography variant="h4" fontWeight={950}>Bot & Telegram</Typography>
+        <Typography variant="overline" color="primary" fontWeight={900}>ĐIỀU KHIỂN DEMO</Typography>
+        <Typography variant="h4" fontWeight={950}>Điều khiển Bot & Telegram</Typography>
         <Typography variant="body2" color="text.secondary" mt={0.7}>
-          Chỉ điều khiển tiến trình local trên máy này. Tài khoản real luôn bị khóa.
+          Chỉ điều khiển tiến trình trên máy local này. Tài khoản thật luôn bị khóa.
         </Typography>
       </Box>
 
@@ -160,8 +170,8 @@ export function Phase7BOpsPage() {
           <StatusCard
             icon={<SmartToyRounded color={o.bot.alive ? "success" : "disabled"} />}
             title="BOT DEMO"
-            status={botStarting ? "STARTING..." : o.bot.alive ? (o.bot.managedPosition ? "MANAGING" : "WAITING SIGNAL") : "STOPPED"}
-            detail={botStarting ? "Đang build + kiểm tra runtime controller..." : o.bot.alive ? `PID ${o.bot.pid ?? "—"} · ${o.bot.armed ? "ARMED" : "NOT ARMED"}` : "Controller DEMO chưa chạy."}
+            status={botStarting ? "ĐANG KHỞI ĐỘNG..." : o.bot.alive ? (o.bot.managedPosition ? "ĐANG QUẢN LÝ LỆNH" : "ĐANG CHỜ TÍN HIỆU") : "ĐÃ DỪNG"}
+            detail={botStarting ? "Đang khởi động và kiểm tra heartbeat controller..." : o.bot.alive ? `PID ${o.bot.pid ?? "—"} · ${o.bot.armed ? "ĐÃ ARM" : "CHƯA ARM"}` : "Controller DEMO chưa chạy."}
             online={o.bot.alive}
           />
         </Grid>
@@ -169,9 +179,9 @@ export function Phase7BOpsPage() {
         <Grid size={{ xs: 12, md: 4 }}>
           <StatusCard
             icon={<TelegramRounded color={o.telegram.alive ? "success" : "disabled"} />}
-            title="TELEGRAM"
-            status={telegramStarting ? "STARTING..." : o.telegram.alive ? "NOTIFY ON" : "NOTIFY OFF"}
-            detail={telegramStarting ? "Đang kiểm tra notifier + heartbeat..." : o.telegram.alive ? "Đang gửi Signal / Filled / +6 / +10 / Exit / Error." : "Không gửi thông báo Telegram."}
+            title="THÔNG BÁO TELEGRAM"
+            status={telegramStarting ? "ĐANG KHỞI ĐỘNG..." : o.telegram.alive ? "ĐANG GỬI THÔNG BÁO" : "ĐÃ TẮT THÔNG BÁO"}
+            detail={telegramStarting ? "Đang kiểm tra notifier và heartbeat..." : o.telegram.alive ? "Thông báo tín hiệu / khớp lệnh / +6 / +10 / HOLD / đóng lệnh / lỗi." : "Không gửi thông báo thường trực."}
             online={o.telegram.alive}
           />
         </Grid>
@@ -180,8 +190,8 @@ export function Phase7BOpsPage() {
           <StatusCard
             icon={<HubRounded color={demoReady ? "success" : "disabled"} />}
             title="MT5 DEMO"
-            status={demoReady ? "READY" : "NOT READY"}
-            detail={`${o.bridge.accountMode?.toUpperCase() ?? "UNKNOWN"} #${o.bridge.accountLogin ?? "—"} · ${o.bridge.server ?? "—"}`}
+            status={demoReady ? "SẴN SÀNG" : "CHƯA SẴN SÀNG"}
+            detail={`${o.bridge.accountMode?.toUpperCase() ?? "KHÔNG RÕ"} #${o.bridge.accountLogin ?? "—"} · ${o.bridge.server ?? "—"}`}
             online={demoReady}
           />
         </Grid>
@@ -189,13 +199,13 @@ export function Phase7BOpsPage() {
 
       {o.bot.managedPosition && (
         <Alert severity="warning">
-          Bot đang quản lý một position. Nút <b>Dừng Bot DEMO</b> bị khóa để không bỏ position đang mở.
+          Bot đang quản lý một vị thế. Nút <b>Dừng Bot DEMO</b> bị khóa để tránh bỏ vị thế đang mở không được quản lý.
         </Alert>
       )}
 
       {!demoReady && (
         <Alert severity="warning">
-          MT5 DEMO chưa đủ điều kiện chạy bot. Kiểm tra Bridge, Algo Trading và quyền Expert Trading.
+          MT5 DEMO chưa đủ điều kiện chạy Bot. Kiểm tra Bridge, Algo Trading và quyền Expert Trading.
         </Alert>
       )}
 
@@ -203,9 +213,9 @@ export function Phase7BOpsPage() {
         <Grid size={{ xs: 12, lg: 6 }}>
           <Card variant="outlined">
             <CardContent>
-              <Typography variant="h6" fontWeight={900}>Bot DEMO</Typography>
+              <Typography variant="h6" fontWeight={900}>Bot giao dịch DEMO</Typography>
               <Typography variant="body2" color="text.secondary" mt={0.5}>
-                Entry hiện hành: 2 mô hình nến + Supertrend M15 + M5 fresh flip. FVG chỉ là context. Volume mặc định 0.03 lot.
+                Điều kiện vào lệnh: 2 mô hình nến + Supertrend M15 cùng hướng + M5 cùng hướng và fresh flip ≤ 2 nến đóng. FVG chỉ là bối cảnh. Khối lượng mặc định 0.03 lot.
               </Typography>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} mt={2.5}>
                 <Button
@@ -238,15 +248,15 @@ export function Phase7BOpsPage() {
             <CardContent>
               <Typography variant="h6" fontWeight={900}>Thông báo Telegram</Typography>
               <Typography variant="body2" color="text.secondary" mt={0.5}>
-                Telegram chỉ đọc journal và gửi thông báo. Không có quyền đặt hoặc sửa lệnh MT5.
+                Telegram chỉ đọc journal/API và gửi thông báo; không có quyền đặt, sửa hoặc đóng lệnh MT5.
               </Typography>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} mt={2.5}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} mt={2.5} flexWrap="wrap" useFlexGap>
                 <Button
                   variant="contained"
                   startIcon={<TelegramRounded />}
                   disabled={actionPending || o.telegram.alive || !o.controlEnabled}
                   onClick={() => mutate.mutate("telegram/start")}
-                  sx={{ fontWeight: 900, minWidth: 180 }}
+                  sx={{ fontWeight: 900, minWidth: 170 }}
                 >
                   {telegramStarting ? "ĐANG BẬT..." : "BẬT TELEGRAM"}
                 </Button>
@@ -256,11 +266,24 @@ export function Phase7BOpsPage() {
                   startIcon={<StopRounded />}
                   disabled={actionPending || !o.telegram.alive || !o.controlEnabled}
                   onClick={() => mutate.mutate("telegram/stop")}
-                  sx={{ fontWeight: 900, minWidth: 180 }}
+                  sx={{ fontWeight: 900, minWidth: 170 }}
                 >
                   {telegramStopping ? "ĐANG TẮT..." : "TẮT TELEGRAM"}
                 </Button>
+                <Button
+                  variant="outlined"
+                  color="primary"
+                  startIcon={<SendRounded />}
+                  disabled={testTelegram.isPending || !o.controlEnabled}
+                  onClick={() => testTelegram.mutate()}
+                  sx={{ fontWeight: 900, minWidth: 210 }}
+                >
+                  {testTelegram.isPending ? "ĐANG GỬI TIN TEST..." : "GỬI TIN TEST TELEGRAM"}
+                </Button>
               </Stack>
+              <Typography variant="caption" color="text.secondary" display="block" mt={1.5}>
+                Tin test là one-shot: gửi một nội dung mẫu rồi tự thoát, không cần bật notifier thường trực.
+              </Typography>
             </CardContent>
           </Card>
         </Grid>
@@ -272,9 +295,27 @@ export function Phase7BOpsPage() {
           {mutate.error instanceof Error ? mutate.error.message : "Không thực hiện được thao tác."}
         </Alert>
       )}
+      {testTelegram.isSuccess && <Alert severity="success">{testTelegram.data.message}</Alert>}
+      {testTelegram.isError && (
+        <Alert severity="error" sx={{ whiteSpace: "pre-wrap" }}>
+          {testTelegram.error instanceof Error ? testTelegram.error.message : "Không gửi được tin test Telegram."}
+        </Alert>
+      )}
+
+      <Card variant="outlined">
+        <CardContent>
+          <Typography variant="h6" fontWeight={900}>Nội dung Telegram sẽ giải thích gì?</Typography>
+          <Grid container spacing={1.5} mt={0.4}>
+            <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Vì sao vào lệnh:</b> mô hình nến, hướng M15, M5 fresh flip, giá vào, SL và bối cảnh FVG.</Typography></Grid>
+            <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Vì sao HOLD:</b> trạng thái +6 hòa vốn, +10 chốt 1/3, runner còn lại và lý do chưa thoát.</Typography></Grid>
+            <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Khi quản lý:</b> dời SL, khối lượng còn lại, lãi/lỗ runner.</Typography></Grid>
+            <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Khi đóng:</b> P&amp;L, giá thoát và lý do đóng.</Typography></Grid>
+          </Grid>
+        </CardContent>
+      </Card>
 
       <Alert severity="info">
-        +6 → BE · +10 → chốt 1/3 · phần còn lại tiếp tục canonical runner. Web không mở quyền giao dịch cho tài khoản real.
+        Quản lý hiện hành: +6 giá → dời SL về hòa vốn · +10 giá → chốt 1/3 · phần còn lại tiếp tục runner canonical. H1/H4 và FVG chỉ là bối cảnh, không phải TP cứng.
       </Alert>
     </Stack>
   );
