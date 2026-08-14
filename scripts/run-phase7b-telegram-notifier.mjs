@@ -445,9 +445,12 @@ function line(icon, label, raw) {
 }
 
 async function sendHtml(text) {
+  const highContrastText = String(text)
+    .replaceAll("<code>", "<b>")
+    .replaceAll("</code>", "</b>");
   const payload = {
     chat_id: chatId,
-    text: text.slice(0, 4096),
+    text: highContrastText.slice(0, 4096),
     parse_mode: "HTML",
     link_preview_options: { is_disabled: true },
     ...(messageThreadId === null ? {} : { message_thread_id: messageThreadId }),
