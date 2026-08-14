@@ -228,7 +228,7 @@ $block = @'
     { name: "M0_CANONICAL", beOffset: 0, partialAt10: true, post10Mode: "CANONICAL", supertrendExitMode: "NEVER", useMa20Fallback: true },
     { name: "M1_BE2_CANONICAL", beOffset: 2, partialAt10: true, post10Mode: "CANONICAL", supertrendExitMode: "NEVER", useMa20Fallback: true },
     { name: "M2_BE2_PARTIAL_FIXED5", beOffset: 2, partialAt10: true, post10Mode: "FIXED5", supertrendExitMode: "NEVER", useMa20Fallback: true },
-    { name: "M3_BE2_PARTIAL_ST_EXIT", beOffset: 2, partialAt10: true, post10Mode: "NONE", supertrendExitMode: "AFTER_PARTIAL", useMa20Fallback: false },
+    { name: "M3_BE2_PARTIAL_ST_EXIT", beOffset: 2, partialAt10: true, post10Mode: "NONE", supertrendExitMode: "ALWAYS", useMa20Fallback: false },
     { name: "M4_BE2_NO_PARTIAL_ST_EXIT", beOffset: 2, partialAt10: false, post10Mode: "NONE", supertrendExitMode: "ALWAYS", useMa20Fallback: false },
   ];
 
