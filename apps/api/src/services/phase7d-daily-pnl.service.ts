@@ -308,6 +308,7 @@ export async function runPhase7DDailyPnlResearch(input: Phase7DDailyPnlRequest) 
       profitBufferUsd,
       positiveLockFloorUsd,
       dayUtcOffsetHours,
+      recoveryStopPolicy: "STRUCTURAL_SL_UNTIL_DYNAMIC_FULL_TP",
       comparedTradeSchedule: candidateTrades.length,
       fullPeriodCanonicalTrades: baseline.metrics.trades,
       journalTradeLimitApplied: false,
@@ -326,12 +327,13 @@ export async function runPhase7DDailyPnlResearch(input: Phase7DDailyPnlRequest) 
     recoveryPlusLock,
     decision,
     notes: [
-      "Phase 7D.2 exact signal isolation: every lane starts from the same full Pattern+MA candidate stream and maintains its own max-one-position busyUntil state.",
+      "Phase 7D exact signal isolation: every lane starts from the same full Pattern+MA candidate stream and maintains its own max-one-position busyUntil state.",
       "TREND_PLUS_LOCK isolates Positive Lock without Recovery. RECOVERY_PLUS_LOCK measures the combined effect.",
       "For every Positive Lock block, counterfactualCanonicalPnl records that candidate's isolated canonical outcome. This diagnoses whether Lock blocks winners or losers, but it is not a full alternate-path replay because executing a blocked trade would change later signal contention.",
       "If Recovery exits earlier, later signals become eligible in that lane. If Positive Lock blocks a candidate, later signals remain eligible because no position was opened.",
       "Canonical trend-mode management mirrors Phase 7B research rules: +6 BE, +10 one-third partial, confirmed M15 structure trail, opposing-FVG rejection, MA20 fallback.",
-      "Recovery mode is used only when realized P/L of the UTC+7 trading day is negative at entry. Full-exit target is clamped to the configured 6-10 price range by default.",
+      "Recovery mode is used only when realized P/L of the UTC+7 trading day is negative at entry. The full-exit target is dynamically calculated to recover the day plus the configured buffer and then clamped to the configured 6-10 price range.",
+      "Recovery mode keeps the original structural SL until the dynamic full-close target is reached; it does NOT move SL to Entry at +6. This isolates the user's recovery rule from canonical Trend Mode management.",
       "Positive Lock blocks a new trend-mode trade when its initial SL risk could reduce an already-positive day to the configured floor or below.",
       "Research only: no Phase 7B DEMO order, stop, volume or management setting is changed. A positive day is a target, not a guarantee.",
       "M5 OHLC with broker spread is still an intrabar approximation; STOP_FIRST is used when a single M5 bar contains conflicting paths.",
@@ -449,18 +451,17 @@ function simulateLane(candidates: CandidateTrade[], lane: LaneConfig, common: Co
 
 function simulateRecoveryTrade(trade: CandidateTrade, targetMove: number, common: Common) {
   const start = lowerBound(common.m5OpenTimes, trade.entryTime);
-  let activeStop = trade.stopLoss;
-  let breakEvenApplied = false;
+  const structuralStop = trade.stopLoss;
 
   for (let index = start; index < common.m5.length; index += 1) {
     const bar = common.m5[index]!;
     if (bar.openTime > trade.exitTime) break;
 
-    if (stopTouched(trade.side, bar, activeStop)) {
+    if (stopTouched(trade.side, bar, structuralStop)) {
       return {
-        pnl: pnlUsdCash(trade.side, trade.entry, activeStop, trade.volume, common.cashPerPriceUnitPerLot),
+        pnl: pnlUsdCash(trade.side, trade.entry, structuralStop, trade.volume, common.cashPerPriceUnitPerLot),
         exitTime: Math.min(bar.closeTime, trade.exitTime),
-        exitReason: breakEvenApplied && Math.abs(activeStop - trade.entry) < 1e-8 ? "RECOVERY_BE" : "RECOVERY_STOP",
+        exitReason: "RECOVERY_STOP",
         targetMove,
       };
     }
@@ -472,11 +473,6 @@ function simulateRecoveryTrade(trade: CandidateTrade, targetMove: number, common
         exitReason: "RECOVERY_TP",
         targetMove,
       };
-    }
-
-    if (!breakEvenApplied && favorableMove(trade.side, trade.entry, bar) >= BREAK_EVEN_TRIGGER) {
-      activeStop = improveStop(trade.side, activeStop, trade.entry);
-      breakEvenApplied = true;
     }
   }
 
