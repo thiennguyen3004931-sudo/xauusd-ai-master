@@ -20,6 +20,7 @@ import PsychologyRounded from "@mui/icons-material/PsychologyRounded";
 import AssessmentRounded from "@mui/icons-material/AssessmentRounded";
 import InsightsRounded from "@mui/icons-material/InsightsRounded";
 import SmartToyRounded from "@mui/icons-material/SmartToyRounded";
+import CandlestickChartRounded from "@mui/icons-material/CandlestickChartRounded";
 import DnsRounded from "@mui/icons-material/DnsRounded";
 import SettingsRounded from "@mui/icons-material/SettingsRounded";
 import MenuRounded from "@mui/icons-material/MenuRounded";
@@ -31,6 +32,7 @@ const drawerWidth = 250;
 
 const operationsLinks = [
   ["/phase7b-demo", "Phase 7B Demo", SmartToyRounded],
+  ["/phase7b-pattern-check", "M15 Pattern Check", CandlestickChartRounded],
   ["/performance", "MT5 Performance", InsightsRounded],
   ["/system", "Hệ thống", DnsRounded],
 ] as const;
@@ -147,9 +149,10 @@ export function DashboardLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
   const isPhase7B = location.pathname.startsWith("/phase7b-demo");
+  const isPatternCheck = location.pathname.startsWith("/phase7b-pattern-check");
   const isPerformance = location.pathname.startsWith("/performance");
   const isSystem = location.pathname.startsWith("/system");
-  const isOperational = isPhase7B || isPerformance || isSystem;
+  const isOperational = isPhase7B || isPatternCheck || isPerformance || isSystem;
   const dashboard = useDashboard(!isOperational);
   const mode = dashboard.data?.control.mode ?? "SHADOW";
 
@@ -162,6 +165,10 @@ export function DashboardLayout() {
   if (isPhase7B) {
     headerTitle = "Phase 7B DEMO Operations";
     headerSubtitle = "Forward execution monitor · MT5 DEMO · read-only web";
+    headerMode = "DEMO ONLY";
+  } else if (isPatternCheck) {
+    headerTitle = "M15 Pattern Check";
+    headerSubtitle = "Engulfing / Two-candle / MA diagnostics · tolerance-aware · read-only";
     headerMode = "DEMO ONLY";
   } else if (isPerformance) {
     headerTitle = "MT5 DEMO Performance";
