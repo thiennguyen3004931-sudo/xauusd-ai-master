@@ -82,7 +82,7 @@ if (-not $SendTest -and -not $Once) {
   if (Test-TelegramRuntimeAlive $existingRuntime) {
     Write-Host "PHASE7B_TELEGRAM_NOTIFIER=ALREADY_RUNNING"
     Write-Host "PHASE7B_TELEGRAM_EXISTING_PID=$($existingRuntime.pid)"
-    exit 0
+    return
   }
 }
 
@@ -122,6 +122,24 @@ $startedAt = [DateTimeOffset]::UtcNow.ToString("o")
 
 Push-Location $ProjectRoot
 try {
+  # One-shot/test mode intentionally runs Node synchronously. On Windows
+  # PowerShell 5.1, Start-Process -PassThru can report HasExited while the
+  # ExitCode property remains unavailable even after WaitForExit(). Native
+  # invocation gives us the reliable process exit status through LASTEXITCODE.
+  if ($SendTest -or $Once) {
+    Write-Host "PHASE7B_TELEGRAM_NOTIFIER=RUNNING_ONESHOT"
+    & $nodeExe $Notifier
+    $nativeExitCode = $LASTEXITCODE
+    if ($null -eq $nativeExitCode) { $nativeExitCode = 0 }
+    $nativeExitCode = [int]$nativeExitCode
+    Write-TelegramRuntime -Status "STOPPED" -NodePid 0 -ExitCode $nativeExitCode -StartedAt $startedAt
+    if ($nativeExitCode -ne 0) {
+      throw "Phase 7B Telegram notifier one-shot exited with code $nativeExitCode"
+    }
+    Write-Host "PHASE7B_TELEGRAM_WRAPPER_TEST_EXIT=PASS"
+    return
+  }
+
   $nodeProcess = Start-Process -FilePath $nodeExe -ArgumentList @($Notifier) -NoNewWindow -PassThru
   Write-TelegramRuntime -Status "RUNNING" -NodePid $nodeProcess.Id -StartedAt $startedAt
   Write-Host "PHASE7B_TELEGRAM_NOTIFIER=RUNNING"
@@ -135,25 +153,11 @@ try {
     }
   }
 
-  # Windows PowerShell 5.1 can expose HasExited=True before the Process object
-  # has populated ExitCode. WaitForExit() is required before reading ExitCode;
-  # otherwise $null -ne 0 evaluates true and a successful Telegram test is
-  # incorrectly reported as a failure with a blank exit code.
-  $nodeProcess.WaitForExit()
-  $nodeProcess.Refresh()
-  $exitCode = $nodeProcess.ExitCode
-  if ($null -eq $exitCode) {
-    throw "Phase 7B Telegram notifier exit code is unavailable after WaitForExit()."
-  }
-  $exitCode = [int]$exitCode
-
-  Write-TelegramRuntime -Status "STOPPED" -NodePid $nodeProcess.Id -ExitCode $exitCode -StartedAt $startedAt
-  if ($exitCode -ne 0) {
-    throw "Phase 7B Telegram notifier exited with code $exitCode"
-  }
-  if ($SendTest) {
-    Write-Host "PHASE7B_TELEGRAM_WRAPPER_TEST_EXIT=PASS"
-  }
+  # Persistent notifier should not normally exit. We do not depend on the
+  # flaky Windows PowerShell ExitCode property here; any unexpected exit is
+  # reported as a stopped notifier and the wrapper returns a clear failure.
+  Write-TelegramRuntime -Status "STOPPED" -NodePid $nodeProcess.Id -ExitCode 1 -StartedAt $startedAt
+  throw "Phase 7B persistent Telegram notifier stopped unexpectedly."
 }
 finally {
   Pop-Location
