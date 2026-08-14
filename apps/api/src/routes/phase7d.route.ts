@@ -7,6 +7,10 @@ import {
   runPhase7DManagementResearch,
   type Phase7DManagementRequest,
 } from "../services/phase7d-management.service";
+import {
+  runPhase7DDailyScaleResearch,
+  type Phase7DDailyScaleRequest,
+} from "../services/phase7d-daily-scale.service";
 
 const router = Router();
 
@@ -26,6 +30,16 @@ router.post("/management-backtest", async (req: Request, res: Response) => {
   } catch (error) {
     res.status(400).json({
       error: error instanceof Error ? error.message : "Phase 7D BE/partial management research failed.",
+    });
+  }
+});
+
+router.post("/daily-scale-backtest", async (req: Request, res: Response) => {
+  try {
+    res.json(await runPhase7DDailyScaleResearch(req.body as Phase7DDailyScaleRequest));
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Phase 7D daily recovery/trend scale research failed.",
     });
   }
 });
