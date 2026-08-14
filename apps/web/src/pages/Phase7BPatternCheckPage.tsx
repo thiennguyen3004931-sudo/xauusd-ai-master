@@ -15,6 +15,7 @@ import { dateTime, price } from "../format";
 import { ErrorState, LoadingState } from "../ui/PageState";
 
 type Side = "BUY" | "SELL";
+type Confidence = "CHƯA_ĐÁNH_GIÁ" | "TIÊU_CHUẨN" | "CAO" | "RẤT_CAO";
 type EntryDiagnostics = {
   closeTime: number;
   nextCloseTime: number;
@@ -23,7 +24,14 @@ type EntryDiagnostics = {
     m15Supertrend: Side | null;
     m5Supertrend: Side | null;
     m5FlipAgeBars: number | null;
-    m5FreshAligned: boolean;
+    m5FreshAligned?: boolean;
+    m15SupertrendLine?: number | null;
+    m5SupertrendLine?: number | null;
+    m15TrendlineDistance?: number | null;
+    m5TrendlineDistance?: number | null;
+    m15TrendlineReaction?: boolean;
+    m5TrendlineReaction?: boolean;
+    confidenceLevel?: Confidence;
   };
   fvg: { sameDirectionConfirmed: boolean; requiredForEntry: false };
   entry: {
@@ -72,6 +80,13 @@ function tenMoHinh(name: string | null | undefined) {
   return "Chưa có mô hình";
 }
 
+function tenDoTinCay(value: Confidence | undefined) {
+  if (value === "RẤT_CAO") return "RẤT CAO";
+  if (value === "CAO") return "CAO";
+  if (value === "TIÊU_CHUẨN") return "TIÊU CHUẨN";
+  return "CHƯA ĐÁNH GIÁ";
+}
+
 type GateStatus = "ĐẠT" | "CHỜ" | "THÔNG TIN";
 
 function GateCard({ label, value, status, detail }: { label: string; value: string; status: GateStatus; detail: string }) {
@@ -96,6 +111,10 @@ function countdown(ms: number) {
   return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+function fmtDistance(value: number | null | undefined) {
+  return value === null || value === undefined ? "—" : `${value.toFixed(2)} giá`;
+}
+
 export function Phase7BPatternCheckPage() {
   const [now, setNow] = useState(Date.now());
   const query = useQuery({ queryKey: ["phase7b-live-entry-gate"], queryFn: getSnapshot, refetchInterval: 3_000, retry: false });
@@ -115,12 +134,11 @@ export function Phase7BPatternCheckPage() {
 
   const wanted = d.pattern.side;
   const m15Pass = Boolean(wanted && d.trend.m15Supertrend === wanted);
-  const m5DirectionPass = Boolean(wanted && d.trend.m5Supertrend === wanted);
-  const m5FreshPass = Boolean(wanted && d.trend.m5FreshAligned && d.trend.m5FlipAgeBars !== null && d.trend.m5FlipAgeBars <= 2);
-  const m5Pass = m5DirectionPass && m5FreshPass;
+  const m5Pass = Boolean(wanted && d.trend.m5Supertrend === wanted);
   const stopPass = d.entry.stopDistance !== null && d.entry.stopDistance >= 6 && d.entry.stopDistance <= 10;
   const quote = query.data.mt5?.quote;
   const mid = quote?.bid !== undefined && quote?.ask !== undefined ? (Number(quote.bid) + Number(quote.ask)) / 2 : null;
+  const confidence = d.trend.confidenceLevel ?? (d.entry.eligible ? "TIÊU_CHUẨN" : "CHƯA_ĐÁNH_GIÁ");
 
   const reasons = [
     {
@@ -138,10 +156,8 @@ export function Phase7BPatternCheckPage() {
     {
       ok: m5Pass,
       text: wanted
-        ? (m5Pass
-          ? `M5 cùng hướng ${tenHuong(wanted)} và fresh flip còn ${d.trend.m5FlipAgeBars ?? "—"} nến đóng (yêu cầu ≤ 2).`
-          : `M5 chưa đạt đồng thời cùng hướng và fresh flip ≤ 2 nến đóng.`)
-        : "Chưa có hướng mô hình để đối chiếu M5.",
+        ? (m5Pass ? `Supertrend M5 đang cùng hướng ${tenHuong(wanted)}.` : `Supertrend M5 chưa cùng hướng ${tenHuong(wanted)}.`)
+        : "Chưa có hướng mô hình để đối chiếu Supertrend M5.",
     },
     {
       ok: stopPass,
@@ -157,9 +173,12 @@ export function Phase7BPatternCheckPage() {
         <Box>
           <Typography variant="overline" color="primary" fontWeight={900}>KIỂM TRA TÍN HIỆU</Typography>
           <Typography variant="h4" fontWeight={950}>Điều kiện vào lệnh</Typography>
-          <Typography variant="body2" color="text.secondary" mt={0.5}>Chỉ đánh giá dữ liệu nến M15/M5 đã đóng, không dùng nến đang hình thành.</Typography>
+          <Typography variant="body2" color="text.secondary" mt={0.5}>Chỉ đánh giá dữ liệu nến M15/M5 đã đóng. Flip age chỉ để tham khảo, không chặn lệnh.</Typography>
         </Box>
-        <Chip label={d.entry.eligible ? `${tenHuong(d.entry.side)} · ĐỦ ĐIỀU KIỆN` : "CHƯA ĐỦ ĐIỀU KIỆN"} color={d.entry.eligible ? "success" : "default"} sx={{ fontWeight: 900 }} />
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          <Chip label={d.entry.eligible ? `${tenHuong(d.entry.side)} · ĐỦ ĐIỀU KIỆN` : "CHƯA ĐỦ ĐIỀU KIỆN"} color={d.entry.eligible ? "success" : "default"} sx={{ fontWeight: 900 }} />
+          <Chip label={`ĐỘ TIN CẬY: ${tenDoTinCay(confidence)}`} color={confidence === "RẤT_CAO" || confidence === "CAO" ? "success" : "default"} variant="outlined" sx={{ fontWeight: 900 }} />
+        </Stack>
       </Stack>
 
       <Grid container spacing={2}>
@@ -195,12 +214,34 @@ export function Phase7BPatternCheckPage() {
           <GateCard label="2 · SUPERTREND M15" value={tenHuong(d.trend.m15Supertrend)} status={wanted ? (m15Pass ? "ĐẠT" : "CHỜ") : "THÔNG TIN"} detail={wanted ? `Phải cùng hướng ${tenHuong(wanted)}` : "Đối chiếu sau khi có mô hình nến"} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <GateCard label="3 · M5 CÙNG HƯỚNG + FRESH FLIP" value={tenHuong(d.trend.m5Supertrend)} status={wanted ? (m5Pass ? "ĐẠT" : "CHỜ") : "THÔNG TIN"} detail={d.trend.m5FlipAgeBars === null ? "Chưa có fresh flip" : `Fresh flip cách ${d.trend.m5FlipAgeBars} nến đóng · yêu cầu ≤ 2`} />
+          <GateCard label="3 · SUPERTREND M5" value={tenHuong(d.trend.m5Supertrend)} status={wanted ? (m5Pass ? "ĐẠT" : "CHỜ") : "THÔNG TIN"} detail={d.trend.m5FlipAgeBars === null ? "Flip age: chưa xác định · chỉ tham khảo" : `Flip age ${d.trend.m5FlipAgeBars} nến · chỉ tham khảo, không chặn lệnh`} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
           <GateCard label="4 · DỪNG LỖ" value={d.entry.stopDistance === null ? "—" : `${d.entry.stopDistance.toFixed(2)} giá`} status={stopPass ? "ĐẠT" : "CHỜ"} detail="Khoảng SL vận hành: 6–10 giá" />
         </Grid>
       </Grid>
+
+      <Card variant="outlined" sx={{ borderColor: confidence === "RẤT_CAO" || confidence === "CAO" ? "success.main" : undefined }}>
+        <CardContent>
+          <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1}>
+            <Box>
+              <Typography variant="h6" fontWeight={900}>Độ tin cậy theo phản ứng gần đường Supertrend</Typography>
+              <Typography variant="body2" color="text.secondary" mt={0.5}>Đây là điểm cộng chất lượng, không phải điều kiện bắt buộc để vào lệnh.</Typography>
+            </Box>
+            <Chip label={tenDoTinCay(confidence)} color={confidence === "RẤT_CAO" || confidence === "CAO" ? "success" : "default"} variant="outlined" />
+          </Stack>
+          <Grid container spacing={2} mt={0.4}>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <Typography variant="body2" fontWeight={800}>M15: {d.trend.m15TrendlineReaction ? "✓ Có phản ứng gần đường Supertrend" : "Không có phản ứng gần rõ ràng"}</Typography>
+              <Typography variant="caption" color="text.secondary">Đường ST {price(d.trend.m15SupertrendLine ?? null)} · khoảng cách {fmtDistance(d.trend.m15TrendlineDistance)}</Typography>
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <Typography variant="body2" fontWeight={800}>M5: {d.trend.m5TrendlineReaction ? "✓ Có phản ứng gần đường Supertrend" : "Không có phản ứng gần rõ ràng"}</Typography>
+              <Typography variant="caption" color="text.secondary">Đường ST {price(d.trend.m5SupertrendLine ?? null)} · khoảng cách {fmtDistance(d.trend.m5TrendlineDistance)}</Typography>
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
 
       <Card variant="outlined">
         <CardContent>
@@ -215,7 +256,10 @@ export function Phase7BPatternCheckPage() {
               </Typography>
             ))}
             <Typography variant="body2" color="text.secondary" fontWeight={700}>
-              ℹ FVG cùng hướng: {d.fvg.sameDirectionConfirmed ? "CÓ" : "KHÔNG"}. FVG chỉ là bối cảnh chất lượng, <b>không phải điều kiện bắt buộc để vào lệnh</b>.
+              ℹ Flip age M5: {d.trend.m5FlipAgeBars ?? "—"} nến. Chỉ để tham khảo độ mới của xu hướng, không phải entry gate.
+            </Typography>
+            <Typography variant="body2" color="text.secondary" fontWeight={700}>
+              ℹ FVG cùng hướng: {d.fvg.sameDirectionConfirmed ? "CÓ" : "KHÔNG"}. FVG chỉ là bối cảnh chất lượng, không bắt buộc để vào lệnh.
             </Typography>
           </Stack>
         </CardContent>
@@ -223,10 +267,10 @@ export function Phase7BPatternCheckPage() {
 
       <Alert severity={d.entry.eligible ? "success" : "info"}>
         {d.entry.eligible
-          ? `KẾT LUẬN: Có thể vào ${tenHuong(d.entry.side)} vì mô hình nến, Supertrend M15, M5 fresh flip và khoảng SL đều đạt.`
-          : "KẾT LUẬN: Chưa gửi lệnh. Bot tiếp tục chờ đến khi tất cả điều kiện bắt buộc cùng đạt trên dữ liệu nến đã đóng."}
+          ? `KẾT LUẬN: Có thể vào ${tenHuong(d.entry.side)} vì mô hình nến, Supertrend M15, Supertrend M5 và khoảng SL đều đạt. Độ tin cậy hiện tại: ${tenDoTinCay(confidence)}.`
+          : "KẾT LUẬN: Chưa gửi lệnh. Bot tiếp tục chờ đến khi 4 điều kiện bắt buộc cùng đạt trên dữ liệu nến đã đóng."}
       </Alert>
-      <Alert severity="info">Quản lý sau khi khớp: +6 giá → dời SL về hòa vốn · +10 giá → chốt 1/3 · phần còn lại tiếp tục runner theo quản lý canonical. H1/H4 và FVG không phải TP cứng.</Alert>
+      <Alert severity="info">Quản lý sau khi khớp: +6 giá → dời SL về hòa vốn · +10 giá → chốt 1/3 · phần còn lại tiếp tục runner theo quản lý canonical. H1/H4, FVG và phản ứng trendline chỉ là bối cảnh/độ tin cậy, không phải TP cứng.</Alert>
     </Stack>
   );
 }
