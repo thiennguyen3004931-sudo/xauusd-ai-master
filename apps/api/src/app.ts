@@ -11,6 +11,7 @@ import soakRouter from "./routes/soak.route";
 import phase7bDemoRouter from "./routes/phase7b-demo.route";
 import phase7bPatternCheckRouter from "./routes/phase7b-pattern-check.route";
 import phase7bOpsRouter from "./routes/phase7b-ops.route";
+import phase7cRouter from "./routes/phase7c.route";
 
 const app = express();
 
@@ -34,6 +35,7 @@ app.use("/api/v1/soak", soakRouter);
 app.use("/api/v1/phase7b-demo", phase7bDemoRouter);
 app.use("/api/v1/phase7b-pattern-check", phase7bPatternCheckRouter);
 app.use("/api/v1/phase7b-ops", phase7bOpsRouter);
+app.use("/api/v1/phase7c", phase7cRouter);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: "Route not found." });
