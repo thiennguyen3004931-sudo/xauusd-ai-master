@@ -15,6 +15,8 @@ const TASKS = {
   web: "XAUUSD-Phase7B-Web",
 } as const;
 
+const TELEGRAM_HEARTBEAT_STALE_MS = 10_000;
+
 type RuntimeState = {
   version?: number;
   status?: string;
@@ -22,6 +24,17 @@ type RuntimeState = {
   pid?: number | null;
   heartbeatAt?: number;
   startedAt?: number | null;
+};
+
+type TelegramRuntimeState = {
+  version?: number;
+  status?: string;
+  pid?: number | null;
+  wrapperPid?: number | null;
+  heartbeatAt?: number;
+  startedAt?: string | null;
+  intervalSeconds?: number;
+  exitCode?: number | null;
 };
 
 type TaskStatus = {
@@ -39,10 +52,13 @@ router.get("/status", async (req: Request, res: Response) => {
   try {
     const demoDir = resolveDemoDir();
     const runtime = demoDir ? readJsonIfExists<RuntimeState>(path.join(demoDir, "phase7b-demo-runtime.json")) : null;
+    const telegramRuntime = demoDir
+      ? readJsonIfExists<TelegramRuntimeState>(path.join(demoDir, "phase7b-telegram-runtime.json"))
+      : null;
     const botProcessAlive = Boolean(runtime?.armed && isPidAlive(runtime.pid));
-    const [tasks, telegramProcessAlive, webUiAlive, telemetry] = await Promise.all([
+    const telegramStatus = getTelegramRuntimeStatus(telegramRuntime);
+    const [tasks, webUiAlive, telemetry] = await Promise.all([
       readTaskStatuses(),
-      isTelegramNotifierAlive(),
       isWebUiAlive(),
       getMt5Telemetry("XAUUSD").catch(() => null),
     ]);
@@ -55,9 +71,10 @@ router.get("/status", async (req: Request, res: Response) => {
       tasks,
       processes: {
         botAlive: botProcessAlive,
-        telegramAlive: telegramProcessAlive,
+        telegramAlive: telegramStatus.alive,
         webAlive: webUiAlive,
       },
+      telegram: telegramStatus,
       bridge: telemetry
         ? {
             reachable: telemetry.reachable,
@@ -76,6 +93,7 @@ router.get("/status", async (req: Request, res: Response) => {
         directOrderRouteExposed: false,
         startAction: "WINDOWS_SCHEDULED_TASKS_ONLY",
         taskBackend: "SCHTASKS_EXE",
+        telegramHealthSource: "RUNTIME_HEARTBEAT",
       },
     });
   } catch (error) {
@@ -97,10 +115,11 @@ router.post("/start", async (req: Request, res: Response) => {
     }
 
     const runtime = readJsonIfExists<RuntimeState>(path.join(demoDir, "phase7b-demo-runtime.json"));
+    const telegramRuntime = readJsonIfExists<TelegramRuntimeState>(path.join(demoDir, "phase7b-telegram-runtime.json"));
     const botProcessAlive = Boolean(runtime?.armed && isPidAlive(runtime.pid));
-    const [tasks, telegramProcessAlive, webUiAlive, telemetry] = await Promise.all([
+    const telegramStatus = getTelegramRuntimeStatus(telegramRuntime);
+    const [tasks, webUiAlive, telemetry] = await Promise.all([
       readTaskStatuses(),
-      isTelegramNotifierAlive(),
       isWebUiAlive(),
       getMt5Telemetry("XAUUSD").catch(() => null),
     ]);
@@ -129,7 +148,7 @@ router.post("/start", async (req: Request, res: Response) => {
       actions.push("BRIDGE_ALREADY_REACHABLE");
     }
 
-    if (!telegramProcessAlive) {
+    if (!telegramStatus.alive) {
       await startScheduledTask(TASKS.telegram);
       actions.push("TELEGRAM_START_REQUESTED");
     } else {
@@ -151,6 +170,7 @@ router.post("/start", async (req: Request, res: Response) => {
       demoOnly: true,
       directOrderRouteExposed: false,
       actions,
+      telegramBeforeStart: telegramStatus,
       message: "Phase 7B DEMO stack start requested through Windows Scheduled Tasks.",
     });
   } catch (error) {
@@ -231,25 +251,26 @@ async function startScheduledTask(taskName: string): Promise<void> {
   );
 }
 
-async function isTelegramNotifierAlive(): Promise<boolean> {
-  if (process.platform !== "win32") return false;
-  const script = [
-    "$p = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |",
-    "  Where-Object { $_.CommandLine -like '*run-phase7b-telegram-notifier.mjs*' } |",
-    "  Select-Object -First 1",
-    "if ($null -ne $p) { 'true' } else { 'false' }",
-  ].join(" ");
-  try {
-    const encoded = Buffer.from(script, "utf16le").toString("base64");
-    const { stdout } = await execFileAsync(
-      "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-      { windowsHide: true, timeout: 5_000, maxBuffer: 16 * 1024 },
-    );
-    return stdout.trim().toLowerCase() === "true";
-  } catch {
-    return false;
-  }
+function getTelegramRuntimeStatus(runtime: TelegramRuntimeState | null) {
+  const heartbeatAt = Number(runtime?.heartbeatAt ?? 0);
+  const heartbeatAgeMs = heartbeatAt > 0 ? Math.max(0, Date.now() - heartbeatAt) : null;
+  const pidAlive = isPidAlive(runtime?.pid);
+  const heartbeatFresh = heartbeatAgeMs !== null && heartbeatAgeMs <= TELEGRAM_HEARTBEAT_STALE_MS;
+  const alive = Boolean(runtime?.status === "RUNNING" && pidAlive && heartbeatFresh);
+
+  return {
+    alive,
+    status: runtime?.status ?? "NO_RUNTIME",
+    pid: runtime?.pid ?? null,
+    wrapperPid: runtime?.wrapperPid ?? null,
+    startedAt: runtime?.startedAt ?? null,
+    heartbeatAt: heartbeatAt || null,
+    heartbeatAgeMs,
+    heartbeatFresh,
+    pidAlive,
+    staleAfterMs: TELEGRAM_HEARTBEAT_STALE_MS,
+    exitCode: runtime?.exitCode ?? null,
+  };
 }
 
 async function isWebUiAlive(): Promise<boolean> {
