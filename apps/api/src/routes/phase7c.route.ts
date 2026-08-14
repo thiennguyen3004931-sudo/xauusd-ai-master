@@ -6,6 +6,10 @@ import {
 } from "../services/phase7c.service";
 import { getPhase7CForwardRange } from "../services/phase7c-forward.service";
 import { getPhase7CAutoLotPreview } from "../services/phase7c-autolot.service";
+import {
+  runPhase7CAutoLotBacktestComparison,
+  type Phase7CAutoLotBacktestRequest,
+} from "../services/phase7c-auto-lot.service";
 
 const router = Router();
 
@@ -45,6 +49,14 @@ router.post("/backtest", async (req: Request, res: Response) => {
     res.json(await runPhase7CCanonicalBacktest(req.body as Phase7CBacktestRequest));
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : "Phase 7C backtest failed." });
+  }
+});
+
+router.post("/auto-lot-backtest", async (req: Request, res: Response) => {
+  try {
+    res.json(await runPhase7CAutoLotBacktestComparison(req.body as Phase7CAutoLotBacktestRequest));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Phase 7C Auto Lot backtest comparison failed." });
   }
 });
 
