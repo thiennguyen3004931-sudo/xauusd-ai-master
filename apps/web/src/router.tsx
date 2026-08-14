@@ -17,6 +17,7 @@ import { Phase7CAutoLotBacktestPage } from "./pages/Phase7CAutoLotBacktestPage";
 import { Phase7CRiskPage } from "./pages/Phase7CRiskPage";
 import { Phase7DDailyPnlPage } from "./pages/Phase7DDailyPnlPage";
 import { Phase7DManagementPage } from "./pages/Phase7DManagementPage";
+import { Phase7DDailyScalePage } from "./pages/Phase7DDailyScalePage";
 
 export const router = createBrowserRouter([
   {
@@ -30,6 +31,7 @@ export const router = createBrowserRouter([
       { path: "phase7c-backtest", element: <Phase7CBacktestPage /> },
       { path: "phase7d-daily-pnl", element: <Phase7DDailyPnlPage /> },
       { path: "phase7d-management", element: <Phase7DManagementPage /> },
+      { path: "phase7d-daily-scale", element: <Phase7DDailyScalePage /> },
       { path: "phase7c-auto-lot", element: <Phase7CAutoLotBacktestPage /> },
       { path: "phase7c-risk", element: <Phase7CRiskPage /> },
       { path: "performance", element: <PerformancePage /> },
