@@ -28,6 +28,15 @@ export interface Phase7CAutoLotShadowTrade {
   reason: string;
 }
 
+export interface Phase7CAutoLotDecisionCriterion {
+  key: string;
+  label: string;
+  pass: boolean;
+  score: number;
+  maxScore: number;
+  detail: string;
+}
+
 export interface Phase7CAutoLotBacktestResult {
   source: "PHASE7C_AUTO_LOT_SHADOW_COMPARISON";
   generatedAt: number;
@@ -47,6 +56,9 @@ export interface Phase7CAutoLotBacktestResult {
     volumeStep: number;
     minVolume: number;
     managementCompatibility: "EXACT_ONE_THIRD_PARTIAL_ONLY";
+    comparedTradeSchedule: number;
+    fullPeriodCanonicalTrades: number;
+    journalTradeLimitApplied: boolean;
   };
   fixed: {
     trades: number;
@@ -69,9 +81,11 @@ export interface Phase7CAutoLotBacktestResult {
     attemptedTrades: number;
     executedTrades: number;
     blockedTrades: number;
+    blockRatePercent: number;
     averageTargetRiskUsd: number;
     averageRiskUsd: number;
     averageRiskPercent: number;
+    riskStdDevPercent: number;
     minLot: number;
     maxLot: number;
     averageLot: number;
@@ -84,6 +98,16 @@ export interface Phase7CAutoLotBacktestResult {
     expectancy: number;
     maxDrawdownUsd: number;
     endingBalance: number;
+  };
+  decision: {
+    score: number;
+    maxScore: 100;
+    verdict: "INSUFFICIENT_SAMPLE" | "REJECT_AUTO_LOT" | "KEEP_FIXED" | "NEEDS_MORE_DATA" | "SHADOW_PROMISING";
+    reason: string;
+    minimumSampleTrades: number;
+    sampleTrades: number;
+    executionEligible: false;
+    criteria: Phase7CAutoLotDecisionCriterion[];
   };
   backtest: Phase7CBacktestResult;
   shadowTrades: Phase7CAutoLotShadowTrade[];
