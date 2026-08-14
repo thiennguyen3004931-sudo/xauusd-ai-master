@@ -104,6 +104,7 @@ const armed = /^(1|true|yes|on)$/i.test(process.env.ZIQ_DEMO_ARMED ?? "false");
 const once = /^(1|true|yes|on)$/i.test(process.env.ZIQ_DEMO_ONCE ?? "false");
 const workDir = requiredEnv("ZIQ_DEMO_WORK_DIR");
 const bridgeEnvPath = process.env.ZIQ_BRIDGE_ENV ?? path.resolve("packages/mt5-broker/bridge/.env.phase7b-demo");
+const ENGULF_BODY_TOLERANCE_PRICE = 0.1;
 
 loadEnvFile(bridgeEnvPath);
 
@@ -137,6 +138,7 @@ console.log(`PHASE7B_DEMO_FIXED_VOLUME=${fixedVolume}`);
 console.log(`PHASE7B_DEMO_INTERVAL_SECONDS=${intervalSeconds}`);
 console.log(`PHASE7B_DEMO_ARMED=${armed ? "YES" : "NO"}`);
 console.log("PHASE7B_DEMO_ENTRY_GATE=PATTERN_PLUS_MA_ONLY");
+console.log(`PHASE7B_DEMO_ENGULF_BODY_TOLERANCE_PRICE=${ENGULF_BODY_TOLERANCE_PRICE}`);
 console.log("PHASE7B_DEMO_FVG_ENTRY_GATE=OFF");
 console.log("PHASE7B_DEMO_FVG_ROLE=HOLD_CONFIRMATION_PLUS_ADDON_SHADOW");
 console.log("PHASE7B_DEMO_FVG_ADDON_EXECUTION=SHADOW_ONLY_NO_ORDER");
@@ -287,13 +289,17 @@ async function cycle(): Promise<void> {
   if (!latest) return;
   if (latest.closeTime <= state.lastEvaluatedM15Close) return;
 
-  // Consume each closed M15 candle exactly once. A rejected/wide-spread signal is not chased later.
   state.lastEvaluatedM15Close = latest.closeTime;
   saveState();
 
   const signal = latestSignal(m15, spec);
   if (!signal || signal.signalTimestamp !== latest.closeTime) {
-    journal("M15_NO_ENTRY_SIGNAL", { closeTime: latest.closeTime, close: latest.close, entryRule: "PATTERN_PLUS_MA" });
+    journal("M15_NO_ENTRY_SIGNAL", {
+      closeTime: latest.closeTime,
+      close: latest.close,
+      entryRule: "PATTERN_PLUS_MA",
+      engulfBodyTolerancePrice: ENGULF_BODY_TOLERANCE_PRICE,
+    });
     return;
   }
 
@@ -326,6 +332,7 @@ async function cycle(): Promise<void> {
     stopLoss,
     volume: fixedVolume,
     entryRule: "PATTERN_PLUS_MA",
+    engulfBodyTolerancePrice: ENGULF_BODY_TOLERANCE_PRICE,
     fvgConfirmedAtEntry,
     fvgRequiredForEntry: false,
   });
@@ -444,16 +451,16 @@ function detectEntryPattern(
   if (
     isBearish(previous) &&
     isBullish(current) &&
-    current.open <= previous.close &&
-    current.close >= previous.open
+    current.open <= previous.close + ENGULF_BODY_TOLERANCE_PRICE + 1e-9 &&
+    current.close + ENGULF_BODY_TOLERANCE_PRICE + 1e-9 >= previous.open
   ) {
     return { side: "BUY", pattern: "ENGULFING", patternExtreme: current.low };
   }
   if (
     isBullish(previous) &&
     isBearish(current) &&
-    current.open >= previous.close &&
-    current.close <= previous.open
+    current.open + ENGULF_BODY_TOLERANCE_PRICE + 1e-9 >= previous.close &&
+    current.close <= previous.open + ENGULF_BODY_TOLERANCE_PRICE + 1e-9
   ) {
     return { side: "SELL", pattern: "ENGULFING", patternExtreme: current.high };
   }
