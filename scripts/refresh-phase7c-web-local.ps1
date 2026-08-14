@@ -102,6 +102,8 @@ if ($dailyResearch.safety.executionMutation -ne $false -or $dailyResearch.safety
 if (-not $dailyResearch.decision -or $dailyResearch.decision.executionEligible -ne $false) { throw "Phase 7D safety contract is invalid." }
 if (-not $dailyResearch.trendPlusLock) { throw "Phase 7D Trend+Lock isolation lane is missing." }
 if (-not $dailyResearch.decision.lockIsolation) { throw "Phase 7D Lock isolation diagnostics are missing." }
+if ($dailyResearch.configuration.recoveryStopPolicy -ne "STRUCTURAL_SL_UNTIL_DYNAMIC_FULL_TP") { throw "Phase 7D Recovery structural-SL policy is not active." }
+if ($dailyResearch.recovery.metrics.recoveryBeExits -ne 0 -or $dailyResearch.recoveryPlusLock.metrics.recoveryBeExits -ne 0) { throw "Phase 7D Recovery unexpectedly contains BE exits; Recovery must keep structural SL until dynamic full TP." }
 
 $managementBody = @{
   from = $fromDate
@@ -140,6 +142,9 @@ Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_EXECUTION_ELIGIBLE=$($autoCompare.decis
 
 Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_BACKTEST=PASS"
 Write-Host "PHASE7D_WEB_REFRESH_REPLAY_MODE=$($dailyResearch.replayMode)"
+Write-Host "PHASE7D_WEB_REFRESH_RECOVERY_STOP_POLICY=$($dailyResearch.configuration.recoveryStopPolicy)"
+Write-Host "PHASE7D_WEB_REFRESH_RECOVERY_BE_EXITS=$($dailyResearch.recovery.metrics.recoveryBeExits)"
+Write-Host "PHASE7D_WEB_REFRESH_RECOVERY_LOCK_BE_EXITS=$($dailyResearch.recoveryPlusLock.metrics.recoveryBeExits)"
 Write-Host "PHASE7D_WEB_REFRESH_SIGNALS=$($dailyResearch.configuration.signals)"
 Write-Host "PHASE7D_WEB_REFRESH_FILLED_CANDIDATES=$($dailyResearch.configuration.filledCandidateTrades)"
 Write-Host "PHASE7D_WEB_REFRESH_BASELINE_TRADES=$($dailyResearch.baseline.metrics.trades)"
