@@ -27,12 +27,15 @@ export interface Phase7CAutoLotPreview {
     maxLot: number;
     currentFixedVolume: number;
     targetRiskUsd: number;
+    managementCompatibility: "EXACT_ONE_THIRD_PARTIAL_ONLY";
   };
   preview: {
     stopDistance: number;
     lossAtSlOneLot: number;
     rawLot: number;
     recommendedLot: number;
+    partialVolume: number;
+    runnerVolume: number;
     estimatedRiskUsd: number;
     estimatedRiskPercent: number;
     approved: boolean;
