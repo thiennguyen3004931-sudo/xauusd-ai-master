@@ -22,6 +22,10 @@ import type {
   Phase7DDailyPnlRequest,
   Phase7DDailyPnlResult,
 } from "./phase7d-types";
+import type {
+  Phase7ESupertrendRequest,
+  Phase7ESupertrendResult,
+} from "./phase7e-types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
@@ -177,6 +181,18 @@ export async function runPhase7DDailyPnlBacktest(
 ): Promise<Phase7DDailyPnlResult> {
   return read<Phase7DDailyPnlResult>(
     await fetch(`${API_BASE}/api/v1/phase7d/daily-pnl-backtest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
+}
+
+export async function runPhase7ESupertrendBacktest(
+  input: Phase7ESupertrendRequest,
+): Promise<Phase7ESupertrendResult> {
+  return read<Phase7ESupertrendResult>(
+    await fetch(`${API_BASE}/api/v1/phase7e/supertrend-backtest`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),
