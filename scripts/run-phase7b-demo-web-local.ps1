@@ -79,8 +79,6 @@ foreach ($port in @($ApiPort, $WebPort)) {
   }
 }
 
-# Credentials/config are inherited only by the API child. The browser never
-# receives the bridge API key or execution credentials.
 $env:MT5_BRIDGE_ENABLED = "true"
 $env:MT5_BRIDGE_BASE_URL = $bridgeBase
 $env:MT5_BRIDGE_API_KEY = $apiKey
@@ -92,7 +90,6 @@ $env:HOST = "127.0.0.1"
 $env:PORT = [string]$ApiPort
 $env:WEB_ORIGIN = $webUrl
 
-# Run API package directly so all process-scoped Phase 7B env vars reach it.
 $apiCommand = "Set-Location '$ProjectRoot'; Write-Host 'PHASE7B_WEB_API=$apiUrl'; pnpm --filter @xauusd/api dev"
 $apiProcess = Start-Process powershell.exe -PassThru -ArgumentList @(
   "-NoExit",
@@ -103,9 +100,10 @@ $apiProcess = Start-Process powershell.exe -PassThru -ArgumentList @(
 Remove-Item Env:MT5_BRIDGE_API_KEY -ErrorAction SilentlyContinue
 Remove-Item Env:MT5_MAGIC_NUMBER -ErrorAction SilentlyContinue
 
-# The dedicated web talks directly to the dedicated API rather than the legacy
-# Vite /api -> 3001 proxy.
-$env:VITE_API_BASE_URL = $apiUrl
+# Browser requests remain same-origin. Vite proxies /api to the dedicated API,
+# eliminating cross-origin/CORS dependency for local DEMO monitoring.
+$env:VITE_API_BASE_URL = ""
+$env:VITE_DEV_API_PROXY_TARGET = $apiUrl
 $webCommand = "Set-Location '$ProjectRoot'; Write-Host 'PHASE7B_WEB_UI=$webUrl/phase7b-demo'; pnpm --filter @xauusd/web dev -- --host 127.0.0.1 --port $WebPort --strictPort"
 $webProcess = Start-Process powershell.exe -PassThru -ArgumentList @(
   "-NoExit",
@@ -113,12 +111,14 @@ $webProcess = Start-Process powershell.exe -PassThru -ArgumentList @(
   "-Command", $webCommand
 )
 Remove-Item Env:VITE_API_BASE_URL -ErrorAction SilentlyContinue
+Remove-Item Env:VITE_DEV_API_PROXY_TARGET -ErrorAction SilentlyContinue
 
 Write-Host "PHASE7B_WEB_API_PID=$($apiProcess.Id)"
 Write-Host "PHASE7B_WEB_UI_PID=$($webProcess.Id)"
 Write-Host "PHASE7B_WEB_DEMO_DIR=$demoDir"
 Write-Host "PHASE7B_WEB_API=$apiUrl/api/v1/phase7b-demo"
 Write-Host "PHASE7B_WEB_UI=$webUrl/phase7b-demo"
+Write-Host "PHASE7B_WEB_API_TRANSPORT=SAME_ORIGIN_VITE_PROXY"
 Write-Host "PHASE7B_WEB_READ_ONLY=PASS"
 Write-Host "PHASE7B_WEB_LEGACY_PORTS_3001_5173=BYPASSED"
 Write-Host "PHASE7B_WEB_API_TURBO=OFF"
