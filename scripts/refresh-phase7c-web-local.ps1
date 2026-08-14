@@ -108,10 +108,13 @@ $dailyResearch = Invoke-RestMethod `
   -Method Post `
   -ContentType "application/json" `
   -Body $dailyBody `
-  -TimeoutSec 120
+  -TimeoutSec 180
 
 if ($dailyResearch.source -ne "PHASE7D_DAILY_PNL_RESEARCH") {
   throw "Phase 7D Daily P/L self-test returned an unexpected source."
+}
+if ($dailyResearch.replayMode -ne "EXACT_PER_LANE_SIGNAL_CONTENTION_WITH_M5_APPROXIMATION") {
+  throw "Phase 7D Daily P/L exact replay mode is not active."
 }
 if ($dailyResearch.safety.executionMutation -ne $false -or $dailyResearch.safety.phase7bStrategyMutation -ne $false) {
   throw "Phase 7D Daily P/L research unexpectedly allows execution/strategy mutation."
@@ -136,7 +139,15 @@ Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_SCORE=$($autoCompare.decision.score)"
 Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_VERDICT=$($autoCompare.decision.verdict)"
 Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_EXECUTION_ELIGIBLE=$($autoCompare.decision.executionEligible)"
 Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_BACKTEST=PASS"
-Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_TRADES=$($dailyResearch.configuration.comparedTradeSchedule)"
+Write-Host "PHASE7D_WEB_REFRESH_REPLAY_MODE=$($dailyResearch.replayMode)"
+Write-Host "PHASE7D_WEB_REFRESH_SIGNALS=$($dailyResearch.configuration.signals)"
+Write-Host "PHASE7D_WEB_REFRESH_FILLED_CANDIDATES=$($dailyResearch.configuration.filledCandidateTrades)"
+Write-Host "PHASE7D_WEB_REFRESH_BASELINE_TRADES=$($dailyResearch.baseline.metrics.trades)"
+Write-Host "PHASE7D_WEB_REFRESH_RECOVERY_TRADES=$($dailyResearch.recovery.metrics.trades)"
+Write-Host "PHASE7D_WEB_REFRESH_LOCK_TRADES=$($dailyResearch.recoveryPlusLock.metrics.trades)"
+Write-Host "PHASE7D_WEB_REFRESH_BASELINE_BUSY_SKIPS=$($dailyResearch.baseline.metrics.skippedPositionBusy)"
+Write-Host "PHASE7D_WEB_REFRESH_RECOVERY_BUSY_SKIPS=$($dailyResearch.recovery.metrics.skippedPositionBusy)"
+Write-Host "PHASE7D_WEB_REFRESH_LOCK_BUSY_SKIPS=$($dailyResearch.recoveryPlusLock.metrics.skippedPositionBusy)"
 Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_SCORE=$($dailyResearch.decision.bestResearchScore)"
 Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_VERDICT=$($dailyResearch.decision.verdict)"
 Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_RECOMMENDED=$($dailyResearch.decision.recommendedLane)"
