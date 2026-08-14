@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from .auth import api_key_dependency
 from .config import Settings
 from .errors import BridgeError
+from .forming_candles import candles_with_forming
 from .ledger import IdempotencyLedger
 from .models import CloseRequest, ModifyRequest, OrderRequest
 from .mt5_gateway import Mt5Gateway
@@ -57,9 +58,18 @@ def quote(symbol: str):
 def trading_day_boundary(symbol: str):
     return gateway.trading_day_boundary(symbol)
 
+
 @app.get("/v1/candles/{symbol}", dependencies=[Depends(verify_api_key)])
-def candles(symbol: str, timeframe: str = "M15", count: int = 320):
+def candles(
+    symbol: str,
+    timeframe: str = "M15",
+    count: int = 320,
+    includeForming: bool = False,
+):
+    if includeForming:
+        return candles_with_forming(gateway, symbol, timeframe, count)
     return gateway.candles(symbol, timeframe, count)
+
 
 @app.get("/v1/symbols/{symbol}/spec", dependencies=[Depends(verify_api_key)])
 def symbol_spec(symbol: str):
@@ -69,6 +79,7 @@ def symbol_spec(symbol: str):
 @app.get("/v1/history/deals", dependencies=[Depends(verify_api_key)])
 def deal_history(fromMs: int, toMs: int, symbol: str | None = None):
     return gateway.deals(fromMs, toMs, symbol)
+
 
 @app.get("/v1/positions", dependencies=[Depends(verify_api_key)])
 def positions(symbol: str | None = Query(default=None)):
