@@ -4,6 +4,7 @@ import {
   Card,
   CardContent,
   Chip,
+  Divider,
   Grid,
   Stack,
   Table,
@@ -76,6 +77,8 @@ type DemoEvent = {
   type?: string;
   side?: string;
   pattern?: string;
+  reason?: string;
+  message?: string;
   [key: string]: unknown;
 };
 
@@ -123,18 +126,44 @@ async function getSnapshot(): Promise<Snapshot> {
   return JSON.parse(text) as Snapshot;
 }
 
+function tenHuong(side: Side | null | undefined) {
+  if (side === "BUY") return "MUA";
+  if (side === "SELL") return "BÁN";
+  return "—";
+}
+
+function tenMoHinh(name: string | null | undefined) {
+  if (name === "ENGULFING") return "Nến nhấn chìm";
+  if (name === "TWO_CANDLE_BODY_DOMINANCE") return "Hai nến thân chiếm ưu thế";
+  return name ? name.replaceAll("_", " ") : "Chưa có mô hình";
+}
+
+function tenTrangThaiBot(status: string) {
+  const map: Record<string, string> = {
+    WAITING_SIGNAL: "ĐANG CHỜ TÍN HIỆU",
+    MANAGING: "ĐANG QUẢN LÝ LỆNH",
+    READY_NOT_ARMED: "SẴN SÀNG · CHƯA BẬT BOT",
+    BOT_STALE: "BOT MẤT HEARTBEAT",
+    POSITION_NOT_MANAGED: "CÓ LỆNH NHƯNG BOT KHÔNG QUẢN LÝ",
+    MT5_OFFLINE: "MT5 MẤT KẾT NỐI",
+    NOT_CONFIGURED: "CHƯA CẤU HÌNH",
+  };
+  return map[status] ?? status.replaceAll("_", " ");
+}
+
 function eventLabel(type?: string) {
   const labels: Record<string, string> = {
-    ENTRY_SUBMIT: "Gửi lệnh",
-    ENTRY_FILLED: "Khớp lệnh",
-    ENTRY_REJECTED: "Từ chối entry",
-    PLUS6_SL_TO_ENTRY: "+6 → BE",
-    PLUS10_PARTIAL_ONE_THIRD: "+10 → chốt 1/3",
-    STRUCTURAL_SL_TIGHTEN: "Dời SL",
-    EXIT_EXECUTED: "Đóng lệnh",
-    MANAGED_POSITION_CLOSED: "Position đã đóng",
-    DEMO_GUARD_BLOCK: "DEMO guard block",
-    CYCLE_ERROR: "Lỗi controller",
+    ENTRY_SUBMIT: "Gửi yêu cầu vào lệnh",
+    ENTRY_FILLED: "Đã khớp lệnh",
+    ENTRY_REJECTED: "Lệnh vào bị từ chối",
+    PLUS6_SL_TO_ENTRY: "+6 giá → dời SL về hòa vốn",
+    PLUS10_PARTIAL_ONE_THIRD: "+10 giá → chốt 1/3",
+    STRUCTURAL_SL_TIGHTEN: "Siết dừng lỗ",
+    EXIT_EXECUTED: "Đã đóng lệnh",
+    MANAGED_POSITION_CLOSED: "Vị thế đã đóng",
+    DEMO_GUARD_BLOCK: "Bộ bảo vệ DEMO chặn",
+    CYCLE_ERROR: "Lỗi chu kỳ Bot",
+    FVG_HOLD_CONFIRMED: "Bối cảnh FVG cùng hướng",
   };
   return labels[type ?? ""] ?? String(type ?? "—").replaceAll("_", " ");
 }
@@ -148,6 +177,14 @@ function Info({ label, value }: { label: string; value: string }) {
   );
 }
 
+function ReasonLine({ ok, children }: { ok: boolean; children: React.ReactNode }) {
+  return (
+    <Typography variant="body2" fontWeight={700} color={ok ? "success.main" : "warning.main"}>
+      {ok ? "✓" : "•"} {children}
+    </Typography>
+  );
+}
+
 export function Phase7BDemoPage() {
   const query = useQuery({
     queryKey: ["phase7b-demo-simple"],
@@ -158,7 +195,7 @@ export function Phase7BDemoPage() {
 
   if (query.isLoading) return <LoadingState />;
   if (query.isError || !query.data) {
-    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được Forward Monitor."} />;
+    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được màn hình theo dõi giao dịch."} />;
   }
 
   const data = query.data;
@@ -177,56 +214,38 @@ export function Phase7BDemoPage() {
     health?.expertTradeAllowed === true,
   );
   const recent = data.recentEvents.slice(0, 12);
+  const latestExit = data.recentEvents.find((event) => event.type === "EXIT_EXECUTED" || event.type === "MANAGED_POSITION_CLOSED");
+  const currentM15Aligned = Boolean(managed && diagnostics?.trend.m15Supertrend === managed.side);
+  const currentM5Aligned = Boolean(managed && diagnostics?.trend.m5Supertrend === managed.side && diagnostics?.trend.m5FreshAligned);
 
   return (
     <Stack spacing={2.2}>
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1.5} alignItems={{ md: "center" }}>
         <Box>
-          <Typography variant="overline" color="primary" fontWeight={900}>XAUUSD · DEMO FORWARD</Typography>
-          <Typography variant="h4" fontWeight={950}>Forward Monitor</Typography>
-          <Typography variant="body2" color="text.secondary" mt={0.5}>Theo dõi bot DEMO, tín hiệu và lệnh đang quản lý.</Typography>
+          <Typography variant="overline" color="primary" fontWeight={900}>XAUUSD · CHẠY THỬ DEMO</Typography>
+          <Typography variant="h4" fontWeight={950}>Theo dõi giao dịch</Typography>
+          <Typography variant="body2" color="text.secondary" mt={0.5}>Theo dõi Bot DEMO, lý do vào lệnh, lý do tiếp tục giữ và quá trình quản lý lệnh.</Typography>
         </Box>
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          <StatusChip value={botAlive ? data.botStatus : "BOT STOPPED"} />
-          <StatusChip value={guardPass ? "DEMO READY" : "DEMO BLOCKED"} />
+          <StatusChip value={botAlive ? tenTrangThaiBot(data.botStatus) : "BOT ĐANG DỪNG"} />
+          <StatusChip value={guardPass ? "DEMO SẴN SÀNG" : "DEMO BỊ CHẶN"} />
         </Stack>
       </Stack>
 
-      {health?.accountMode === "real" && <Alert severity="error">REAL account detected — Bot DEMO bị khóa.</Alert>}
+      {health?.accountMode === "real" && <Alert severity="error">Phát hiện tài khoản thật — Bot DEMO bị khóa hoàn toàn.</Alert>}
 
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <MetricCard
-            label="DEMO account"
-            value={String(health?.accountLogin ?? data.state?.accountLogin ?? "—")}
-            detail={`${health?.server ?? "—"}`}
-            icon={<AccountCircleRounded color="primary" />}
-          />
+          <MetricCard label="Tài khoản DEMO" value={String(health?.accountLogin ?? data.state?.accountLogin ?? "—")} detail={`${health?.server ?? "—"}`} icon={<AccountCircleRounded color="primary" />} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <MetricCard
-            label="XAUUSD"
-            value={price(data.mt5.quote?.bid ?? null)}
-            detail={`Ask ${price(data.mt5.quote?.ask ?? null)} · spread ${price(data.mt5.quote?.spread ?? null)}`}
-            icon={<CandlestickChartRounded color="primary" />}
-          />
+          <MetricCard label="Giá XAUUSD" value={price(data.mt5.quote?.bid ?? null)} detail={`Ask ${price(data.mt5.quote?.ask ?? null)} · spread ${price(data.mt5.quote?.spread ?? null)}`} icon={<CandlestickChartRounded color="primary" />} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <MetricCard
-            label="Bot"
-            value={botAlive ? data.botStatus : "STOPPED"}
-            detail={botAlive ? `PID ${data.runtime?.pid ?? "—"}` : "Bật tại Bot & Telegram"}
-            icon={<SmartToyRounded color="primary" />}
-          />
+          <MetricCard label="Trạng thái Bot" value={botAlive ? tenTrangThaiBot(data.botStatus) : "ĐANG DỪNG"} detail={botAlive ? `PID ${data.runtime?.pid ?? "—"}` : "Bật Bot tại trang Bot & Telegram"} icon={<SmartToyRounded color="primary" />} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <MetricCard
-            label="Open P&L"
-            value={money(position?.profit ?? health?.accountProfit ?? 0, currency)}
-            detail={managed ? `${managed.side} · ${position?.volume ?? managed.expectedRemainingVolume} lot` : "No managed position"}
-            icon={<ReceiptLongRounded color={position && position.profit >= 0 ? "success" : "primary"} />}
-            tone={position ? (position.profit >= 0 ? "success.main" : "error.main") : "text.primary"}
-          />
+          <MetricCard label="Lãi/lỗ đang mở" value={money(position?.profit ?? health?.accountProfit ?? 0, currency)} detail={managed ? `${tenHuong(managed.side)} · ${position?.volume ?? managed.expectedRemainingVolume} lot` : "Không có lệnh đang quản lý"} icon={<ReceiptLongRounded color={position && position.profit >= 0 ? "success" : "primary"} />} tone={position ? (position.profit >= 0 ? "success.main" : "error.main") : "text.primary"} />
         </Grid>
       </Grid>
 
@@ -235,29 +254,29 @@ export function Phase7BDemoPage() {
           <Card variant="outlined" sx={{ height: "100%" }}>
             <CardContent>
               <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
-                <Typography variant="h6" fontWeight={900}>Entry Gate</Typography>
-                <Chip
-                  label={diagnostics?.entry.eligible ? `${diagnostics.entry.side} READY` : "WAIT"}
-                  color={diagnostics?.entry.eligible ? "success" : "default"}
-                  variant="outlined"
-                />
+                <Typography variant="h6" fontWeight={900}>Điều kiện vào lệnh hiện tại</Typography>
+                <Chip label={diagnostics?.entry.eligible ? `${tenHuong(diagnostics.entry.side)} · ĐỦ ĐIỀU KIỆN` : "CHƯA ĐỦ ĐIỀU KIỆN"} color={diagnostics?.entry.eligible ? "success" : "default"} variant="outlined" />
               </Stack>
 
               {!diagnostics ? (
-                <Alert severity="warning" sx={{ mt: 2 }}>{data.entryDiagnosticsError ?? "Entry diagnostics chưa sẵn sàng."}</Alert>
+                <Alert severity="warning" sx={{ mt: 2 }}>{data.entryDiagnosticsError ?? "Dữ liệu điều kiện vào lệnh chưa sẵn sàng."}</Alert>
               ) : (
                 <>
                   <Grid container spacing={2} mt={0.3}>
-                    <Grid size={6}><Info label="Pattern" value={diagnostics.pattern.name?.replaceAll("_", " ") ?? "NONE"} /></Grid>
-                    <Grid size={6}><Info label="Hướng pattern" value={diagnostics.pattern.side ?? "—"} /></Grid>
-                    <Grid size={6}><Info label="Supertrend M15" value={diagnostics.trend.m15Supertrend ?? "—"} /></Grid>
-                    <Grid size={6}><Info label="Supertrend M5" value={diagnostics.trend.m5Supertrend ?? "—"} /></Grid>
-                    <Grid size={6}><Info label="M5 flip age" value={diagnostics.trend.m5FlipAgeBars === null || diagnostics.trend.m5FlipAgeBars === undefined ? "—" : `${diagnostics.trend.m5FlipAgeBars} bar`} /></Grid>
-                    <Grid size={6}><Info label="FVG context" value={diagnostics.fvg.sameDirectionConfirmed ? "YES" : "NO"} /></Grid>
-                    <Grid size={6}><Info label="Entry ref" value={price(diagnostics.entry.referenceEntry)} /></Grid>
+                    <Grid size={6}><Info label="Mô hình nến" value={tenMoHinh(diagnostics.pattern.name)} /></Grid>
+                    <Grid size={6}><Info label="Hướng mô hình" value={tenHuong(diagnostics.pattern.side)} /></Grid>
+                    <Grid size={6}><Info label="Supertrend M15" value={tenHuong(diagnostics.trend.m15Supertrend)} /></Grid>
+                    <Grid size={6}><Info label="Supertrend M5" value={tenHuong(diagnostics.trend.m5Supertrend)} /></Grid>
+                    <Grid size={6}><Info label="Fresh flip M5" value={diagnostics.trend.m5FlipAgeBars === null || diagnostics.trend.m5FlipAgeBars === undefined ? "Chưa có" : `${diagnostics.trend.m5FlipAgeBars} nến đóng`} /></Grid>
+                    <Grid size={6}><Info label="Bối cảnh FVG" value={diagnostics.fvg.sameDirectionConfirmed ? "Có cùng hướng" : "Không có / không bắt buộc"} /></Grid>
+                    <Grid size={6}><Info label="Giá vào tham chiếu" value={price(diagnostics.entry.referenceEntry)} /></Grid>
                     <Grid size={6}><Info label="SL dự kiến" value={diagnostics.entry.stopDistance === null ? "—" : `${diagnostics.entry.stopDistance.toFixed(2)} giá`} /></Grid>
                   </Grid>
-                  <Alert severity={diagnostics.entry.eligible ? "success" : "info"} sx={{ mt: 2 }}>{diagnostics.entry.reason}</Alert>
+                  <Alert severity={diagnostics.entry.eligible ? "success" : "info"} sx={{ mt: 2 }}>
+                    {diagnostics.entry.eligible
+                      ? `Được phép vào ${tenHuong(diagnostics.entry.side)} vì 2 mô hình nến + Supertrend M15 cùng hướng + M5 fresh flip ≤ 2 đều đạt. FVG chỉ là bối cảnh.`
+                      : "Chưa gửi lệnh vì ít nhất một điều kiện bắt buộc chưa đạt. Bot tiếp tục chờ nến đóng tiếp theo."}
+                  </Alert>
                 </>
               )}
             </CardContent>
@@ -269,38 +288,81 @@ export function Phase7BDemoPage() {
             <CardContent>
               <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
                 <Typography variant="h6" fontWeight={900}>Lệnh đang quản lý</Typography>
-                <StatusChip value={managed ? managed.side : "NO POSITION"} />
+                <StatusChip value={managed ? tenHuong(managed.side) : "KHÔNG CÓ LỆNH"} />
               </Stack>
 
               {!managed ? (
-                <Typography variant="body2" color="text.secondary" mt={2}>Chưa có lệnh. Bot chờ tín hiệu hợp lệ trên nến đóng.</Typography>
+                <Typography variant="body2" color="text.secondary" mt={2}>Chưa có lệnh. Bot chỉ vào khi toàn bộ điều kiện bắt buộc cùng đạt trên nến đã đóng.</Typography>
               ) : (
-                <Grid container spacing={2} mt={0.3}>
-                  <Grid size={6}><Info label="Ticket" value={managed.ticket} /></Grid>
-                  <Grid size={6}><Info label="Pattern" value={managed.pattern.replaceAll("_", " ")} /></Grid>
-                  <Grid size={6}><Info label="Entry" value={price(position?.entry ?? managed.entry)} /></Grid>
-                  <Grid size={6}><Info label="Giá hiện tại" value={price(currentPrice ?? null)} /></Grid>
-                  <Grid size={6}><Info label="Volume còn" value={`${position?.volume ?? managed.expectedRemainingVolume} lot`} /></Grid>
-                  <Grid size={6}><Info label="SL hiện tại" value={price(position?.stopLoss ?? managed.lastStructuralStop)} /></Grid>
-                  <Grid size={6}><Info label="+6 → BE" value={managed.breakEvenApplied ? "ĐÃ DỜI" : "CHƯA"} /></Grid>
-                  <Grid size={6}><Info label="+10 → chốt 1/3" value={managed.partialApplied ? "ĐÃ CHỐT" : "CHƯA"} /></Grid>
-                  <Grid size={12}><Info label="Floating P&L" value={money(position?.profit ?? 0, currency)} /></Grid>
-                </Grid>
+                <>
+                  <Grid container spacing={2} mt={0.3}>
+                    <Grid size={6}><Info label="Mã lệnh" value={managed.ticket} /></Grid>
+                    <Grid size={6}><Info label="Mô hình đã kích hoạt" value={tenMoHinh(managed.pattern)} /></Grid>
+                    <Grid size={6}><Info label="Giá vào" value={price(position?.entry ?? managed.entry)} /></Grid>
+                    <Grid size={6}><Info label="Giá hiện tại" value={price(currentPrice ?? null)} /></Grid>
+                    <Grid size={6}><Info label="Khối lượng còn lại" value={`${position?.volume ?? managed.expectedRemainingVolume} lot`} /></Grid>
+                    <Grid size={6}><Info label="SL hiện tại" value={price(position?.stopLoss ?? managed.lastStructuralStop)} /></Grid>
+                    <Grid size={6}><Info label="+6 → hòa vốn" value={managed.breakEvenApplied ? "ĐÃ DỜI" : "CHƯA"} /></Grid>
+                    <Grid size={6}><Info label="+10 → chốt 1/3" value={managed.partialApplied ? "ĐÃ CHỐT" : "CHƯA"} /></Grid>
+                    <Grid size={12}><Info label="Lãi/lỗ thả nổi" value={money(position?.profit ?? 0, currency)} /></Grid>
+                  </Grid>
+
+                  <Divider sx={{ my: 2 }} />
+                  <Typography fontWeight={900}>Vì sao lệnh này đã được vào?</Typography>
+                  <Stack spacing={0.8} mt={1.2}>
+                    <ReasonLine ok>Mô hình {tenMoHinh(managed.pattern)} đã kích hoạt hướng {tenHuong(managed.side)}.</ReasonLine>
+                    <ReasonLine ok>Rule bắt buộc Supertrend M15 cùng hướng tại thời điểm kích hoạt.</ReasonLine>
+                    <ReasonLine ok>Rule bắt buộc M5 cùng hướng và fresh flip không quá 2 nến đóng.</ReasonLine>
+                    <Typography variant="body2" color="text.secondary">ℹ FVG chỉ ghi nhận bối cảnh; không có FVG vẫn được phép vào nếu các gate bắt buộc đạt.</Typography>
+                  </Stack>
+                </>
               )}
             </CardContent>
           </Card>
         </Grid>
       </Grid>
 
+      {managed && (
+        <Card variant="outlined" sx={{ borderColor: "rgba(56,189,248,.25)" }}>
+          <CardContent>
+            <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1}>
+              <Box>
+                <Typography variant="h6" fontWeight={900}>Vì sao Bot đang HOLD lệnh?</Typography>
+                <Typography variant="body2" color="text.secondary" mt={0.4}>Giải thích theo trạng thái quản lý hiện tại; không biến H1/H4/FVG thành điều kiện thoát cứng.</Typography>
+              </Box>
+              <Chip label="ĐANG GIỮ LỆNH" color="info" variant="outlined" />
+            </Stack>
+            <Grid container spacing={2} mt={0.5}>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <Stack spacing={1}>
+                  <ReasonLine ok={Boolean(position)}>Vị thế vẫn còn tồn tại trên MT5 và đang thuộc state quản lý của Bot.</ReasonLine>
+                  <ReasonLine ok={managed.breakEvenApplied}>{managed.breakEvenApplied ? "+6 đã đạt: SL đã được đưa về hòa vốn." : "+6 chưa được áp dụng: Bot tiếp tục giữ với SL hiện hành."}</ReasonLine>
+                  <ReasonLine ok={managed.partialApplied}>{managed.partialApplied ? "+10 đã đạt: đã chốt 1/3, phần còn lại tiếp tục runner." : "+10 chưa được áp dụng: chưa đến bước chốt 1/3."}</ReasonLine>
+                  <Typography variant="body2" color="text.secondary" fontWeight={700}>ℹ H1/H4 và FVG chỉ là bối cảnh; không tự đóng lệnh chỉ vì chạm các vùng này.</Typography>
+                </Stack>
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <Stack spacing={1}>
+                  <ReasonLine ok={currentM15Aligned}>Supertrend M15 hiện tại {currentM15Aligned ? `vẫn cùng hướng ${tenHuong(managed.side)}` : "không còn cùng hướng hoàn toàn"}.</ReasonLine>
+                  <ReasonLine ok={currentM5Aligned}>M5 hiện tại {currentM5Aligned ? `vẫn cùng hướng ${tenHuong(managed.side)} và fresh` : "không còn đồng thuận fresh với hướng lệnh"}.</ReasonLine>
+                  <Typography variant="body2" color="text.secondary" fontWeight={700}>ℹ M15/M5 hiện tại là bối cảnh theo dõi. Bot chỉ thoát khi management canonical thực sự phát điều kiện thoát/SL.</Typography>
+                  <Typography variant="body2" color="text.secondary">Sự kiện đóng gần nhất: {latestExit?.timestamp ? `${eventLabel(latestExit.type)} lúc ${dateTime(Date.parse(latestExit.timestamp))}` : "chưa có trong journal gần đây"}.</Typography>
+                </Stack>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
+      )}
+
       <Alert severity={guardPass ? "success" : "warning"}>
         {guardPass
-          ? "DEMO ready · Rule: Engulfing/Two-candle + Supertrend M15 + M5 fresh flip. FVG chỉ là context. +6 → BE · +10 → chốt 1/3."
-          : "DEMO chưa đủ điều kiện. Kiểm tra MT5 Bridge / Algo Trading / Expert Trading."}
+          ? "DEMO sẵn sàng · Entry: 2 mô hình nến + Supertrend M15 + M5 fresh flip ≤ 2 · FVG chỉ là bối cảnh · +6 → hòa vốn · +10 → chốt 1/3."
+          : "DEMO chưa đủ điều kiện. Kiểm tra MT5 Bridge / Algo Trading / quyền Expert Trading."}
       </Alert>
 
       <Card variant="outlined">
         <CardContent>
-          <Typography variant="h6" fontWeight={900}>Event gần đây</Typography>
+          <Typography variant="h6" fontWeight={900}>Hoạt động gần đây</Typography>
           <TableContainer sx={{ mt: 1.5, maxHeight: 400 }}>
             <Table stickyHeader size="small">
               <TableHead>
@@ -308,12 +370,12 @@ export function Phase7BDemoPage() {
               </TableHead>
               <TableBody>
                 {recent.length === 0 ? (
-                  <TableRow><TableCell colSpan={3}>Chưa có event.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={3}>Chưa có sự kiện.</TableCell></TableRow>
                 ) : recent.map((event, index) => (
                   <TableRow key={`${event.timestamp ?? "event"}-${index}`} hover>
                     <TableCell sx={{ whiteSpace: "nowrap" }}>{event.timestamp ? dateTime(Date.parse(event.timestamp)) : "—"}</TableCell>
                     <TableCell><Typography variant="body2" fontWeight={800}>{eventLabel(event.type)}</Typography></TableCell>
-                    <TableCell><Typography variant="caption" color="text.secondary">{event.side ?? ""} {event.pattern ? String(event.pattern).replaceAll("_", " ") : ""}</Typography></TableCell>
+                    <TableCell><Typography variant="caption" color="text.secondary">{event.side ? tenHuong(event.side as Side) : ""} {event.pattern ? tenMoHinh(String(event.pattern)) : ""} {event.reason ? `· ${event.reason}` : ""} {event.message ? `· ${event.message}` : ""}</Typography></TableCell>
                   </TableRow>
                 ))}
               </TableBody>
