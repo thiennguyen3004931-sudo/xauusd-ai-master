@@ -11,22 +11,28 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { Phase7BDemoPage } from "./pages/Phase7BDemoPage";
 import { Phase7BPatternCheckPage } from "./pages/Phase7BPatternCheckPage";
 import { Phase7BOpsPage } from "./pages/Phase7BOpsPage";
+import { Phase7CControlCenterPage } from "./pages/Phase7CControlCenterPage";
+import { Phase7CBacktestPage } from "./pages/Phase7CBacktestPage";
+import { Phase7CRiskPage } from "./pages/Phase7CRiskPage";
 
 export const router = createBrowserRouter([
   {
     path: "/",
     element: <DashboardLayout />,
     children: [
-      { index: true, element: <OverviewPage /> },
+      { index: true, element: <Phase7CControlCenterPage /> },
+      { path: "phase7b-demo", element: <Phase7BDemoPage /> },
+      { path: "phase7b-pattern-check", element: <Phase7BPatternCheckPage /> },
+      { path: "phase7b-ops", element: <Phase7BOpsPage /> },
+      { path: "phase7c-backtest", element: <Phase7CBacktestPage /> },
+      { path: "phase7c-risk", element: <Phase7CRiskPage /> },
+      { path: "performance", element: <PerformancePage /> },
+      { path: "system", element: <SystemPage /> },
+      { path: "legacy-overview", element: <OverviewPage /> },
       { path: "signals", element: <SignalsPage /> },
       { path: "risk", element: <RiskPage /> },
       { path: "ai", element: <AiPage /> },
       { path: "backtest", element: <BacktestPage /> },
-      { path: "performance", element: <PerformancePage /> },
-      { path: "phase7b-demo", element: <Phase7BDemoPage /> },
-      { path: "phase7b-pattern-check", element: <Phase7BPatternCheckPage /> },
-      { path: "phase7b-ops", element: <Phase7BOpsPage /> },
-      { path: "system", element: <SystemPage /> },
       { path: "settings", element: <SettingsPage /> },
     ],
   },
