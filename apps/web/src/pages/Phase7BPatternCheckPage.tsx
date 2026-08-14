@@ -10,267 +10,154 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import CandlestickChartRounded from "@mui/icons-material/CandlestickChartRounded";
-import CheckCircleRounded from "@mui/icons-material/CheckCircleRounded";
-import ScheduleRounded from "@mui/icons-material/ScheduleRounded";
-import ShowChartRounded from "@mui/icons-material/ShowChartRounded";
 import { useQuery } from "@tanstack/react-query";
 import { dateTime, price } from "../format";
 import { ErrorState, LoadingState } from "../ui/PageState";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
-
 type Side = "BUY" | "SELL";
 type EntryDiagnostics = {
-  source: string;
   closeTime: number;
   nextCloseTime: number;
-  bar: { open: number; high: number; low: number; close: number };
-  pattern: {
-    matched: boolean;
-    name: "ENGULFING" | "TWO_CANDLE_BODY_DOMINANCE" | null;
-    side: Side | null;
-    extreme: number | null;
-  };
+  pattern: { matched: boolean; name: string | null; side: Side | null };
   trend: {
     m15Supertrend: Side | null;
     m5Supertrend: Side | null;
     m5FlipAgeBars: number | null;
     m5FreshAligned: boolean;
-    matchedPatternSide: boolean;
-    ma20?: number;
-    ma50?: number;
-    ma200?: number;
   };
-  fvg: {
-    buyConfirmed: boolean;
-    sellConfirmed: boolean;
-    sameDirectionConfirmed: boolean;
-    requiredForEntry: false;
-  };
+  fvg: { sameDirectionConfirmed: boolean; requiredForEntry: false };
   entry: {
     eligible: boolean;
     side: Side | null;
-    rule: string;
     referenceEntry: number;
-    structuralStopDistance: number | null;
     stopDistance: number | null;
     reason: string;
   };
 };
 
 type Snapshot = {
-  readOnly: true;
-  generatedAt: number;
   botStatus: string;
-  runtime?: { alive?: boolean; armed?: boolean; heartbeatAgeMs?: number | null };
-  strategy?: {
-    name?: string;
-    trigger?: string;
-    trend?: string;
-    fvg?: string;
-    initialStop?: string;
-    plus6?: string;
-    plus10?: string;
-    runner?: string;
-  };
   entryDiagnostics: EntryDiagnostics | null;
   entryDiagnosticsError?: string | null;
   mt5?: {
-    quote?: { bid?: number; ask?: number; timestamp?: number } | null;
+    quote?: { bid?: number; ask?: number } | null;
     health?: { accountMode?: string; accountLogin?: number | null; server?: string | null } | null;
-    positions?: Array<{ ticket?: string; side?: string; entry?: number; stopLoss?: number; volume?: number; profit?: number }>;
   };
 };
 
 async function getSnapshot(): Promise<Snapshot> {
-  const response = await fetch(`${API_BASE}/api/v1/phase7b-demo`, { cache: "no-store" });
+  const response = await fetch("/api/v1/phase7b-demo", { cache: "no-store" });
   const text = await response.text();
   if (!response.ok) {
-    let message = `HTTP ${response.status}`;
     try {
       const parsed = JSON.parse(text) as { error?: string };
-      if (parsed.error) message = parsed.error;
-    } catch {}
-    throw new Error(message);
+      throw new Error(parsed.error || `HTTP ${response.status}`);
+    } catch (error) {
+      if (error instanceof Error && error.message !== text) throw error;
+      throw new Error(text || `HTTP ${response.status}`);
+    }
   }
   return JSON.parse(text) as Snapshot;
 }
 
-function StatusCard({
-  label,
-  value,
-  pass,
-  detail,
-}: {
-  label: string;
-  value: string;
-  pass: boolean | null;
-  detail: string;
-}) {
-  const color = pass === true ? "success" : pass === false ? "warning" : "default";
+function GateCard({ label, value, status, detail }: { label: string; value: string; status: "PASS" | "WAIT" | "INFO"; detail: string }) {
+  const color = status === "PASS" ? "success" : status === "WAIT" ? "warning" : "default";
   return (
     <Card variant="outlined" sx={{ height: "100%" }}>
       <CardContent>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
-          <Typography variant="caption" color="text.secondary" fontWeight={800}>{label}</Typography>
-          <Chip size="small" label={pass === true ? "PASS" : pass === false ? "WAIT" : "INFO"} color={color} variant="outlined" />
+        <Stack direction="row" justifyContent="space-between" gap={1} alignItems="center">
+          <Typography variant="caption" color="text.secondary" fontWeight={900}>{label}</Typography>
+          <Chip size="small" label={status} color={color} variant="outlined" />
         </Stack>
-        <Typography variant="h6" fontWeight={900} mt={1}>{value}</Typography>
+        <Typography variant="h6" fontWeight={950} mt={1}>{value}</Typography>
         <Typography variant="caption" color="text.secondary">{detail}</Typography>
       </CardContent>
     </Card>
   );
 }
 
-function secondsLabel(ms: number) {
-  const total = Math.max(0, Math.ceil(ms / 1000));
-  const minutes = Math.floor(total / 60);
-  const seconds = total % 60;
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+function countdown(ms: number) {
+  const seconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
 export function Phase7BPatternCheckPage() {
   const [now, setNow] = useState(Date.now());
-  const query = useQuery({
-    queryKey: ["phase7b-live-entry-gate"],
-    queryFn: getSnapshot,
-    refetchInterval: 5_000,
-  });
+  const query = useQuery({ queryKey: ["phase7b-live-entry-gate"], queryFn: getSnapshot, refetchInterval: 3_000, retry: false });
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, []);
 
-  const data = query.data;
-  const diagnostics = data?.entryDiagnostics ?? null;
-  const remainingMs = diagnostics ? diagnostics.nextCloseTime - now : 0;
-  const progress = useMemo(() => {
-    if (!diagnostics) return 0;
-    const barMs = 15 * 60_000;
-    return Math.max(0, Math.min(100, ((barMs - remainingMs) / barMs) * 100));
-  }, [diagnostics, remainingMs]);
+  const d = query.data?.entryDiagnostics ?? null;
+  const remainingMs = d ? d.nextCloseTime - now : 0;
+  const progress = useMemo(() => d ? Math.max(0, Math.min(100, ((15 * 60_000 - remainingMs) / (15 * 60_000)) * 100)) : 0, [d, remainingMs]);
 
   if (query.isLoading) return <LoadingState />;
-  if (query.isError || !data) {
-    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được Live Entry Gate."} />;
-  }
+  if (query.isError || !query.data) return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được Live Entry Gate."} />;
+  if (!d) return <ErrorState message={query.data.entryDiagnosticsError ?? "Entry diagnostics chưa sẵn sàng."} />;
 
-  if (!diagnostics) {
-    return <ErrorState message={data.entryDiagnosticsError ?? "Entry diagnostics chưa sẵn sàng."} />;
-  }
-
-  const patternSide = diagnostics.pattern.side;
-  const wanted = patternSide;
-  const m15Pass = Boolean(wanted && diagnostics.trend.m15Supertrend === wanted);
-  const m5Pass = Boolean(wanted && diagnostics.trend.m5Supertrend === wanted && diagnostics.trend.m5FreshAligned);
-  const fvgText = diagnostics.fvg.sameDirectionConfirmed ? "CÓ FVG CÙNG HƯỚNG" : "KHÔNG CÓ / KHÔNG BẮT BUỘC";
-  const quote = data.mt5?.quote;
+  const wanted = d.pattern.side;
+  const m15Pass = Boolean(wanted && d.trend.m15Supertrend === wanted);
+  const m5Pass = Boolean(wanted && d.trend.m5Supertrend === wanted && d.trend.m5FreshAligned);
+  const quote = query.data.mt5?.quote;
   const mid = quote?.bid !== undefined && quote?.ask !== undefined ? (Number(quote.bid) + Number(quote.ask)) / 2 : null;
-  const spread = quote?.bid !== undefined && quote?.ask !== undefined ? Number(quote.ask) - Number(quote.bid) : null;
-  const livePosition = data.mt5?.positions?.[0] ?? null;
 
   return (
-    <Stack spacing={2}>
-      <Alert severity="info" icon={<CandlestickChartRounded />}>
-        <b>Forward DEMO entry:</b> Engulfing hoặc Two-candle → Supertrend M15 cùng hướng → M5 cùng hướng với fresh flip trong tối đa 2 nến đóng. FVG chỉ là context, không chặn entry. MA/EMA không dùng để xác nhận vào lệnh.
-      </Alert>
+    <Stack spacing={2.2}>
+      <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1.5} alignItems={{ md: "center" }}>
+        <Box>
+          <Typography variant="overline" color="primary" fontWeight={900}>ENTRY CHECK</Typography>
+          <Typography variant="h4" fontWeight={950}>Live Entry Gate</Typography>
+          <Typography variant="body2" color="text.secondary" mt={0.5}>Chỉ dùng dữ liệu nến đã đóng.</Typography>
+        </Box>
+        <Chip label={d.entry.eligible ? `${d.entry.side} READY` : "WAIT SIGNAL"} color={d.entry.eligible ? "success" : "default"} sx={{ fontWeight: 900 }} />
+      </Stack>
 
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, lg: 4 }}>
-          <Card variant="outlined" sx={{ height: "100%" }}>
-            <CardContent>
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Box>
-                  <Typography variant="caption" color="text.secondary" fontWeight={800}>XAUUSD · DEMO LIVE</Typography>
-                  <Typography variant="h4" fontWeight={950}>{mid === null ? "—" : price(mid)}</Typography>
-                </Box>
-                <Chip label={data.botStatus} color={data.botStatus === "MANAGING" ? "warning" : data.botStatus === "WAITING_SIGNAL" ? "success" : "default"} />
-              </Stack>
-              <Stack direction="row" spacing={3} mt={2}>
-                <Box><Typography variant="caption" color="text.secondary">Bid</Typography><Typography fontWeight={800}>{quote?.bid === undefined ? "—" : price(Number(quote.bid))}</Typography></Box>
-                <Box><Typography variant="caption" color="text.secondary">Ask</Typography><Typography fontWeight={800}>{quote?.ask === undefined ? "—" : price(Number(quote.ask))}</Typography></Box>
-                <Box><Typography variant="caption" color="text.secondary">Spread</Typography><Typography fontWeight={800}>{spread === null ? "—" : price(spread)}</Typography></Box>
-              </Stack>
-              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 2 }}>
-                DEMO #{data.mt5?.health?.accountLogin ?? "—"} · {data.mt5?.health?.server ?? "—"}
-              </Typography>
-            </CardContent>
-          </Card>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <Card variant="outlined"><CardContent>
+            <Typography variant="caption" color="text.secondary" fontWeight={900}>XAUUSD</Typography>
+            <Typography variant="h4" fontWeight={950}>{mid === null ? "—" : price(mid)}</Typography>
+            <Typography variant="caption" color="text.secondary">Bid {quote?.bid === undefined ? "—" : price(Number(quote.bid))} · Ask {quote?.ask === undefined ? "—" : price(Number(quote.ask))}</Typography>
+          </CardContent></Card>
         </Grid>
-
-        <Grid size={{ xs: 12, lg: 4 }}>
-          <Card variant="outlined" sx={{ height: "100%" }}>
-            <CardContent>
-              <Stack direction="row" spacing={1} alignItems="center"><ScheduleRounded color="primary" /><Typography variant="caption" color="text.secondary" fontWeight={800}>M15 CANDLE</Typography></Stack>
-              <Typography variant="h4" fontWeight={950} mt={1}>{secondsLabel(remainingMs)}</Typography>
-              <Typography variant="caption" color="text.secondary">đến nến đóng tiếp theo</Typography>
-              <LinearProgress variant="determinate" value={progress} sx={{ mt: 2, height: 8, borderRadius: 99 }} />
-              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>Nến vừa đóng: {dateTime(diagnostics.closeTime)}</Typography>
-            </CardContent>
-          </Card>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <Card variant="outlined"><CardContent>
+            <Typography variant="caption" color="text.secondary" fontWeight={900}>M15 CLOSE IN</Typography>
+            <Typography variant="h4" fontWeight={950}>{countdown(remainingMs)}</Typography>
+            <LinearProgress value={progress} variant="determinate" sx={{ mt: 1.5, height: 7, borderRadius: 99 }} />
+            <Typography variant="caption" color="text.secondary" display="block" mt={1}>Nến vừa đóng: {dateTime(d.closeTime)}</Typography>
+          </CardContent></Card>
         </Grid>
-
-        <Grid size={{ xs: 12, lg: 4 }}>
-          <Card variant="outlined" sx={{ height: "100%", borderColor: diagnostics.entry.eligible ? "success.main" : undefined }}>
-            <CardContent>
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Stack direction="row" spacing={1} alignItems="center"><CheckCircleRounded color={diagnostics.entry.eligible ? "success" : "disabled"} /><Typography variant="caption" color="text.secondary" fontWeight={800}>ENTRY STATUS</Typography></Stack>
-                <Chip label={diagnostics.entry.eligible ? `${diagnostics.entry.side} READY` : "WAIT SIGNAL"} color={diagnostics.entry.eligible ? "success" : "default"} />
-              </Stack>
-              <Typography variant="body1" fontWeight={900} mt={2}>{diagnostics.entry.reason}</Typography>
-              <Stack direction="row" spacing={2} mt={2} flexWrap="wrap" useFlexGap>
-                <Typography variant="caption">Entry ref: <b>{price(diagnostics.entry.referenceEntry)}</b></Typography>
-                <Typography variant="caption">SL distance: <b>{diagnostics.entry.stopDistance === null ? "—" : `${price(diagnostics.entry.stopDistance)} giá`}</b></Typography>
-              </Stack>
-            </CardContent>
-          </Card>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <Card variant="outlined" sx={{ borderColor: d.entry.eligible ? "success.main" : undefined }}><CardContent>
+            <Typography variant="caption" color="text.secondary" fontWeight={900}>ENTRY PREVIEW</Typography>
+            <Typography variant="h6" fontWeight={950}>{d.entry.eligible ? `${d.entry.side} READY` : "WAIT"}</Typography>
+            <Typography variant="body2" color="text.secondary" mt={0.5}>Entry {price(d.entry.referenceEntry)} · SL {d.entry.stopDistance === null ? "—" : `${d.entry.stopDistance.toFixed(2)} giá`}</Typography>
+          </CardContent></Card>
         </Grid>
       </Grid>
 
-      <Typography variant="h6" fontWeight={900}>Entry Gate · nến M15 vừa đóng</Typography>
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, md: 6, xl: 3 }}><StatusCard label="1 · PATTERN" value={diagnostics.pattern.name ?? "NONE"} pass={diagnostics.pattern.matched} detail={diagnostics.pattern.side ? `Hướng ${diagnostics.pattern.side}` : "Chờ Engulfing / Two-candle"} /></Grid>
-        <Grid size={{ xs: 12, md: 6, xl: 3 }}><StatusCard label="2 · M15 SUPERTREND" value={diagnostics.trend.m15Supertrend ?? "—"} pass={wanted ? m15Pass : null} detail={wanted ? `Cần cùng hướng ${wanted}` : "Chỉ đánh giá khi có pattern"} /></Grid>
-        <Grid size={{ xs: 12, md: 6, xl: 3 }}><StatusCard label="3 · M5 FRESH ALIGNMENT" value={diagnostics.trend.m5Supertrend ?? "—"} pass={wanted ? m5Pass : null} detail={diagnostics.trend.m5FlipAgeBars === null ? "Chưa có fresh flip phù hợp" : `Flip age ${diagnostics.trend.m5FlipAgeBars} bar · yêu cầu ≤ 1 (M5_FLIP_2)`} /></Grid>
-        <Grid size={{ xs: 12, md: 6, xl: 3 }}><StatusCard label="4 · FVG CONTEXT" value={fvgText} pass={null} detail="Context only · không phải entry gate" /></Grid>
+        <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
+          <GateCard label="1 · PATTERN" value={d.pattern.name?.replaceAll("_", " ") ?? "NONE"} status={d.pattern.matched ? "PASS" : "WAIT"} detail={d.pattern.side ? `Hướng ${d.pattern.side}` : "Chờ Engulfing / Two-candle"} />
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
+          <GateCard label="2 · SUPERTREND M15" value={d.trend.m15Supertrend ?? "—"} status={wanted ? (m15Pass ? "PASS" : "WAIT") : "INFO"} detail={wanted ? `Cần cùng hướng ${wanted}` : "Đánh giá khi có pattern"} />
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
+          <GateCard label="3 · M5 FRESH FLIP" value={d.trend.m5Supertrend ?? "—"} status={wanted ? (m5Pass ? "PASS" : "WAIT") : "INFO"} detail={d.trend.m5FlipAgeBars === null ? "Chưa có fresh flip" : `Flip age ${d.trend.m5FlipAgeBars} bar · 2 nến đóng gần nhất`} />
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
+          <GateCard label="4 · FVG" value={d.fvg.sameDirectionConfirmed ? "CONTEXT YES" : "CONTEXT NO"} status="INFO" detail="Không phải entry gate" />
+        </Grid>
       </Grid>
 
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12, lg: 7 }}>
-          <Card variant="outlined">
-            <CardContent>
-              <Stack direction="row" spacing={1} alignItems="center"><ShowChartRounded color="primary" /><Typography variant="h6" fontWeight={900}>M15 OHLC</Typography></Stack>
-              <Grid container spacing={2} mt={0.5}>
-                <Grid size={3}><Typography variant="caption" color="text.secondary">Open</Typography><Typography fontWeight={800}>{price(diagnostics.bar.open)}</Typography></Grid>
-                <Grid size={3}><Typography variant="caption" color="text.secondary">High</Typography><Typography fontWeight={800}>{price(diagnostics.bar.high)}</Typography></Grid>
-                <Grid size={3}><Typography variant="caption" color="text.secondary">Low</Typography><Typography fontWeight={800}>{price(diagnostics.bar.low)}</Typography></Grid>
-                <Grid size={3}><Typography variant="caption" color="text.secondary">Close</Typography><Typography fontWeight={800}>{price(diagnostics.bar.close)}</Typography></Grid>
-              </Grid>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, lg: 5 }}>
-          <Card variant="outlined">
-            <CardContent>
-              <Typography variant="h6" fontWeight={900}>Forward Management</Typography>
-              <Stack direction="row" spacing={1} mt={1.5} flexWrap="wrap" useFlexGap>
-                <Chip label="SL 6–10 giá" variant="outlined" />
-                <Chip label="+6 → BE" color="success" variant="outlined" />
-                <Chip label="+10 → chốt 1/3" color="primary" variant="outlined" />
-                <Chip label="2/3 → canonical runner" variant="outlined" />
-                <Chip label="H1/H4 = context" variant="outlined" />
-              </Stack>
-              {livePosition && (
-                <Alert severity="warning" sx={{ mt: 2 }}>
-                  Đang quản lý position {String(livePosition.ticket ?? "")} · {String(livePosition.side ?? "")} · {String(livePosition.volume ?? "")} lot · Entry {livePosition.entry === undefined ? "—" : price(Number(livePosition.entry))}
-                </Alert>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      <Alert severity={d.entry.eligible ? "success" : "info"}>{d.entry.reason}</Alert>
+      <Alert severity="info">Management: SL 6–10 giá · +6 → BE · +10 → chốt 1/3 · phần còn lại tiếp tục runner.</Alert>
     </Stack>
   );
 }
