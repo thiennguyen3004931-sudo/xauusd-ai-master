@@ -135,10 +135,24 @@ try {
     }
   }
 
+  # Windows PowerShell 5.1 can expose HasExited=True before the Process object
+  # has populated ExitCode. WaitForExit() is required before reading ExitCode;
+  # otherwise $null -ne 0 evaluates true and a successful Telegram test is
+  # incorrectly reported as a failure with a blank exit code.
+  $nodeProcess.WaitForExit()
+  $nodeProcess.Refresh()
   $exitCode = $nodeProcess.ExitCode
+  if ($null -eq $exitCode) {
+    throw "Phase 7B Telegram notifier exit code is unavailable after WaitForExit()."
+  }
+  $exitCode = [int]$exitCode
+
   Write-TelegramRuntime -Status "STOPPED" -NodePid $nodeProcess.Id -ExitCode $exitCode -StartedAt $startedAt
   if ($exitCode -ne 0) {
     throw "Phase 7B Telegram notifier exited with code $exitCode"
+  }
+  if ($SendTest) {
+    Write-Host "PHASE7B_TELEGRAM_WRAPPER_TEST_EXIT=PASS"
   }
 }
 finally {
