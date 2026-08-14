@@ -7,6 +7,7 @@ import {
   CardContent,
   Chip,
   Grid,
+  LinearProgress,
   Stack,
   Table,
   TableBody,
@@ -40,6 +41,23 @@ function money(value: number) {
 
 function pf(value: number | null) {
   return value === null ? "∞" : value.toFixed(2);
+}
+
+function verdictColor(verdict: Phase7CAutoLotBacktestResult["decision"]["verdict"]) {
+  if (verdict === "SHADOW_PROMISING") return "success" as const;
+  if (verdict === "REJECT_AUTO_LOT") return "error" as const;
+  if (verdict === "KEEP_FIXED") return "warning" as const;
+  return "info" as const;
+}
+
+function verdictLabel(verdict: Phase7CAutoLotBacktestResult["decision"]["verdict"]) {
+  switch (verdict) {
+    case "SHADOW_PROMISING": return "SHADOW PROMISING";
+    case "REJECT_AUTO_LOT": return "REJECT AUTO LOT";
+    case "KEEP_FIXED": return "KEEP FIXED";
+    case "NEEDS_MORE_DATA": return "NEEDS MORE DATA";
+    default: return "INSUFFICIENT SAMPLE";
+  }
 }
 
 function csvEscape(value: unknown) {
@@ -99,8 +117,8 @@ export function Phase7CAutoLotBacktestPage() {
   const [from, setFrom] = useState(range.from);
   const [to, setTo] = useState(range.to);
   const [fixedVolume, setFixedVolume] = useState(0.03);
-  const [riskPercent, setRiskPercent] = useState(0.25);
-  const [maxAutoLot, setMaxAutoLot] = useState(0.03);
+  const [riskPercent, setRiskPercent] = useState(0.05);
+  const [maxAutoLot, setMaxAutoLot] = useState(0.09);
   const [startingBalance, setStartingBalance] = useState(0);
   const [result, setResult] = useState<Phase7CAutoLotBacktestResult | null>(null);
   const [running, setRunning] = useState(false);
@@ -165,8 +183,8 @@ export function Phase7CAutoLotBacktestPage() {
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6, md: 2 }}><TextField fullWidth size="small" type="date" label="Từ ngày" value={from} onChange={(e) => setFrom(e.target.value)} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
             <Grid size={{ xs: 12, sm: 6, md: 2 }}><TextField fullWidth size="small" type="date" label="Đến ngày" value={to} onChange={(e) => setTo(e.target.value)} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 2 }}><TextField fullWidth size="small" type="number" label="Fixed lot" value={fixedVolume} onChange={(e) => setFixedVolume(Number(e.target.value))} slotProps={{ htmlInput: { min: 0.01, step: 0.01 } }} /></Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 2 }}><TextField fullWidth size="small" type="number" label="Risk / trade (%)" value={riskPercent} onChange={(e) => setRiskPercent(Number(e.target.value))} slotProps={{ htmlInput: { min: 0.01, max: 5, step: 0.05 } }} /></Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 2 }}><TextField fullWidth size="small" type="number" label="Fixed lot" value={fixedVolume} onChange={(e) => setFixedVolume(Number(e.target.value))} slotProps={{ htmlInput: { min: 0.03, step: 0.03 } }} /></Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 2 }}><TextField fullWidth size="small" type="number" label="Risk / trade (%)" value={riskPercent} onChange={(e) => setRiskPercent(Number(e.target.value))} slotProps={{ htmlInput: { min: 0.01, max: 5, step: 0.01 } }} /></Grid>
             <Grid size={{ xs: 12, sm: 6, md: 2 }}><TextField fullWidth size="small" type="number" label="Max Auto Lot" value={maxAutoLot} onChange={(e) => setMaxAutoLot(Number(e.target.value))} slotProps={{ htmlInput: { min: 0.03, step: 0.03 } }} /></Grid>
             <Grid size={{ xs: 12, sm: 6, md: 2 }}><TextField fullWidth size="small" type="number" label="Starting balance" value={startingBalance} onChange={(e) => setStartingBalance(Number(e.target.value))} helperText="0 = MT5 hiện tại" slotProps={{ htmlInput: { min: 0, step: 100 } }} /></Grid>
             <Grid size={{ xs: 12 }}>
@@ -188,6 +206,7 @@ function Comparison({ result }: { result: Phase7CAutoLotBacktestResult }) {
   const f = result.fixed;
   const a = result.autoLot;
   const d = result.deltaAutoMinusFixed;
+  const decision = result.decision;
   return (
     <Stack spacing={2}>
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1}>
@@ -199,6 +218,51 @@ function Comparison({ result }: { result: Phase7CAutoLotBacktestResult }) {
         </Box>
         <Button size="small" variant="outlined" onClick={() => exportShadowCsv(result)} disabled={result.shadowTrades.length === 0}>Xuất Shadow CSV</Button>
       </Stack>
+
+      <Card>
+        <CardContent>
+          <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2} alignItems={{ md: "center" }}>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="overline" color="text.secondary" fontWeight={800}>AUTO LOT RESEARCH DECISION</Typography>
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography variant="h4" fontWeight={900}>{decision.score}/{decision.maxScore}</Typography>
+                <Chip color={verdictColor(decision.verdict)} label={verdictLabel(decision.verdict)} />
+                <Chip variant="outlined" label={`${decision.sampleTrades}/${decision.minimumSampleTrades} min trades`} />
+              </Stack>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>{decision.reason}</Typography>
+            </Box>
+            <Box sx={{ minWidth: { md: 260 } }}>
+              <Typography variant="caption" color="text.secondary">Research score</Typography>
+              <LinearProgress variant="determinate" value={decision.score} sx={{ height: 10, borderRadius: 5, mt: .5 }} />
+              <Typography variant="caption" color="warning.main" sx={{ display: "block", mt: 1 }}>
+                EXECUTION ELIGIBLE = NO
+              </Typography>
+            </Box>
+          </Stack>
+
+          <TableContainer sx={{ mt: 2 }}>
+            <Table size="small">
+              <TableHead><TableRow><TableCell>Tiêu chí</TableCell><TableCell>Status</TableCell><TableCell align="right">Điểm</TableCell><TableCell>Chi tiết</TableCell></TableRow></TableHead>
+              <TableBody>
+                {decision.criteria.map((criterion) => (
+                  <TableRow key={criterion.key}>
+                    <TableCell><b>{criterion.label}</b></TableCell>
+                    <TableCell><Chip size="small" color={criterion.pass ? "success" : "warning"} variant="outlined" label={criterion.pass ? "PASS" : "WATCH"} /></TableCell>
+                    <TableCell align="right">{criterion.score}/{criterion.maxScore}</TableCell>
+                    <TableCell>{criterion.detail}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </CardContent>
+      </Card>
+
+      {result.configuration.journalTradeLimitApplied ? (
+        <Alert severity="warning">
+          Full-period có {result.configuration.fullPeriodCanonicalTrades} trades nhưng comparison hiện dùng {result.configuration.comparedTradeSchedule} trades journal gần nhất. Fixed và Auto vẫn được so trên cùng schedule, nhưng verdict không đại diện toàn bộ kỳ.
+        </Alert>
+      ) : null}
 
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, sm: 6, xl: 3 }}><MetricCard label="AUTO Net P/L" value={money(a.netPnl)} detail={`Fixed ${money(f.netPnl)} · Δ ${money(d.netPnl)}`} tone={a.netPnl >= 0 ? "success.main" : "error.main"} /></Grid>
@@ -219,9 +283,10 @@ function Comparison({ result }: { result: Phase7CAutoLotBacktestResult }) {
       </CardContent></Card>
 
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, md: 4 }}><MetricCard label="Executed / Blocked" value={`${a.executedTrades} / ${a.blockedTrades}`} detail={`${a.attemptedTrades} attempted`} /></Grid>
-        <Grid size={{ xs: 12, md: 4 }}><MetricCard label="Avg actual risk" value={money(a.averageRiskUsd)} detail={`${a.averageRiskPercent.toFixed(4)}% balance`} /></Grid>
-        <Grid size={{ xs: 12, md: 4 }}><MetricCard label="Avg target risk" value={money(a.averageTargetRiskUsd)} detail={`Configured ${result.configuration.riskPercent}%`} /></Grid>
+        <Grid size={{ xs: 12, sm: 6, xl: 3 }}><MetricCard label="Executed / Blocked" value={`${a.executedTrades} / ${a.blockedTrades}`} detail={`${a.blockRatePercent.toFixed(2)}% blocked`} /></Grid>
+        <Grid size={{ xs: 12, sm: 6, xl: 3 }}><MetricCard label="Avg actual risk" value={money(a.averageRiskUsd)} detail={`${a.averageRiskPercent.toFixed(4)}% balance`} /></Grid>
+        <Grid size={{ xs: 12, sm: 6, xl: 3 }}><MetricCard label="Risk stability" value={`${a.riskStdDevPercent.toFixed(4)} pp`} detail="StdDev actual risk %" /></Grid>
+        <Grid size={{ xs: 12, sm: 6, xl: 3 }}><MetricCard label="Avg target risk" value={money(a.averageTargetRiskUsd)} detail={`Configured ${result.configuration.riskPercent}%`} /></Grid>
       </Grid>
 
       <Card><CardContent>
