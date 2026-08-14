@@ -63,8 +63,8 @@ if (-not $apiReady -or -not $webReady) {
   throw "Phase 7C web refresh self-test failed. API=$apiReady WEB=$webReady"
 }
 
-$risk = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7c/account-risk?riskPercent=0.25&maxLot=0.03" -Method Get -TimeoutSec 5
-$preview = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7c/auto-lot-preview?stopDistance=8&riskPercent=0.25&maxLot=0.03" -Method Get -TimeoutSec 5
+$risk = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7c/account-risk?riskPercent=0.05&maxLot=0.09" -Method Get -TimeoutSec 5
+$preview = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7c/auto-lot-preview?stopDistance=8&riskPercent=0.05&maxLot=0.09" -Method Get -TimeoutSec 5
 $demo = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7b-demo" -Method Get -TimeoutSec 5
 
 $toDate = (Get-Date).ToString("yyyy-MM-dd")
@@ -73,8 +73,8 @@ $compareBody = @{
   from = $fromDate
   to = $toDate
   fixedVolume = 0.03
-  riskPercent = 0.25
-  maxAutoLot = 0.03
+  riskPercent = 0.05
+  maxAutoLot = 0.09
 } | ConvertTo-Json
 $autoCompare = Invoke-RestMethod `
   -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7c/auto-lot-backtest" `
@@ -89,6 +89,9 @@ if ($autoCompare.source -ne "PHASE7C_AUTO_LOT_SHADOW_COMPARISON") {
 if ($autoCompare.safety.executionMutation -ne $false) {
   throw "Phase 7C Auto Lot comparison unexpectedly allows execution mutation."
 }
+if (-not $autoCompare.decision -or $autoCompare.decision.executionEligible -ne $false) {
+  throw "Phase 7C Auto Lot research decision safety contract is invalid."
+}
 
 Write-Host "PHASE7C_WEB_REFRESH_API=PASS"
 Write-Host "PHASE7C_WEB_REFRESH_WEB=PASS"
@@ -102,6 +105,9 @@ Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_BACKTEST=PASS"
 Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_ATTEMPTED=$($autoCompare.autoLot.attemptedTrades)"
 Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_EXECUTED=$($autoCompare.autoLot.executedTrades)"
 Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_BLOCKED=$($autoCompare.autoLot.blockedTrades)"
+Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_SCORE=$($autoCompare.decision.score)"
+Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_VERDICT=$($autoCompare.decision.verdict)"
+Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_EXECUTION_ELIGIBLE=$($autoCompare.decision.executionEligible)"
 Write-Host "PHASE7C_WEB_REFRESH_CONTROL_CENTER=http://127.0.0.1:$WebPort/"
 Write-Host "PHASE7C_WEB_REFRESH_BACKTEST=http://127.0.0.1:$WebPort/phase7c-backtest"
 Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_COMPARE=http://127.0.0.1:$WebPort/phase7c-auto-lot"
