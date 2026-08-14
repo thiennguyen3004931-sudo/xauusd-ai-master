@@ -46,7 +46,6 @@ export function SystemPage() {
           </Stack>
           <Grid container spacing={1.5} mt={0.5}>
             <Info label="Account mode" value={health?.accountMode?.toUpperCase() ?? "UNKNOWN"} />
-            <Info label="Account" value={String(health?.accountLogin ?? "—")} />
             <Info label="Server" value={health?.server ?? "—"} />
             <Info label="Bridge trading" value={health?.tradingEnabled ? "ON" : "OFF"} />
             <Info label="Terminal Algo" value={health?.terminalTradeAllowed ? "ON" : "OFF"} />
