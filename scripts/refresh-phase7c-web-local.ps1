@@ -16,12 +16,12 @@ Write-Host "PHASE7C_WEB_REFRESH_TELEGRAM_MUTATION=false"
 
 Write-Host "PHASE7C_WEB_REFRESH_API_BUILD=START"
 pnpm --filter @xauusd/api build
-if ($LASTEXITCODE -ne 0) { throw "Phase 7C API build failed." }
+if ($LASTEXITCODE -ne 0) { throw "Phase 7C/7D API build failed." }
 Write-Host "PHASE7C_WEB_REFRESH_API_BUILD=PASS"
 
 Write-Host "PHASE7C_WEB_REFRESH_WEB_BUILD=START"
 pnpm --filter @xauusd/web build
-if ($LASTEXITCODE -ne 0) { throw "Phase 7C Web build failed." }
+if ($LASTEXITCODE -ne 0) { throw "Phase 7C/7D Web build failed." }
 Write-Host "PHASE7C_WEB_REFRESH_WEB_BUILD=PASS"
 
 $task = Get-ScheduledTask -TaskName $WebTaskName -ErrorAction SilentlyContinue
@@ -60,7 +60,7 @@ for ($attempt = 1; $attempt -le 40; $attempt++) {
 }
 
 if (-not $apiReady -or -not $webReady) {
-  throw "Phase 7C web refresh self-test failed. API=$apiReady WEB=$webReady"
+  throw "Phase 7C/7D web refresh self-test failed. API=$apiReady WEB=$webReady"
 }
 
 $risk = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7c/account-risk?riskPercent=0.05&maxLot=0.09" -Method Get -TimeoutSec 5
@@ -93,6 +93,33 @@ if (-not $autoCompare.decision -or $autoCompare.decision.executionEligible -ne $
   throw "Phase 7C Auto Lot research decision safety contract is invalid."
 }
 
+$dailyBody = @{
+  from = $fromDate
+  to = $toDate
+  fixedVolume = 0.03
+  recoveryMinPrice = 6
+  recoveryMaxPrice = 10
+  profitBufferUsd = 3
+  positiveLockFloorUsd = 0
+  dayUtcOffsetHours = 7
+} | ConvertTo-Json
+$dailyResearch = Invoke-RestMethod `
+  -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7d/daily-pnl-backtest" `
+  -Method Post `
+  -ContentType "application/json" `
+  -Body $dailyBody `
+  -TimeoutSec 120
+
+if ($dailyResearch.source -ne "PHASE7D_DAILY_PNL_RESEARCH") {
+  throw "Phase 7D Daily P/L self-test returned an unexpected source."
+}
+if ($dailyResearch.safety.executionMutation -ne $false -or $dailyResearch.safety.phase7bStrategyMutation -ne $false) {
+  throw "Phase 7D Daily P/L research unexpectedly allows execution/strategy mutation."
+}
+if (-not $dailyResearch.decision -or $dailyResearch.decision.executionEligible -ne $false) {
+  throw "Phase 7D Daily P/L research safety contract is invalid."
+}
+
 Write-Host "PHASE7C_WEB_REFRESH_API=PASS"
 Write-Host "PHASE7C_WEB_REFRESH_WEB=PASS"
 Write-Host "PHASE7C_WEB_REFRESH_BOT_STATUS=$($demo.botStatus)"
@@ -108,8 +135,15 @@ Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_BLOCKED=$($autoCompare.autoLot.blockedT
 Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_SCORE=$($autoCompare.decision.score)"
 Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_VERDICT=$($autoCompare.decision.verdict)"
 Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_EXECUTION_ELIGIBLE=$($autoCompare.decision.executionEligible)"
+Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_BACKTEST=PASS"
+Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_TRADES=$($dailyResearch.configuration.comparedTradeSchedule)"
+Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_SCORE=$($dailyResearch.decision.bestResearchScore)"
+Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_VERDICT=$($dailyResearch.decision.verdict)"
+Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_RECOMMENDED=$($dailyResearch.decision.recommendedLane)"
+Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL_EXECUTION_ELIGIBLE=$($dailyResearch.decision.executionEligible)"
 Write-Host "PHASE7C_WEB_REFRESH_CONTROL_CENTER=http://127.0.0.1:$WebPort/"
 Write-Host "PHASE7C_WEB_REFRESH_BACKTEST=http://127.0.0.1:$WebPort/phase7c-backtest"
+Write-Host "PHASE7D_WEB_REFRESH_DAILY_PNL=http://127.0.0.1:$WebPort/phase7d-daily-pnl"
 Write-Host "PHASE7C_WEB_REFRESH_AUTO_LOT_COMPARE=http://127.0.0.1:$WebPort/phase7c-auto-lot"
 Write-Host "PHASE7C_WEB_REFRESH_RISK=http://127.0.0.1:$WebPort/phase7c-risk"
 Write-Host "PHASE7C_WEB_REFRESH_STATUS=PASS"
