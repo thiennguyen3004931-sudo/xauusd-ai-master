@@ -5,6 +5,7 @@ import {
   type Phase7CBacktestRequest,
 } from "../services/phase7c.service";
 import { getPhase7CForwardRange } from "../services/phase7c-forward.service";
+import { getPhase7CAutoLotPreview } from "../services/phase7c-autolot.service";
 
 const router = Router();
 
@@ -15,6 +16,17 @@ router.get("/account-risk", async (req: Request, res: Response) => {
     res.json(await getPhase7CAccountRisk(riskPercent, maxLot));
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : "Phase 7C account/risk request failed." });
+  }
+});
+
+router.get("/auto-lot-preview", async (req: Request, res: Response) => {
+  try {
+    const stopDistance = Number(req.query.stopDistance);
+    const riskPercent = Number(req.query.riskPercent ?? 0.25);
+    const maxLot = Number(req.query.maxLot ?? 0.03);
+    res.json(await getPhase7CAutoLotPreview(stopDistance, riskPercent, maxLot));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Phase 7C Auto Lot preview failed." });
   }
 });
 
