@@ -27,11 +27,11 @@ const drawerWidth = 250;
 type LinkRow = readonly [string, string, typeof SmartToyRounded];
 
 const links: readonly LinkRow[] = [
-  ["/", "Forward Monitor", SmartToyRounded],
-  ["/phase7b-pattern-check", "Live Entry Gate", CandlestickChartRounded],
+  ["/", "Theo dõi giao dịch", SmartToyRounded],
+  ["/phase7b-pattern-check", "Điều kiện vào lệnh", CandlestickChartRounded],
   ["/phase7b-ops", "Bot & Telegram", PowerSettingsNewRounded],
-  ["/performance", "Performance", InsightsRounded],
-  ["/system", "System Health", DnsRounded],
+  ["/performance", "Hiệu suất", InsightsRounded],
+  ["/system", "Trạng thái hệ thống", DnsRounded],
 ] as const;
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
@@ -46,7 +46,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
       </Stack>
 
       <Typography variant="caption" color="text.disabled" sx={{ px: 1.5, mt: 1.5, letterSpacing: ".12em", fontWeight: 800 }}>
-        DEMO FORWARD
+        VẬN HÀNH DEMO
       </Typography>
       <List dense sx={{ pt: .7 }}>
         {links.map(([href, label, Icon]) => (
@@ -76,10 +76,10 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
       <Box sx={{ mt: "auto", p: 2, borderRadius: 3, border: "1px solid rgba(148,163,184,.12)", bgcolor: "rgba(255,255,255,.02)" }}>
         <Stack direction="row" spacing={1} alignItems="center">
           <LockRounded fontSize="small" color="primary" />
-          <Typography variant="caption" fontWeight={900}>DEMO ONLY</Typography>
+          <Typography variant="caption" fontWeight={900}>CHỈ TÀI KHOẢN DEMO</Typography>
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, lineHeight: 1.5 }}>
-          Real account bị khóa. Bot hiện hành: 2 mô hình nến + Supertrend M15 + M5 fresh flip; FVG chỉ là context.
+          Tài khoản thật luôn bị khóa. Rule hiện hành: 2 mô hình nến + Supertrend M15 + M5 fresh flip; FVG chỉ là bối cảnh.
         </Typography>
       </Box>
     </Box>
@@ -90,20 +90,20 @@ export function DashboardLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
 
-  let headerTitle = "Forward Monitor";
-  let headerSubtitle = "XAUUSD · MT5 DEMO · signal / position / management";
+  let headerTitle = "Theo dõi giao dịch DEMO";
+  let headerSubtitle = "XAUUSD · MT5 DEMO · tín hiệu / vị thế / quản lý lệnh";
   if (location.pathname.startsWith("/phase7b-pattern-check")) {
-    headerTitle = "Live Entry Gate";
-    headerSubtitle = "Pattern → Supertrend M15 → M5 fresh flip · FVG context";
+    headerTitle = "Điều kiện vào lệnh";
+    headerSubtitle = "Mô hình nến → Supertrend M15 → M5 fresh flip · FVG chỉ là bối cảnh";
   } else if (location.pathname.startsWith("/phase7b-ops")) {
-    headerTitle = "Bot & Telegram";
-    headerSubtitle = "Bật / dừng Bot DEMO và thông báo Telegram";
+    headerTitle = "Điều khiển Bot & Telegram";
+    headerSubtitle = "Bật / dừng Bot DEMO · bật / tắt / kiểm tra thông báo Telegram";
   } else if (location.pathname.startsWith("/performance")) {
-    headerTitle = "Forward Performance";
-    headerSubtitle = "Kết quả giao dịch DEMO của hệ thống";
+    headerTitle = "Hiệu suất giao dịch DEMO";
+    headerSubtitle = "Kết quả giao dịch XAUUSD do hệ thống thực hiện";
   } else if (location.pathname.startsWith("/system")) {
-    headerTitle = "System Health";
-    headerSubtitle = "MT5 · Bridge · API · DEMO runtime";
+    headerTitle = "Trạng thái hệ thống";
+    headerSubtitle = "MT5 · Bridge · API · tiến trình DEMO";
   }
 
   return (
@@ -130,7 +130,7 @@ export function DashboardLayout() {
               <Typography variant="subtitle2" fontWeight={900}>{headerTitle}</Typography>
               <Typography variant="caption" color="text.secondary">{headerSubtitle}</Typography>
             </Box>
-            <StatusChip value="DEMO ONLY" />
+            <StatusChip value="CHỈ DEMO" />
           </Toolbar>
         </AppBar>
         <Box component="main" sx={{ p: { xs: 2, md: 3 }, maxWidth: 1500, mx: "auto" }}><Outlet /></Box>
