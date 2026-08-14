@@ -30,13 +30,15 @@ function bullishTwoCandleM15(): Phase7Bar[] {
     close: 118.9,
   };
 
+  // A bearish body = 1.0. B and C are bullish bodies = 0.7 + 0.7,
+  // so B < A while B + C > A, which is the intended valid dominance fixture.
   bars.push({
     openTime: 199 * M15,
     closeTime: 200 * M15,
     open: 120.0,
     high: 120.2,
-    low: 119.4,
-    close: 119.5,
+    low: 118.9,
+    close: 119.0,
     volume: 250,
   });
   bars.push({
