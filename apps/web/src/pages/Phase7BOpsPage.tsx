@@ -198,13 +198,14 @@ export function Phase7BOpsPage() {
 
         <Grid size={{ xs: 12, md: 6, xl: 3 }}>
           <Card variant="outlined" sx={{ height: "100%" }}>
-            <HubRounded color={o.bridge.reachable ? "success" : "disabled"} />
+            <CardContent>
+              <HubRounded color={o.bridge.reachable ? "success" : "disabled"} />
               <Typography variant="caption" color="text.secondary" display="block" mt={1}>MT5 BRIDGE</Typography>
               <Typography variant="h6" fontWeight={900}>{o.bridge.reachable ? "ONLINE" : "OFFLINE"}</Typography>
               <Typography variant="body2" color="text.secondary" mt={1}>
                 {o.bridge.accountMode?.toUpperCase() ?? "UNKNOWN"} · trading {o.bridge.tradingEnabled ? "ON" : "OFF"}
               </Typography>
-          </CardContent>
+            </CardContent>
           </Card>
         </Grid>
 
