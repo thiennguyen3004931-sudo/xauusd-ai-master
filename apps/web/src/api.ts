@@ -26,6 +26,10 @@ import type {
   Phase7ESupertrendRequest,
   Phase7ESupertrendResult,
 } from "./phase7e-types";
+import type {
+  Phase7ERealignmentRequest,
+  Phase7ERealignmentResult,
+} from "./phase7e-realignment-types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
@@ -193,6 +197,18 @@ export async function runPhase7ESupertrendBacktest(
 ): Promise<Phase7ESupertrendResult> {
   return read<Phase7ESupertrendResult>(
     await fetch(`${API_BASE}/api/v1/phase7e/supertrend-backtest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
+}
+
+export async function runPhase7ERealignmentBacktest(
+  input: Phase7ERealignmentRequest,
+): Promise<Phase7ERealignmentResult> {
+  return read<Phase7ERealignmentResult>(
+    await fetch(`${API_BASE}/api/v1/phase7e/realignment-backtest`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),
