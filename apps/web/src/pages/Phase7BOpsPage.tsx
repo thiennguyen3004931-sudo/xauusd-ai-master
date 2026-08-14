@@ -61,6 +61,7 @@ type ActionResponse = {
   accepted: boolean;
   action: string;
   message: string;
+  pid?: number | null;
 };
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -112,14 +113,13 @@ export function Phase7BOpsPage() {
   const query = useQuery({
     queryKey: ["phase7b-ops-status"],
     queryFn: getOps,
-    refetchInterval: 3_000,
+    refetchInterval: 2_000,
     retry: false,
   });
 
   const mutate = useMutation({
     mutationFn: runAction,
     onSuccess: async () => {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
       await queryClient.invalidateQueries({ queryKey: ["phase7b-ops-status"] });
     },
   });
@@ -139,6 +139,11 @@ export function Phase7BOpsPage() {
   );
 
   const actionPending = mutate.isPending;
+  const pendingAction = mutate.variables;
+  const botStarting = actionPending && pendingAction === "bot/start";
+  const botStopping = actionPending && pendingAction === "bot/stop";
+  const telegramStarting = actionPending && pendingAction === "telegram/start";
+  const telegramStopping = actionPending && pendingAction === "telegram/stop";
 
   return (
     <Stack spacing={2.5}>
@@ -155,8 +160,8 @@ export function Phase7BOpsPage() {
           <StatusCard
             icon={<SmartToyRounded color={o.bot.alive ? "success" : "disabled"} />}
             title="BOT DEMO"
-            status={o.bot.alive ? (o.bot.managedPosition ? "MANAGING" : "WAITING SIGNAL") : "STOPPED"}
-            detail={o.bot.alive ? `PID ${o.bot.pid ?? "—"} · ${o.bot.armed ? "ARMED" : "NOT ARMED"}` : "Controller DEMO chưa chạy."}
+            status={botStarting ? "STARTING..." : o.bot.alive ? (o.bot.managedPosition ? "MANAGING" : "WAITING SIGNAL") : "STOPPED"}
+            detail={botStarting ? "Đang build + kiểm tra runtime controller..." : o.bot.alive ? `PID ${o.bot.pid ?? "—"} · ${o.bot.armed ? "ARMED" : "NOT ARMED"}` : "Controller DEMO chưa chạy."}
             online={o.bot.alive}
           />
         </Grid>
@@ -165,8 +170,8 @@ export function Phase7BOpsPage() {
           <StatusCard
             icon={<TelegramRounded color={o.telegram.alive ? "success" : "disabled"} />}
             title="TELEGRAM"
-            status={o.telegram.alive ? "NOTIFY ON" : "NOTIFY OFF"}
-            detail={o.telegram.alive ? "Đang gửi Signal / Filled / +6 / +10 / Exit / Error." : "Không gửi thông báo Telegram."}
+            status={telegramStarting ? "STARTING..." : o.telegram.alive ? "NOTIFY ON" : "NOTIFY OFF"}
+            detail={telegramStarting ? "Đang kiểm tra notifier + heartbeat..." : o.telegram.alive ? "Đang gửi Signal / Filled / +6 / +10 / Exit / Error." : "Không gửi thông báo Telegram."}
             online={o.telegram.alive}
           />
         </Grid>
@@ -211,7 +216,7 @@ export function Phase7BOpsPage() {
                   onClick={() => mutate.mutate("bot/start")}
                   sx={{ fontWeight: 900, minWidth: 180 }}
                 >
-                  BẬT BOT DEMO
+                  {botStarting ? "ĐANG BẬT BOT..." : "BẬT BOT DEMO"}
                 </Button>
                 <Button
                   variant="outlined"
@@ -221,7 +226,7 @@ export function Phase7BOpsPage() {
                   onClick={() => mutate.mutate("bot/stop")}
                   sx={{ fontWeight: 900, minWidth: 180 }}
                 >
-                  DỪNG BOT DEMO
+                  {botStopping ? "ĐANG DỪNG..." : "DỪNG BOT DEMO"}
                 </Button>
               </Stack>
             </CardContent>
@@ -243,7 +248,7 @@ export function Phase7BOpsPage() {
                   onClick={() => mutate.mutate("telegram/start")}
                   sx={{ fontWeight: 900, minWidth: 180 }}
                 >
-                  BẬT TELEGRAM
+                  {telegramStarting ? "ĐANG BẬT..." : "BẬT TELEGRAM"}
                 </Button>
                 <Button
                   variant="outlined"
@@ -253,7 +258,7 @@ export function Phase7BOpsPage() {
                   onClick={() => mutate.mutate("telegram/stop")}
                   sx={{ fontWeight: 900, minWidth: 180 }}
                 >
-                  TẮT TELEGRAM
+                  {telegramStopping ? "ĐANG TẮT..." : "TẮT TELEGRAM"}
                 </Button>
               </Stack>
             </CardContent>
@@ -262,7 +267,11 @@ export function Phase7BOpsPage() {
       </Grid>
 
       {mutate.isSuccess && <Alert severity="success">{mutate.data.message}</Alert>}
-      {mutate.isError && <Alert severity="error">{mutate.error instanceof Error ? mutate.error.message : "Không thực hiện được thao tác."}</Alert>}
+      {mutate.isError && (
+        <Alert severity="error" sx={{ whiteSpace: "pre-wrap", fontFamily: "monospace" }}>
+          {mutate.error instanceof Error ? mutate.error.message : "Không thực hiện được thao tác."}
+        </Alert>
+      )}
 
       <Alert severity="info">
         +6 → BE · +10 → chốt 1/3 · phần còn lại tiếp tục canonical runner. Web không mở quyền giao dịch cho tài khoản real.
