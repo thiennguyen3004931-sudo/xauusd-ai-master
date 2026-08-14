@@ -36,8 +36,8 @@ type LinkRow = readonly [string, string, typeof DashboardRounded];
 
 const dashboardLinks = [["/", "Control Center", DashboardRounded]] as const;
 const tradingLinks = [
-  ["/phase7b-demo", "Phase 7B Monitor", SmartToyRounded],
-  ["/phase7b-pattern-check", "M15 Pattern Check", CandlestickChartRounded],
+  ["/phase7b-demo", "Forward Monitor", SmartToyRounded],
+  ["/phase7b-pattern-check", "Live Entry Gate", CandlestickChartRounded],
   ["/phase7b-ops", "Bot & Telegram", PowerSettingsNewRounded],
 ] as const;
 const researchLinks = [
@@ -92,8 +92,8 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
       <NavGroup title="SYSTEM" links={systemLinks} onNavigate={onNavigate} />
       <NavGroup title="LEGACY" links={legacyLinks} onNavigate={onNavigate} />
       <Box sx={{ mt: 2, p: 2, borderRadius: 3, border: "1px solid rgba(148,163,184,.12)", bgcolor: "rgba(255,255,255,.02)" }}>
-        <Stack direction="row" spacing={1} alignItems="center"><LockRounded fontSize="small" color="primary" /><Typography variant="caption" fontWeight={800}>LIVE LOCKED</Typography></Stack>
-        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, lineHeight: 1.5 }}>Phase 7B chỉ giao dịch DEMO allow-list. Phase 7C/7D/7E Control, Backtest, Supertrend, Re-alignment, Daily P/L, Management, Scale và Auto Lot là research/read-only, không tự thay đổi execution.</Typography>
+        <Stack direction="row" spacing={1} alignItems="center"><LockRounded fontSize="small" color="primary" /><Typography variant="caption" fontWeight={800}>REAL ACCOUNT LOCKED</Typography></Stack>
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, lineHeight: 1.5 }}>Forward trading chỉ cho MT5 DEMO allow-list. Research pages không tự thay đổi execution. Rule DEMO hiện tại: 2 candle models + Supertrend M15 + fresh aligned M5_FLIP_2; FVG là context.</Typography>
       </Box>
     </Box>
   );
@@ -125,9 +125,9 @@ export function DashboardLayout() {
   let headerMode: string = mode;
 
   if (isControlCenter) { headerTitle = "Phase 7C Control Center"; headerSubtitle = "DBGMarkets DEMO · Phase 7B operations · M15 readiness · read-only"; headerMode = "DEMO ONLY"; }
-  else if (isPhase7B) { headerTitle = "Phase 7B DEMO Operations"; headerSubtitle = "Forward execution monitor · MT5 DEMO · read-only web"; headerMode = "DEMO ONLY"; }
-  else if (isPatternCheck) { headerTitle = "M15 Pattern Check"; headerSubtitle = "Engulfing / Two-candle / MA diagnostics · tolerance-aware · read-only"; headerMode = "DEMO ONLY"; }
-  else if (isPhase7BOps) { headerTitle = "Bot & Telegram"; headerSubtitle = "Local Scheduled Task control · DEMO-only process launcher · no MT5 order route"; headerMode = "DEMO ONLY"; }
+  else if (isPhase7B) { headerTitle = "Forward DEMO Monitor"; headerSubtitle = "XAUUSD · MT5 DEMO · live position / +6 BE / +10 partial / runner"; headerMode = "DEMO ONLY"; }
+  else if (isPatternCheck) { headerTitle = "Live Entry Gate"; headerSubtitle = "2 models → Supertrend M15 → fresh aligned M5_FLIP_2 · FVG context only"; headerMode = "DEMO ONLY"; }
+  else if (isPhase7BOps) { headerTitle = "Bot & Telegram"; headerSubtitle = "DEMO controller · Telegram read-only notifier · runtime status"; headerMode = "DEMO ONLY"; }
   else if (isPhase7CBacktest) { headerTitle = "Canonical Phase 7B Backtest"; headerSubtitle = "Broker-native MT5 history · selectable date range · closed-bar replay"; headerMode = "RESEARCH"; }
   else if (isPhase7ESupertrend) { headerTitle = "Phase 7E Pattern + Dual Supertrend"; headerSubtitle = "Engulfing / Two-candle + closed M5/M15 Supertrend alignment · MA entry filter removed"; headerMode = "RESEARCH"; }
   else if (isPhase7ERealignment) { headerTitle = "Phase 7E.1 M5 Re-alignment Optimizer"; headerSubtitle = "M15 Supertrend direction · fresh M5 flip in 1/2/3 closed bars · candle pattern trigger"; headerMode = "RESEARCH"; }
