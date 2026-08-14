@@ -133,6 +133,14 @@ for ($attempt = 1; $attempt -le 16; $attempt++) {
       Write-Host "PHASE7B_WEB_API_SELFTEST=PASS"
       Write-Host "PHASE7B_WEB_BOT_STATUS=$($snapshot.botStatus)"
       Write-Host "PHASE7B_WEB_MT5_REACHABLE=$($snapshot.mt5.reachable)"
+      if ($null -ne $snapshot.entryDiagnostics) {
+        Write-Host "PHASE7B_WEB_ENTRY_DIAGNOSTICS=PASS"
+        Write-Host "PHASE7B_WEB_ENTRY_ELIGIBLE=$($snapshot.entryDiagnostics.entry.eligible)"
+        Write-Host "PHASE7B_WEB_ENTRY_SIDE=$($snapshot.entryDiagnostics.entry.side)"
+        Write-Host "PHASE7B_WEB_FVG_REQUIRED_FOR_ENTRY=$($snapshot.entryDiagnostics.fvg.requiredForEntry)"
+      } else {
+        Write-Warning "Phase 7B entry diagnostics unavailable: $($snapshot.entryDiagnosticsError)"
+      }
       break
     }
   } catch {
