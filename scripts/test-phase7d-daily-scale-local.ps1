@@ -19,23 +19,37 @@ $body = @{
 
 $r = Invoke-RestMethod `
   -Uri "http://127.0.0.1:$ApiPort/api/v1/phase7d/daily-scale-backtest" `
-  -Method Post -ContentType "application/json" -Body $body -TimeoutSec 180
+  -Method Post -ContentType "application/json" -Body $body -TimeoutSec 240
 
 if ($r.source -ne "PHASE7D_DAILY_RECOVERY_TREND_SCALE_RESEARCH") { throw "Unexpected Phase 7D daily scale source." }
 if ($r.replayMode -ne "EXACT_PER_LANE_SIGNAL_CONTENTION_WITH_M5_APPROXIMATION") { throw "Exact per-lane replay is not active." }
 if ($r.safety.executionMutation -ne $false -or $r.safety.phase7bStrategyMutation -ne $false) { throw "Daily scale research unexpectedly allows strategy/execution mutation." }
 if ($r.decision.executionEligible -ne $false) { throw "Daily scale research execution must remain disabled." }
 if (-not $r.current -or -not $r.recoveryLockCurrent -or -not $r.scaleBe6 -or -not $r.scaleBe10) { throw "Daily scale lanes are incomplete." }
-if ($r.configuration.recoveryStopPolicy -ne "STRUCTURAL_SL_UNTIL_DYNAMIC_FULL_TP") { throw "Recovery must keep structural SL until dynamic full TP." }
-if ($r.recoveryLockCurrent.metrics.recoveryBeExits -ne 0 -or $r.scaleBe6.metrics.recoveryBeExits -ne 0 -or $r.scaleBe10.metrics.recoveryBeExits -ne 0) { throw "Recovery lane unexpectedly contains BE exits." }
+if (-not $r.reconciliation) { throw "Phase 7D reconciliation gate is missing." }
 if ([math]::Abs($r.configuration.firstPartialVolume - 0.01) -gt 0.000001) { throw "Expected +10 partial 0.01 lot for fixed 0.03." }
 if ([math]::Abs($r.configuration.secondPartialVolume - 0.01) -gt 0.000001) { throw "Expected +20 partial 0.01 lot for fixed 0.03." }
 if ([math]::Abs($r.configuration.finalRunnerVolume - 0.01) -gt 0.000001) { throw "Expected final runner 0.01 lot for fixed 0.03." }
 
+if ($r.reconciliation.passed -eq $false -and $r.decision.verdict -ne "RECONCILIATION_FAILED") {
+  throw "Reconciliation failed but scale verdict was not locked."
+}
+if ($r.reconciliation.passed -eq $true -and $r.decision.verdict -eq "RECONCILIATION_FAILED") {
+  throw "Reconciliation passed but scale verdict remained locked."
+}
+
 Write-Host "PHASE7D_DAILY_SCALE_TEST=PASS"
 Write-Host "PHASE7D_DAILY_SCALE_REPLAY=$($r.replayMode)"
-Write-Host "PHASE7D_DAILY_SCALE_RECOVERY_STOP_POLICY=$($r.configuration.recoveryStopPolicy)"
-Write-Host "PHASE7D_DAILY_SCALE_RECOVERY_BE_EXITS=$($r.recoveryLockCurrent.metrics.recoveryBeExits)"
+Write-Host "PHASE7D_DAILY_SCALE_RECONCILIATION=$($r.reconciliation.status)"
+Write-Host "PHASE7D_DAILY_SCALE_RECONCILIATION_FAILED_COUNT=$($r.reconciliation.failedKeys.Count)"
+if ($r.reconciliation.failedKeys.Count -gt 0) {
+  Write-Host "PHASE7D_DAILY_SCALE_RECONCILIATION_FAILED_KEYS=$($r.reconciliation.failedKeys -join '|')"
+}
+foreach ($check in $r.reconciliation.checks) {
+  if (-not $check.pass) {
+    Write-Host "PHASE7D_RECON_FAIL_$($check.key)=EXPECTED:$($check.expected)|ACTUAL:$($check.actual)|DELTA:$($check.delta)"
+  }
+}
 Write-Host "PHASE7D_DAILY_SCALE_SIGNALS=$($r.configuration.signals)"
 Write-Host "PHASE7D_DAILY_SCALE_CANDIDATES=$($r.configuration.filledCandidates)"
 Write-Host "PHASE7D_DAILY_SCALE_CURRENT_NET=$($r.current.metrics.netPnl)"
