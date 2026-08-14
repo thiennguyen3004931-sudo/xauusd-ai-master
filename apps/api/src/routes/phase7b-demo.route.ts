@@ -94,6 +94,7 @@ type EntryDiagnostics = {
   };
 };
 
+const ENGULF_BODY_TOLERANCE_PRICE = 0.1;
 const router = Router();
 
 router.get("/", async (_req: Request, res: Response) => {
@@ -120,9 +121,6 @@ router.get("/", async (_req: Request, res: Response) => {
       heartbeatAgeMs <= heartbeatLimitMs,
     );
     const processAlive = Boolean(runtime?.armed && isPidAlive(runtime.pid));
-    // The PowerShell wrapper owns the heartbeat file, but the Node controller may
-    // continue running if that wrapper exits unexpectedly. In that case, a live
-    // controller PID is stronger evidence than a stale wrapper heartbeat.
     const runtimeAlive = heartbeatAlive || processAlive;
     const managedPosition = state?.managed
       ? telemetry.positions.find((position) => String(position.ticket) === String(state.managed?.ticket)) ?? null
@@ -156,12 +154,7 @@ router.get("/", async (_req: Request, res: Response) => {
       readOnly: true,
       botStatus,
       generatedAt: Date.now(),
-      source: {
-        demoDir,
-        statePath,
-        journalPath,
-        runtimePath,
-      },
+      source: { demoDir, statePath, journalPath, runtimePath },
       runtime: {
         ...runtime,
         alive: runtimeAlive,
@@ -173,6 +166,7 @@ router.get("/", async (_req: Request, res: Response) => {
       strategy: {
         name: "M15_DUAL_PATTERN_MA_STRUCTURE_RIDER_FVG_CONFIRMATION",
         trigger: "ENGULFING_OR_TWO_SAME_COLOR_BODY_DOMINANCE",
+        engulfBodyTolerancePrice: ENGULF_BODY_TOLERANCE_PRICE,
         trend: "MA20_MA50_MA200_MANDATORY",
         fvg: "OPTIONAL_AT_ENTRY_HOLD_CONFIRMATION_ADDON_SHADOW",
         initialStop: "PRICE_DISTANCE_6_TO_10",
@@ -204,18 +198,14 @@ router.get("/", async (_req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    res.status(503).json({
-      error: error instanceof Error ? error.message : "Phase 7B DEMO status failed.",
-    });
+    res.status(503).json({ error: error instanceof Error ? error.message : "Phase 7B DEMO status failed." });
   }
 });
 
 async function getEntryDiagnostics(): Promise<EntryDiagnostics> {
   const baseUrl = process.env.MT5_BRIDGE_BASE_URL?.trim().replace(/\/$/, "") ?? "";
   const apiKey = process.env.MT5_BRIDGE_API_KEY?.trim() ?? "";
-  if (!baseUrl || !apiKey) {
-    throw new Error("Bridge read-only credentials are unavailable to the Phase 7B API.");
-  }
+  if (!baseUrl || !apiKey) throw new Error("Bridge read-only credentials are unavailable to the Phase 7B API.");
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3_000);
@@ -225,9 +215,7 @@ async function getEntryDiagnostics(): Promise<EntryDiagnostics> {
       signal: controller.signal,
     });
     const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`Bridge M15 request failed ${response.status}: ${text}`);
-    }
+    if (!response.ok) throw new Error(`Bridge M15 request failed ${response.status}: ${text}`);
     const bars = JSON.parse(text) as M15Bar[];
     return buildEntryDiagnostics(bars);
   } finally {
@@ -250,31 +238,19 @@ function buildEntryDiagnostics(bars: M15Bar[]): EntryDiagnostics {
   const buyAligned = ma20 > ma50 && ma50 > ma200 && current.close > ma20;
   const sellAligned = ma20 < ma50 && ma50 < ma200 && current.close < ma20;
   const pattern = detectEntryPattern(bars, index);
-  const matchedPatternSide = pattern?.side === "BUY"
-    ? buyAligned
-    : pattern?.side === "SELL"
-      ? sellAligned
-      : false;
+  const matchedPatternSide = pattern?.side === "BUY" ? buyAligned : pattern?.side === "SELL" ? sellAligned : false;
   const buyFvg = hasRelevantFvg(bars, index, "BUY", 12);
   const sellFvg = hasRelevantFvg(bars, index, "SELL", 12);
-  const sameDirectionConfirmed = pattern?.side === "BUY"
-    ? buyFvg
-    : pattern?.side === "SELL"
-      ? sellFvg
-      : false;
+  const sameDirectionConfirmed = pattern?.side === "BUY" ? buyFvg : pattern?.side === "SELL" ? sellFvg : false;
 
   const structuralStopDistance = pattern
-    ? pattern.side === "BUY"
-      ? current.close - pattern.extreme
-      : pattern.extreme - current.close
+    ? pattern.side === "BUY" ? current.close - pattern.extreme : pattern.extreme - current.close
     : null;
   const validStructure = structuralStopDistance !== null && structuralStopDistance > 0;
   const eligible = Boolean(pattern && matchedPatternSide && validStructure);
-  const stopDistance = validStructure && structuralStopDistance !== null
-    ? clamp(structuralStopDistance, 6, 10)
-    : null;
+  const stopDistance = validStructure && structuralStopDistance !== null ? clamp(structuralStopDistance, 6, 10) : null;
 
-  let reason = "Chưa có Engulfing hoặc Two-candle hợp lệ: thân nến đầu tiên phải nhỏ hơn thân nến ngược màu trước đó, và tổng hai thân cùng màu phải lớn hơn thân nến trước.";
+  let reason = `Chưa có Engulfing (cho phép sai số thân tối đa ${ENGULF_BODY_TOLERANCE_PRICE.toFixed(2)} giá) hoặc Two-candle hợp lệ: thân nến đầu tiên phải nhỏ hơn thân nến ngược màu trước đó, và tổng hai thân cùng màu phải lớn hơn thân nến trước.`;
   if (pattern && !matchedPatternSide) {
     reason = `${pattern.side} pattern đã xuất hiện nhưng MA20/50/200 chưa đồng thuận cùng hướng.`;
   } else if (pattern && matchedPatternSide && !validStructure) {
@@ -337,16 +313,16 @@ function detectEntryPattern(
   if (
     isBearish(previous) &&
     isBullish(current) &&
-    current.open <= previous.close &&
-    current.close >= previous.open
+    current.open <= previous.close + ENGULF_BODY_TOLERANCE_PRICE + 1e-9 &&
+    current.close + ENGULF_BODY_TOLERANCE_PRICE + 1e-9 >= previous.open
   ) {
     return { side: "BUY", name: "ENGULFING", extreme: current.low };
   }
   if (
     isBullish(previous) &&
     isBearish(current) &&
-    current.open >= previous.close &&
-    current.close <= previous.open
+    current.open + ENGULF_BODY_TOLERANCE_PRICE + 1e-9 >= previous.close &&
+    current.close <= previous.open + ENGULF_BODY_TOLERANCE_PRICE + 1e-9
   ) {
     return { side: "SELL", name: "ENGULFING", extreme: current.high };
   }
@@ -366,11 +342,7 @@ function detectEntryPattern(
     firstBodyStillSmaller &&
     combinedBody > priorBody
   ) {
-    return {
-      side: "BUY",
-      name: "TWO_CANDLE_BODY_DOMINANCE",
-      extreme: Math.min(priorOpposite.low, first.low, current.low),
-    };
+    return { side: "BUY", name: "TWO_CANDLE_BODY_DOMINANCE", extreme: Math.min(priorOpposite.low, first.low, current.low) };
   }
   if (
     isBullish(priorOpposite) &&
@@ -379,11 +351,7 @@ function detectEntryPattern(
     firstBodyStillSmaller &&
     combinedBody > priorBody
   ) {
-    return {
-      side: "SELL",
-      name: "TWO_CANDLE_BODY_DOMINANCE",
-      extreme: Math.max(priorOpposite.high, first.high, current.high),
-    };
+    return { side: "SELL", name: "TWO_CANDLE_BODY_DOMINANCE", extreme: Math.max(priorOpposite.high, first.high, current.high) };
   }
   return null;
 }
@@ -401,31 +369,16 @@ function hasRelevantFvg(bars: M15Bar[], index: number, side: Phase7BSide, lookba
   return false;
 }
 
-function isBullish(bar: M15Bar): boolean {
-  return bar.close > bar.open;
-}
-
-function isBearish(bar: M15Bar): boolean {
-  return bar.close < bar.open;
-}
-
-function bodySize(bar: M15Bar): number {
-  return Math.abs(bar.close - bar.open);
-}
+function isBullish(bar: M15Bar): boolean { return bar.close > bar.open; }
+function isBearish(bar: M15Bar): boolean { return bar.close < bar.open; }
+function bodySize(bar: M15Bar): number { return Math.abs(bar.close - bar.open); }
 
 function smaPeriod(values: number[], period: number): number {
   if (values.length < period) throw new Error(`Not enough M15 bars for MA${period}.`);
   return values.slice(-period).reduce((sum, value) => sum + value, 0) / period;
 }
-
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.max(minimum, Math.min(maximum, value));
-}
-
-function round(value: number, digits: number): number {
-  const factor = 10 ** digits;
-  return Math.round((value + Number.EPSILON) * factor) / factor;
-}
+function clamp(value: number, minimum: number, maximum: number): number { return Math.max(minimum, Math.min(maximum, value)); }
+function round(value: number, digits: number): number { const factor = 10 ** digits; return Math.round((value + Number.EPSILON) * factor) / factor; }
 
 function findLatestDemoDir(): string | null {
   const configured = process.env.PHASE7B_DEMO_WORK_DIR?.trim();
@@ -473,8 +426,6 @@ function isPidAlive(pid: number | null | undefined): boolean {
 }
 
 function readJson<T>(file: string): T {
-  // Windows PowerShell 5.1 writes `-Encoding utf8` with a UTF-8 BOM.
-  // Strip the BOM defensively so runtime/state files remain valid JSON to Node.
   const text = fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "");
   return JSON.parse(text) as T;
 }
@@ -488,10 +439,9 @@ function readRecentEvents(file: string, limit: number): DemoEvent[] {
   const events: DemoEvent[] = [];
   for (const line of lines) {
     try {
-      const parsed = JSON.parse(line) as DemoEvent;
-      events.push(parsed);
+      events.push(JSON.parse(line) as DemoEvent);
     } catch {
-      // The first line may be partial when reading only the tail of a large journal.
+      // First line can be partial when reading a journal tail.
     }
   }
   return events.slice(-limit);
