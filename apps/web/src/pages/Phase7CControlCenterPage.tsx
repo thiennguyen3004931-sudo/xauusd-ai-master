@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Alert,
@@ -75,13 +75,15 @@ export function Phase7CControlCenterPage() {
     ? Math.max(0, Math.min(100, 100 - remainingMs / (15 * 60_000) * 100))
     : 0;
 
-  const readiness = useMemo(() => {
-    if (!diag) return { label: "NO DIAGNOSTICS", color: "warning" as const };
-    if (diag.entry.eligible) return { label: `${diag.entry.side} READY`, color: "success" as const };
-    if (diag.trend.sellAligned) return { label: "SELL TREND · WAIT PATTERN", color: "warning" as const };
-    if (diag.trend.buyAligned) return { label: "BUY TREND · WAIT PATTERN", color: "warning" as const };
-    return { label: "WAIT TREND", color: "default" as const };
-  }, [diag]);
+  const readiness = !diag
+    ? { label: "NO DIAGNOSTICS", color: "warning" as const }
+    : diag.entry.eligible
+      ? { label: `${diag.entry.side} READY`, color: "success" as const }
+      : diag.trend.sellAligned
+        ? { label: "SELL TREND · WAIT PATTERN", color: "warning" as const }
+        : diag.trend.buyAligned
+          ? { label: "BUY TREND · WAIT PATTERN", color: "warning" as const }
+          : { label: "WAIT TREND", color: "default" as const };
 
   return (
     <Stack spacing={2}>
