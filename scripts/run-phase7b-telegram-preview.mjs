@@ -6,8 +6,6 @@ const monitorUrl = process.env.ZIQ_TELEGRAM_MONITOR_URL?.trim() ?? "";
 const delayMs = Math.max(250, Number(process.env.ZIQ_TELEGRAM_PREVIEW_DELAY_MS ?? "650"));
 
 const previewTag = "🧪 <b>PREVIEW · KHÔNG PHẢI LỆNH THẬT</b>";
-const ticketBuy = "PREVIEW-BUY-270713";
-const ticketSell = "PREVIEW-SELL-270714";
 
 const messages = [
   [
@@ -16,15 +14,11 @@ const messages = [
     `🟢 <b>BUY SIGNAL · ${esc(symbol)}</b>`,
     "<code>PHASE 7B · DEMO ONLY</code>",
     "",
-    line("⏱", "M15", "14/08/2026 10:15"),
     line("🧠", "Pattern", "ENGULFING"),
-    line("📐", "Trend", "MA20 > MA50 > MA200"),
-    line("🎯", "Giá tham chiếu", "4324.15"),
-    line("🛡", "SL", "4316.15"),
-    line("📦", "Volume", "0.03"),
-    line("🧩", "FVG", "OPTIONAL / NO CONFIRM"),
-    "",
-    "<b>Trạng thái:</b> đang gửi lệnh BUY DEMO…",
+    line("🎯", "Entry", "4324.15"),
+    line("🛡", "SL", "4316.15 · −8.00 giá"),
+    line("📦", "Volume", "0.03 lot"),
+    line("🧩", "FVG", "OPTIONAL"),
   ].join("\n"),
 
   [
@@ -33,82 +27,42 @@ const messages = [
     `✅🟢 <b>BUY FILLED · ${esc(symbol)}</b>`,
     "<code>PHASE 7B · DEMO ONLY</code>",
     "",
-    line("🎫", "Ticket", ticketBuy),
     line("💵", "Entry", "4324.20"),
-    line("📦", "Volume", "0.03"),
-    line("🛡", "SL", "4316.20"),
-    line("🧩", "FVG tại entry", "NO · entry vẫn hợp lệ"),
+    line("📦", "Volume", "0.03 lot"),
+    line("🛡", "SL", "4316.20 · −8.00 giá"),
     "",
-    "<b>Quản lý:</b> +6 → BE · +10 → close 1/3 · runner theo swing M15",
+    "<b>Rule:</b> +6 → BE · +10 → chốt 1/3 · runner swing M15",
   ].join("\n"),
 
-  [
-    previewTag,
-    "",
-    "🛡 <b>+6 · SL → ENTRY</b>",
-    "<code>PHASE 7B · DEMO ONLY</code>",
-    "",
-    line("🎫", "Ticket", ticketBuy),
-    line("📈", "Favorable", "+6.00 giá"),
-    line("🔒", "SL mới", "4324.20"),
-    "",
-    "✅ Rủi ro ban đầu đã được đưa về hòa vốn theo rule.",
-  ].join("\n"),
+  compact("🛡", "🟢", "BUY · +6 → BE", [
+    "📈 <b>Hiện:</b> <code>+6.15 giá</code> · 💵 <code>+$18.45</code>",
+    "🔒 <b>SL:</b> <code>4324.20</code> · khóa <code>+0.00 giá</code> · <code>$0.00</code>",
+  ]),
 
-  [
-    previewTag,
-    "",
-    "💰 <b>+10 · CHỐT 1/3</b>",
-    "<code>PHASE 7B · DEMO ONLY</code>",
-    "",
-    line("🎫", "Ticket", ticketBuy),
-    line("📈", "Favorable", "+10.00 giá"),
-    line("📤", "Đã đóng", "0.01 lot"),
-    line("📦", "Còn lại", "0.02 lot"),
-    "",
-    "🏃 Runner tiếp tục theo cấu trúc swing M15.",
-  ].join("\n"),
+  compact("💰", "🟢", "BUY · CHỐT 1/3", [
+    "📈 <b>Chốt tại:</b> <code>+10.10 giá</code> · <b>Lãi:</b> <code>≈ +$10.10</code>",
+    "📤 <b>Đóng:</b> <code>0.01 lot</code> · còn <code>0.02 lot</code>",
+    "🛡 <b>SL:</b> <code>4324.20</code> · khóa <code>+0.00 giá</code> · <code>$0.00</code>",
+    "💵 <b>P&L runner:</b> <code>+$20.20</code>",
+  ]),
 
-  [
-    previewTag,
-    "",
-    "🧩 <b>FVG CONFIRM · HOLD</b>",
-    "<code>PHASE 7B · DEMO ONLY</code>",
-    "",
-    line("🎫", "Ticket", ticketBuy),
-    line("↕️", "Side", "BUY"),
-    line("📈", "Favorable", "+12.40 giá"),
-    line("📐", "MA20 / 50 / 200", "4331.20 / 4318.60 / 4295.10"),
-    "",
-    "✅ FVG cùng hướng xác nhận tiếp tục HOLD.",
-  ].join("\n"),
+  compact("🧩", "🟢", "BUY · HOLD", [
+    "📈 <b>Hiện:</b> <code>+12.40 giá</code> · 💵 <code>+$24.80</code>",
+    "🛡 <b>SL khóa:</b> <code>+0.00 giá</code> · <code>$0.00</code>",
+    "✅ FVG cùng hướng · tiếp tục giữ.",
+  ]),
 
-  [
-    previewTag,
-    "",
-    "🔒 <b>RUNNER · STRUCTURE TRAIL</b>",
-    "<code>PHASE 7B · DEMO ONLY</code>",
-    "",
-    line("🎫", "Ticket", ticketBuy),
-    line("🛡", "SL mới", "4330.80"),
-    line("⏱", "M15 close", "14/08/2026 11:00"),
-    "",
-    "📌 Stop chỉ được siết chặt theo swing M15 đã xác nhận.",
-  ].join("\n"),
+  compact("🔒", "🟢", "BUY · TRAIL SL", [
+    "🛡 <b>SL mới:</b> <code>4330.80</code> · khóa <code>+6.60 giá</code> · <code>≈ +$13.20</code>",
+    "📈 <b>Hiện:</b> <code>+14.50 giá</code> · 💵 <code>+$29.00</code>",
+  ]),
 
-  [
-    previewTag,
-    "",
-    `🏁 <b>EXIT EXECUTED · ${esc(symbol)}</b>`,
-    "<code>PHASE 7B · DEMO ONLY</code>",
-    "",
-    line("🎫", "Ticket", ticketBuy),
-    line("📤", "Volume", "0.02 lot"),
-    line("💵", "Exit", "4338.70"),
-    line("🧠", "Lý do", "MA20 REVERSAL / RUNNER EXIT"),
-    "",
-    "✅ Position BUY Phase 7B đã được đóng.",
-  ].join("\n"),
+  compact("🏁", "🟢", "BUY · CHỐT LỆNH", [
+    "💵 <b>P&L tổng:</b> <code>+$39.10</code>",
+    "📈 <b>Biến động TB:</b> <code>+13.03 giá</code>",
+    "🎯 <b>Exit TB:</b> <code>4337.23</code>",
+    "🧠 <b>Lý do:</b> đóng M15 phá MA20",
+  ]),
 
   [
     previewTag,
@@ -116,15 +70,11 @@ const messages = [
     `🔴 <b>SELL SIGNAL · ${esc(symbol)}</b>`,
     "<code>PHASE 7B · DEMO ONLY</code>",
     "",
-    line("⏱", "M15", "14/08/2026 13:30"),
     line("🧠", "Pattern", "TWO_CANDLE_BODY_DOMINANCE"),
-    line("📐", "Trend", "MA20 < MA50 < MA200"),
-    line("🎯", "Giá tham chiếu", "4312.60"),
-    line("🛡", "SL", "4320.60"),
-    line("📦", "Volume", "0.03"),
+    line("🎯", "Entry", "4312.60"),
+    line("🛡", "SL", "4320.60 · −8.00 giá"),
+    line("📦", "Volume", "0.03 lot"),
     line("🧩", "FVG", "CONFIRMED"),
-    "",
-    "<b>Trạng thái:</b> đang gửi lệnh SELL DEMO…",
   ].join("\n"),
 
   [
@@ -133,40 +83,39 @@ const messages = [
     `✅🔴 <b>SELL FILLED · ${esc(symbol)}</b>`,
     "<code>PHASE 7B · DEMO ONLY</code>",
     "",
-    line("🎫", "Ticket", ticketSell),
     line("💵", "Entry", "4312.55"),
-    line("📦", "Volume", "0.03"),
-    line("🛡", "SL", "4320.55"),
-    line("🧩", "FVG tại entry", "YES"),
+    line("📦", "Volume", "0.03 lot"),
+    line("🛡", "SL", "4320.55 · −8.00 giá"),
     "",
-    "<b>Quản lý:</b> +6 → BE · +10 → close 1/3 · runner theo swing M15",
+    "<b>Rule:</b> +6 → BE · +10 → chốt 1/3 · runner swing M15",
   ].join("\n"),
+
+  compact("💰", "🔴", "SELL · CHỐT 1/3", [
+    "📈 <b>Chốt tại:</b> <code>+10.30 giá</code> · <b>Lãi:</b> <code>≈ +$10.30</code>",
+    "📤 <b>Đóng:</b> <code>0.01 lot</code> · còn <code>0.02 lot</code>",
+    "🛡 <b>SL:</b> <code>4312.55</code> · khóa <code>+0.00 giá</code> · <code>$0.00</code>",
+    "💵 <b>P&L runner:</b> <code>+$20.60</code>",
+  ]),
+
+  compact("🏁", "🔴", "SELL · CHỐT LỆNH", [
+    "💵 <b>P&L tổng:</b> <code>+$38.75</code>",
+    "📈 <b>Biến động TB:</b> <code>+12.92 giá</code>",
+    "🎯 <b>Exit TB:</b> <code>4299.63</code>",
+    "🧠 <b>Lý do:</b> FVG ngược hướng + rejection sau +10",
+  ]),
+
+  compact("🛑", "🔴", "SELL · CLOSED / STOP", [
+    "💵 <b>P&L tổng:</b> <code>−$24.00</code>",
+    "📉 <b>Biến động TB:</b> <code>−8.00 giá</code>",
+    "🎯 <b>Exit:</b> <code>4320.55</code>",
+    "🧠 <b>Lý do:</b> STOPLOSS",
+  ]),
 
   [
     previewTag,
     "",
-    `🏁 <b>REVERSAL EXIT · ${esc(symbol)}</b>`,
-    "<code>PHASE 7B · DEMO ONLY</code>",
-    "",
-    line("🎫", "Ticket", ticketSell),
-    line("📤", "Volume", "0.02 lot"),
-    line("💵", "Exit", "4298.40"),
-    line("🧩", "Tín hiệu đảo chiều", "Opposing M15 FVG + rejection sau +10"),
-    "",
-    "✅ Runner SELL đã đóng theo rule reversal exit.",
-  ].join("\n"),
-
-  [
-    previewTag,
-    "",
-    "⚠️ <b>PHASE 7B ACTION REJECTED</b>",
-    "<code>PHASE 7B · DEMO ONLY</code>",
-    "",
-    line("📝", "Sự kiện", "PLUS6_SL_REJECTED"),
-    line("🎫", "Ticket", "PREVIEW-ERROR-001"),
-    line("💬", "Chi tiết", "Broker bridge từ chối sửa SL — bot giữ fail-closed và ghi audit"),
-    "",
-    "🚨 Đây là mẫu cảnh báo khi một hành động quản lý lệnh không thực hiện được.",
+    "⚠️ <b>ACTION REJECTED</b>",
+    "<code>Broker từ chối sửa SL · bot giữ fail-closed</code>",
   ].join("\n"),
 ];
 
@@ -182,6 +131,16 @@ for (let index = 0; index < messages.length; index += 1) {
 }
 
 console.log("PHASE7B_TELEGRAM_PREVIEW=PASS");
+
+function compact(icon, sideMarker, title, lines) {
+  return [
+    previewTag,
+    "",
+    `${icon} ${sideMarker} <b>${esc(title)}</b>`,
+    "<code>PHASE 7B · DEMO</code>",
+    ...lines,
+  ].join("\n");
+}
 
 function line(icon, label, raw) {
   return `${icon} <b>${esc(label)}:</b> <code>${esc(raw)}</code>`;
