@@ -14,6 +14,10 @@ import type {
 } from "./phase7c-types";
 import type { Phase7CForwardRangeResult } from "./phase7c-forward-types";
 import type { Phase7CAutoLotPreview } from "./phase7c-autolot-types";
+import type {
+  Phase7CAutoLotBacktestRequest,
+  Phase7CAutoLotBacktestResult,
+} from "./phase7c-auto-lot-types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
@@ -145,6 +149,18 @@ export async function runPhase7CBacktest(
 ): Promise<Phase7CBacktestResult> {
   return read<Phase7CBacktestResult>(
     await fetch(`${API_BASE}/api/v1/phase7c/backtest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
+}
+
+export async function runPhase7CAutoLotBacktest(
+  input: Phase7CAutoLotBacktestRequest,
+): Promise<Phase7CAutoLotBacktestResult> {
+  return read<Phase7CAutoLotBacktestResult>(
+    await fetch(`${API_BASE}/api/v1/phase7c/auto-lot-backtest`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),
