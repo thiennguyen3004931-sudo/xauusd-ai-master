@@ -21,11 +21,24 @@ if (-not (Test-Path $Notifier)) {
   throw "Telegram notifier not found: $Notifier"
 }
 
+if (-not $SendTest -and -not $Once) {
+  try {
+    $existing = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+      Where-Object { $_.CommandLine -like '*run-phase7b-telegram-notifier.mjs*' } |
+      Select-Object -First 1
+    if ($null -ne $existing) {
+      Write-Host "PHASE7B_TELEGRAM_NOTIFIER=ALREADY_RUNNING"
+      Write-Host "PHASE7B_TELEGRAM_EXISTING_PID=$($existing.ProcessId)"
+      exit 0
+    }
+  } catch {}
+}
+
 foreach ($raw in Get-Content $EnvFile) {
   $line = $raw.Trim()
   if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) { continue }
   $index = $line.IndexOf("=")
-  $name = $line.Substring(0, $index).Trim()
+  $name = $line.Substring(0, $index).Trim().TrimStart([char]0xFEFF)
   $value = $line.Substring($index + 1).Trim().Trim('"').Trim("'")
   [System.Environment]::SetEnvironmentVariable($name, $value, "Process")
 }
