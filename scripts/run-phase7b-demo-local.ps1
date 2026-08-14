@@ -163,6 +163,7 @@ $PreCloseHook = Join-Path $ProjectRoot "scripts\phase7b-preclose-fetch-hook.mts"
 $RiskEngineEsm = Join-Path $ProjectRoot "packages\risk-engine\dist\index.js"
 if (-not (Test-Path $ControllerTs)) { throw "Phase 7B DEMO controller missing: $ControllerTs" }
 if (-not (Test-Path $PreCloseHook)) { throw "Phase 7B DEMO pre-close hook missing: $PreCloseHook" }
+$PreCloseHookUri = ([System.Uri]::new($PreCloseHook)).AbsoluteUri
 
 $BotProcess = $null
 $RuntimeStartedAt = $null
@@ -191,12 +192,13 @@ try {
   Write-Host "PHASE7B_DEMO_RISK_ENGINE_IMPORT=../packages/risk-engine/dist/index.js"
   Write-Host "PHASE7B_DEMO_TSX_RUNTIME=OFF"
   Write-Host "PHASE7B_DEMO_PRE_CLOSE_HOOK=$PreCloseHook"
+  Write-Host "PHASE7B_DEMO_PRE_CLOSE_HOOK_URI=$PreCloseHookUri"
 
   if ($ArmDemoTrading) {
     $RuntimeStartedAt = Get-EpochMs
     Write-DemoRuntimeState -Status "STARTING" -Armed $true -ProcessId $null -StartedAt $RuntimeStartedAt
     $NodeExe = (Get-Command node -ErrorAction Stop).Source
-    $ImportArg = "--import=$PreCloseHook"
+    $ImportArg = "--import=$PreCloseHookUri"
     $BotProcess = Start-Process -FilePath $NodeExe -ArgumentList @($ImportArg, $ControllerMts) -NoNewWindow -PassThru
     Write-DemoRuntimeState -Status "RUNNING" -Armed $true -ProcessId $BotProcess.Id -StartedAt $RuntimeStartedAt
     Write-Host "PHASE7B_DEMO_RUNTIME_ARMED=YES"
@@ -213,7 +215,7 @@ try {
     Write-DemoRuntimeState -Status "STOPPED" -Armed $false -ProcessId $BotProcess.Id -StartedAt $RuntimeStartedAt
     if ($exitCode -ne 0) { throw "Phase 7B DEMO controller exited with code $exitCode" }
   } else {
-    & node "--import=$PreCloseHook" $ControllerMts
+    & node "--import=$PreCloseHookUri" $ControllerMts
     $controllerExitCode = $LASTEXITCODE
 
     # Node 24 on Windows can hit a libuv async-handle assertion while the
