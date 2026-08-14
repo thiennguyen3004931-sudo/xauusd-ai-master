@@ -41,6 +41,59 @@ type DemoEvent = Record<string, unknown> & {
   type?: string;
 };
 
+type Phase7BSide = "BUY" | "SELL";
+type Phase7BPattern = "ENGULFING" | "TWO_CANDLE_BODY_DOMINANCE";
+
+type M15Bar = {
+  openTime?: number;
+  closeTime: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+};
+
+type EntryDiagnostics = {
+  source: "READ_ONLY_BRIDGE_M15";
+  closeTime: number;
+  nextCloseTime: number;
+  bar: {
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+  };
+  pattern: {
+    matched: boolean;
+    name: Phase7BPattern | null;
+    side: Phase7BSide | null;
+    extreme: number | null;
+  };
+  trend: {
+    ma20: number;
+    ma50: number;
+    ma200: number;
+    buyAligned: boolean;
+    sellAligned: boolean;
+    matchedPatternSide: boolean;
+  };
+  fvg: {
+    buyConfirmed: boolean;
+    sellConfirmed: boolean;
+    sameDirectionConfirmed: boolean;
+    requiredForEntry: false;
+  };
+  entry: {
+    eligible: boolean;
+    side: Phase7BSide | null;
+    rule: "PATTERN_PLUS_MA";
+    referenceEntry: number;
+    structuralStopDistance: number | null;
+    stopDistance: number | null;
+    reason: string;
+  };
+};
+
 const router = Router();
 
 router.get("/", async (_req: Request, res: Response) => {
@@ -89,6 +142,16 @@ router.get("/", async (_req: Request, res: Response) => {
       recentEventCounts[key] = (recentEventCounts[key] ?? 0) + 1;
     }
 
+    let entryDiagnostics: EntryDiagnostics | null = null;
+    let entryDiagnosticsError: string | null = null;
+    if (telemetry.reachable && telemetry.health?.accountMode === "demo") {
+      try {
+        entryDiagnostics = await getEntryDiagnostics();
+      } catch (error) {
+        entryDiagnosticsError = error instanceof Error ? error.message : "M15 entry diagnostics unavailable.";
+      }
+    }
+
     res.json({
       readOnly: true,
       botStatus,
@@ -118,6 +181,8 @@ router.get("/", async (_req: Request, res: Response) => {
         runner: "M15_STRUCTURE_TRAIL",
         reversalExit: "OPPOSING_FVG_PLUS_REJECTION_AFTER_PLUS10",
       },
+      entryDiagnostics,
+      entryDiagnosticsError,
       state,
       latestEvent,
       latestEventAt,
@@ -144,6 +209,208 @@ router.get("/", async (_req: Request, res: Response) => {
     });
   }
 });
+
+async function getEntryDiagnostics(): Promise<EntryDiagnostics> {
+  const baseUrl = process.env.MT5_BRIDGE_BASE_URL?.trim().replace(/\/$/, "") ?? "";
+  const apiKey = process.env.MT5_BRIDGE_API_KEY?.trim() ?? "";
+  if (!baseUrl || !apiKey) {
+    throw new Error("Bridge read-only credentials are unavailable to the Phase 7B API.");
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3_000);
+  try {
+    const response = await fetch(`${baseUrl}/v1/candles/XAUUSD?timeframe=M15&count=320`, {
+      headers: { "x-mt5-api-key": apiKey },
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`Bridge M15 request failed ${response.status}: ${text}`);
+    }
+    const bars = JSON.parse(text) as M15Bar[];
+    return buildEntryDiagnostics(bars);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function buildEntryDiagnostics(bars: M15Bar[]): EntryDiagnostics {
+  const index = bars.length - 1;
+  if (index < 200) throw new Error(`Need at least 201 closed M15 bars, received ${bars.length}.`);
+  const current = bars[index]!;
+  if (![current.closeTime, current.open, current.high, current.low, current.close].every(Number.isFinite)) {
+    throw new Error("Latest M15 candle is invalid.");
+  }
+
+  const closes = bars.slice(0, index + 1).map((bar) => bar.close);
+  const ma20 = smaPeriod(closes, 20);
+  const ma50 = smaPeriod(closes, 50);
+  const ma200 = smaPeriod(closes, 200);
+  const buyAligned = ma20 > ma50 && ma50 > ma200 && current.close > ma20;
+  const sellAligned = ma20 < ma50 && ma50 < ma200 && current.close < ma20;
+  const pattern = detectEntryPattern(bars, index);
+  const matchedPatternSide = pattern?.side === "BUY"
+    ? buyAligned
+    : pattern?.side === "SELL"
+      ? sellAligned
+      : false;
+  const buyFvg = hasRelevantFvg(bars, index, "BUY", 12);
+  const sellFvg = hasRelevantFvg(bars, index, "SELL", 12);
+  const sameDirectionConfirmed = pattern?.side === "BUY"
+    ? buyFvg
+    : pattern?.side === "SELL"
+      ? sellFvg
+      : false;
+
+  const structuralStopDistance = pattern
+    ? pattern.side === "BUY"
+      ? current.close - pattern.extreme
+      : pattern.extreme - current.close
+    : null;
+  const validStructure = structuralStopDistance !== null && structuralStopDistance > 0;
+  const eligible = Boolean(pattern && matchedPatternSide && validStructure);
+  const stopDistance = validStructure && structuralStopDistance !== null
+    ? clamp(structuralStopDistance, 6, 10)
+    : null;
+
+  let reason = "Chưa có Engulfing hoặc Two-candle body dominance trên cây M15 vừa đóng.";
+  if (pattern && !matchedPatternSide) {
+    reason = `${pattern.side} pattern đã xuất hiện nhưng MA20/50/200 chưa đồng thuận cùng hướng.`;
+  } else if (pattern && matchedPatternSide && !validStructure) {
+    reason = "Pattern + MA đạt nhưng cấu trúc không tạo được khoảng SL hợp lệ.";
+  } else if (eligible) {
+    reason = sameDirectionConfirmed
+      ? `${pattern!.side} đủ Pattern + MA; FVG cùng hướng cũng xác nhận.`
+      : `${pattern!.side} đủ Pattern + MA; FVG chưa xác nhận nhưng không chặn entry.`;
+  }
+
+  return {
+    source: "READ_ONLY_BRIDGE_M15",
+    closeTime: current.closeTime,
+    nextCloseTime: current.closeTime + 15 * 60_000,
+    bar: {
+      open: round(current.open, 5),
+      high: round(current.high, 5),
+      low: round(current.low, 5),
+      close: round(current.close, 5),
+    },
+    pattern: {
+      matched: Boolean(pattern),
+      name: pattern?.name ?? null,
+      side: pattern?.side ?? null,
+      extreme: pattern ? round(pattern.extreme, 5) : null,
+    },
+    trend: {
+      ma20: round(ma20, 5),
+      ma50: round(ma50, 5),
+      ma200: round(ma200, 5),
+      buyAligned,
+      sellAligned,
+      matchedPatternSide,
+    },
+    fvg: {
+      buyConfirmed: buyFvg,
+      sellConfirmed: sellFvg,
+      sameDirectionConfirmed,
+      requiredForEntry: false,
+    },
+    entry: {
+      eligible,
+      side: eligible ? pattern!.side : null,
+      rule: "PATTERN_PLUS_MA",
+      referenceEntry: round(current.close, 5),
+      structuralStopDistance: structuralStopDistance === null ? null : round(structuralStopDistance, 5),
+      stopDistance: stopDistance === null ? null : round(stopDistance, 5),
+      reason,
+    },
+  };
+}
+
+function detectEntryPattern(
+  bars: M15Bar[],
+  index: number,
+): { side: Phase7BSide; name: Phase7BPattern; extreme: number } | null {
+  const current = bars[index]!;
+  const previous = bars[index - 1]!;
+
+  if (
+    isBearish(previous) &&
+    isBullish(current) &&
+    current.open <= previous.close &&
+    current.close >= previous.open
+  ) {
+    return { side: "BUY", name: "ENGULFING", extreme: current.low };
+  }
+  if (
+    isBullish(previous) &&
+    isBearish(current) &&
+    current.open >= previous.close &&
+    current.close <= previous.open
+  ) {
+    return { side: "SELL", name: "ENGULFING", extreme: current.high };
+  }
+
+  if (index < 2) return null;
+  const priorOpposite = bars[index - 2]!;
+  const first = bars[index - 1]!;
+  const combinedBody = bodySize(first) + bodySize(current);
+
+  if (isBearish(priorOpposite) && isBullish(first) && isBullish(current) && combinedBody > bodySize(priorOpposite)) {
+    return {
+      side: "BUY",
+      name: "TWO_CANDLE_BODY_DOMINANCE",
+      extreme: Math.min(priorOpposite.low, first.low, current.low),
+    };
+  }
+  if (isBullish(priorOpposite) && isBearish(first) && isBearish(current) && combinedBody > bodySize(priorOpposite)) {
+    return {
+      side: "SELL",
+      name: "TWO_CANDLE_BODY_DOMINANCE",
+      extreme: Math.max(priorOpposite.high, first.high, current.high),
+    };
+  }
+  return null;
+}
+
+function hasRelevantFvg(bars: M15Bar[], index: number, side: Phase7BSide, lookback: number): boolean {
+  if (index < 2) return false;
+  const start = Math.max(2, index - lookback);
+  const current = bars[index]!;
+  for (let i = index - 1; i >= start; i -= 1) {
+    const first = bars[i - 2]!;
+    const third = bars[i]!;
+    if (side === "BUY" && third.low > first.high && current.low <= third.low && current.high >= first.high) return true;
+    if (side === "SELL" && third.high < first.low && current.high >= third.high && current.low <= first.low) return true;
+  }
+  return false;
+}
+
+function isBullish(bar: M15Bar): boolean {
+  return bar.close > bar.open;
+}
+
+function isBearish(bar: M15Bar): boolean {
+  return bar.close < bar.open;
+}
+
+function bodySize(bar: M15Bar): number {
+  return Math.abs(bar.close - bar.open);
+}
+
+function smaPeriod(values: number[], period: number): number {
+  if (values.length < period) throw new Error(`Not enough M15 bars for MA${period}.`);
+  return values.slice(-period).reduce((sum, value) => sum + value, 0) / period;
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+function round(value: number, digits: number): number {
+  const factor = 10 ** digits;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
 
 function findLatestDemoDir(): string | null {
   const configured = process.env.PHASE7B_DEMO_WORK_DIR?.trim();
