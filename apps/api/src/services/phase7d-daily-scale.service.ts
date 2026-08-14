@@ -22,7 +22,7 @@ type Spec = {
 type Signal = { side: Side; pattern: Pattern; signalTimestamp: number; patternExtreme: number; stopDistance: number };
 type PreparedSignal = Signal & {
   entryTime: number; entry: number; stopLoss: number; initialRiskUsd: number; volume: number;
-  fallbackExitTime: number; fallbackExitPrice: number;
+  fallbackExitTime: number; fallbackExitPrice: number; canonicalCurrent?: TradeResult;
 };
 type TrendConfig = { beTrigger: 6 | 10; secondPartial: boolean };
 type TradeResult = {
@@ -137,7 +137,15 @@ export async function runPhase7DDailyScaleResearch(input: Phase7DDailyScaleReque
     fixedVolume, recoveryMinPrice, recoveryMaxPrice, profitBufferUsd, positiveLockFloorUsd, dayUtcOffsetHours,
     cashPerPriceUnitPerLot, spec, m15: sortedM15, m5: sortedM5, m5OpenTimes, closeTimes, ma20, swingLows, swingHighs,
   };
-  const prepared = signals.map((signal) => prepareSignal(signal, common)).filter((value): value is PreparedSignal => value !== null).sort((a, b) => a.signalTimestamp - b.signalTimestamp);
+  const preparedBase = signals
+    .map((signal) => prepareSignal(signal, common))
+    .filter((value): value is PreparedSignal => value !== null)
+    .sort((a, b) => a.signalTimestamp - b.signalTimestamp);
+  const prepared = preparedBase.map((candidate) => ({
+    ...candidate,
+    canonicalCurrent: simulateTrend(candidate, { beTrigger: 6, secondPartial: false }, common),
+  }));
+
   const lanes: LaneConfig[] = [
     { name: "CURRENT", useRecovery: false, usePositiveLock: false, trend: { beTrigger: 6, secondPartial: false } },
     { name: "RECOVERY_LOCK_CURRENT", useRecovery: true, usePositiveLock: true, trend: { beTrigger: 6, secondPartial: false } },
@@ -159,17 +167,17 @@ export async function runPhase7DDailyScaleResearch(input: Phase7DDailyScaleReque
     safety: { researchOnly: true, executionMutation: false, phase7bStrategyMutation: false, fixedVolumeUnchanged: true, liveUnlockAvailable: false, profitGuarantee: false },
     configuration: {
       from: input.from, to: input.to, days, fixedVolume, recoveryMinPrice, recoveryMaxPrice, profitBufferUsd,
-      positiveLockFloorUsd, dayUtcOffsetHours, recoveryStopPolicy: "STRUCTURAL_SL_UNTIL_DYNAMIC_FULL_TP",
+      positiveLockFloorUsd, dayUtcOffsetHours, recoveryStopPolicy: "STRUCTURAL_SL_UNTIL_DYNAMIC_FULL_TP_WITH_CANONICAL_EXIT_FALLBACK",
       signals: signals.length, filledCandidates: prepared.length, accountLogin: health.accountLogin, server: health.server,
       volumeStep: spec.volumeStep, firstPartialVolume: round(oneThird, 4), secondPartialVolume: round(oneThird, 4), finalRunnerVolume: round(fixedVolume - 2 * oneThird, 4),
     },
     current, recoveryLockCurrent, scaleBe6, scaleBe10, decision,
     notes: [
-      "CURRENT: +6 BE, +10 close one-third, remaining two-thirds runner.",
-      "All Recovery+Lock lanes use dynamic full-close Recovery 6-10 while the realized UTC+7 day is negative. Recovery keeps the structural SL until the dynamic target; it does not move to BE at +6.",
-      "RECOVERY_LOCK_CURRENT returns to current trend management once the day is positive.",
+      "CURRENT is precomputed once with the canonical +6 BE, +10 one-third partial and canonical runner rules, then reused instead of replaying a duplicate baseline path.",
+      "All Recovery+Lock lanes use dynamic full-close Recovery 6-10 while the realized UTC+7 day is negative. Recovery keeps the structural SL until the dynamic target and falls back at the canonical CURRENT trade exit, not a later MA20-only exit.",
+      "RECOVERY_LOCK_CURRENT returns to the precomputed canonical current trend outcome once the day is positive.",
       "RECOVERY_LOCK_SCALE_BE6: after the day is positive, +6 BE, +10 close one-third, +20 close another one-third, final one-third runner.",
-      "RECOVERY_LOCK_SCALE_BE10: same +10/+20 thirds, but trend-mode BE is delayed to +10. Recovery policy remains structural-SL-only until its dynamic full TP.",
+      "RECOVERY_LOCK_SCALE_BE10: same +10/+20 thirds, but trend-mode BE is delayed to +10. Recovery policy is unchanged.",
       "Positive Lock blocks a new trend-mode trade when its full initial SL risk could reduce an already-positive day to the configured floor or below.",
       "M5 OHLC uses STOP_FIRST when stop and a favorable trigger coexist inside one M5 bar. Commission, swap and exact tick-level slippage are not reconstructed.",
       "Research only. No Phase 7B DEMO order, stop, partial, volume or runtime setting is changed.",
@@ -225,7 +233,12 @@ function simulateLane(candidates: PreparedSignal[], lane: LaneConfig, common: Co
     const targetMove = recoveryMode
       ? clamp((-dayPnlBeforeEntry + common.profitBufferUsd) / (common.cashPerPriceUnitPerLot * candidate.volume), common.recoveryMinPrice, common.recoveryMaxPrice)
       : null;
-    const result = recoveryMode ? simulateRecovery(candidate, targetMove!, common) : simulateTrend(candidate, lane.trend, common);
+    const useCanonicalCurrent = !recoveryMode && lane.trend.beTrigger === 6 && lane.trend.secondPartial === false && candidate.canonicalCurrent;
+    const result = recoveryMode
+      ? simulateRecovery(candidate, targetMove!, common)
+      : useCanonicalCurrent
+        ? candidate.canonicalCurrent!
+        : simulateTrend(candidate, lane.trend, common);
     busyUntil = result.exitTime;
     const exitDay = getDay(result.exitTime);
     exitDay.pnl += result.pnl; exitDay.trades += 1; if (exitDay.pnl < 0) exitDay.wentNegative = true;
@@ -242,16 +255,19 @@ function simulateLane(candidates: PreparedSignal[], lane: LaneConfig, common: Co
 
 function simulateRecovery(candidate: PreparedSignal, targetMove: number, common: Common): TradeResult {
   const start = lowerBound(common.m5OpenTimes, candidate.entryTime);
+  const canonical = candidate.canonicalCurrent;
+  const fallbackExitTime = canonical?.exitTime ?? candidate.fallbackExitTime;
+  const fallbackExitPrice = canonical?.exit ?? candidate.fallbackExitPrice;
   for (let index = start; index < common.m5.length; index += 1) {
     const bar = common.m5[index]!;
-    if (bar.openTime > candidate.fallbackExitTime) break;
-    if (stopTouched(candidate.side, bar, candidate.stopLoss)) return basicResult(candidate, bar.closeTime, candidate.stopLoss, common, "RECOVERY_STOP");
+    if (bar.openTime > fallbackExitTime) break;
+    if (stopTouched(candidate.side, bar, candidate.stopLoss)) return basicResult(candidate, Math.min(bar.closeTime, fallbackExitTime), candidate.stopLoss, common, "RECOVERY_STOP");
     if (targetTouched(candidate.side, candidate.entry, targetMove, bar)) {
       const exit = candidate.side === "BUY" ? candidate.entry + targetMove : candidate.entry - targetMove;
-      return basicResult(candidate, bar.closeTime, exit, common, "RECOVERY_TP");
+      return basicResult(candidate, Math.min(bar.closeTime, fallbackExitTime), exit, common, "RECOVERY_TP");
     }
   }
-  return basicResult(candidate, candidate.fallbackExitTime, candidate.fallbackExitPrice, common, "RECOVERY_FALLBACK");
+  return basicResult(candidate, fallbackExitTime, fallbackExitPrice, common, "RECOVERY_FALLBACK");
 }
 
 function simulateTrend(candidate: PreparedSignal, config: TrendConfig, common: Common): TradeResult {
@@ -302,6 +318,11 @@ function simulateTrend(candidate: PreparedSignal, config: TrendConfig, common: C
           }
         }
       }
+    }
+    if (bar.closeTime >= candidate.fallbackExitTime) {
+      const runnerPnl = pnlUsd(candidate.side, candidate.entry, candidate.fallbackExitPrice, remainingVolume, common.cashPerPriceUnitPerLot);
+      return finish(candidate.fallbackExitTime, candidate.fallbackExitPrice, firstPartialPnl + secondPartialPnl + runnerPnl, "TREND_MA20",
+        plus10Reached, plus20Reached, firstPartialApplied, secondPartialApplied, firstPartialPnl, secondPartialPnl, runnerPnl, false);
     }
   }
   const runnerPnl = pnlUsd(candidate.side, candidate.entry, candidate.fallbackExitPrice, remainingVolume, common.cashPerPriceUnitPerLot);
