@@ -10,63 +10,67 @@ import {
   Typography,
 } from "@mui/material";
 import PlayArrowRounded from "@mui/icons-material/PlayArrowRounded";
+import StopRounded from "@mui/icons-material/StopRounded";
 import SmartToyRounded from "@mui/icons-material/SmartToyRounded";
 import TelegramRounded from "@mui/icons-material/Telegram";
 import HubRounded from "@mui/icons-material/HubRounded";
-import ScheduleRounded from "@mui/icons-material/ScheduleRounded";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ErrorState, LoadingState } from "../ui/PageState";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
-
-type DemoSnapshot = {
-  botStatus: string;
-  runtime: { armed?: boolean; alive?: boolean; pid?: number | null } | null;
-  mt5: {
-    reachable: boolean;
-    health: {
-      accountMode?: "demo" | "contest" | "real";
-      tradingEnabled?: boolean;
-      terminalTradeAllowed?: boolean;
-      expertTradeAllowed?: boolean;
-    } | null;
-  };
-};
-
-type TaskStatus = {
-  key: "bridge" | "bot" | "telegram" | "web";
-  name: string;
-  exists: boolean;
-  state: string;
-};
+const API_BASE = "";
 
 type OpsStatus = {
   localOnly: boolean;
   controlEnabled: boolean;
   generatedAt: number;
-  tasks: TaskStatus[];
-  processes: { botAlive: boolean; telegramAlive: boolean; webAlive: boolean };
+  bot: {
+    alive: boolean;
+    armed: boolean;
+    status: string;
+    pid: number | null;
+    managedPosition: boolean;
+    canStop: boolean;
+  };
+  telegram: {
+    alive: boolean;
+    status: string;
+    pid: number | null;
+    wrapperPid: number | null;
+    heartbeatAgeMs: number | null;
+    heartbeatFresh: boolean;
+  };
   bridge: {
     reachable: boolean;
     status: string;
     accountMode: string | null;
+    accountLogin: number | null;
+    server: string | null;
     tradingEnabled: boolean | null;
+    terminalTradeAllowed: boolean | null;
+    expertTradeAllowed: boolean | null;
   };
   safety: {
     demoOnly: boolean;
-    directOrderRouteExposed: boolean;
-    startAction: string;
+    realAccountAllowed: false;
+    directOrderRouteExposed: false;
+    botStopBlockedWhileManaging: true;
   };
 };
 
-type StartResponse = {
+type ActionResponse = {
   accepted: boolean;
-  actions: string[];
+  action: string;
   message: string;
 };
 
 async function readJson<T>(response: Response): Promise<T> {
-  const payload = await response.json() as T | { error?: string };
+  const text = await response.text();
+  let payload: T | { error?: string };
+  try {
+    payload = JSON.parse(text) as T | { error?: string };
+  } catch {
+    throw new Error(text || `HTTP ${response.status}`);
+  }
   if (!response.ok) {
     throw new Error("error" in (payload as object) && (payload as { error?: string }).error
       ? String((payload as { error?: string }).error)
@@ -75,202 +79,193 @@ async function readJson<T>(response: Response): Promise<T> {
   return payload as T;
 }
 
-async function getDemo(): Promise<DemoSnapshot> {
-  return readJson<DemoSnapshot>(await fetch(`${API_BASE}/api/v1/phase7b-demo`, { cache: "no-store" }));
-}
-
 async function getOps(): Promise<OpsStatus> {
   return readJson<OpsStatus>(await fetch(`${API_BASE}/api/v1/phase7b-ops/status`, { cache: "no-store" }));
 }
 
-async function startStack(): Promise<StartResponse> {
-  return readJson<StartResponse>(await fetch(`${API_BASE}/api/v1/phase7b-ops/start`, {
+async function runAction(path: string): Promise<ActionResponse> {
+  return readJson<ActionResponse>(await fetch(`${API_BASE}/api/v1/phase7b-ops/${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: "{}",
   }));
 }
 
-function taskByKey(tasks: TaskStatus[], key: TaskStatus["key"]): TaskStatus | undefined {
-  return tasks.find((task) => task.key === key);
-}
-
-function statusColor(ok: boolean): "success" | "default" {
-  return ok ? "success" : "default";
+function StatusCard({ icon, title, status, detail, online }: { icon: React.ReactNode; title: string; status: string; detail: string; online: boolean }) {
+  return (
+    <Card variant="outlined" sx={{ height: "100%" }}>
+      <CardContent>
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Box>{icon}</Box>
+          <Chip size="small" label={online ? "ONLINE" : "OFFLINE"} color={online ? "success" : "default"} variant="outlined" />
+        </Stack>
+        <Typography variant="caption" color="text.secondary" display="block" mt={1.5}>{title}</Typography>
+        <Typography variant="h6" fontWeight={900}>{status}</Typography>
+        <Typography variant="body2" color="text.secondary" mt={1}>{detail}</Typography>
+      </CardContent>
+    </Card>
+  );
 }
 
 export function Phase7BOpsPage() {
   const queryClient = useQueryClient();
-  const demo = useQuery({
-    queryKey: ["phase7b-demo-ops"],
-    queryFn: getDemo,
-    refetchInterval: 5_000,
-    retry: false,
-  });
-  const ops = useQuery({
+  const query = useQuery({
     queryKey: ["phase7b-ops-status"],
     queryFn: getOps,
-    refetchInterval: 5_000,
+    refetchInterval: 3_000,
     retry: false,
   });
-  const start = useMutation({
-    mutationFn: startStack,
+
+  const mutate = useMutation({
+    mutationFn: runAction,
     onSuccess: async () => {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["phase7b-demo-ops"] }),
-        queryClient.invalidateQueries({ queryKey: ["phase7b-ops-status"] }),
-      ]);
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await queryClient.invalidateQueries({ queryKey: ["phase7b-ops-status"] });
     },
   });
 
-  if (demo.isLoading || ops.isLoading) return <LoadingState />;
-  if (!demo.data || !ops.data) {
-    const error = demo.error ?? ops.error;
-    return <ErrorState message={error instanceof Error ? error.message : "Không đọc được trạng thái Bot & Telegram."} />;
+  if (query.isLoading) return <LoadingState />;
+  if (query.isError || !query.data) {
+    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được Bot & Telegram."} />;
   }
 
-  const d = demo.data;
-  const o = ops.data;
-  const botTask = taskByKey(o.tasks, "bot");
-  const telegramTask = taskByKey(o.tasks, "telegram");
-  const bridgeTask = taskByKey(o.tasks, "bridge");
-  const webTask = taskByKey(o.tasks, "web");
-  const allTasksInstalled = o.tasks.every((task) => task.exists);
-  const coreTasksInstalled = o.tasks.filter((task) => task.key !== "web").every((task) => task.exists);
-  const demoGuard = Boolean(
-    d.mt5.reachable &&
-      d.mt5.health?.accountMode === "demo" &&
-      d.mt5.health?.tradingEnabled === true &&
-      d.mt5.health?.terminalTradeAllowed === true &&
-      d.mt5.health?.expertTradeAllowed === true,
+  const o = query.data;
+  const demoReady = Boolean(
+    o.bridge.reachable &&
+    o.bridge.accountMode === "demo" &&
+    o.bridge.tradingEnabled === true &&
+    o.bridge.terminalTradeAllowed === true &&
+    o.bridge.expertTradeAllowed === true,
   );
 
+  const actionPending = mutate.isPending;
+
   return (
-    <Stack spacing={2}>
+    <Stack spacing={2.5}>
       <Box>
-        <Typography variant="overline" color="primary" fontWeight={900}>VẬN HÀNH TỰ ĐỘNG</Typography>
-        <Typography variant="h5" fontWeight={900}>Bot & Telegram</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          Khởi động Phase 7B DEMO bằng Windows Scheduled Tasks. Web chỉ điều khiển task local; không có API đặt, sửa hoặc đóng lệnh MT5.
+        <Typography variant="overline" color="primary" fontWeight={900}>DEMO CONTROL</Typography>
+        <Typography variant="h4" fontWeight={950}>Bot & Telegram</Typography>
+        <Typography variant="body2" color="text.secondary" mt={0.7}>
+          Chỉ điều khiển tiến trình local trên máy này. Tài khoản real luôn bị khóa.
         </Typography>
       </Box>
 
-      <Alert severity="info">
-        Nút bên dưới chỉ gọi Scheduled Task local trên chính máy này. Bot vẫn phải vượt toàn bộ DEMO guard và allow-list trước khi có quyền gửi lệnh.
-      </Alert>
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <StatusCard
+            icon={<SmartToyRounded color={o.bot.alive ? "success" : "disabled"} />}
+            title="BOT DEMO"
+            status={o.bot.alive ? (o.bot.managedPosition ? "MANAGING" : "WAITING SIGNAL") : "STOPPED"}
+            detail={o.bot.alive ? `PID ${o.bot.pid ?? "—"} · ${o.bot.armed ? "ARMED" : "NOT ARMED"}` : "Controller DEMO chưa chạy."}
+            online={o.bot.alive}
+          />
+        </Grid>
 
-      {!allTasksInstalled && (
+        <Grid size={{ xs: 12, md: 4 }}>
+          <StatusCard
+            icon={<TelegramRounded color={o.telegram.alive ? "success" : "disabled"} />}
+            title="TELEGRAM"
+            status={o.telegram.alive ? "NOTIFY ON" : "NOTIFY OFF"}
+            detail={o.telegram.alive ? "Đang gửi Signal / Filled / +6 / +10 / Exit / Error." : "Không gửi thông báo Telegram."}
+            online={o.telegram.alive}
+          />
+        </Grid>
+
+        <Grid size={{ xs: 12, md: 4 }}>
+          <StatusCard
+            icon={<HubRounded color={demoReady ? "success" : "disabled"} />}
+            title="MT5 DEMO"
+            status={demoReady ? "READY" : "NOT READY"}
+            detail={`${o.bridge.accountMode?.toUpperCase() ?? "UNKNOWN"} #${o.bridge.accountLogin ?? "—"} · ${o.bridge.server ?? "—"}`}
+            online={demoReady}
+          />
+        </Grid>
+      </Grid>
+
+      {o.bot.managedPosition && (
         <Alert severity="warning">
-          Chưa cài đủ Scheduled Task. Chạy lại <code>scripts/install-phase7b-autostart.ps1</code> để cài Bot + Telegram + Bridge + Web tự khởi động khi đăng nhập Windows.
+          Bot đang quản lý một position. Nút <b>Dừng Bot DEMO</b> bị khóa để không bỏ position đang mở.
         </Alert>
       )}
 
-      {d.mt5.health?.accountMode === "real" && (
-        <Alert severity="error">REAL account detected — chức năng Start DEMO bị khóa.</Alert>
+      {!demoReady && (
+        <Alert severity="warning">
+          MT5 DEMO chưa đủ điều kiện chạy bot. Kiểm tra Bridge, Algo Trading và quyền Expert Trading.
+        </Alert>
       )}
 
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, md: 6, xl: 3 }}>
-          <Card variant="outlined" sx={{ height: "100%" }}>
+        <Grid size={{ xs: 12, lg: 6 }}>
+          <Card variant="outlined">
             <CardContent>
-              <SmartToyRounded color={o.processes.botAlive ? "success" : "disabled"} />
-              <Typography variant="caption" color="text.secondary" display="block" mt={1}>BOT PHASE 7B</Typography>
-              <Typography variant="h6" fontWeight={900}>{d.botStatus}</Typography>
-              <Stack direction="row" spacing={1} mt={1} flexWrap="wrap" useFlexGap>
-                <Chip size="small" label={o.processes.botAlive ? "PROCESS ONLINE" : "PROCESS OFFLINE"} color={statusColor(o.processes.botAlive)} variant="outlined" />
-                <Chip size="small" label={d.runtime?.armed ? "ARMED" : "NOT ARMED"} color={statusColor(Boolean(d.runtime?.armed))} variant="outlined" />
+              <Typography variant="h6" fontWeight={900}>Bot DEMO</Typography>
+              <Typography variant="body2" color="text.secondary" mt={0.5}>
+                Entry hiện hành: 2 mô hình nến + Supertrend M15 + M5 fresh flip. FVG chỉ là context. Volume mặc định 0.03 lot.
+              </Typography>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} mt={2.5}>
+                <Button
+                  variant="contained"
+                  color="success"
+                  startIcon={<PlayArrowRounded />}
+                  disabled={actionPending || o.bot.alive || !o.controlEnabled || !demoReady}
+                  onClick={() => mutate.mutate("bot/start")}
+                  sx={{ fontWeight: 900, minWidth: 180 }}
+                >
+                  BẬT BOT DEMO
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  startIcon={<StopRounded />}
+                  disabled={actionPending || !o.bot.alive || !o.bot.canStop || !o.controlEnabled}
+                  onClick={() => mutate.mutate("bot/stop")}
+                  sx={{ fontWeight: 900, minWidth: 180 }}
+                >
+                  DỪNG BOT DEMO
+                </Button>
               </Stack>
             </CardContent>
           </Card>
         </Grid>
 
-        <Grid size={{ xs: 12, md: 6, xl: 3 }}>
-          <Card variant="outlined" sx={{ height: "100%" }}>
+        <Grid size={{ xs: 12, lg: 6 }}>
+          <Card variant="outlined">
             <CardContent>
-              <TelegramRounded color={o.processes.telegramAlive ? "success" : "disabled"} />
-              <Typography variant="caption" color="text.secondary" display="block" mt={1}>TELEGRAM</Typography>
-              <Typography variant="h6" fontWeight={900}>{o.processes.telegramAlive ? "ONLINE" : "OFFLINE"}</Typography>
-              <Typography variant="body2" color="text.secondary" mt={1}>
-                Journal notifier · chỉ gửi thông báo, không có quyền MT5.
+              <Typography variant="h6" fontWeight={900}>Thông báo Telegram</Typography>
+              <Typography variant="body2" color="text.secondary" mt={0.5}>
+                Telegram chỉ đọc journal và gửi thông báo. Không có quyền đặt hoặc sửa lệnh MT5.
               </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid size={{ xs: 12, md: 6, xl: 3 }}>
-          <Card variant="outlined" sx={{ height: "100%" }}>
-            <CardContent>
-              <HubRounded color={o.bridge.reachable ? "success" : "disabled"} />
-              <Typography variant="caption" color="text.secondary" display="block" mt={1}>MT5 BRIDGE</Typography>
-              <Typography variant="h6" fontWeight={900}>{o.bridge.reachable ? "ONLINE" : "OFFLINE"}</Typography>
-              <Typography variant="body2" color="text.secondary" mt={1}>
-                {o.bridge.accountMode?.toUpperCase() ?? "UNKNOWN"} · trading {o.bridge.tradingEnabled ? "ON" : "OFF"}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid size={{ xs: 12, md: 6, xl: 3 }}>
-          <Card variant="outlined" sx={{ height: "100%" }}>
-            <CardContent>
-              <ScheduleRounded color={allTasksInstalled ? "success" : "disabled"} />
-              <Typography variant="caption" color="text.secondary" display="block" mt={1}>WINDOWS AUTOSTART</Typography>
-              <Typography variant="h6" fontWeight={900}>{allTasksInstalled ? "INSTALLED" : "INCOMPLETE"}</Typography>
-              <Typography variant="body2" color="text.secondary" mt={1}>
-                Bridge {bridgeTask?.state ?? "—"} · Bot {botTask?.state ?? "—"} · Telegram {telegramTask?.state ?? "—"} · Web {webTask?.state ?? "—"}
-              </Typography>
-              <Chip
-                size="small"
-                sx={{ mt: 1 }}
-                label={o.processes.webAlive ? "WEB ONLINE" : "WEB OFFLINE"}
-                color={statusColor(o.processes.webAlive)}
-                variant="outlined"
-              />
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} mt={2.5}>
+                <Button
+                  variant="contained"
+                  startIcon={<TelegramRounded />}
+                  disabled={actionPending || o.telegram.alive || !o.controlEnabled}
+                  onClick={() => mutate.mutate("telegram/start")}
+                  sx={{ fontWeight: 900, minWidth: 180 }}
+                >
+                  BẬT TELEGRAM
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  startIcon={<StopRounded />}
+                  disabled={actionPending || !o.telegram.alive || !o.controlEnabled}
+                  onClick={() => mutate.mutate("telegram/stop")}
+                  sx={{ fontWeight: 900, minWidth: 180 }}
+                >
+                  TẮT TELEGRAM
+                </Button>
+              </Stack>
             </CardContent>
           </Card>
         </Grid>
       </Grid>
 
-      <Card>
-        <CardContent>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2} justifyContent="space-between" alignItems={{ md: "center" }}>
-            <Box>
-              <Typography variant="h6" fontWeight={900}>Khởi động DEMO stack</Typography>
-              <Typography variant="body2" color="text.secondary" mt={0.5}>
-                Idempotent: nếu Bot hoặc Telegram đã chạy thì không tạo thêm bản sao. Web có task autostart riêng để lần mở máy sau không cần chạy PowerShell.
-              </Typography>
-            </Box>
-            <Button
-              variant="contained"
-              size="large"
-              startIcon={<PlayArrowRounded />}
-              disabled={start.isPending || !o.controlEnabled || !coreTasksInstalled || d.mt5.health?.accountMode === "real"}
-              onClick={() => start.mutate()}
-              sx={{ minWidth: 250, fontWeight: 900 }}
-            >
-              {start.isPending ? "Đang yêu cầu…" : "KHỞI ĐỘNG BOT + TELEGRAM"}
-            </Button>
-          </Stack>
+      {mutate.isSuccess && <Alert severity="success">{mutate.data.message}</Alert>}
+      {mutate.isError && <Alert severity="error">{mutate.error instanceof Error ? mutate.error.message : "Không thực hiện được thao tác."}</Alert>}
 
-          {start.isSuccess && (
-            <Alert severity="success" sx={{ mt: 2 }}>
-              {start.data.message}<br />
-              {start.data.actions.join(" · ")}
-            </Alert>
-          )}
-          {start.isError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              {start.error instanceof Error ? start.error.message : "Không thể khởi động Phase 7B stack."}
-            </Alert>
-          )}
-        </CardContent>
-      </Card>
-
-      <Alert severity={demoGuard ? "success" : "warning"}>
-        {demoGuard
-          ? "DEMO guard hiện PASS. Bot vẫn tự kiểm tra lại guard trong chính controller trước mỗi chu kỳ."
-          : "DEMO guard hiện chưa đủ điều kiện. Start task không bỏ qua guard; bot sẽ chờ/không giao dịch cho đến khi MT5 DEMO và Bridge sẵn sàng."}
+      <Alert severity="info">
+        +6 → BE · +10 → chốt 1/3 · phần còn lại tiếp tục canonical runner. Web không mở quyền giao dịch cho tài khoản real.
       </Alert>
     </Stack>
   );
