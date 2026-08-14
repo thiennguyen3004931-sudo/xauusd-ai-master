@@ -21,6 +21,7 @@ import AssessmentRounded from "@mui/icons-material/AssessmentRounded";
 import InsightsRounded from "@mui/icons-material/InsightsRounded";
 import SmartToyRounded from "@mui/icons-material/SmartToyRounded";
 import CandlestickChartRounded from "@mui/icons-material/CandlestickChartRounded";
+import PowerSettingsNewRounded from "@mui/icons-material/PowerSettingsNewRounded";
 import DnsRounded from "@mui/icons-material/DnsRounded";
 import SettingsRounded from "@mui/icons-material/SettingsRounded";
 import MenuRounded from "@mui/icons-material/MenuRounded";
@@ -33,6 +34,7 @@ const drawerWidth = 250;
 const operationsLinks = [
   ["/phase7b-demo", "Phase 7B Demo", SmartToyRounded],
   ["/phase7b-pattern-check", "M15 Pattern Check", CandlestickChartRounded],
+  ["/phase7b-ops", "Bot & Telegram", PowerSettingsNewRounded],
   ["/performance", "MT5 Performance", InsightsRounded],
   ["/system", "Hệ thống", DnsRounded],
 ] as const;
@@ -138,7 +140,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
           sx={{ display: "block", mt: 1, lineHeight: 1.5 }}
         >
           Phase 7B chỉ được phép giao dịch trên tài khoản DEMO đã allow-list.
-          Web monitor không có route đặt, sửa hoặc đóng lệnh.
+          Web không có route đặt, sửa hoặc đóng lệnh; trang Bot & Telegram chỉ gọi Scheduled Task local.
         </Typography>
       </Box>
     </Box>
@@ -150,9 +152,10 @@ export function DashboardLayout() {
   const location = useLocation();
   const isPhase7B = location.pathname.startsWith("/phase7b-demo");
   const isPatternCheck = location.pathname.startsWith("/phase7b-pattern-check");
+  const isPhase7BOps = location.pathname.startsWith("/phase7b-ops");
   const isPerformance = location.pathname.startsWith("/performance");
   const isSystem = location.pathname.startsWith("/system");
-  const isOperational = isPhase7B || isPatternCheck || isPerformance || isSystem;
+  const isOperational = isPhase7B || isPatternCheck || isPhase7BOps || isPerformance || isSystem;
   const dashboard = useDashboard(!isOperational);
   const mode = dashboard.data?.control.mode ?? "SHADOW";
 
@@ -169,6 +172,10 @@ export function DashboardLayout() {
   } else if (isPatternCheck) {
     headerTitle = "M15 Pattern Check";
     headerSubtitle = "Engulfing / Two-candle / MA diagnostics · tolerance-aware · read-only";
+    headerMode = "DEMO ONLY";
+  } else if (isPhase7BOps) {
+    headerTitle = "Bot & Telegram";
+    headerSubtitle = "Local Scheduled Task control · DEMO-only process launcher · no MT5 order route";
     headerMode = "DEMO ONLY";
   } else if (isPerformance) {
     headerTitle = "MT5 DEMO Performance";
