@@ -3,6 +3,10 @@ import {
   runPhase7DDailyPnlResearch,
   type Phase7DDailyPnlRequest,
 } from "../services/phase7d-daily-pnl.service";
+import {
+  runPhase7DManagementResearch,
+  type Phase7DManagementRequest,
+} from "../services/phase7d-management.service";
 
 const router = Router();
 
@@ -12,6 +16,16 @@ router.post("/daily-pnl-backtest", async (req: Request, res: Response) => {
   } catch (error) {
     res.status(400).json({
       error: error instanceof Error ? error.message : "Phase 7D daily P/L research failed.",
+    });
+  }
+});
+
+router.post("/management-backtest", async (req: Request, res: Response) => {
+  try {
+    res.json(await runPhase7DManagementResearch(req.body as Phase7DManagementRequest));
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Phase 7D BE/partial management research failed.",
     });
   }
 });
