@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Router, type Request, type Response } from "express";
 import { getMt5Telemetry } from "../services/mt5.service";
@@ -92,6 +92,7 @@ router.get("/status", async (req: Request, res: Response) => {
         directOrderRouteExposed: false,
         botStopBlockedWhileManaging: true,
         controlTransport: "LOCALHOST_ONLY",
+        processLaunchMode: "WINDOWS_POWERSHELL_START_PROCESS",
         botStartVerification: "RUNTIME_PID_AND_HEARTBEAT",
         telegramStartVerification: "RUNTIME_PID_AND_HEARTBEAT",
       },
@@ -124,16 +125,17 @@ router.post("/bot/start", async (req: Request, res: Response) => {
     const logPath = path.join(demoDir, "phase7b-web-bot-start.log");
     const requestedAt = Date.now();
     prepareStartLog(logPath, `BOT START ${new Date(requestedAt).toISOString()} · volume=${fixedVolume}`);
-    const launcherPid = launchPowerShellLogged(
+    const launcherPid = await launchPowerShellViaWindowsHost(
       script,
       ["-WorkDir", workRoot, "-FixedVolume", fixedVolume, "-ArmDemoTrading"],
       logPath,
+      "bot",
     );
 
     const runtime = await waitForBotRuntime(runtimePath, requestedAt, BOT_START_TIMEOUT_MS);
     if (!runtime) {
       if (isPidAlive(launcherPid)) await killProcessTree(launcherPid);
-      const tail = readLogTail(logPath, 32);
+      const tail = readLogTail(logPath, 48);
       return res.status(503).json({
         error: `Bot DEMO không lên RUNNING trong ${BOT_START_TIMEOUT_MS / 1000} giây.\n\nLog cuối:\n${tail || "Không có log."}`,
         code: "BOT_START_VERIFICATION_FAILED",
@@ -201,16 +203,17 @@ router.post("/telegram/start", async (req: Request, res: Response) => {
     const logPath = path.join(demoDir, "phase7b-web-telegram-start.log");
     const requestedAt = Date.now();
     prepareStartLog(logPath, `TELEGRAM START ${new Date(requestedAt).toISOString()}`);
-    const launcherPid = launchPowerShellLogged(
+    const launcherPid = await launchPowerShellViaWindowsHost(
       script,
       ["-WorkDir", path.dirname(demoDir), "-EnvFile", envFile],
       logPath,
+      "telegram",
     );
 
     const telegram = await waitForTelegramRuntime(runtimePath, requestedAt, TELEGRAM_START_TIMEOUT_MS);
     if (!telegram) {
       if (isPidAlive(launcherPid)) await killProcessTree(launcherPid);
-      const tail = readLogTail(logPath, 32);
+      const tail = readLogTail(logPath, 48);
       return res.status(503).json({
         error: `Telegram không lên RUNNING trong ${TELEGRAM_START_TIMEOUT_MS / 1000} giây.\n\nLog cuối:\n${tail || "Không có log."}`,
         code: "TELEGRAM_START_VERIFICATION_FAILED",
@@ -297,19 +300,59 @@ function prepareStartLog(file: string, header: string): void {
   fs.appendFileSync(file, `\n=== ${header} ===\n`, "utf8");
 }
 
-function launchPowerShellLogged(script: string, args: string[], logPath: string): number {
-  const fd = fs.openSync(logPath, "a");
-  try {
-    const child = spawn(
-      "powershell.exe",
-      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, ...args],
-      { detached: true, windowsHide: true, stdio: ["ignore", fd, fd] },
-    );
-    child.unref();
-    return child.pid ?? 0;
-  } finally {
-    fs.closeSync(fd);
+async function launchPowerShellViaWindowsHost(
+  script: string,
+  args: string[],
+  logPath: string,
+  kind: "bot" | "telegram",
+): Promise<number> {
+  const launcherPath = path.join(path.dirname(logPath), `phase7b-web-${kind}-launcher.ps1`);
+  const invocation = [
+    "& " + quotePowerShellLiteral(script),
+    ...pairPowerShellArguments(args),
+    "*>> " + quotePowerShellLiteral(logPath),
+  ].join(" ");
+  const launcher = [
+    "$ErrorActionPreference = 'Stop'",
+    `$Host.UI.RawUI.WindowTitle = 'XAUUSD Phase7B ${kind.toUpperCase()}'`,
+    invocation,
+  ].join("\r\n") + "\r\n";
+  fs.writeFileSync(launcherPath, launcher, "utf8");
+
+  const startCommand = [
+    "$ErrorActionPreference='Stop'",
+    `$p = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',${quotePowerShellLiteral(launcherPath)}) -WindowStyle Hidden -PassThru`,
+    "$p.Id",
+  ].join("; ");
+
+  const { stdout } = await execFileAsync(
+    "powershell.exe",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", startCommand],
+    { windowsHide: true, timeout: 10_000, maxBuffer: 32 * 1024 },
+  );
+  const pid = Number(String(stdout).trim().split(/\r?\n/).at(-1));
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new Error(`Windows PowerShell launcher did not return a valid ${kind} PID. Output=${String(stdout).trim()}`);
   }
+  return pid;
+}
+
+function pairPowerShellArguments(args: string[]): string[] {
+  const output: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index];
+    if (value.startsWith("-") && index + 1 < args.length && !args[index + 1].startsWith("-")) {
+      output.push(value, quotePowerShellLiteral(args[index + 1]));
+      index += 1;
+    } else {
+      output.push(value.startsWith("-") ? value : quotePowerShellLiteral(value));
+    }
+  }
+  return output;
+}
+
+function quotePowerShellLiteral(value: string): string {
+  return `'${String(value).replace(/'/g, "''")}'`;
 }
 
 async function waitForBotRuntime(file: string, requestedAt: number, timeoutMs: number): Promise<RuntimeState | null> {
