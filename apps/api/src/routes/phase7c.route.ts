@@ -1,11 +1,11 @@
 import { Router, type Request, type Response } from "express";
 import {
-  getPhase7CAccountRisk,
   runPhase7CCanonicalBacktest,
   type Phase7CBacktestRequest,
 } from "../services/phase7c.service";
 import { getPhase7CForwardRange } from "../services/phase7c-forward.service";
 import { getPhase7CAutoLotPreview } from "../services/phase7c-autolot.service";
+import { getPhase7CCanonicalAccountRisk } from "../services/phase7c-risk-view.service";
 import {
   runPhase7CAutoLotBacktestComparison,
   type Phase7CAutoLotBacktestRequest,
@@ -17,7 +17,7 @@ router.get("/account-risk", async (req: Request, res: Response) => {
   try {
     const riskPercent = Number(req.query.riskPercent ?? 0.25);
     const maxLot = Number(req.query.maxLot ?? 0.03);
-    res.json(await getPhase7CAccountRisk(riskPercent, maxLot));
+    res.json(await getPhase7CCanonicalAccountRisk(riskPercent, maxLot));
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : "Phase 7C account/risk request failed." });
   }
