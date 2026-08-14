@@ -55,13 +55,22 @@ foreach ($check in $r.reconciliation.checks) {
   }
 }
 
+if ($r.reconciliation.diagnostic) {
+  Write-Host "PHASE7D_DAILY_SCALE_MANAGEMENT_DIAGNOSTIC=$($r.reconciliation.diagnostic.status)"
+  Write-Host "PHASE7D_DAILY_SCALE_MANAGEMENT_DIAGNOSTIC_FAILED_COUNT=$($r.reconciliation.diagnostic.failedKeys.Count)"
+  if ($r.reconciliation.diagnostic.failedKeys.Count -gt 0) {
+    Write-Host "PHASE7D_DAILY_SCALE_MANAGEMENT_DIAGNOSTIC_FAILED_KEYS=$($r.reconciliation.diagnostic.failedKeys -join '|')"
+  }
+}
+
 $diffSets = @{
-  MANAGEMENT_VS_DAILY_CURRENT = $r.reconciliation.tradeDiffs.managementVsDailyCurrent
-  MANAGEMENT_VS_SCALE_CURRENT = $r.reconciliation.tradeDiffs.managementVsScaleCurrent
+  DAILY_VS_SCALE_CURRENT = $r.reconciliation.tradeDiffs.dailyVsScaleCurrent
   DAILY_VS_SCALE_RECOVERY_LOCK = $r.reconciliation.tradeDiffs.dailyVsScaleRecoveryLock
+  MANAGEMENT_VS_DAILY_CURRENT = $r.reconciliation.tradeDiffs.managementVsDailyCurrent
 }
 foreach ($name in $diffSets.Keys) {
   $d = $diffSets[$name]
+  if (-not $d) { continue }
   Write-Host "PHASE7D_RECON_${name}_MISMATCHES=$($d.mismatchCount)"
   Write-Host "PHASE7D_RECON_${name}_PNL_DELTA=$($d.totalPnlDelta)"
   Write-Host "PHASE7D_RECON_${name}_PNL_MISMATCHES=$($d.pnlMismatchCount)"
