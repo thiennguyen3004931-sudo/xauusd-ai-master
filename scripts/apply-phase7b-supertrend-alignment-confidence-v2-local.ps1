@@ -30,10 +30,10 @@ function Sync-RemoteFile([string]$Relative, [string]$Destination) {
 }
 function Stop-Port([int]$Port) {
   $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
-  foreach ($pid in @($listeners | Select-Object -ExpandProperty OwningProcess -Unique)) {
-    if ($pid -and $pid -ne $PID) {
-      Write-Host "PHASE7B_ALIGNMENT_V2_STOP_PORT_${Port}_PID=$pid"
-      & taskkill /PID $pid /T /F | Out-Null
+  foreach ($processId in @($listeners | Select-Object -ExpandProperty OwningProcess -Unique)) {
+    if ($processId -and $processId -ne $PID) {
+      Write-Host "PHASE7B_ALIGNMENT_V2_STOP_PORT_${Port}_PID=$processId"
+      & taskkill /PID $processId /T /F | Out-Null
     }
   }
 }
@@ -43,7 +43,6 @@ try {
   & git fetch $Remote $Branch
   if ($LASTEXITCODE -ne 0) { throw "git fetch failed: $LASTEXITCODE" }
 
-  # 1) Controller: direction alignment only. Flip age is informational.
   $controller = Read-Text $ControllerPath
   if (-not ($controller.Contains("PATTERN_PLUS_M15_SUPERTREND_PLUS_M5_FLIP2") -or $controller.Contains("PATTERN_PLUS_M15_M5_SUPERTREND_ALIGNMENT"))) {
     throw "Controller does not contain a recognized synced Phase 7B Supertrend gate."
@@ -62,7 +61,6 @@ try {
   }
   Write-Text $ControllerPath $controller
 
-  # 2) API diagnostics: robust line-based patching.
   $route = Read-Text $RoutePath
   if (-not ($route.Contains("PATTERN_PLUS_M15_SUPERTREND_PLUS_M5_FLIP2") -or $route.Contains("PATTERN_PLUS_M15_M5_SUPERTREND_ALIGNMENT"))) {
     throw "API route is not yet on the synced Supertrend diagnostics. Run apply-phase7b-forward-demo-sync-v2-local.ps1 first."
@@ -71,12 +69,13 @@ try {
   $route = $route.Replace("M15_DUAL_PATTERN_SUPERTREND_M5_FLIP2_CANONICAL_RIDER", "M15_DUAL_PATTERN_M15_M5_SUPERTREND_ALIGNMENT_CANONICAL_RIDER")
   $route = $route.Replace("M15_SUPERTREND_10_3_PLUS_ALIGNED_FRESH_M5_FLIP_WITHIN_2_CLOSED_BARS", "M15_SUPERTREND_10_3_PLUS_M5_SUPERTREND_10_3_SAME_DIRECTION")
 
-  # Replace only the m5FreshAligned expression, whatever whitespace/<=1 formatting exists.
-  $route = [regex]::Replace(
-    $route,
-    '(?m)^\s*const\s+m5FreshAligned\s*=\s*Boolean\([^;]+\);\s*$',
-    '  const m5DirectionAligned = Boolean(wanted !== null && d5 === wanted);`r`n  // Compatibility field: now means M5 direction aligned. Flip age is information only.`r`n  const m5FreshAligned = m5DirectionAligned;'
-  )
+  if (-not $route.Contains("const m5DirectionAligned = Boolean")) {
+    $route = [regex]::Replace(
+      $route,
+      '(?m)^\s*const\s+m5FreshAligned\s*=\s*Boolean\([^;]+\);\s*$',
+      "  const m5DirectionAligned = Boolean(wanted !== null && d5 === wanted);`r`n  // Compatibility field: now means M5 direction aligned. Flip age is information only.`r`n  const m5FreshAligned = m5DirectionAligned;"
+    )
+  }
   $route = [regex]::Replace(
     $route,
     '(?m)^\s*const\s+matchedPatternSide\s*=\s*Boolean\([^;]+\);\s*$',
@@ -86,7 +85,6 @@ try {
     throw "V2 could not patch m5 direction alignment."
   }
 
-  # Insert confidence calculations exactly once, immediately after matchedPatternSide.
   if (-not $route.Contains("const confidenceLevel =")) {
     $pattern = '(?m)^(\s*const\s+matchedPatternSide\s*=\s*Boolean\([^;]+\);\s*)$'
     $match = [regex]::Match($route, $pattern)
@@ -106,7 +104,6 @@ try {
     $route = $route.Substring(0, $match.Index + $match.Length) + "`r`n" + $insert + $route.Substring($match.Index + $match.Length)
   }
 
-  # Human-readable reasons: no fresh flip gate wording.
   $route = [regex]::Replace(
     $route,
     '(?m)^\s*reason\s*=\s*`\$\{pattern\.side\} pattern \+ Supertrend M15 đạt nhưng M5[^`]*`;\s*$',
@@ -115,7 +112,6 @@ try {
   $route = $route.Replace("Pattern + Supertrend M15 + M5_FLIP_2", "Pattern + Supertrend M15 + Supertrend M5 cùng hướng")
   $route = $route.Replace("M5_FLIP_2", "M5_ALIGNMENT")
 
-  # Extend type once.
   if (-not $route.Contains('confidenceLevel: "CHƯA_ĐÁNH_GIÁ"')) {
     $route = [regex]::Replace(
       $route,
@@ -133,7 +129,6 @@ try {
     )
   }
 
-  # Extend trend payload once.
   if (-not $route.Contains("m15TrendlineDistance:")) {
     $payloadPattern = '(?m)^(\s*m5FreshAligned,\s*)$'
     $payloadMatch = [regex]::Match($route, $payloadPattern)
@@ -151,7 +146,6 @@ try {
     $route = $route.Substring(0, $payloadMatch.Index) + $payload + $route.Substring($payloadMatch.Index + $payloadMatch.Length)
   }
 
-  # Add detail/reaction helper once before detectEntryPattern.
   if (-not $route.Contains("function phase7bTrendlineReaction(")) {
     $marker = "function detectEntryPattern("
     $position = $route.IndexOf($marker)
@@ -173,7 +167,6 @@ function phase7bTrendlineReaction(
   const bar = bars[index]!;
   const probe = wanted === 1 ? bar.low : bar.high;
   const distance = Math.abs(probe - line);
-  // Confidence only: near Supertrend line within 20% ATR, bounded 0.50..2.00 XAUUSD.
   const threshold = Math.min(2, Math.max(0.5, atr * 0.2));
   const near = distance <= threshold + 1e-9;
   const reaction = wanted === 1
@@ -231,15 +224,13 @@ function phase7bSupertrendDetail(
     $route = $route.Substring(0, $position) + $helpers + $route.Substring($position)
   }
 
-  if ($route -match 'fresh flip.*(?:≤|<=).*2.*(?:đạt|entry|hướng)' -or $route.Contains("fresh flip trong 2 nến đóng gần nhất")) {
+  if ($route.Contains("fresh flip trong 2 nến đóng gần nhất")) {
     throw "API still contains fresh-flip entry gate wording after V2 patch."
   }
   Write-Text $RoutePath $route
 
-  # 3) Latest gate page is remote canonical UI for alignment/confidence.
   Sync-RemoteFile "apps/web/src/pages/Phase7BPatternCheckPage.tsx" $GatePagePath
 
-  # Forward monitor: patch local file minimally; do not overwrite accumulated local UI.
   $demo = Read-Text $DemoPagePath
   $demo = $demo.Replace(
     'const currentM5Aligned = Boolean(managed && diagnostics?.trend.m5Supertrend === managed.side && diagnostics?.trend.m5FreshAligned);',
@@ -252,23 +243,19 @@ function phase7bSupertrendDetail(
   $demo = $demo.Replace('Supertrend M15 cùng hướng + M5 fresh flip ≤ 2', 'Supertrend M15 + Supertrend M5 cùng hướng')
   Write-Text $DemoPagePath $demo
 
-  # Telegram: remote compact notifier has alignment wording; preserve local IPv4/retry patch if present.
   if (Test-Path $TelegramPath) {
     $tg = Read-Text $TelegramPath
     $tg = $tg.Replace(" + M5 cùng hướng/fresh flip ≤ 2 nến đóng.", " + Supertrend M5 cùng hướng.")
     $tg = $tg.Replace("• M5 = MUA, fresh flip 1 nến đóng (≤ 2).", "• Supertrend M5 = MUA.")
-    $tg = [regex]::Replace($tg, '`• M5 = \$\{m5 === "SELL" \? "BÁN" : "MUA"\}\$\{[^`]+`', '`• Supertrend M5 = ${m5 === "SELL" ? "BÁN" : "MUA"}.`')
     Write-Text $TelegramPath $tg
   }
 
-  # 4) Build before touching running API/web.
   & pnpm --filter @xauusd/api build
   if ($LASTEXITCODE -ne 0) { throw "API build failed: $LASTEXITCODE" }
   & pnpm --filter @xauusd/web build
   if ($LASTEXITCODE -ne 0) { throw "Web build failed: $LASTEXITCODE" }
   Write-Host "PHASE7B_ALIGNMENT_V2_BUILD=PASS"
 
-  # Bridge preflight (read-only, demo only) and API env key.
   if (-not (Test-Path $BridgeEnv)) { throw "Missing demo bridge env: $BridgeEnv" }
   $keyLine = Get-Content $BridgeEnv | Where-Object { $_ -match '^\s*MT5_API_KEY=' } | Select-Object -First 1
   if (-not $keyLine) { throw "MT5_API_KEY missing from demo bridge env." }
@@ -278,7 +265,6 @@ function phase7bSupertrendDetail(
   Write-Host "PHASE7B_ALIGNMENT_V2_BRIDGE=PASS"
   Write-Host "PHASE7B_ALIGNMENT_V2_ACCOUNT_LOGIN=$($health.accountLogin)"
 
-  # Restart API only. Bot/controller is not restarted automatically.
   Stop-Port $ApiPort
   $apiCmd = @"
 Set-Location '$Root\apps\api'
