@@ -31,6 +31,7 @@ export interface Phase7DOutcome {
   dayPnlBeforeEntry: number;
   initialRiskUsd: number;
   blocked: boolean;
+  counterfactualCanonicalPnl: number | null;
 }
 
 export interface Phase7DLaneMetrics {
@@ -59,10 +60,19 @@ export interface Phase7DLaneMetrics {
   averageRecoveryTargetPrice: number;
   positiveLockBlockedTrades: number;
   positiveLockBlockedDays: number;
+  blockedCounterfactualWinRatePercent: number;
+  blockedCounterfactualNetPnl: number;
+  blockedCounterfactualProfitFactor: number | null;
+  blockedCounterfactualGrossProfit: number;
+  blockedCounterfactualGrossLoss: number;
+  blockedInitialRiskUsd: number;
+  lockEstimatedPnlSavedUsd: number;
 }
 
+export type Phase7DLaneName = "BASELINE" | "RECOVERY" | "TREND_PLUS_LOCK" | "RECOVERY_PLUS_LOCK";
+
 export interface Phase7DLaneResult {
-  lane: "BASELINE" | "RECOVERY" | "RECOVERY_PLUS_LOCK";
+  lane: Phase7DLaneName;
   metrics: Phase7DLaneMetrics;
   days: Phase7DDayRow[];
   outcomes: Phase7DOutcome[];
@@ -71,7 +81,7 @@ export interface Phase7DLaneResult {
 export interface Phase7DDailyPnlResult {
   source: "PHASE7D_DAILY_PNL_RESEARCH";
   generatedAt: number;
-  replayMode?: "EXACT_PER_LANE_SIGNAL_CONTENTION_WITH_M5_APPROXIMATION";
+  replayMode: "EXACT_PER_LANE_SIGNAL_CONTENTION_WITH_M5_APPROXIMATION";
   safety: {
     researchOnly: true;
     executionMutation: false;
@@ -92,16 +102,18 @@ export interface Phase7DDailyPnlResult {
     comparedTradeSchedule: number;
     fullPeriodCanonicalTrades: number;
     journalTradeLimitApplied: boolean;
-    signals?: number;
-    filledCandidateTrades?: number;
-    baselineSkippedPositionBusy?: number;
-    recoverySkippedPositionBusy?: number;
-    recoveryPlusLockSkippedPositionBusy?: number;
-    accountLogin?: number | null;
-    server?: string | null;
+    signals: number;
+    filledCandidateTrades: number;
+    baselineSkippedPositionBusy: number;
+    recoverySkippedPositionBusy: number;
+    trendPlusLockSkippedPositionBusy: number;
+    recoveryPlusLockSkippedPositionBusy: number;
+    accountLogin: number | null;
+    server: string | null;
   };
   baseline: Phase7DLaneResult;
   recovery: Phase7DLaneResult;
+  trendPlusLock: Phase7DLaneResult;
   recoveryPlusLock: Phase7DLaneResult;
   decision: {
     sampleTrades: number;
@@ -112,7 +124,7 @@ export interface Phase7DDailyPnlResult {
     executionEligible: false;
     bestResearchScore: number;
     candidates: Array<{
-      lane: "RECOVERY" | "RECOVERY_PLUS_LOCK";
+      lane: "RECOVERY" | "TREND_PLUS_LOCK" | "RECOVERY_PLUS_LOCK";
       score: number;
       metrics: Phase7DLaneMetrics;
       deltas: {
@@ -123,6 +135,11 @@ export interface Phase7DDailyPnlResult {
         worstDayUsd: number;
       };
     }>;
+    lockIsolation: {
+      trendPlusLockScore: number;
+      recoveryPlusLockScore: number;
+      interpretation: string;
+    };
     reason: string;
   };
   notes: string[];
