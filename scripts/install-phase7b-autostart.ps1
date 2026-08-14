@@ -4,6 +4,8 @@ param(
   [int]$IntervalSeconds = 5,
   [string]$BridgeEnv = "",
   [string]$TelegramEnvFile = ".env.phase7b-telegram",
+  [int]$ApiPort = 3711,
+  [int]$WebPort = 5717,
   [switch]$StartNow
 )
 
@@ -25,7 +27,8 @@ $TelegramEnvFile = (Resolve-Path $TelegramEnvFile).Path
 $bridgeScript = Join-Path $PSScriptRoot "run-phase7b-bridge-service.ps1"
 $botScript = Join-Path $PSScriptRoot "run-phase7b-demo-autostart-wrapper.ps1"
 $telegramScript = Join-Path $PSScriptRoot "run-phase7b-telegram-notifier-local.ps1"
-foreach ($required in @($bridgeScript, $botScript, $telegramScript)) {
+$webScript = Join-Path $PSScriptRoot "run-phase7b-web-autostart.ps1"
+foreach ($required in @($bridgeScript, $botScript, $telegramScript, $webScript)) {
   if (-not (Test-Path $required)) { throw "Required Phase 7B autostart script missing: $required" }
 }
 
@@ -37,6 +40,7 @@ if (-not (Test-Path $bridgePython)) {
 $taskBridge = "XAUUSD-Phase7B-Bridge"
 $taskBot = "XAUUSD-Phase7B-Bot"
 $taskTelegram = "XAUUSD-Phase7B-Telegram"
+$taskWeb = "XAUUSD-Phase7B-Web"
 $currentUser = "$env:USERDOMAIN\$env:USERNAME"
 
 function Quote-Arg([string]$Value) {
@@ -71,21 +75,27 @@ function Register-Phase7BTask {
 $bridgeArgs = "-EnvFile $(Quote-Arg $BridgeEnv)"
 $botArgs = "-WorkDir $(Quote-Arg $WorkDir) -FixedVolume $FixedVolume -IntervalSeconds $IntervalSeconds -BridgeEnv $(Quote-Arg $BridgeEnv) -TelegramEnvFile $(Quote-Arg $TelegramEnvFile)"
 $telegramArgs = "-WorkDir $(Quote-Arg $WorkDir) -EnvFile $(Quote-Arg $TelegramEnvFile) -IntervalSeconds 2"
+$webArgs = "-WorkDir $(Quote-Arg $WorkDir) -BridgeEnv $(Quote-Arg $BridgeEnv) -ApiPort $ApiPort -WebPort $WebPort"
 
 Register-Phase7BTask -TaskName $taskBridge -ScriptPath $bridgeScript -Arguments $bridgeArgs -Description "XAUUSD AI MASTER Phase 7B DEMO MT5 bridge. Real account opt-in remains disabled."
 Register-Phase7BTask -TaskName $taskTelegram -ScriptPath $telegramScript -Arguments $telegramArgs -Description "XAUUSD AI MASTER Phase 7B Telegram journal notifier. Read-only; no MT5 order permission."
 Register-Phase7BTask -TaskName $taskBot -ScriptPath $botScript -Arguments $botArgs -Description "XAUUSD AI MASTER Phase 7B DEMO bot. Hard-locked to DEMO account allow-list."
+Register-Phase7BTask -TaskName $taskWeb -ScriptPath $webScript -Arguments $webArgs -Description "XAUUSD AI MASTER Phase 7B local Web API/UI on 127.0.0.1 only."
 
 Write-Host "PHASE7B_AUTOSTART_MODE=AT_LOGON"
 Write-Host "PHASE7B_AUTOSTART_USER=$currentUser"
 Write-Host "PHASE7B_AUTOSTART_BOT_TASK=$taskBot"
 Write-Host "PHASE7B_AUTOSTART_TELEGRAM_TASK=$taskTelegram"
 Write-Host "PHASE7B_AUTOSTART_BRIDGE_TASK=$taskBridge"
+Write-Host "PHASE7B_AUTOSTART_WEB_TASK=$taskWeb"
+Write-Host "PHASE7B_AUTOSTART_WEB_API=http://127.0.0.1:$ApiPort"
+Write-Host "PHASE7B_AUTOSTART_WEB_UI=http://127.0.0.1:$WebPort"
 Write-Host "PHASE7B_AUTOSTART_REAL_ACCOUNT_ALLOWED=false"
 Write-Host "PHASE7B_AUTOSTART_INSTALL_STATUS=PASS"
 
 if ($StartNow) {
   Start-ScheduledTask -TaskName $taskBridge
+  Start-ScheduledTask -TaskName $taskWeb
   Start-Sleep -Seconds 2
   Start-ScheduledTask -TaskName $taskTelegram
   Start-ScheduledTask -TaskName $taskBot
