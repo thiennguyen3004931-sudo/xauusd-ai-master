@@ -14,6 +14,10 @@ export function StatusChip({ value }: { value: string }) {
       "PASS",
       "GUARD PASS",
       "DEMO ONLY",
+      "BOT ALIVE",
+      "ENTRY ELIGIBLE",
+      "ARMED",
+      "ALIVE",
     ].includes(normalized)
       ? "success"
       : [
@@ -25,6 +29,8 @@ export function StatusChip({ value }: { value: string }) {
           "BOT_STALE",
           "POSITION_NOT_MANAGED",
           "GUARD BLOCKED",
+          "BOT STOPPED",
+          "STOPPED",
         ].includes(normalized)
         ? "error"
         : [
@@ -34,6 +40,10 @@ export function StatusChip({ value }: { value: string }) {
             "READY_NOT_ARMED",
             "STARTING",
             "HISTORY",
+            "OPTIONAL",
+            "SHADOW ONLY",
+            "M15 EVALUATED",
+            "NEXT EVALUATION",
           ].includes(normalized)
           ? "warning"
           : "default";
