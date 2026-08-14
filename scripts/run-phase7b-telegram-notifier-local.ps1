@@ -54,7 +54,7 @@ function Test-TelegramRuntimeAlive {
 function Write-TelegramRuntime {
   param(
     [Parameter(Mandatory = $true)] [string]$Status,
-    [int]$Pid = 0,
+    [int]$NodePid = 0,
     [int]$ExitCode = 0,
     [string]$StartedAt = ""
   )
@@ -62,7 +62,7 @@ function Write-TelegramRuntime {
   $payload = [ordered]@{
     version = 1
     status = $Status
-    pid = if ($Pid -gt 0) { $Pid } else { $null }
+    pid = if ($NodePid -gt 0) { $NodePid } else { $null }
     wrapperPid = $PID
     startedAt = if ($StartedAt) { $StartedAt } else { $null }
     heartbeatAt = $now
@@ -123,7 +123,7 @@ $startedAt = [DateTimeOffset]::UtcNow.ToString("o")
 Push-Location $ProjectRoot
 try {
   $nodeProcess = Start-Process -FilePath $nodeExe -ArgumentList @($Notifier) -NoNewWindow -PassThru
-  Write-TelegramRuntime -Status "RUNNING" -Pid $nodeProcess.Id -StartedAt $startedAt
+  Write-TelegramRuntime -Status "RUNNING" -NodePid $nodeProcess.Id -StartedAt $startedAt
   Write-Host "PHASE7B_TELEGRAM_NOTIFIER=RUNNING"
   Write-Host "PHASE7B_TELEGRAM_PID=$($nodeProcess.Id)"
 
@@ -131,12 +131,12 @@ try {
     Start-Sleep -Seconds ([Math]::Max(1, $IntervalSeconds))
     $nodeProcess.Refresh()
     if (-not $nodeProcess.HasExited) {
-      Write-TelegramRuntime -Status "RUNNING" -Pid $nodeProcess.Id -StartedAt $startedAt
+      Write-TelegramRuntime -Status "RUNNING" -NodePid $nodeProcess.Id -StartedAt $startedAt
     }
   }
 
   $exitCode = $nodeProcess.ExitCode
-  Write-TelegramRuntime -Status "STOPPED" -Pid $nodeProcess.Id -ExitCode $exitCode -StartedAt $startedAt
+  Write-TelegramRuntime -Status "STOPPED" -NodePid $nodeProcess.Id -ExitCode $exitCode -StartedAt $startedAt
   if ($exitCode -ne 0) {
     throw "Phase 7B Telegram notifier exited with code $exitCode"
   }
