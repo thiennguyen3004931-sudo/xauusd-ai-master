@@ -12,6 +12,7 @@ export type Phase7DDailyPnlRequest = {
 type Side = "BUY" | "SELL";
 type Pattern = "ENGULFING" | "TWO_CANDLE_BODY_DOMINANCE";
 type ExitReason = "STOP" | "TREND_MA20" | "REVERSAL_FVG_REJECTION" | "END_OF_DATA";
+type LaneName = "BASELINE" | "RECOVERY" | "TREND_PLUS_LOCK" | "RECOVERY_PLUS_LOCK";
 
 type Bar = {
   symbol?: string;
@@ -91,6 +92,7 @@ type Outcome = {
   dayPnlBeforeEntry: number;
   initialRiskUsd: number;
   blocked: boolean;
+  counterfactualCanonicalPnl: number | null;
 };
 
 type DayState = {
@@ -103,9 +105,20 @@ type DayState = {
 };
 
 type LaneConfig = {
-  name: "BASELINE" | "RECOVERY" | "RECOVERY_PLUS_LOCK";
+  name: LaneName;
   useRecovery: boolean;
   usePositiveLock: boolean;
+};
+
+type Common = {
+  recoveryMinPrice: number;
+  recoveryMaxPrice: number;
+  profitBufferUsd: number;
+  positiveLockFloorUsd: number;
+  dayUtcOffsetHours: number;
+  cashPerPriceUnitPerLot: number;
+  m5: Bar[];
+  m5OpenTimes: number[];
 };
 
 const DAY_MS = 86_400_000;
@@ -251,7 +264,7 @@ export async function runPhase7DDailyPnlResearch(input: Phase7DDailyPnlRequest) 
     .filter((trade): trade is CandidateTrade => trade !== null)
     .sort((a, b) => a.signalTimestamp - b.signalTimestamp);
 
-  const common = {
+  const common: Common = {
     recoveryMinPrice,
     recoveryMaxPrice,
     profitBufferUsd,
@@ -264,8 +277,15 @@ export async function runPhase7DDailyPnlResearch(input: Phase7DDailyPnlRequest) 
 
   const baseline = simulateLane(candidateTrades, { name: "BASELINE", useRecovery: false, usePositiveLock: false }, common);
   const recovery = simulateLane(candidateTrades, { name: "RECOVERY", useRecovery: true, usePositiveLock: false }, common);
+  const trendPlusLock = simulateLane(candidateTrades, { name: "TREND_PLUS_LOCK", useRecovery: false, usePositiveLock: true }, common);
   const recoveryPlusLock = simulateLane(candidateTrades, { name: "RECOVERY_PLUS_LOCK", useRecovery: true, usePositiveLock: true }, common);
-  const decision = evaluateDecision(baseline.metrics, recovery.metrics, recoveryPlusLock.metrics, candidateTrades.length);
+  const decision = evaluateDecision(
+    baseline.metrics,
+    recovery.metrics,
+    trendPlusLock.metrics,
+    recoveryPlusLock.metrics,
+    candidateTrades.length,
+  );
 
   return {
     source: "PHASE7D_DAILY_PNL_RESEARCH",
@@ -295,16 +315,20 @@ export async function runPhase7DDailyPnlResearch(input: Phase7DDailyPnlRequest) 
       filledCandidateTrades: candidateTrades.length,
       baselineSkippedPositionBusy: baseline.metrics.skippedPositionBusy,
       recoverySkippedPositionBusy: recovery.metrics.skippedPositionBusy,
+      trendPlusLockSkippedPositionBusy: trendPlusLock.metrics.skippedPositionBusy,
       recoveryPlusLockSkippedPositionBusy: recoveryPlusLock.metrics.skippedPositionBusy,
       accountLogin: health.accountLogin,
       server: health.server,
     },
     baseline,
     recovery,
+    trendPlusLock,
     recoveryPlusLock,
     decision,
     notes: [
-      "Phase 7D.1 exact signal replay: every lane starts from the same full Pattern+MA candidate stream and maintains its own max-one-position busyUntil state.",
+      "Phase 7D.2 exact signal isolation: every lane starts from the same full Pattern+MA candidate stream and maintains its own max-one-position busyUntil state.",
+      "TREND_PLUS_LOCK isolates Positive Lock without Recovery. RECOVERY_PLUS_LOCK measures the combined effect.",
+      "For every Positive Lock block, counterfactualCanonicalPnl records that candidate's isolated canonical outcome. This diagnoses whether Lock blocks winners or losers, but it is not a full alternate-path replay because executing a blocked trade would change later signal contention.",
       "If Recovery exits earlier, later signals become eligible in that lane. If Positive Lock blocks a candidate, later signals remain eligible because no position was opened.",
       "Canonical trend-mode management mirrors Phase 7B research rules: +6 BE, +10 one-third partial, confirmed M15 structure trail, opposing-FVG rejection, MA20 fallback.",
       "Recovery mode is used only when realized P/L of the UTC+7 trading day is negative at entry. Full-exit target is clamped to the configured 6-10 price range by default.",
@@ -316,20 +340,7 @@ export async function runPhase7DDailyPnlResearch(input: Phase7DDailyPnlRequest) 
   };
 }
 
-function simulateLane(
-  candidates: CandidateTrade[],
-  lane: LaneConfig,
-  common: {
-    recoveryMinPrice: number;
-    recoveryMaxPrice: number;
-    profitBufferUsd: number;
-    positiveLockFloorUsd: number;
-    dayUtcOffsetHours: number;
-    cashPerPriceUnitPerLot: number;
-    m5: Bar[];
-    m5OpenTimes: number[];
-  },
-) {
+function simulateLane(candidates: CandidateTrade[], lane: LaneConfig, common: Common) {
   const dayStates = new Map<string, DayState>();
   const outcomes: Outcome[] = [];
   let busyUntil = -Infinity;
@@ -376,6 +387,7 @@ function simulateLane(
         dayPnlBeforeEntry: round(dayPnlBeforeEntry, 2),
         initialRiskUsd: round(initialRiskUsd, 2),
         blocked: true,
+        counterfactualCanonicalPnl: round(trade.pnl, 2),
       });
       continue;
     }
@@ -414,12 +426,13 @@ function simulateLane(
       dayPnlBeforeEntry: round(dayPnlBeforeEntry, 2),
       initialRiskUsd: round(initialRiskUsd, 2),
       blocked: false,
+      counterfactualCanonicalPnl: null,
     });
   }
 
   const days = [...dayStates.values()]
     .filter((day) => day.trades > 0 || day.blocked > 0)
-    .sort((a, b) => a.day.localeCompare(b.day))
+    .sort((left, right) => left.day.localeCompare(right.day))
     .map((day) => ({
       ...day,
       pnl: round(day.pnl, 2),
@@ -434,15 +447,7 @@ function simulateLane(
   };
 }
 
-function simulateRecoveryTrade(
-  trade: CandidateTrade,
-  targetMove: number,
-  common: {
-    cashPerPriceUnitPerLot: number;
-    m5: Bar[];
-    m5OpenTimes: number[];
-  },
-) {
+function simulateRecoveryTrade(trade: CandidateTrade, targetMove: number, common: Common) {
   const start = lowerBound(common.m5OpenTimes, trade.entryTime);
   let activeStop = trade.stopLoss;
   let breakEvenApplied = false;
@@ -627,7 +632,7 @@ function summarizeLane(
   let equity = 0;
   let peak = 0;
   let maxDrawdownUsd = 0;
-  for (const item of [...executed].sort((a, b) => a.exitTime - b.exitTime)) {
+  for (const item of [...executed].sort((left, right) => left.exitTime - right.exitTime)) {
     equity += item.pnl;
     peak = Math.max(peak, equity);
     maxDrawdownUsd = Math.max(maxDrawdownUsd, peak - equity);
@@ -641,6 +646,13 @@ function summarizeLane(
     .map((item) => item.recoveryTargetPriceMove)
     .filter((value): value is number => value !== null);
   const positiveLockBlocked = blocked.filter((item) => item.exitReason === "POSITIVE_DAY_LOCK");
+  const blockedPnl = positiveLockBlocked
+    .map((item) => item.counterfactualCanonicalPnl)
+    .filter((value): value is number => value !== null);
+  const blockedWins = blockedPnl.filter((value) => value > 0).length;
+  const blockedGrossProfit = blockedPnl.reduce((sum, value) => sum + Math.max(0, value), 0);
+  const blockedGrossLoss = Math.abs(blockedPnl.reduce((sum, value) => sum + Math.min(0, value), 0));
+  const blockedNetPnl = blockedPnl.reduce((sum, value) => sum + value, 0);
 
   return {
     trades: executed.length,
@@ -668,19 +680,30 @@ function summarizeLane(
     averageRecoveryTargetPrice: round(avg(recoveryTargets), 4),
     positiveLockBlockedTrades: positiveLockBlocked.length,
     positiveLockBlockedDays: new Set(positiveLockBlocked.map((item) => dayKey(item.entryTime, dayUtcOffsetHours))).size,
+    blockedCounterfactualWinRatePercent: round(blockedPnl.length ? blockedWins / blockedPnl.length * 100 : 0, 2),
+    blockedCounterfactualNetPnl: round(blockedNetPnl, 2),
+    blockedCounterfactualProfitFactor: blockedGrossLoss > 0
+      ? round(blockedGrossProfit / blockedGrossLoss, 4)
+      : blockedGrossProfit > 0 ? null : 0,
+    blockedCounterfactualGrossProfit: round(blockedGrossProfit, 2),
+    blockedCounterfactualGrossLoss: round(blockedGrossLoss, 2),
+    blockedInitialRiskUsd: round(positiveLockBlocked.reduce((sum, item) => sum + item.initialRiskUsd, 0), 2),
+    lockEstimatedPnlSavedUsd: round(-blockedNetPnl, 2),
   };
 }
 
 function evaluateDecision(
   baseline: ReturnType<typeof summarizeLane>,
   recovery: ReturnType<typeof summarizeLane>,
-  lock: ReturnType<typeof summarizeLane>,
+  trendPlusLock: ReturnType<typeof summarizeLane>,
+  recoveryPlusLock: ReturnType<typeof summarizeLane>,
   candidateTrades: number,
 ) {
   const candidates = [
     scoreCandidate("RECOVERY", baseline, recovery),
-    scoreCandidate("RECOVERY_PLUS_LOCK", baseline, lock),
-  ].sort((a, b) => b.score - a.score);
+    scoreCandidate("TREND_PLUS_LOCK", baseline, trendPlusLock),
+    scoreCandidate("RECOVERY_PLUS_LOCK", baseline, recoveryPlusLock),
+  ].sort((left, right) => right.score - left.score);
   const best = candidates[0]!;
   const sufficientSample = candidateTrades >= 100 && baseline.activeDays >= 30;
   const hardPass =
@@ -702,6 +725,11 @@ function evaluateDecision(
     executionEligible: false,
     bestResearchScore: best.score,
     candidates,
+    lockIsolation: {
+      trendPlusLockScore: candidates.find((item) => item.lane === "TREND_PLUS_LOCK")?.score ?? 0,
+      recoveryPlusLockScore: candidates.find((item) => item.lane === "RECOVERY_PLUS_LOCK")?.score ?? 0,
+      interpretation: classifyLockContribution(trendPlusLock, recoveryPlusLock),
+    },
     reason: !sufficientSample
       ? "Need at least 100 filled candidate trades and 30 active baseline days before judging daily P/L controls."
       : hardPass
@@ -711,7 +739,7 @@ function evaluateDecision(
 }
 
 function scoreCandidate(
-  lane: "RECOVERY" | "RECOVERY_PLUS_LOCK",
+  lane: Exclude<LaneName, "BASELINE">,
   baseline: ReturnType<typeof summarizeLane>,
   metrics: ReturnType<typeof summarizeLane>,
 ) {
@@ -749,6 +777,25 @@ function scoreCandidate(
       worstDayUsd: round(metrics.worstDayUsd - baseline.worstDayUsd, 2),
     },
   };
+}
+
+function classifyLockContribution(
+  trendPlusLock: ReturnType<typeof summarizeLane>,
+  recoveryPlusLock: ReturnType<typeof summarizeLane>,
+): string {
+  const netGap = recoveryPlusLock.netPnl - trendPlusLock.netPnl;
+  const dayGap = recoveryPlusLock.positiveDayRatePercent - trendPlusLock.positiveDayRatePercent;
+  const ddGap = recoveryPlusLock.maxDrawdownUsd - trendPlusLock.maxDrawdownUsd;
+  if (Math.abs(netGap) <= 25 && Math.abs(dayGap) <= 5 && Math.abs(ddGap) <= 50) {
+    return "LOCK_DOMINANT: Trend+Lock is close to Recovery+Lock; Positive Lock appears to provide most of the observed benefit in this sample.";
+  }
+  if (netGap > 25 && dayGap > 3 && ddGap <= 50) {
+    return "RECOVERY_ADDS_VALUE: Recovery+Lock materially improves economics/day rate beyond Trend+Lock without a large drawdown penalty.";
+  }
+  if (trendPlusLock.netPnl > recoveryPlusLock.netPnl && trendPlusLock.maxDrawdownUsd <= recoveryPlusLock.maxDrawdownUsd) {
+    return "LOCK_ONLY_STRONGER: Trend+Lock is economically stronger than Recovery+Lock in this sample; Recovery may be unnecessary or harmful.";
+  }
+  return "MIXED: Lock clearly changes trade selection, but the incremental value of Recovery is not yet stable enough to classify.";
 }
 
 function detectPattern(bars: Bar[], index: number): { side: Side; pattern: Pattern; patternExtreme: number } | null {
@@ -977,7 +1024,7 @@ function clamp(value: number, min: number, max: number): number { return Math.ma
 function avg(values: number[]): number { return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0; }
 function median(values: number[]): number {
   if (!values.length) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
+  const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0 ? (sorted[middle - 1]! + sorted[middle]!) / 2 : sorted[middle]!;
 }
