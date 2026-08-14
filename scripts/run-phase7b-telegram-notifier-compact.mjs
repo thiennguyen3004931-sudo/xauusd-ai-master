@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import https from "node:https";
 
 const token = requiredEnv("ZIQ_TELEGRAM_BOT_TOKEN");
 const chatId = requiredEnv("ZIQ_TELEGRAM_CHAT_ID");
@@ -47,7 +48,7 @@ if (sendTest) {
 
 if (!state.initialized) {
   state = {
-    version: 3,
+    version: 4,
     initialized: true,
     offset: replayExisting ? 0 : fs.statSync(journalPath).size,
     sent: 0,
@@ -59,8 +60,8 @@ if (!state.initialized) {
     await sendHtml([
       "🤖 <b>XAUUSD AI MASTER · TELEGRAM ĐÃ BẬT</b>",
       `📊 <b>${esc(symbol)}</b> · DEMO`,
-      "Chờ: 1 trong 2 mô hình nến + Supertrend M15 cùng hướng + M5 cùng hướng/fresh flip ≤ 2 nến đóng.",
-      "ℹ️ FVG chỉ là bối cảnh, không chặn vào lệnh.",
+      "Chờ: 1 trong 2 mô hình nến + Supertrend M15 và M5 cùng hướng + SL cấu trúc 6–10 giá.",
+      "ℹ️ Flip age / FVG / phản ứng gần đường Supertrend chỉ là thông tin & độ tin cậy, không chặn lệnh.",
     ].join("\n"));
   }
 }
@@ -68,6 +69,8 @@ if (!state.initialized) {
 console.log("PHASE7B_TELEGRAM_COMPACT_NOTIFIER=RUNNING");
 console.log(`PHASE7B_TELEGRAM_JOURNAL=${journalPath}`);
 console.log(`PHASE7B_TELEGRAM_STATE=${statePath}`);
+console.log("PHASE7B_TELEGRAM_ENTRY_GATE=M15_M5_SUPERTREND_ALIGNMENT");
+console.log("PHASE7B_TELEGRAM_FLIP_AGE_ROLE=INFO_ONLY");
 console.log("PHASE7B_TELEGRAM_ORDER_PERMISSION=NONE_READ_ONLY_JOURNAL_AND_MONITOR");
 
 while (true) {
@@ -89,10 +92,12 @@ async function sendTestSequence() {
     "📦 Khối lượng: <b>0.03 lot</b>",
     "",
     "📝 <b>Lý do vào lệnh:</b>",
-    "• Nến nhấn chìm MUA đã đóng.",
+    "• Nến nhấn chìm hướng MUA.",
     "• Supertrend M15 = MUA.",
-    "• M5 = MUA, fresh flip 1 nến đóng (≤ 2).",
+    "• Supertrend M5 = MUA.",
     "• SL cấu trúc hợp lệ 8.00 giá.",
+    "⭐ Độ tin cậy: CAO · giá phản ứng gần đường Supertrend M5.",
+    "ℹ️ Flip age 3 nến: chỉ tham khảo, không chặn lệnh.",
     "ℹ️ FVG: chỉ bối cảnh, không bắt buộc.",
   ].join("\n"));
   await sleep(250);
@@ -277,13 +282,19 @@ function entryReasonLines(event, live, side) {
   const m15 = d?.trend?.m15Supertrend ?? side;
   const m5 = d?.trend?.m5Supertrend ?? side;
   const flipAge = d?.trend?.m5FlipAgeBars;
+  const confidence = String(d?.trend?.confidenceLevel ?? event.confidenceLevel ?? "TIÊU_CHUẨN").replaceAll("_", " ");
   const stopDistance = numberOrNull(d?.entry?.stopDistance ?? event.stopDistance);
+  const reactions = [];
+  if (d?.trend?.m15TrendlineReaction) reactions.push("M15");
+  if (d?.trend?.m5TrendlineReaction) reactions.push("M5");
   return [
     `• ${patternLabel(pattern)} hướng ${side === "BUY" ? "MUA" : "BÁN"}.`,
     `• Supertrend M15 = ${m15 === "SELL" ? "BÁN" : "MUA"}.`,
-    `• M5 = ${m5 === "SELL" ? "BÁN" : "MUA"}${Number.isFinite(Number(flipAge)) ? `, fresh flip ${Number(flipAge)} nến đóng (≤ 2)` : ", fresh flip đạt yêu cầu"}.`,
+    `• Supertrend M5 = ${m5 === "SELL" ? "BÁN" : "MUA"}.`,
     stopDistance === null ? "• Khoảng SL cấu trúc đã được controller chấp nhận." : `• SL cấu trúc hợp lệ ${stopDistance.toFixed(2)} giá.`,
-    `• FVG: ${d?.fvg?.sameDirectionConfirmed || event.fvgConfirmedAtEntry ? "CÓ" : "KHÔNG"} · chỉ là bối cảnh.`,
+    `⭐ Độ tin cậy: ${confidence}${reactions.length ? ` · phản ứng gần đường Supertrend ${reactions.join(" + ")}` : ""}.`,
+    Number.isFinite(Number(flipAge)) ? `ℹ️ Flip age ${Number(flipAge)} nến: chỉ tham khảo, không chặn lệnh.` : "ℹ️ Flip age: chỉ tham khảo, không chặn lệnh.",
+    `ℹ️ FVG: ${d?.fvg?.sameDirectionConfirmed || event.fvgConfirmedAtEntry ? "CÓ" : "KHÔNG"} · chỉ là bối cảnh.`,
   ];
 }
 
@@ -421,31 +432,74 @@ async function sendHtml(text) {
     ...(messageThreadId === null ? {} : { message_thread_id: messageThreadId }),
     ...(monitorUrl ? { reply_markup: { inline_keyboard: [[{ text: "📊 Mở màn hình DEMO", url: monitorUrl }]] } } : {}),
   };
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8_000);
-  try {
-    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-    const body = await response.text();
-    if (!response.ok) throw new Error(`Telegram sendMessage ${response.status}: ${body}`);
-    const parsed = JSON.parse(body);
-    if (!parsed.ok) throw new Error(`Telegram sendMessage failed: ${body}`);
-  } finally {
-    clearTimeout(timeout);
+
+  let lastError = null;
+  const delays = [0, 700, 1600, 3200];
+  for (let attempt = 0; attempt < delays.length; attempt += 1) {
+    if (delays[attempt] > 0) await sleep(delays[attempt]);
+    try {
+      await sendTelegramHttps(payload);
+      if (attempt > 0) console.log(`PHASE7B_TELEGRAM_SEND_RECOVERED_ATTEMPT=${attempt + 1}`);
+      return;
+    } catch (error) {
+      lastError = error;
+      const code = error?.code ?? error?.cause?.code ?? "UNKNOWN";
+      console.error(`PHASE7B_TELEGRAM_SEND_RETRY=${attempt + 1}/${delays.length} CODE=${code} ERROR=${errorMessage(error)}`);
+    }
   }
+  throw lastError ?? new Error("Telegram send failed after retries.");
+}
+
+function sendTelegramHttps(payload) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(payload);
+    const req = https.request({
+      protocol: "https:",
+      hostname: "api.telegram.org",
+      port: 443,
+      path: `/bot${token}/sendMessage`,
+      method: "POST",
+      family: 4,
+      headers: {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(body),
+        "user-agent": "XAUUSD-AI-MASTER-Phase7B/1.0",
+        connection: "close",
+      },
+      timeout: 10_000,
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => {
+        const responseText = Buffer.concat(chunks).toString("utf8");
+        let parsed = null;
+        try { parsed = responseText ? JSON.parse(responseText) : null; } catch {}
+        if ((response.statusCode ?? 0) < 200 || (response.statusCode ?? 0) >= 300 || parsed?.ok !== true) {
+          const error = new Error(`Telegram sendMessage ${response.statusCode ?? 0}: ${responseText}`);
+          error.code = `HTTP_${response.statusCode ?? 0}`;
+          reject(error);
+          return;
+        }
+        resolve(parsed);
+      });
+    });
+    req.on("timeout", () => {
+      const error = new Error("Telegram HTTPS request timed out after 10 seconds.");
+      error.code = "ETIMEDOUT";
+      req.destroy(error);
+    });
+    req.on("error", reject);
+    req.end(body);
+  });
 }
 
 function loadState() {
-  const blank = { version: 3, initialized: false, offset: 0, sent: 0, lastEventAt: null, trade: null };
+  const blank = { version: 4, initialized: false, offset: 0, sent: 0, lastEventAt: null, trade: null };
   if (!fs.existsSync(statePath)) return blank;
   try {
     const parsed = JSON.parse(fs.readFileSync(statePath, "utf8").replace(/^\uFEFF/, ""));
     return {
-      version: 3,
+      version: 4,
       initialized: Boolean(parsed.initialized),
       offset: Number.isFinite(parsed.offset) ? parsed.offset : 0,
       sent: Number.isFinite(parsed.sent) ? parsed.sent : 0,
