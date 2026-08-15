@@ -42,15 +42,29 @@ if ($actions.Count -ne 1) {
   throw "Task $TaskName has $($actions.Count) actions. Migration refuses to change a non-single-action task automatically."
 }
 $currentAction = $actions[0]
+$currentActionText = "$([string]$currentAction.Execute) $([string]$currentAction.Arguments)"
+$currentIsPhase7C = $currentActionText -like "*run-phase7c-executors-local.ps1*" -and $currentActionText -like "*-Armed*"
 
 if ($RestoreLegacy) {
   if (-not (Test-Path $BackupPath)) { throw "Legacy task action backup not found: $BackupPath" }
   $backup = Get-Content -LiteralPath $BackupPath -Raw | ConvertFrom-Json
+  if ([int]$backup.version -ne 1) { throw "Legacy task backup version is unsupported: $($backup.version)" }
   if ([string]::IsNullOrWhiteSpace($backup.execute)) { throw "Legacy task backup is invalid: execute is empty." }
+  if (-not [string]::IsNullOrWhiteSpace($backup.taskName) -and [string]$backup.taskName -ne $TaskName) {
+    throw "Legacy task backup belongs to $($backup.taskName), not $TaskName."
+  }
+  $backupText = "$([string]$backup.execute) $([string]$backup.arguments)"
+  if ($backupText -like "*run-phase7c-executors-local.ps1*") {
+    throw "Legacy task backup is unsafe because it already points to the Phase 7C supervisor. Refusing rollback."
+  }
 
   Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Stopper -WorkDir $WorkDir
-  $legacyAction = New-ScheduledTaskAction -Execute $backup.execute -Argument $backup.arguments -WorkingDirectory $backup.workingDirectory
+  if ([string]::IsNullOrWhiteSpace([string]$backup.workingDirectory)) {
+    $legacyAction = New-ScheduledTaskAction -Execute ([string]$backup.execute) -Argument ([string]$backup.arguments)
+  } else {
+    $legacyAction = New-ScheduledTaskAction -Execute ([string]$backup.execute) -Argument ([string]$backup.arguments) -WorkingDirectory ([string]$backup.workingDirectory)
+  }
   Set-ScheduledTask -TaskName $TaskName -Action $legacyAction | Out-Null
   Write-Host "PHASE7C_TASK_RESTORE=PASS"
   Write-Host "PHASE7C_TASK_NAME=$TaskName"
@@ -64,6 +78,9 @@ if ($RestoreLegacy) {
 }
 
 if (-not (Test-Path $BackupPath)) {
+  if ($currentIsPhase7C) {
+    throw "Task $TaskName already points to Phase 7C, but no legacy backup exists at $BackupPath. Refusing to overwrite rollback history."
+  }
   [pscustomobject]@{
     version = 1
     taskName = $TaskName
@@ -74,6 +91,14 @@ if (-not (Test-Path $BackupPath)) {
   } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $BackupPath -Encoding utf8
   Write-Host "PHASE7C_TASK_BACKUP=CREATED"
 } else {
+  $existingBackup = Get-Content -LiteralPath $BackupPath -Raw | ConvertFrom-Json
+  if ([int]$existingBackup.version -ne 1 -or [string]::IsNullOrWhiteSpace($existingBackup.execute)) {
+    throw "Existing legacy backup is invalid: $BackupPath"
+  }
+  $existingBackupText = "$([string]$existingBackup.execute) $([string]$existingBackup.arguments)"
+  if ($existingBackupText -like "*run-phase7c-executors-local.ps1*") {
+    throw "Existing rollback backup already points to Phase 7C and is unsafe: $BackupPath"
+  }
   Write-Host "PHASE7C_TASK_BACKUP=PRESERVED_EXISTING"
 }
 
