@@ -34,7 +34,7 @@ test("range side only fires near demand or supply, not in the middle or after br
 
 test("M5 confirmation detects bullish rejection and bearish engulfing", () => {
   const bullish = [
-    { open: 2393, high: 2393.5, low: 2391.8, close: 2392.4, closeTime: 1 },
+    { open: 2392.0, high: 2393.0, low: 2391.8, close: 2392.6, closeTime: 1 },
     { open: 2392.4, high: 2393.2, low: 2390.6, close: 2393.0, closeTime: 2 },
   ];
   assert.equal(detectM5Confirmation(bullish, "BUY")?.pattern, "BULLISH_REJECTION");
