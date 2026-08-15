@@ -1,4 +1,5 @@
 import type { StrategyResult } from "@xauusd/types";
+import type { BotMode } from "./BotMode";
 import type { MarketRegimeAssessment } from "./MarketRegimeAssessment";
 import type { StrategyAction } from "./StrategyAction";
 import type { StrategyDiagnostics } from "./StrategyDiagnostics";
@@ -10,6 +11,8 @@ export interface StrategyEvaluation {
   action: StrategyAction;
   plan: StrategyPlan | null;
   regime: MarketRegimeAssessment;
+  botMode: BotMode;
+  recommendedBotMode: BotMode;
   selection: StrategySelection;
   rules: StrategyRuleResult[];
   diagnostics: StrategyDiagnostics;
