@@ -1,6 +1,9 @@
 param(
   [string]$ControlApiUrl = "http://127.0.0.1:3711",
-  [string]$EnvFile = ""
+  [string]$EnvFile = "packages/mt5-broker/bridge/.env.phase7b-demo",
+  [string]$WorkDir = "",
+  [switch]$Armed,
+  [switch]$Once
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,10 +32,26 @@ if (-not [string]::IsNullOrWhiteSpace($EnvFile)) {
   }
 }
 
+if (-not [string]::IsNullOrWhiteSpace($WorkDir)) {
+  if (-not [System.IO.Path]::IsPathRooted($WorkDir)) {
+    $WorkDir = Join-Path $ProjectRoot $WorkDir
+  }
+  New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
+  $env:ZIQ_DEMO_WORK_DIR = (Resolve-Path $WorkDir).Path
+}
+
+if ([string]::IsNullOrWhiteSpace($env:ZIQ_DEMO_WORK_DIR)) {
+  throw "Phase 7C Trend controller requires -WorkDir or existing ZIQ_DEMO_WORK_DIR."
+}
+
 $env:ZIQ_PHASE7C_CONTROL_API_URL = $ControlApiUrl.TrimEnd('/')
+$env:ZIQ_DEMO_ARMED = if ($Armed) { "true" } else { "false" }
+$env:ZIQ_DEMO_ONCE = if ($Once) { "true" } else { "false" }
 
 Write-Host "PHASE7C_TREND_CONTROLLER=STARTING"
 Write-Host "PHASE7C_CONTROL_API=$($env:ZIQ_PHASE7C_CONTROL_API_URL)"
+Write-Host "PHASE7C_TREND_ARMED=$($env:ZIQ_DEMO_ARMED)"
+Write-Host "PHASE7C_TREND_DEMO_WORK_DIR=$($env:ZIQ_DEMO_WORK_DIR)"
 Write-Host "PHASE7C_GATE_SCOPE=NEW_TREND_ENTRIES_ONLY"
 Write-Host "PHASE7C_POSITION_MANAGEMENT=PASS_THROUGH"
 Write-Host "PHASE7C_FAIL_CLOSED=TRUE"
