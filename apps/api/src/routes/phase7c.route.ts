@@ -15,6 +15,7 @@ import {
   isPhase7CBotMode,
   phase7CBotModeService,
 } from "../services/phase7c-bot-mode.service";
+import { getPhase7CLiveRegime } from "../services/phase7c-live-regime.service";
 
 const router = Router();
 
@@ -67,6 +68,18 @@ router.post("/bot-mode", (req: Request, res: Response) => {
     state: phase7CBotModeService.set(requestedMode, source),
     options: getPhase7CBotModeOptions(),
   });
+});
+
+router.get("/live-regime", async (req: Request, res: Response) => {
+  try {
+    const symbol = String(req.query.symbol ?? "XAUUSD").trim().toUpperCase();
+    const count = Number(req.query.count ?? 320);
+    res.json(await getPhase7CLiveRegime(symbol || "XAUUSD", count));
+  } catch (error) {
+    res.status(503).json({
+      error: error instanceof Error ? error.message : "Phase 7C live regime detection failed.",
+    });
+  }
 });
 
 router.get("/account-risk", async (req: Request, res: Response) => {
