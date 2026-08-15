@@ -1,6 +1,7 @@
 param(
   [string]$ControlApiUrl = "http://127.0.0.1:3711",
   [string]$EnvFile = "packages/mt5-broker/bridge/.env.phase7b-demo",
+  [string]$WorkDir = "",
   [double]$RiskPercent = 0.25,
   [double]$MaxLot = 0.03,
   [int]$IntervalSeconds = 5,
@@ -44,6 +45,14 @@ if (-not [string]::IsNullOrWhiteSpace($EnvFile)) {
   }
 }
 
+if (-not [string]::IsNullOrWhiteSpace($WorkDir)) {
+  if (-not [System.IO.Path]::IsPathRooted($WorkDir)) {
+    $WorkDir = Join-Path $ProjectRoot $WorkDir
+  }
+  New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
+  $env:ZIQ_PHASE7C_SIDEWAY_WORK_DIR = (Resolve-Path $WorkDir).Path
+}
+
 $env:ZIQ_PHASE7C_CONTROL_API_URL = $ControlApiUrl.TrimEnd('/')
 $env:ZIQ_PHASE7C_SIDEWAY_RISK_PERCENT = $RiskPercent.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 $env:ZIQ_PHASE7C_SIDEWAY_MAX_LOT = $MaxLot.ToString([System.Globalization.CultureInfo]::InvariantCulture)
@@ -62,6 +71,9 @@ Write-Host "PHASE7C_CONTROL_API=$($env:ZIQ_PHASE7C_CONTROL_API_URL)"
 Write-Host "PHASE7C_SIDEWAY_RISK_PERCENT=$($env:ZIQ_PHASE7C_SIDEWAY_RISK_PERCENT)"
 Write-Host "PHASE7C_SIDEWAY_MAX_LOT=$($env:ZIQ_PHASE7C_SIDEWAY_MAX_LOT)"
 Write-Host "PHASE7C_SIDEWAY_ARMED=$($env:ZIQ_PHASE7C_SIDEWAY_ARMED)"
+if (-not [string]::IsNullOrWhiteSpace($env:ZIQ_PHASE7C_SIDEWAY_WORK_DIR)) {
+  Write-Host "PHASE7C_SIDEWAY_WORK_DIR=$($env:ZIQ_PHASE7C_SIDEWAY_WORK_DIR)"
+}
 Write-Host "PHASE7C_SIDEWAY_DEMO_ONLY=TRUE"
 Write-Host "PHASE7C_SIDEWAY_NO_TRAILING=TRUE"
 Write-Host "PHASE7C_SIDEWAY_SINGLE_POSITION_FAIL_CLOSED=TRUE"
