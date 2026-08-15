@@ -24,11 +24,16 @@ export function resolveSidewayPermission(activeMode, recommendedMode) {
 
 export function chooseRangeSide(range, bid, ask) {
   if (!range || !Number.isFinite(bid) || !Number.isFinite(ask)) return null;
+  const demandLow = Number(range.demand?.low);
   const lower = Number(range.demand?.high);
   const upper = Number(range.supply?.low);
-  if (!Number.isFinite(lower) || !Number.isFinite(upper) || upper <= lower) return null;
+  const supplyHigh = Number(range.supply?.high);
+  if (![demandLow, lower, upper, supplyHigh].every(Number.isFinite) || upper <= lower || lower < demandLow || supplyHigh < upper) return null;
 
   const mid = (bid + ask) / 2;
+  // Never fade a confirmed live breakout beyond the outer zone boundaries.
+  if (mid < demandLow || mid > supplyHigh) return null;
+
   const position = clamp((mid - lower) / (upper - lower), 0, 1);
   const buyNear = ask <= lower || position <= 0.30;
   const sellNear = bid >= upper || position >= 0.70;
