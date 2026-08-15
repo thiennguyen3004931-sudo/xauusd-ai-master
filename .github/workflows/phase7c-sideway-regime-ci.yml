@@ -11,6 +11,9 @@ on:
       - "scripts/run-phase7c-*.mjs"
       - "scripts/run-phase7c-*.ps1"
       - "scripts/phase7c-sideway-*.mjs"
+      - "scripts/phase7c-execution-lock*.mjs"
+      - "scripts/activate-phase7c-local.ps1"
+      - "scripts/stop-phase7c-executors-local.ps1"
       - ".github/workflows/phase7c-sideway-regime-ci.yml"
   pull_request:
     paths:
@@ -20,6 +23,9 @@ on:
       - "scripts/run-phase7c-*.mjs"
       - "scripts/run-phase7c-*.ps1"
       - "scripts/phase7c-sideway-*.mjs"
+      - "scripts/phase7c-execution-lock*.mjs"
+      - "scripts/activate-phase7c-local.ps1"
+      - "scripts/stop-phase7c-executors-local.ps1"
       - ".github/workflows/phase7c-sideway-regime-ci.yml"
 
 jobs:
@@ -54,8 +60,10 @@ jobs:
       - name: Test strategy-engine
         run: pnpm --filter @xauusd/strategy-engine test
 
-      - name: Test Phase7C Sideway execution logic
-        run: node --test scripts/phase7c-sideway-logic.test.mjs
+      - name: Test Phase7C execution logic
+        run: |
+          node --test scripts/phase7c-sideway-logic.test.mjs
+          node --test scripts/phase7c-execution-lock.test.mjs
 
       - name: Build API dependency graph
         run: pnpm --filter @xauusd/api... build
@@ -67,7 +75,9 @@ jobs:
           node --check scripts/run-phase7c-regime-notifier.mjs
           node --check scripts/run-phase7c-trend-controller.mjs
           node --check scripts/phase7c-sideway-logic.mjs
+          node --check scripts/phase7c-execution-lock.mjs
           node --check scripts/run-phase7c-sideway-controller.mjs
+          node --check scripts/run-phase7c-sideway-locked.mjs
 
       - name: Parse Phase7C PowerShell launchers
         shell: pwsh
@@ -76,7 +86,10 @@ jobs:
             "scripts/run-phase7c-telegram-mode-controller-local.ps1",
             "scripts/run-phase7c-regime-notifier-local.ps1",
             "scripts/run-phase7c-trend-controller-local.ps1",
-            "scripts/run-phase7c-sideway-controller-local.ps1"
+            "scripts/run-phase7c-sideway-controller-local.ps1",
+            "scripts/run-phase7c-executors-local.ps1",
+            "scripts/stop-phase7c-executors-local.ps1",
+            "scripts/activate-phase7c-local.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null
