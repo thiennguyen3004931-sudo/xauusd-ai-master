@@ -16,6 +16,7 @@ const controlApiBase = (process.env.ZIQ_PHASE7C_CONTROL_API_URL || "http://127.0
 const intervalSeconds = clampNumber(process.env.ZIQ_PHASE7C_SIDEWAY_INTERVAL_SECONDS, 5, 1, 60);
 const riskPercent = clampNumber(process.env.ZIQ_PHASE7C_SIDEWAY_RISK_PERCENT, 0.25, 0.01, 5);
 const maxLot = clampNumber(process.env.ZIQ_PHASE7C_SIDEWAY_MAX_LOT, 0.03, 0.01, 10);
+const minRegimeConfidence = clampNumber(process.env.ZIQ_PHASE7C_SIDEWAY_MIN_REGIME_CONFIDENCE, 60, 0, 100);
 const regimeCandleCount = clampInteger(process.env.ZIQ_PHASE7C_REGIME_CANDLE_COUNT, 320, 220, 1000);
 const m5CandleCount = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_M5_COUNT, 120, 30, 500);
 const armed = truthy(process.env.ZIQ_PHASE7C_SIDEWAY_ARMED);
@@ -49,6 +50,7 @@ console.log(`PHASE7C_CONTROL_API=${controlApiBase}`);
 console.log(`PHASE7C_SIDEWAY_ARMED=${armed ? "YES" : "NO"}`);
 console.log(`PHASE7C_SIDEWAY_RISK_PERCENT=${riskPercent}`);
 console.log(`PHASE7C_SIDEWAY_MAX_LOT=${maxLot}`);
+console.log(`PHASE7C_SIDEWAY_MIN_REGIME_CONFIDENCE=${minRegimeConfidence}`);
 console.log(`PHASE7C_SIDEWAY_MAX_HOLD_MINUTES=${maxHoldingMinutes}`);
 console.log("PHASE7C_SIDEWAY_ENTRY=M15_RANGING_PLUS_SUPPLY_DEMAND_EDGE_PLUS_M5_CONFIRMATION");
 console.log("PHASE7C_SIDEWAY_TP1=VOLUME_POC_OR_RANGE_MID_FALLBACK");
@@ -165,6 +167,12 @@ async function cycle() {
     return;
   }
 
+  const maxSpread = Number(spec.maxSpread);
+  if (Number.isFinite(maxSpread) && maxSpread > 0 && Number(quote.spread) > maxSpread) {
+    journal("ENTRY_SPREAD_BLOCK", { spread: quote.spread, maxSpread });
+    return;
+  }
+
   const [modePayload, regime, m5] = await Promise.all([
     controlGet("/api/v1/phase7c/bot-mode"),
     controlGet(`/api/v1/phase7c/live-regime?symbol=${encodeURIComponent(symbol)}&count=${regimeCandleCount}`),
@@ -188,10 +196,17 @@ async function cycle() {
     return;
   }
 
-  if (regime?.regime !== "RANGING" || regime?.recommendedMode !== "SIDEWAY" || !regime?.supplyDemandRange) {
+  if (
+    regime?.regime !== "RANGING" ||
+    regime?.recommendedMode !== "SIDEWAY" ||
+    !regime?.supplyDemandRange ||
+    Number(regime?.confidence ?? 0) < minRegimeConfidence
+  ) {
     journal("ENTRY_REGIME_BLOCK", {
       activeMode,
       regime: regime?.regime ?? null,
+      confidence: regime?.confidence ?? null,
+      minRegimeConfidence,
       recommendedMode: regime?.recommendedMode ?? null,
       hasRange: Boolean(regime?.supplyDemandRange),
     });
@@ -200,11 +215,12 @@ async function cycle() {
 
   const side = chooseRangeSide(regime.supplyDemandRange, Number(quote.bid), Number(quote.ask));
   if (!side) {
-    journal("ENTRY_LOCATION_BLOCK_MIDDLE_RANGE", {
+    journal("ENTRY_LOCATION_BLOCK", {
       closeTime,
       bid: quote.bid,
       ask: quote.ask,
       range: regime.supplyDemandRange,
+      note: "Middle-range and live breakouts outside the outer zones are blocked.",
     });
     return;
   }
@@ -254,8 +270,18 @@ async function cycle() {
     controlGet(`/api/v1/phase7c/live-regime?symbol=${encodeURIComponent(symbol)}&count=${regimeCandleCount}`),
   ]);
   const finalPermission = resolveSidewayPermission(freshMode?.state?.mode, freshRegime?.recommendedMode);
-  if (!finalPermission.allowed || freshRegime?.regime !== "RANGING" || freshRegime?.recommendedMode !== "SIDEWAY") {
-    journal("ENTRY_FINAL_GATE_BLOCK", { finalPermission, regime: freshRegime?.regime ?? null });
+  if (
+    !finalPermission.allowed ||
+    freshRegime?.regime !== "RANGING" ||
+    freshRegime?.recommendedMode !== "SIDEWAY" ||
+    Number(freshRegime?.confidence ?? 0) < minRegimeConfidence
+  ) {
+    journal("ENTRY_FINAL_GATE_BLOCK", {
+      finalPermission,
+      regime: freshRegime?.regime ?? null,
+      confidence: freshRegime?.confidence ?? null,
+      minRegimeConfidence,
+    });
     return;
   }
 
