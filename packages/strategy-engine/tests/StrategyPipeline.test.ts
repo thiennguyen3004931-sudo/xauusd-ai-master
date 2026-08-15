@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BreakoutRetestStrategy,
-StrategyPipeline
+  StrategyPipeline,
 } from "../src";
 import { acceptsCommonResult, createContext } from "./fixtures";
 
@@ -18,18 +18,20 @@ describe("StrategyPipeline", () => {
     expect(acceptsCommonResult(result.commonResult).decision).toBe("BUY");
   });
 });
+
 /**
- * 3E.5Y default remains TrendContinuation-only.
- * Legacy breakout behavior is still available only by explicit module opt-in.
+ * Phase 7C production default keeps breakout/reversal opt-in while enabling
+ * only the mutually-exclusive TREND_CONTINUATION and RANGE_MEAN_REVERSION bots.
  */
-describe("StrategyPipeline trend-only production default", () => {
-  it("does not restore BREAKOUT_RETEST into the default module set", () => {
+describe("StrategyPipeline controlled production default", () => {
+  it("includes the range bot without restoring breakout into the default module set", () => {
     const result = new StrategyPipeline({
       minimumCandidateEdge: 0,
     }).evaluate(createContext());
+    const strategyIds = result.selection.ranked.map((candidate) => candidate.strategyId);
 
-    expect(
-      result.selection.selected?.strategyId ?? null,
-    ).not.toBe("BREAKOUT_RETEST");
+    expect(strategyIds).toContain("TREND_CONTINUATION");
+    expect(strategyIds).toContain("RANGE_MEAN_REVERSION");
+    expect(strategyIds).not.toContain("BREAKOUT_RETEST");
   });
 });
