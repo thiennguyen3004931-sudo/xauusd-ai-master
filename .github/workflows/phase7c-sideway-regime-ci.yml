@@ -10,6 +10,7 @@ on:
       - "apps/api/src/services/phase7c-*.ts"
       - "scripts/run-phase7c-*.mjs"
       - "scripts/run-phase7c-*.ps1"
+      - "scripts/phase7c-sideway-*.mjs"
       - ".github/workflows/phase7c-sideway-regime-ci.yml"
   pull_request:
     paths:
@@ -18,6 +19,7 @@ on:
       - "apps/api/src/services/phase7c-*.ts"
       - "scripts/run-phase7c-*.mjs"
       - "scripts/run-phase7c-*.ps1"
+      - "scripts/phase7c-sideway-*.mjs"
       - ".github/workflows/phase7c-sideway-regime-ci.yml"
 
 jobs:
@@ -52,6 +54,9 @@ jobs:
       - name: Test strategy-engine
         run: pnpm --filter @xauusd/strategy-engine test
 
+      - name: Test Phase7C Sideway execution logic
+        run: node --test scripts/phase7c-sideway-logic.test.mjs
+
       - name: Build API dependency graph
         run: pnpm --filter @xauusd/api... build
 
@@ -61,6 +66,8 @@ jobs:
           node --check scripts/run-phase7c-telegram-mode-controller.mjs
           node --check scripts/run-phase7c-regime-notifier.mjs
           node --check scripts/run-phase7c-trend-controller.mjs
+          node --check scripts/phase7c-sideway-logic.mjs
+          node --check scripts/run-phase7c-sideway-controller.mjs
 
       - name: Parse Phase7C PowerShell launchers
         shell: pwsh
@@ -68,7 +75,8 @@ jobs:
           $files = @(
             "scripts/run-phase7c-telegram-mode-controller-local.ps1",
             "scripts/run-phase7c-regime-notifier-local.ps1",
-            "scripts/run-phase7c-trend-controller-local.ps1"
+            "scripts/run-phase7c-trend-controller-local.ps1",
+            "scripts/run-phase7c-sideway-controller-local.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null
