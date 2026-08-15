@@ -13,9 +13,9 @@ const VALID_MODE_SET = new Set<BotMode>(VALID_MODES);
 
 function defaultState(): Phase7CBotModeState {
   return {
-    mode: "AUTO",
+    mode: "PAUSE",
     updatedAt: new Date(0).toISOString(),
-    updatedBy: "default",
+    updatedBy: "safe-default",
   };
 }
 
