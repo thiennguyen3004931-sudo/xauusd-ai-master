@@ -52,7 +52,7 @@ function Stop-BotProcess {
   try {
     $runtime = Get-Content $runtimePath -Raw | ConvertFrom-Json
     if ($null -ne $runtime.pid -and [int]$runtime.pid -gt 0) {
-      Stop-Process -Id ([int]$runtime.pid -Force -ErrorAction SilentlyContinue)
+      Stop-Process -Id ([int]$runtime.pid) -Force -ErrorAction SilentlyContinue
     }
   } catch {}
 }
@@ -220,8 +220,9 @@ Write-Host "PHASE7C_ACTIVATE_PHASE7B_FIXED_VOLUME_UNCHANGED=$($risk.safety.phase
 
 Start-Phase7CExecutors
 
+$executorMode = if ($ArmExecutors) { "ARMED_DEMO_ONLY" } else { "SHADOW_ONLY" }
 Write-Host "PHASE7C_ACTIVATE_CONTROL_CENTER=$webUrl/"
 Write-Host "PHASE7C_ACTIVATE_BACKTEST=$webUrl/phase7c-backtest"
 Write-Host "PHASE7C_ACTIVATE_RISK=$webUrl/phase7c-risk"
-Write-Host "PHASE7C_ACTIVATE_EXECUTORS=$([string]$(if ($ArmExecutors) { 'ARMED_DEMO_ONLY' } else { 'SHADOW_ONLY' }))"
+Write-Host "PHASE7C_ACTIVATE_EXECUTORS=$executorMode"
 Write-Host "PHASE7C_ACTIVATE_STATUS=PASS"
