@@ -4,6 +4,7 @@ param(
   [string]$EnvFile = "packages/mt5-broker/bridge/.env.phase7b-demo",
   [double]$SidewayRiskPercent = 0.25,
   [double]$SidewayMaxLot = 0.03,
+  [int]$DependencyWaitSeconds = 120,
   [switch]$Armed,
   [switch]$Once
 )
@@ -15,6 +16,7 @@ $SidewayLauncher = Join-Path $PSScriptRoot "run-phase7c-sideway-controller-local
 
 if (-not (Test-Path $TrendLauncher)) { throw "Trend launcher not found: $TrendLauncher" }
 if (-not (Test-Path $SidewayLauncher)) { throw "Sideway launcher not found: $SidewayLauncher" }
+if ($DependencyWaitSeconds -lt 10) { throw "DependencyWaitSeconds must be >= 10." }
 
 if (-not [System.IO.Path]::IsPathRooted($WorkDir)) {
   $WorkDir = Join-Path $ProjectRoot $WorkDir
@@ -44,6 +46,22 @@ $TrendErr = Join-Path $RuntimeDir "trend.err.log"
 $SidewayOut = Join-Path $RuntimeDir "sideway.out.log"
 $SidewayErr = Join-Path $RuntimeDir "sideway.err.log"
 
+function Read-EnvValue([string]$Name) {
+  foreach ($raw in Get-Content -LiteralPath $EnvFile) {
+    $line = $raw.Trim()
+    if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) { continue }
+    $index = $line.IndexOf("=")
+    $key = $line.Substring(0, $index).Trim().TrimStart([char]0xFEFF)
+    if ($key -ne $Name) { continue }
+    $value = $line.Substring($index + 1).Trim()
+    if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+      $value = $value.Substring(1, $value.Length - 2)
+    }
+    return $value
+  }
+  return ""
+}
+
 function Stop-PidFile([string]$Path) {
   if (-not (Test-Path $Path)) { return }
   try {
@@ -53,6 +71,55 @@ function Stop-PidFile([string]$Path) {
     }
   } catch {}
   Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+}
+
+function Wait-Phase7CDependencies {
+  $apiKey = Read-EnvValue "MT5_API_KEY"
+  $bridgeHost = Read-EnvValue "MT5_BRIDGE_HOST"
+  $bridgePort = Read-EnvValue "MT5_BRIDGE_PORT"
+  if ([string]::IsNullOrWhiteSpace($apiKey)) { throw "MT5_API_KEY is missing from $EnvFile" }
+  if ([string]::IsNullOrWhiteSpace($bridgeHost)) { $bridgeHost = "127.0.0.1" }
+  if ([string]::IsNullOrWhiteSpace($bridgePort)) { $bridgePort = "8765" }
+  $bridgeBase = "http://${bridgeHost}:${bridgePort}"
+  $deadline = (Get-Date).AddSeconds($DependencyWaitSeconds)
+  $lastBridgeError = "not checked"
+  $lastApiError = "not checked"
+
+  while ((Get-Date) -lt $deadline) {
+    $bridgeReady = $false
+    $apiReady = $false
+    try {
+      $health = Invoke-RestMethod -Uri "$bridgeBase/health" -Headers @{ "x-mt5-api-key" = $apiKey } -Method Get -TimeoutSec 4
+      if ($health.connected -and $health.status -eq "ok" -and $health.accountMode -eq "demo") {
+        $bridgeReady = $true
+      } else {
+        $lastBridgeError = "connected=$($health.connected);status=$($health.status);mode=$($health.accountMode)"
+      }
+    } catch {
+      $lastBridgeError = $_.Exception.Message
+    }
+
+    try {
+      $mode = Invoke-RestMethod -Uri "$($ControlApiUrl.TrimEnd('/'))/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 4
+      if ($null -ne $mode.state.mode) {
+        $apiReady = $true
+      } else {
+        $lastApiError = "bot-mode response missing state.mode"
+      }
+    } catch {
+      $lastApiError = $_.Exception.Message
+    }
+
+    if ($bridgeReady -and $apiReady) {
+      Write-Host "PHASE7C_DEPENDENCY_BRIDGE=PASS"
+      Write-Host "PHASE7C_DEPENDENCY_CONTROL_API=PASS"
+      Write-Host "PHASE7C_DEPENDENCY_ACCOUNT_MODE=demo"
+      return
+    }
+    Start-Sleep -Seconds 2
+  }
+
+  throw "Phase 7C dependencies were not ready within $DependencyWaitSeconds seconds. Bridge=[$lastBridgeError] ControlAPI=[$lastApiError]"
 }
 
 # Any prior detached child from a killed supervisor is explicitly cleaned up.
@@ -96,10 +163,13 @@ Write-Host "PHASE7C_EXECUTOR_DEMO_ONLY=TRUE"
 Write-Host "PHASE7C_EXECUTION_LOCK=$($env:ZIQ_PHASE7C_EXECUTION_LOCK)"
 Write-Host "PHASE7C_TREND_RUNTIME=$TrendWorkDir"
 Write-Host "PHASE7C_SIDEWAY_RUNTIME=$SidewayWorkDir"
+Write-Host "PHASE7C_DEPENDENCY_WAIT_SECONDS=$DependencyWaitSeconds"
 
 $trend = $null
 $sideway = $null
 try {
+  Wait-Phase7CDependencies
+
   $trend = Start-Process -FilePath "powershell.exe" -ArgumentList ($common + $trendArgs) -WorkingDirectory $ProjectRoot -RedirectStandardOutput $TrendOut -RedirectStandardError $TrendErr -PassThru
   Set-Content -LiteralPath $TrendPidPath -Value $trend.Id -Encoding ascii
   Write-Host "PHASE7C_TREND_PID=$($trend.Id)"
