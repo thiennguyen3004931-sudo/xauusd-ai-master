@@ -11,10 +11,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$Controller = Join-Path $PSScriptRoot "run-phase7c-sideway-controller.mjs"
+$Controller = Join-Path $PSScriptRoot "run-phase7c-sideway-locked.mjs"
 
 if (-not (Test-Path $Controller)) {
-  throw "Phase 7C Sideway controller not found: $Controller"
+  throw "Phase 7C Sideway locked controller not found: $Controller"
 }
 
 if ($RiskPercent -le 0 -or $RiskPercent -gt 5) {
@@ -77,6 +77,7 @@ if (-not [string]::IsNullOrWhiteSpace($env:ZIQ_PHASE7C_SIDEWAY_WORK_DIR)) {
 Write-Host "PHASE7C_SIDEWAY_DEMO_ONLY=TRUE"
 Write-Host "PHASE7C_SIDEWAY_NO_TRAILING=TRUE"
 Write-Host "PHASE7C_SIDEWAY_SINGLE_POSITION_FAIL_CLOSED=TRUE"
+Write-Host "PHASE7C_SIDEWAY_EXECUTION_LOCK=TRUE"
 Write-Host "PHASE7C_SIDEWAY_EXISTING_POSITION_MANAGEMENT=PRESERVED_ACROSS_MODE_CHANGE"
 Write-Host "PHASE7C_ENV_FILE=$EnvFile"
 
