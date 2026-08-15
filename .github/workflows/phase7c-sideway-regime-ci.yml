@@ -15,6 +15,7 @@ on:
       - "scripts/activate-phase7c-local.ps1"
       - "scripts/stop-phase7c-executors-local.ps1"
       - "scripts/upgrade-phase7c-executor-task-local.ps1"
+      - "scripts/verify-phase7c-executors-local.ps1"
       - ".github/workflows/phase7c-sideway-regime-ci.yml"
   pull_request:
     paths:
@@ -28,6 +29,7 @@ on:
       - "scripts/activate-phase7c-local.ps1"
       - "scripts/stop-phase7c-executors-local.ps1"
       - "scripts/upgrade-phase7c-executor-task-local.ps1"
+      - "scripts/verify-phase7c-executors-local.ps1"
       - ".github/workflows/phase7c-sideway-regime-ci.yml"
 
 jobs:
@@ -92,7 +94,8 @@ jobs:
             "scripts/run-phase7c-executors-local.ps1",
             "scripts/stop-phase7c-executors-local.ps1",
             "scripts/activate-phase7c-local.ps1",
-            "scripts/upgrade-phase7c-executor-task-local.ps1"
+            "scripts/upgrade-phase7c-executor-task-local.ps1",
+            "scripts/verify-phase7c-executors-local.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null
