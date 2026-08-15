@@ -1,11 +1,11 @@
-import { MarketStructure, SignalType, TradingSession } from "@xauusd/types";
+import { SignalType, TradingSession } from "@xauusd/types";
 import type { StrategyEngineConfig } from "../config";
 import type {
   MarketRegimeAssessment,
   StrategyCandidate,
   StrategyContext,
 } from "../models";
-import { PriceLocationUtils } from "../utils";
+import { RangeBoundaryUtils } from "../utils";
 import { BaseStrategy } from "./BaseStrategy";
 
 export class RangeMeanReversionStrategy extends BaseStrategy {
@@ -26,45 +26,76 @@ export class RangeMeanReversionStrategy extends BaseStrategy {
   ): StrategyCandidate {
     const signal = context.signalResult.signal;
     const direction = signal?.type ?? SignalType.NONE;
-    const isRange = context.analysis.structure === MarketStructure.Range;
+    const close = context.indicators.latest.close;
     const adx = context.indicators.latest.adx.adx;
     const weakTrend = adx !== null && adx <= config.rangeAdxThreshold;
-    const favorableLocation = signal
-      ? PriceLocationUtils.isFavorable(direction, context.indicators.latest.close, context.analysis)
+    const range = RangeBoundaryUtils.find(
+      close,
+      context.analysis.supplyDemandZones,
+    );
+    const nearDemand = range
+      ? RangeBoundaryUtils.isNearDemand(range, close)
+      : false;
+    const nearSupply = range
+      ? RangeBoundaryUtils.isNearSupply(range, close)
+      : false;
+    const boundaryAligned = signal
+      ? direction === SignalType.BUY
+        ? nearDemand
+        : direction === SignalType.SELL
+          ? nearSupply
+          : false
       : false;
     const percentB = context.indicators.latest.bollingerBands.percentB;
     const bandExtreme = signal
       ? direction === SignalType.BUY
-        ? (percentB ?? 0.5) <= 0.2
-        : (percentB ?? 0.5) >= 0.8
+        ? (percentB ?? 0.5) <= 0.3
+        : (percentB ?? 0.5) >= 0.7
       : false;
     const sessionSupported = this.supportedSessions.includes(session as never);
     const asianAllowed = session !== TradingSession.ASIAN || config.allowAsianRangeMeanReversion;
     const regimeSupported = this.supportedRegimes.includes(regime.regime as never);
+    const supplyDemandConfirmed = Boolean(range);
 
     const eligible = Boolean(
-      signal && isRange && weakTrend && favorableLocation && regimeSupported && sessionSupported && asianAllowed,
+      signal &&
+      supplyDemandConfirmed &&
+      weakTrend &&
+      boundaryAligned &&
+      regimeSupported &&
+      sessionSupported &&
+      asianAllowed,
     );
 
     return this.candidate(
       direction,
       {
         signal: signal ? Math.min(18, signal.confidence * 0.18) : 0,
-        structure: isRange ? 25 : 0,
+        structure: supplyDemandConfirmed ? 25 : 0,
         regime: regimeSupported ? Math.min(15, regime.confidence * 0.15) : 0,
         momentum: weakTrend ? 12 : 0,
-        location: favorableLocation && bandExtreme ? 20 : favorableLocation ? 12 : 0,
+        location: boundaryAligned && bandExtreme ? 20 : boundaryAligned ? 15 : 0,
         multiTimeframe: context.multiTimeframe?.bias ? 3 : 5,
         session: sessionSupported && asianAllowed ? 5 : 0,
       },
       eligible,
       [
-        isRange ? "Market structure is ranging." : "Market structure is not ranging.",
+        supplyDemandConfirmed
+          ? `Supply/Demand corridor confirms a tradeable range (${range!.demand.low.toFixed(2)}-${range!.supply.high.toFixed(2)}).`
+          : "No qualified Supply/Demand corridor contains current price.",
         weakTrend ? "ADX confirms weak directional pressure." : "ADX is too strong for mean reversion.",
-        favorableLocation ? "Price is at a favorable range extreme." : "Price is not at a favorable range extreme.",
-        bandExtreme ? "Bollinger percent-B confirms a band extreme." : "Bollinger percent-B is not extreme.",
+        boundaryAligned
+          ? direction === SignalType.BUY
+            ? "BUY is aligned with the demand/lower 30% boundary."
+            : "SELL is aligned with the supply/upper 30% boundary."
+          : "Price is in the middle of the range or signal direction is not aligned with the nearest boundary.",
+        bandExtreme ? "Bollinger percent-B supports the range extreme." : "Bollinger percent-B is not extreme; Supply/Demand remains the primary location filter.",
       ],
-      ["A confirmed BOS forms away from the range boundary.", "Price closes beyond the approved stop-loss and range extreme."],
+      [
+        "A confirmed BOS closes outside the Supply/Demand corridor.",
+        "ADX expands above the approved range threshold.",
+        "Price closes beyond the protected Supply/Demand boundary.",
+      ],
       [],
       config,
     );
