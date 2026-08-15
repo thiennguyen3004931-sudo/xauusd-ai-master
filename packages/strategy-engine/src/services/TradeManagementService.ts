@@ -31,6 +31,15 @@ export class TradeManagementService {
     const maximumHoldingMinutes =
       config.maximumHoldingMinutes[candidate.strategyId];
 
+    const cancelIfNotFilledAfterMinutes =
+      Math.min(
+        60,
+        Math.max(
+          15,
+          Math.round(maximumHoldingMinutes / 8),
+        ),
+      );
+
     const trendContinuation =
       candidate.strategyId === "TREND_CONTINUATION";
 
@@ -58,14 +67,7 @@ export class TradeManagementService {
             TREND_MIN_DISTANCE_ATR,
         },
         maximumHoldingMinutes,
-        cancelIfNotFilledAfterMinutes:
-          Math.min(
-            60,
-            Math.max(
-              15,
-              Math.round(maximumHoldingMinutes / 8),
-            ),
-          ),
+        cancelIfNotFilledAfterMinutes,
         hardInvalidationPrice: order.stopLoss,
         timeStopAt:
           generatedAt +
@@ -74,8 +76,37 @@ export class TradeManagementService {
       };
     }
 
+    const rangeMeanReversion =
+      candidate.strategyId === "RANGE_MEAN_REVERSION";
+
+    if (rangeMeanReversion) {
+      return {
+        // Sideway trades are finite mean-reversion trades. Keep the
+        // planned scale-out targets and do not trail behind price; an ATR
+        // trail can turn a range scalp into unintended trend-following.
+        partialTargets:
+          levels.partialTargets.map(
+            (target) => ({ ...target }),
+          ),
+        moveStopToBreakEvenAtR: config.breakEvenAtR,
+        trailingStop: {
+          enabled: false,
+          startAtR: config.trailingStartAtR,
+          mode: "ATR",
+          atrMultiple: config.trailingAtrMultiple,
+          neverWidenStop: true,
+        },
+        maximumHoldingMinutes,
+        cancelIfNotFilledAfterMinutes,
+        hardInvalidationPrice: order.stopLoss,
+        timeStopAt:
+          generatedAt +
+          maximumHoldingMinutes * 60_000,
+      };
+    }
+
     // Legacy compatibility branch for any explicitly supplied
-    // non-trend strategy module.
+    // non-trend/non-range strategy module.
     return {
       partialTargets:
         levels.partialTargets.map(
@@ -90,14 +121,7 @@ export class TradeManagementService {
         neverWidenStop: true,
       },
       maximumHoldingMinutes,
-      cancelIfNotFilledAfterMinutes:
-        Math.min(
-          60,
-          Math.max(
-            15,
-            Math.round(maximumHoldingMinutes / 8),
-          ),
-        ),
+      cancelIfNotFilledAfterMinutes,
       hardInvalidationPrice: order.stopLoss,
       timeStopAt:
         generatedAt +
