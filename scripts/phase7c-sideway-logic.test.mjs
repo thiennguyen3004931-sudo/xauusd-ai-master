@@ -24,10 +24,12 @@ test("manual SIDEWAY and AUTO+SIDEWAY are the only entry permissions", () => {
   assert.equal(resolveSidewayPermission("garbage", "SIDEWAY").allowed, false);
 });
 
-test("range side only fires near demand or supply, not in the middle", () => {
+test("range side only fires near demand or supply, not in the middle or after breakout", () => {
   assert.equal(chooseRangeSide(range, 2392.2, 2392.4), "BUY");
   assert.equal(chooseRangeSide(range, 2399.9, 2400.1), null);
   assert.equal(chooseRangeSide(range, 2407.8, 2408.0), "SELL");
+  assert.equal(chooseRangeSide(range, 2388.8, 2389.0), null);
+  assert.equal(chooseRangeSide(range, 2411.0, 2411.2), null);
 });
 
 test("M5 confirmation detects bullish rejection and bearish engulfing", () => {
