@@ -1,0 +1,84 @@
+name: Phase7C Sideway Regime CI
+
+on:
+  push:
+    branches:
+      - phase7c-sideway-supply-demand
+    paths:
+      - "packages/strategy-engine/**"
+      - "apps/api/src/routes/phase7c.route.ts"
+      - "apps/api/src/services/phase7c-*.ts"
+      - "scripts/run-phase7c-*.mjs"
+      - "scripts/run-phase7c-*.ps1"
+      - ".github/workflows/phase7c-sideway-regime-ci.yml"
+  pull_request:
+    paths:
+      - "packages/strategy-engine/**"
+      - "apps/api/src/routes/phase7c.route.ts"
+      - "apps/api/src/services/phase7c-*.ts"
+      - "scripts/run-phase7c-*.mjs"
+      - "scripts/run-phase7c-*.ps1"
+      - ".github/workflows/phase7c-sideway-regime-ci.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build strategy-engine dependency graph
+        run: pnpm --filter @xauusd/strategy-engine... build
+
+      - name: Typecheck strategy-engine
+        run: pnpm --filter @xauusd/strategy-engine typecheck
+
+      - name: Test strategy-engine
+        run: pnpm --filter @xauusd/strategy-engine test
+
+      - name: Build API dependency graph
+        run: pnpm --filter @xauusd/api... build
+
+      - name: Parse Phase7C Node controllers
+        shell: bash
+        run: |
+          node --check scripts/run-phase7c-telegram-mode-controller.mjs
+          node --check scripts/run-phase7c-regime-notifier.mjs
+
+      - name: Parse Phase7C PowerShell launchers
+        shell: pwsh
+        run: |
+          $files = @(
+            "scripts/run-phase7c-telegram-mode-controller-local.ps1",
+            "scripts/run-phase7c-regime-notifier-local.ps1"
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "$file :: $($_.Message)" }
+              exit 1
+            }
+            Write-Host "PHASE7C_POWERSHELL_PARSE_PASS=$file"
+          }
