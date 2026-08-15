@@ -1,3 +1,4 @@
+export * from "./BotMode";
 export * from "./MarketRegime";
 export * from "./MarketRegimeAssessment";
 export * from "./StrategyAction";
