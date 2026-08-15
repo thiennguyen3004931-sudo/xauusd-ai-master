@@ -10,8 +10,64 @@ import {
   runPhase7CAutoLotBacktestComparison,
   type Phase7CAutoLotBacktestRequest,
 } from "../services/phase7c-auto-lot.service";
+import {
+  getPhase7CBotModeOptions,
+  isPhase7CBotMode,
+  phase7CBotModeService,
+} from "../services/phase7c-bot-mode.service";
 
 const router = Router();
+
+function isLoopbackRequest(req: Request): boolean {
+  const addresses = [req.ip, req.socket.remoteAddress]
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.toLowerCase());
+  return addresses.some((value) =>
+    value === "127.0.0.1" || value === "::1" || value === "::ffff:127.0.0.1");
+}
+
+function canChangeBotMode(req: Request): boolean {
+  if (isLoopbackRequest(req)) return true;
+  const configuredToken = process.env.PHASE7C_BOT_MODE_TOKEN?.trim();
+  if (!configuredToken) return false;
+  const providedToken = String(req.header("x-phase7c-token") ?? "").trim();
+  return providedToken === configuredToken;
+}
+
+router.get("/bot-mode", (_req: Request, res: Response) => {
+  res.json({
+    state: phase7CBotModeService.get(),
+    options: getPhase7CBotModeOptions(),
+  });
+});
+
+router.post("/bot-mode", (req: Request, res: Response) => {
+  if (!canChangeBotMode(req)) {
+    res.status(403).json({
+      error: "Bot mode changes are restricted to localhost unless PHASE7C_BOT_MODE_TOKEN is configured.",
+    });
+    return;
+  }
+
+  const requestedMode = typeof req.body?.mode === "string"
+    ? req.body.mode.trim().toUpperCase()
+    : req.body?.mode;
+  if (!isPhase7CBotMode(requestedMode)) {
+    res.status(400).json({
+      error: `Invalid bot mode. Expected one of: ${getPhase7CBotModeOptions().join(", ")}.`,
+    });
+    return;
+  }
+
+  const source = typeof req.body?.source === "string" && req.body.source.trim()
+    ? req.body.source.trim().slice(0, 80)
+    : "operator";
+
+  res.json({
+    state: phase7CBotModeService.set(requestedMode, source),
+    options: getPhase7CBotModeOptions(),
+  });
+});
 
 router.get("/account-risk", async (req: Request, res: Response) => {
   try {
