@@ -1,3 +1,5 @@
+import { acquireExecutionLock } from "./phase7c-execution-lock.mjs";
+
 const nativeFetch = globalThis.fetch.bind(globalThis);
 const controlApiBase = (process.env.ZIQ_PHASE7C_CONTROL_API_URL?.trim() || "http://127.0.0.1:3711").replace(/\/$/, "");
 const regimeSymbol = process.env.ZIQ_PHASE7C_REGIME_SYMBOL?.trim().toUpperCase() || process.env.ZIQ_DEMO_SYMBOL?.trim().toUpperCase() || "XAUUSD";
@@ -8,6 +10,7 @@ console.log(`PHASE7C_CONTROL_API=${controlApiBase}`);
 console.log(`PHASE7C_REGIME_SYMBOL=${regimeSymbol}`);
 console.log("PHASE7C_GATE_SCOPE=POST_/v1/orders_ONLY");
 console.log("PHASE7C_POSITION_MANAGEMENT=PASS_THROUGH");
+console.log("PHASE7C_EXECUTION_LOCK=ENABLED");
 
 globalThis.fetch = async function phase7CTrendGate(input, init = undefined) {
   const request = toRequestInfo(input, init);
@@ -15,29 +18,58 @@ globalThis.fetch = async function phase7CTrendGate(input, init = undefined) {
     return nativeFetch(input, init);
   }
 
-  try {
-    const decision = await evaluateTrendEntryPermission();
-    if (decision.allowed) {
-      console.log(
-        `PHASE7C_TREND_ENTRY_ALLOWED=MODE_${decision.activeMode}|RECOMMENDED_${decision.recommendedMode ?? "N/A"}`,
-      );
-      return nativeFetch(input, init);
-    }
-
-    console.warn(
-      `PHASE7C_TREND_ENTRY_BLOCKED=${decision.reason}|ACTIVE_${decision.activeMode}|RECOMMENDED_${decision.recommendedMode ?? "N/A"}`,
-    );
-    return blockedResponse(decision);
-  } catch (error) {
-    const message = errorMessage(error);
-    console.error(`PHASE7C_TREND_ENTRY_BLOCKED=CONTROL_API_ERROR|DETAIL=${message}`);
+  const lock = acquireExecutionLock({ owner: "TREND" });
+  if (!lock.acquired) {
+    console.warn(`PHASE7C_TREND_ENTRY_BLOCKED=EXECUTION_LOCK_BUSY|DETAIL=${lock.reason}`);
     return blockedResponse({
       allowed: false,
       activeMode: "UNKNOWN",
       recommendedMode: null,
-      reason: "CONTROL_API_ERROR_FAIL_CLOSED",
+      reason: "EXECUTION_LOCK_BUSY",
+      detail: lock.reason,
+    });
+  }
+
+  try {
+    const decision = await evaluateTrendEntryPermission();
+    if (!decision.allowed) {
+      console.warn(
+        `PHASE7C_TREND_ENTRY_BLOCKED=${decision.reason}|ACTIVE_${decision.activeMode}|RECOMMENDED_${decision.recommendedMode ?? "N/A"}`,
+      );
+      return blockedResponse(decision);
+    }
+
+    // The Phase 7B controller checked positions before it reached this fetch,
+    // but Sideway runs concurrently. Re-check under the shared lock so a
+    // regime transition cannot produce one Trend and one Sideway order.
+    const positions = await fetchOpenPositionsUnderLock(request);
+    if (positions.length > 0) {
+      console.warn(`PHASE7C_TREND_ENTRY_BLOCKED=POSITION_PRESENT_UNDER_LOCK|COUNT=${positions.length}`);
+      return blockedResponse({
+        allowed: false,
+        activeMode: decision.activeMode,
+        recommendedMode: decision.recommendedMode,
+        reason: "POSITION_PRESENT_UNDER_LOCK",
+        detail: `Open ${regimeSymbol} positions=${positions.length}`,
+      });
+    }
+
+    console.log(
+      `PHASE7C_TREND_ENTRY_ALLOWED=MODE_${decision.activeMode}|RECOMMENDED_${decision.recommendedMode ?? "N/A"}`,
+    );
+    return await nativeFetch(input, init);
+  } catch (error) {
+    const message = errorMessage(error);
+    console.error(`PHASE7C_TREND_ENTRY_BLOCKED=CONTROL_OR_LOCK_RECHECK_ERROR|DETAIL=${message}`);
+    return blockedResponse({
+      allowed: false,
+      activeMode: "UNKNOWN",
+      recommendedMode: null,
+      reason: "CONTROL_OR_LOCK_RECHECK_ERROR_FAIL_CLOSED",
       detail: message,
     });
+  } finally {
+    lock.release();
   }
 };
 
@@ -100,6 +132,22 @@ async function evaluateTrendEntryPermission() {
   };
 }
 
+async function fetchOpenPositionsUnderLock(request) {
+  const requestUrl = new URL(request.url);
+  const query = new URLSearchParams({ symbol: regimeSymbol });
+  const response = await nativeFetch(`${requestUrl.origin}/v1/positions?${query.toString()}`, {
+    method: "GET",
+    headers: request.headers,
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`MT5 bridge position recheck ${response.status}: ${text}`);
+  }
+  const parsed = text ? JSON.parse(text) : [];
+  if (!Array.isArray(parsed)) throw new Error("MT5 bridge position recheck did not return an array.");
+  return parsed;
+}
+
 async function controlRequest(pathname) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
@@ -129,8 +177,9 @@ function isNewOrderRequest(request) {
 }
 
 function toRequestInfo(input, init) {
-  const requestMethod = input instanceof Request ? input.method : undefined;
-  const rawUrl = input instanceof Request
+  const isRequest = input instanceof Request;
+  const requestMethod = isRequest ? input.method : undefined;
+  const rawUrl = isRequest
     ? input.url
     : input instanceof URL
       ? input.href
@@ -138,6 +187,7 @@ function toRequestInfo(input, init) {
   return {
     method: String(init?.method ?? requestMethod ?? "GET").toUpperCase(),
     url: rawUrl,
+    headers: new Headers(init?.headers ?? (isRequest ? input.headers : undefined)),
   };
 }
 
