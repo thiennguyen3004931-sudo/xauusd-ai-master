@@ -8,7 +8,7 @@ import type {
   StrategyEvaluationDraft,
 } from "../models";
 import { MarketRegimeClassifier, SessionClassifier } from "../classifiers";
-import { TrendContinuationStrategy } from "../strategies";
+import { RangeMeanReversionStrategy, TrendContinuationStrategy } from "../strategies";
 import {
   CandidateScoreRule,
   CandidateSelectionRule,
@@ -80,6 +80,9 @@ export class StrategyPipeline implements IStrategyEngine {
       warnings: [
         ...(selection.selected?.warnings ?? []),
         ...regime.regime === "UNCERTAIN" ? ["Market regime remains uncertain."] : [],
+        ...regime.regime === "RANGING"
+          ? ["SIDEWAY_CONFIRMED: Supply/Demand range detected; trend bot is paused and Range Mean Reversion bot is enabled."]
+          : [],
       ],
       notes: [
         ...regime.reasons,
@@ -114,6 +117,7 @@ export class StrategyPipeline implements IStrategyEngine {
   private createDefaultModules(): IStrategyModule[] {
     return [
       new TrendContinuationStrategy(),
+      new RangeMeanReversionStrategy(),
     ];
   }
 
