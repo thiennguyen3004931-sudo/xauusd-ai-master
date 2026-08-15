@@ -87,7 +87,7 @@ export class StrategyPipeline implements IStrategyEngine {
         `BOT_MODE_ACTIVE: ${botMode}.`,
         `BOT_MODE_RECOMMENDED: ${recommendedBotMode} for market regime ${regime.regime}.`,
         ...regime.regime === "UNCERTAIN" ? ["Market regime remains uncertain; PAUSE is recommended."] : [],
-        ...regime.regime === "REVERSAL_RISK" ? ["TRANSITION_RISK: reversal risk detected; both trading bots should remain paused."] : [],
+        ...regime.regime === "REVERSAL" ? ["TRANSITION_RISK: reversal risk detected; both trading bots should remain paused."] : [],
         ...regime.regime === "RANGING"
           ? ["SIDEWAY_CONFIRMED: Supply/Demand range detected; SIDEWAY mode is recommended and Trend bot should remain paused."]
           : [],
