@@ -1,6 +1,8 @@
 import type { IStrategyEngine, IStrategyModule, IStrategyRule } from "../contracts";
 import { defaultStrategyEngineConfig, type StrategyEngineConfig } from "../config";
 import type {
+  BotMode,
+  MarketRegime,
   StrategyAction,
   StrategyContext,
   StrategyDiagnostics,
@@ -66,7 +68,10 @@ export class StrategyPipeline implements IStrategyEngine {
     const generatedAt = context.evaluatedAt ?? Date.now();
     const session = context.session ?? this.sessionClassifier.classify(generatedAt);
     const regime = this.regimeClassifier.classify(context, this.config);
-    const candidates = this.modules.map((module) =>
+    const botMode = context.botMode ?? "AUTO";
+    const recommendedBotMode = this.recommendBotMode(regime.regime);
+    const activeModules = this.modulesForMode(botMode);
+    const candidates = activeModules.map((module) =>
       module.evaluate(context, regime, session, this.config),
     );
     const selection = this.selectionService.select(candidates);
@@ -75,13 +80,22 @@ export class StrategyPipeline implements IStrategyEngine {
     const failed = ruleResults.filter((rule) => !rule.passed);
 
     const diagnostics: StrategyDiagnostics = {
-      accepted: failed.length === 0,
+      accepted: botMode !== "PAUSE" && failed.length === 0,
       rejectionCodes: failed.flatMap((result) => result.code ? [result.code] : []),
       warnings: [
         ...(selection.selected?.warnings ?? []),
-        ...regime.regime === "UNCERTAIN" ? ["Market regime remains uncertain."] : [],
+        `BOT_MODE_ACTIVE: ${botMode}.`,
+        `BOT_MODE_RECOMMENDED: ${recommendedBotMode} for market regime ${regime.regime}.`,
+        ...regime.regime === "UNCERTAIN" ? ["Market regime remains uncertain; PAUSE is recommended."] : [],
+        ...regime.regime === "REVERSAL_RISK" ? ["TRANSITION_RISK: reversal risk detected; both trading bots should remain paused."] : [],
         ...regime.regime === "RANGING"
-          ? ["SIDEWAY_CONFIRMED: Supply/Demand range detected; trend bot is paused and Range Mean Reversion bot is enabled."]
+          ? ["SIDEWAY_CONFIRMED: Supply/Demand range detected; SIDEWAY mode is recommended and Trend bot should remain paused."]
+          : [],
+        ...botMode === "PAUSE"
+          ? ["BOT_MODE_PAUSE: Strategy execution is disabled by operator."]
+          : [],
+        ...botMode !== "AUTO" && botMode !== "PAUSE" && botMode !== recommendedBotMode
+          ? [`BOT_MODE_MISMATCH: ${botMode} is selected while ${recommendedBotMode} is recommended; incompatible strategies remain ineligible.`]
           : [],
       ],
       notes: [
@@ -90,7 +104,7 @@ export class StrategyPipeline implements IStrategyEngine {
       ],
     };
 
-    const action = this.resolveAction(failed);
+    const action = botMode === "PAUSE" ? "WAIT" : this.resolveAction(failed);
     const plan = action === "EXECUTE" && selection.selected
       ? this.planService.create(context, selection.selected, regime, session, generatedAt, this.config)
       : null;
@@ -99,6 +113,8 @@ export class StrategyPipeline implements IStrategyEngine {
       action,
       plan,
       regime,
+      botMode,
+      recommendedBotMode,
       selection,
       rules: ruleResults,
       diagnostics,
@@ -112,6 +128,23 @@ export class StrategyPipeline implements IStrategyEngine {
     return failed.some((result) => result.actionOnFailure === "REJECT")
       ? "REJECT"
       : "WAIT";
+  }
+
+  private modulesForMode(botMode: BotMode): IStrategyModule[] {
+    if (botMode === "PAUSE") return [];
+    if (botMode === "TREND") {
+      return this.modules.filter((module) => module.id === "TREND_CONTINUATION");
+    }
+    if (botMode === "SIDEWAY") {
+      return this.modules.filter((module) => module.id === "RANGE_MEAN_REVERSION");
+    }
+    return this.modules;
+  }
+
+  private recommendBotMode(regime: MarketRegime): BotMode {
+    if (regime === "RANGING") return "SIDEWAY";
+    if (regime === "TRENDING" || regime === "BREAKOUT") return "TREND";
+    return "PAUSE";
   }
 
   private createDefaultModules(): IStrategyModule[] {
