@@ -19,6 +19,39 @@ export function filterWindow(rows, fromMs, toMs) {
   });
 }
 
+export function dedupeAutoDecisions(rows, duplicateWindowMs = 30_000) {
+  const sorted = rows
+    .filter((row) => row?.type === "AUTO_DECISION" && eventTimeMs(row) !== null)
+    .slice()
+    .sort((a, b) => eventTimeMs(a) - eventTimeMs(b));
+  const result = [];
+  let previousFingerprint = null;
+  let previousTime = null;
+
+  for (const row of sorted) {
+    const time = eventTimeMs(row);
+    const reasons = Array.isArray(row?.reasons) ? row.reasons.map(String).slice().sort() : [];
+    const fingerprint = JSON.stringify({
+      activeMode: row?.activeMode ?? null,
+      regime: row?.regime ?? null,
+      recommendedMode: row?.recommendedMode ?? null,
+      confidence: finiteNumber(row?.confidence),
+      lastCandleCloseTime: finiteNumber(row?.lastCandleCloseTime),
+      reasons,
+    });
+    const duplicate =
+      previousFingerprint === fingerprint &&
+      previousTime !== null &&
+      time - previousTime >= 0 &&
+      time - previousTime <= duplicateWindowMs;
+    if (duplicate) continue;
+    result.push(row);
+    previousFingerprint = fingerprint;
+    previousTime = time;
+  }
+  return result;
+}
+
 export function countByType(rows) {
   const counts = {};
   for (const row of rows) {
