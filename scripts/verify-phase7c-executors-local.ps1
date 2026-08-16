@@ -114,11 +114,14 @@ foreach ($name in @("supervisor", "trend", "sideway")) {
 $apiBase = $ControlApiUrl.TrimEnd('/')
 $mode = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 5
 $regime = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/live-regime?symbol=XAUUSD&count=320" -Method Get -TimeoutSec 10
+$autoLot = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/auto-lot-preview?stopDistance=5&riskPercent=0.25&maxLot=0.03" -Method Get -TimeoutSec 10
 Write-Host "PHASE7C_VERIFY_ACTIVE_MODE=$($mode.state.mode)"
 Write-Host "PHASE7C_VERIFY_REGIME=$($regime.regime)"
 Write-Host "PHASE7C_VERIFY_RECOMMENDED_MODE=$($regime.recommendedMode)"
 Write-Host "PHASE7C_VERIFY_REGIME_CONFIDENCE=$($regime.confidence)"
 Write-Host "PHASE7C_VERIFY_HAS_SUPPLY_DEMAND_RANGE=$($null -ne $regime.supplyDemandRange)"
+Write-Host "PHASE7C_VERIFY_AUTO_LOT_APPROVED=$($autoLot.preview.approved)"
+Write-Host "PHASE7C_VERIFY_AUTO_LOT_RECOMMENDED=$($autoLot.preview.recommendedLot)"
 
 $apiKey = Read-EnvValue "MT5_API_KEY"
 $bridgeHost = Read-EnvValue "MT5_BRIDGE_HOST"
@@ -138,6 +141,27 @@ Write-Host "PHASE7C_VERIFY_ACCOUNT_MODE=$($health.accountMode)"
 Write-Host "PHASE7C_VERIFY_TRADING_ENABLED=$($health.tradingEnabled)"
 Write-Host "PHASE7C_VERIFY_XAUUSD_POSITIONS=$($positions.Count)"
 if ($positions.Count -gt 1) { throw "Phase 7C requires at most one XAUUSD position; broker currently has $($positions.Count)." }
+
+if ($autoLot.safety.executionMutation -ne $false -or $autoLot.safety.phase7bFixedVolumeUnchanged -ne $true) {
+  throw "Phase 7C Auto Lot safety assertion failed."
+}
+if ([string]$autoLot.account.mode -ne "demo") {
+  throw "Phase 7C Auto Lot response is not tied to a DEMO account."
+}
+if ([long]$autoLot.account.login -ne [long]$health.accountLogin) {
+  throw "Phase 7C Auto Lot account login $($autoLot.account.login) does not match MT5 $($health.accountLogin)."
+}
+if ([string]$autoLot.broker.symbol -ne [string]$spec.brokerSymbol) {
+  throw "Phase 7C Auto Lot broker symbol $($autoLot.broker.symbol) does not match MT5 spec $($spec.brokerSymbol)."
+}
+$autoLotAgeMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$autoLot.generatedAt
+if ($autoLotAgeMs -lt -10000 -or $autoLotAgeMs -gt 30000) {
+  throw "Phase 7C Auto Lot snapshot is stale/invalid. ageMs=$autoLotAgeMs"
+}
+Write-Host "PHASE7C_VERIFY_AUTO_LOT_ACCOUNT_LOGIN=$($autoLot.account.login)"
+Write-Host "PHASE7C_VERIFY_AUTO_LOT_BROKER_SYMBOL=$($autoLot.broker.symbol)"
+Write-Host "PHASE7C_VERIFY_AUTO_LOT_AGE_MS=$autoLotAgeMs"
+Write-Host "PHASE7C_VERIFY_AUTO_LOT_SAFETY=PASS"
 
 $trendState = Read-StateJson $TrendStatePath "Trend"
 $sidewayState = Read-StateJson $SidewayStatePath "Sideway"
