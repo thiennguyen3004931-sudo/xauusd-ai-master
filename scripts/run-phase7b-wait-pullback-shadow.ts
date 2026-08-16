@@ -65,15 +65,22 @@ console.log(`PHASE7B_WAIT_PULLBACK_WAIT_MINUTES=${waitMinutes}`);
 console.log(`PHASE7B_WAIT_PULLBACK_STATE=${statePath}`);
 console.log(`PHASE7B_WAIT_PULLBACK_JOURNAL=${journalPath}`);
 
-await preflight();
+void main().catch((error) => {
+  console.error(`PHASE7B_WAIT_PULLBACK_FATAL=${errorMessage(error)}`);
+  process.exitCode = 1;
+});
 
-while (true) {
-  try {
-    await cycle();
-  } catch (error) {
-    journal("SHADOW_CYCLE_ERROR", { message: errorMessage(error) });
+async function main(): Promise<void> {
+  await preflight();
+
+  while (true) {
+    try {
+      await cycle();
+    } catch (error) {
+      journal("SHADOW_CYCLE_ERROR", { message: errorMessage(error) });
+    }
+    await sleep(intervalSeconds * 1000);
   }
-  await sleep(intervalSeconds * 1000);
 }
 
 async function preflight(): Promise<void> {
