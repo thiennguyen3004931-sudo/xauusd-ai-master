@@ -24,11 +24,13 @@ function replaceRequired(text, from, to, label) {
 }
 
 function run(command, args, label) {
-  const executable = process.platform === "win32" && command === "pnpm" ? "pnpm.cmd" : command;
-  const result = spawnSync(executable, args, {
+  // Node 24 on Windows can return EINVAL when spawnSync executes a .cmd file
+  // directly with shell:false. Let cmd.exe resolve pnpm only for that case.
+  const useWindowsShell = process.platform === "win32" && command === "pnpm";
+  const result = spawnSync(command, args, {
     cwd: root,
     stdio: "inherit",
-    shell: false,
+    shell: useWindowsShell,
   });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${label} failed: ${result.status}`);
