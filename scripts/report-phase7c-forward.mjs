@@ -4,6 +4,7 @@ import {
   blockedReasonCounts,
   buildEntryRows,
   countByType,
+  dedupeAutoDecisions,
   eventTimeMs,
   filterWindow,
   regimeDistribution,
@@ -38,13 +39,36 @@ if (String(health?.accountMode ?? "").toLowerCase() !== "demo") {
   throw new Error(`Phase7C forward report is DEMO-only; current accountMode=${health?.accountMode ?? "unknown"}.`);
 }
 
-const trendRows = filterWindow(readJsonl(trendPath), fromMs, toMs);
-const sidewayRows = filterWindow(readJsonl(sidewayPath), fromMs, toMs);
-const decisionRows = filterWindow(readJsonl(decisionPath), fromMs, toMs);
+const allTrendRows = readJsonl(trendPath);
+const allSidewayRows = readJsonl(sidewayPath);
+const allDecisionRows = readJsonl(decisionPath).filter((row) => row?.type === "AUTO_DECISION");
+const firstDecision = allDecisionRows
+  .filter((row) => eventTimeMs(row) !== null)
+  .slice()
+  .sort((a, b) => eventTimeMs(a) - eventTimeMs(b))[0] ?? null;
+const monitoringBaselineMs = firstDecision ? eventTimeMs(firstDecision) : null;
+const monitoringFromMs = monitoringBaselineMs === null ? null : Math.max(fromMs, monitoringBaselineMs);
+
+const rawTrendRows = filterWindow(allTrendRows, fromMs, toMs);
+const rawSidewayRows = filterWindow(allSidewayRows, fromMs, toMs);
+const rawDecisionRows = filterWindow(allDecisionRows, fromMs, toMs);
+const trendRows = monitoringFromMs === null ? [] : filterWindow(allTrendRows, monitoringFromMs, toMs);
+const sidewayRows = monitoringFromMs === null ? [] : filterWindow(allSidewayRows, monitoringFromMs, toMs);
+const decisionRows = monitoringFromMs === null
+  ? []
+  : dedupeAutoDecisions(filterWindow(allDecisionRows, monitoringFromMs, toMs));
+
 const deals = await bridgeGet(`/v1/history/deals?fromMs=${ownershipFromMs}&toMs=${toMs}&symbol=${encodeURIComponent(symbol)}`);
 if (!Array.isArray(deals)) throw new Error("MT5 deal history did not return an array.");
 
-const dealSummary = summarizeDeals(deals, trendMagic, sidewayMagic, { fromMs, toMs });
+const rawWindowDealSummary = summarizeDeals(deals, trendMagic, sidewayMagic, { fromMs, toMs });
+const monitoredDealSummary = monitoringBaselineMs === null
+  ? summarizeDeals([], trendMagic, sidewayMagic)
+  : summarizeDeals(deals, trendMagic, sidewayMagic, {
+      fromMs,
+      toMs,
+      positionOpenedAfterMs: monitoringBaselineMs,
+    });
 const entries = buildEntryRows(trendRows, sidewayRows, decisionRows);
 const trendEvents = countByType(trendRows);
 const sidewayEvents = countByType(sidewayRows);
@@ -59,7 +83,7 @@ const windowDeals = deals.filter((deal) => {
 });
 
 const report = {
-  version: 1,
+  version: 2,
   generatedAt: Date.now(),
   generatedAtIso: new Date().toISOString(),
   symbol,
@@ -75,6 +99,16 @@ const report = {
     toMs,
     toIso: new Date(toMs).toISOString(),
   },
+  monitoring: {
+    status: monitoringBaselineMs === null ? "NOT_STARTED" : "ACTIVE",
+    baselineMs: monitoringBaselineMs,
+    baselineIso: monitoringBaselineMs === null ? null : new Date(monitoringBaselineMs).toISOString(),
+    effectiveFromMs: monitoringFromMs,
+    effectiveFromIso: monitoringFromMs === null ? null : new Date(monitoringFromMs).toISOString(),
+    baselineSource: monitoringBaselineMs === null ? null : "FIRST_AUTO_DECISION",
+    rawDecisionRowsInWindow: rawDecisionRows.length,
+    deduplicatedDecisionRowsInMonitoredWindow: decisionRows.length,
+  },
   sourceFiles: {
     trendJournal: trendPath,
     sidewayJournal: sidewayPath,
@@ -83,6 +117,10 @@ const report = {
   magic: { TREND: trendMagic, SIDEWAY: sidewayMagic },
   entries,
   eventCounts: { TREND: trendEvents, SIDEWAY: sidewayEvents },
+  rawWindowEventCounts: {
+    TREND: countByType(rawTrendRows),
+    SIDEWAY: countByType(rawSidewayRows),
+  },
   blockedReasons: blocks,
   regimeDistribution: regimes,
   brokerDeals: {
@@ -91,7 +129,8 @@ const report = {
     ownershipFromIso: new Date(ownershipFromMs).toISOString(),
     historyDealsLoaded: deals.length,
     matchedWindowDeals: windowDeals.length,
-    summary: dealSummary,
+    summary: monitoredDealSummary,
+    rawWindowSummary: rawWindowDealSummary,
   },
   management: {
     TREND: {
@@ -119,17 +158,25 @@ const markdownPath = path.join(reportDir, `phase7c-forward-${stamp}.md`);
 fs.writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
 fs.writeFileSync(markdownPath, renderMarkdown(report), "utf8");
 
+const monitoredTotal = round(monitoredDealSummary.TREND.netPnl + monitoredDealSummary.SIDEWAY.netPnl, 4);
+const rawTotal = round(rawWindowDealSummary.TREND.netPnl + rawWindowDealSummary.SIDEWAY.netPnl, 4);
 console.log("PHASE7C_FORWARD_REPORT=PASS");
 console.log(`PHASE7C_REPORT_ACCOUNT_LOGIN=${report.account.login}`);
 console.log(`PHASE7C_REPORT_ACCOUNT_MODE=${report.account.mode}`);
 console.log(`PHASE7C_REPORT_FROM=${report.range.fromIso}`);
 console.log(`PHASE7C_REPORT_TO=${report.range.toIso}`);
-console.log(`PHASE7C_REPORT_AUTO_DECISIONS=${decisionRows.filter((row) => row?.type === "AUTO_DECISION").length}`);
+console.log(`PHASE7C_REPORT_MONITORING_STATUS=${report.monitoring.status}`);
+console.log(`PHASE7C_REPORT_MONITORING_BASELINE=${report.monitoring.baselineIso ?? "NONE"}`);
+console.log(`PHASE7C_REPORT_AUTO_DECISIONS_RAW=${report.monitoring.rawDecisionRowsInWindow}`);
+console.log(`PHASE7C_REPORT_AUTO_DECISIONS=${report.monitoring.deduplicatedDecisionRowsInMonitoredWindow}`);
 console.log(`PHASE7C_REPORT_TREND_ENTRIES=${report.management.TREND.entriesFilled}`);
 console.log(`PHASE7C_REPORT_SIDEWAY_ENTRIES=${report.management.SIDEWAY.entriesFilled}`);
-console.log(`PHASE7C_REPORT_TREND_NET_PNL=${dealSummary.TREND.netPnl}`);
-console.log(`PHASE7C_REPORT_SIDEWAY_NET_PNL=${dealSummary.SIDEWAY.netPnl}`);
-console.log(`PHASE7C_REPORT_TOTAL_NET_PNL=${round(dealSummary.TREND.netPnl + dealSummary.SIDEWAY.netPnl, 4)}`);
+console.log(`PHASE7C_REPORT_TREND_NET_PNL=${monitoredDealSummary.TREND.netPnl}`);
+console.log(`PHASE7C_REPORT_SIDEWAY_NET_PNL=${monitoredDealSummary.SIDEWAY.netPnl}`);
+console.log(`PHASE7C_REPORT_TOTAL_NET_PNL=${monitoredTotal}`);
+console.log(`PHASE7C_REPORT_RAW_WINDOW_TREND_NET_PNL=${rawWindowDealSummary.TREND.netPnl}`);
+console.log(`PHASE7C_REPORT_RAW_WINDOW_SIDEWAY_NET_PNL=${rawWindowDealSummary.SIDEWAY.netPnl}`);
+console.log(`PHASE7C_REPORT_RAW_WINDOW_TOTAL_NET_PNL=${rawTotal}`);
 console.log(`PHASE7C_REPORT_JSON=${jsonPath}`);
 console.log(`PHASE7C_REPORT_MARKDOWN=${markdownPath}`);
 
@@ -167,32 +214,49 @@ async function bridgeGet(endpoint) {
 }
 
 function renderMarkdown(value) {
-  const trend = value.brokerDeals.summary.TREND;
-  const sideway = value.brokerDeals.summary.SIDEWAY;
-  const total = round(trend.netPnl + sideway.netPnl, 4);
+  const monitoredTrend = value.brokerDeals.summary.TREND;
+  const monitoredSideway = value.brokerDeals.summary.SIDEWAY;
+  const rawTrend = value.brokerDeals.rawWindowSummary.TREND;
+  const rawSideway = value.brokerDeals.rawWindowSummary.SIDEWAY;
+  const monitoredTotal = round(monitoredTrend.netPnl + monitoredSideway.netPnl, 4);
+  const rawTotal = round(rawTrend.netPnl + rawSideway.netPnl, 4);
   const lines = [
     "# Phase7C Forward DEMO Report",
     "",
     `- Generated: ${value.generatedAtIso}`,
-    `- Window: ${value.range.fromIso} → ${value.range.toIso}`,
+    `- Report window: ${value.range.fromIso} → ${value.range.toIso}`,
+    `- Monitoring baseline: ${value.monitoring.baselineIso ?? "not started"}`,
     `- Symbol: ${value.symbol}`,
     `- Account: ${value.account.login ?? "n/a"} · ${value.account.mode} · ${value.account.server ?? "n/a"}`,
-    `- Deal ownership lookback: ${value.brokerDeals.ownershipLookbackDays} days (used only to resolve position ownership)`,
+    `- AUTO decisions: ${value.monitoring.deduplicatedDecisionRowsInMonitoredWindow} deduplicated / ${value.monitoring.rawDecisionRowsInWindow} raw in report window`,
+    `- Deal ownership lookback: ${value.brokerDeals.ownershipLookbackDays} days (ownership resolution only)`,
     "",
-    "## P/L from MT5 deal history",
+    "## Phase7C monitored P/L",
     "",
-    "| Strategy | Deals | Entry deals | Exit deals | Net P/L |",
+    "Only positions opened at or after the monitoring baseline are eligible for this forward-performance table.",
+    "",
+    "| Strategy | Deals in report window | Entry deals | Exit deals | Net P/L |",
     "|---|---:|---:|---:|---:|",
-    `| TREND | ${trend.deals} | ${trend.entryDeals} | ${trend.exitDeals} | ${trend.netPnl} |`,
-    `| SIDEWAY | ${sideway.deals} | ${sideway.entryDeals} | ${sideway.exitDeals} | ${sideway.netPnl} |`,
-    `| TOTAL | ${trend.deals + sideway.deals} | ${trend.entryDeals + sideway.entryDeals} | ${trend.exitDeals + sideway.exitDeals} | ${total} |`,
+    `| TREND | ${monitoredTrend.deals} | ${monitoredTrend.entryDeals} | ${monitoredTrend.exitDeals} | ${monitoredTrend.netPnl} |`,
+    `| SIDEWAY | ${monitoredSideway.deals} | ${monitoredSideway.entryDeals} | ${monitoredSideway.exitDeals} | ${monitoredSideway.netPnl} |`,
+    `| TOTAL | ${monitoredTrend.deals + monitoredSideway.deals} | ${monitoredTrend.entryDeals + monitoredSideway.entryDeals} | ${monitoredTrend.exitDeals + monitoredSideway.exitDeals} | ${monitoredTotal} |`,
     "",
-    "## Management",
+    "## Raw broker-window P/L (diagnostic, not Phase7C forward performance)",
+    "",
+    "This table may include legacy trades opened before Phase7C monitoring began.",
+    "",
+    "| Strategy | Deals | Net P/L |",
+    "|---|---:|---:|",
+    `| TREND | ${rawTrend.deals} | ${rawTrend.netPnl} |`,
+    `| SIDEWAY | ${rawSideway.deals} | ${rawSideway.netPnl} |`,
+    `| TOTAL | ${rawTrend.deals + rawSideway.deals} | ${rawTotal} |`,
+    "",
+    "## Management since monitoring baseline",
     "",
     `- Trend entries: ${value.management.TREND.entriesFilled}; BE: ${value.management.TREND.breakEvenApplied}; partial +10: ${value.management.TREND.partialsFilled}; structural tighten: ${value.management.TREND.structuralStopTightens}.`,
     `- Sideway entries: ${value.management.SIDEWAY.entriesFilled}; TP1 partial: ${value.management.SIDEWAY.tp1PartialsFilled}; BE: ${value.management.SIDEWAY.breakEvenApplied}; regime invalidation: ${value.management.SIDEWAY.regimeInvalidations}.`,
     "",
-    "## Regime observations",
+    "## Regime observations (deduplicated)",
     "",
     ...objectBullets(value.regimeDistribution.regime),
     "",
@@ -209,7 +273,7 @@ function renderMarkdown(value) {
   ];
 
   if (value.entries.length === 0) {
-    lines.push("No filled entries in this report window.");
+    lines.push("No monitored filled entries in this report window.");
   } else {
     lines.push("| Time | Strategy | Side | Volume | Entry | Regime | Recommended | Confidence |", "|---|---|---|---:|---:|---|---|---:|");
     for (const entry of value.entries) {
@@ -217,7 +281,7 @@ function renderMarkdown(value) {
     }
   }
 
-  lines.push("", "P/L is sourced from the MT5 broker deal-history endpoint. Position ownership is resolved from the opening deal before window filtering, so bridge close magic cannot reassign Sideway P/L to Trend. Journal-derived management counts are observational and are not used to fabricate P/L.", "");
+  lines.push("", "Monitored P/L is sourced from MT5 deal history but excludes positions opened before the first AUTO_DECISION baseline. Raw broker-window P/L is retained only for reconciliation. Position ownership is resolved from opening deals before deal-window filtering, so bridge close magic cannot reassign Sideway P/L to Trend. AUTO decision telemetry is deduplicated for analytics while the raw JSONL journal remains unchanged for audit.", "");
   return lines.join("\n");
 }
 
