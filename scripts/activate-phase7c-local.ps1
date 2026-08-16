@@ -30,10 +30,15 @@ function Stop-TaskSafe([string]$Name) {
 }
 
 function Start-TaskSafe([string]$Name) {
-  if ($null -eq (Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue)) {
+  $task = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+  if ($null -eq $task) {
     throw "Scheduled Task is missing: $Name"
   }
-  Start-ScheduledTask -TaskName $Name
+  if ($task.State -eq "Disabled") {
+    Enable-ScheduledTask -TaskName $Name -ErrorAction Stop | Out-Null
+    Write-Host "PHASE7C_ACTIVATE_TASK_ENABLED=$Name"
+  }
+  Start-ScheduledTask -TaskName $Name -ErrorAction Stop
 }
 
 function Resolve-ExistingTaskName([string[]]$Candidates, [string]$Role) {
