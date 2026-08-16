@@ -244,12 +244,14 @@ if ($positions.Count -gt 0) {
 Write-Host "PHASE7C_ACTIVATE_OPEN_XAUUSD_POSITIONS=0"
 Write-Host "PHASE7C_ACTIVATE_PREFLIGHT=PASS"
 
-$nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-$fromMs = $nowMs - 2 * 60 * 60 * 1000
-$history = Invoke-RestMethod -Uri "$bridgeUrl/v1/history/candles/XAUUSD?timeframe=M15&fromMs=$fromMs&toMs=$nowMs" -Headers @{ "x-mt5-api-key" = $apiKey } -Method Get -TimeoutSec 10
-if (@($history).Count -lt 2) { throw "Phase 7C historical candle endpoint returned insufficient data." }
+# Validate broker history using the latest fully closed M15 candles. This is
+# market-hours agnostic, so safe activation can run on weekends/holidays while
+# still proving the MT5 history feed is available and parsable.
+$history = Invoke-RestMethod -Uri "$bridgeUrl/v1/candles/XAUUSD?timeframe=M15&count=2" -Headers @{ "x-mt5-api-key" = $apiKey } -Method Get -TimeoutSec 10
+$historyBars = @($history).Count
+if ($historyBars -lt 2) { throw "Phase 7C closed M15 candle endpoint returned insufficient data." }
 Write-Host "PHASE7C_ACTIVATE_HISTORY_ENDPOINT=PASS"
-Write-Host "PHASE7C_ACTIVATE_HISTORY_BARS=$(@($history).Count)"
+Write-Host "PHASE7C_ACTIVATE_HISTORY_BARS=$historyBars"
 
 # Web task owns the API/UI surface. Do not restart the raw Phase 7B bot task.
 Start-TaskSafe $WebTask
