@@ -15,8 +15,6 @@ $WorkDir = (Resolve-Path $WorkDir).Path
 $DemoDir = Join-Path $WorkDir "phase7b-demo-forward"
 $BridgeEnv = Join-Path $ProjectRoot "packages\mt5-broker\bridge\.env.phase7b-demo"
 $LegacyBotTask = "XAUUSD-Phase7B-Bot"
-$BridgeTask = "XAUUSD-Phase7B-Bridge"
-$WebTask = "XAUUSD-Phase7B-Web"
 $ExecutorSupervisor = Join-Path $PSScriptRoot "run-phase7c-executors-local.ps1"
 $ExecutorStopper = Join-Path $PSScriptRoot "stop-phase7c-executors-local.ps1"
 $ExecutorRuntime = Join-Path $WorkDir "phase7c-executors"
@@ -36,6 +34,16 @@ function Start-TaskSafe([string]$Name) {
     throw "Scheduled Task is missing: $Name"
   }
   Start-ScheduledTask -TaskName $Name
+}
+
+function Resolve-ExistingTaskName([string[]]$Candidates, [string]$Role) {
+  foreach ($candidate in $Candidates) {
+    if ($null -ne (Get-ScheduledTask -TaskName $candidate -ErrorAction SilentlyContinue)) {
+      Write-Host "PHASE7C_ACTIVATE_${Role}_TASK=$candidate"
+      return $candidate
+    }
+  }
+  throw "Scheduled Task for $Role is missing. Tried: $($Candidates -join ', ')"
 }
 
 function Stop-PortOwner([int]$Port) {
@@ -65,6 +73,33 @@ function Read-EnvValue([string]$Name) {
     $value = $value.Substring(1, $value.Length - 2)
   }
   return $value
+}
+
+function Assert-LocalIdleState {
+  $statePath = Join-Path $DemoDir "phase7b-demo-state.json"
+  if (-not (Test-Path $statePath)) {
+    Write-Host "PHASE7C_ACTIVATE_LOCAL_STATE=NOT_FOUND"
+    return
+  }
+
+  try {
+    $localState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+  } catch {
+    throw "Could not parse Phase 7B local state at $statePath. $($_.Exception.Message)"
+  }
+
+  if ($null -ne $localState.managed) {
+    throw "Phase 7C activation blocked: Phase 7B local state still contains a managed position. Do not delete the state file; reconcile the broker position first."
+  }
+
+  if (
+    $localState.PSObject.Properties.Name -contains "pendingPullback" -and
+    $null -ne $localState.pendingPullback
+  ) {
+    throw "Phase 7C activation blocked: Phase 7B local state still contains a pendingPullback setup. Do not delete the state file; let it resolve or review it first."
+  }
+
+  Write-Host "PHASE7C_ACTIVATE_LOCAL_STATE=IDLE"
 }
 
 function Start-Phase7CExecutors {
@@ -109,9 +144,22 @@ if ([string]::IsNullOrWhiteSpace($apiKey) -or $apiKey.Length -lt 16) {
   throw "MT5_API_KEY is missing/invalid in $BridgeEnv"
 }
 
+$BridgeTask = Resolve-ExistingTaskName @("XAUUSD-Phase7B-Bridge", "XAUUSD-MT5-Bridge") "BRIDGE"
+$WebTask = Resolve-ExistingTaskName @("XAUUSD-Phase7B-Web") "WEB"
+
+# Freeze every entry-capable executor before validating state. This makes a
+# cold-start preflight safe even when the Phase 7C API is currently offline.
+Write-Host "PHASE7C_ACTIVATE_ENTRY_FREEZE=START"
+Stop-TaskSafe $LegacyBotTask
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ExecutorStopper -WorkDir $WorkDir
+if ($LASTEXITCODE -ne 0) { throw "Could not stop existing Phase 7C executors safely." }
+Write-Host "PHASE7C_ACTIVATE_ENTRY_FREEZE=PASS"
+
 Write-Host "PHASE7C_ACTIVATE_PREFLIGHT=START"
+$preflightSource = "API_PLUS_LOCAL_STATE"
 try {
   $current = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7b-demo" -Method Get -TimeoutSec 5
+  Write-Host "PHASE7C_ACTIVATE_PREFLIGHT_API=AVAILABLE"
   Write-Host "PHASE7C_ACTIVATE_CURRENT_BOT_STATUS=$($current.botStatus)"
   if ($current.botStatus -ne "WAITING_SIGNAL") {
     throw "Phase 7C activation requires botStatus=WAITING_SIGNAL. Current=$($current.botStatus)"
@@ -120,10 +168,16 @@ try {
     throw "Managed XAUUSD position is present. Activation is blocked until the trade is closed."
   }
 } catch {
-  if ($_.Exception.Message -like "*requires botStatus*" -or $_.Exception.Message -like "*Managed XAUUSD*") { throw }
-  throw "Could not validate Phase 7B idle state from $apiUrl. $($_.Exception.Message)"
+  $message = $_.Exception.Message
+  if ($message -like "*requires botStatus*" -or $message -like "*Managed XAUUSD*") { throw }
+  $preflightSource = "COLD_START_LOCAL_STATE_PLUS_BRIDGE"
+  Write-Host "PHASE7C_ACTIVATE_PREFLIGHT_API=UNAVAILABLE_COLD_START"
+  Write-Host "PHASE7C_ACTIVATE_PREFLIGHT_API_DETAIL=$message"
 }
-Write-Host "PHASE7C_ACTIVATE_PREFLIGHT=PASS"
+
+Assert-LocalIdleState
+Write-Host "PHASE7C_ACTIVATE_PREFLIGHT_SOURCE=$preflightSource"
+Write-Host "PHASE7C_ACTIVATE_PREFLIGHT_LOCAL=PASS"
 
 if (-not $SkipBuild) {
   Push-Location $ProjectRoot
@@ -146,6 +200,7 @@ Write-Host "PHASE7C_ACTIVATE_RESTART=START"
 # Raw Phase 7B executor must never run beside the Phase 7C gated executors.
 Stop-TaskSafe $LegacyBotTask
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ExecutorStopper -WorkDir $WorkDir
+if ($LASTEXITCODE -ne 0) { throw "Could not stop existing Phase 7C executors safely during restart." }
 Stop-TaskSafe $WebTask
 Stop-TaskSafe $BridgeTask
 Stop-BotProcess
@@ -168,10 +223,21 @@ while ((Get-Date) -lt $bridgeDeadline) {
   } catch {}
   Start-Sleep -Seconds 2
 }
-if ($null -eq $health) { throw "Bridge did not become healthy within 60 seconds." }
+if ($null -eq $health) { throw "Bridge did not become healthy on DEMO within 60 seconds." }
 Write-Host "PHASE7C_ACTIVATE_BRIDGE=PASS"
 Write-Host "PHASE7C_ACTIVATE_ACCOUNT_LOGIN=$($health.accountLogin)"
+Write-Host "PHASE7C_ACTIVATE_ACCOUNT_MODE=$($health.accountMode)"
 Write-Host "PHASE7C_ACTIVATE_SERVER=$($health.server)"
+
+# Broker truth is authoritative for clean activation. Always check positions,
+# even when the API warm-start preflight was available.
+$positions = @(Invoke-RestMethod -Uri "$bridgeUrl/v1/positions?symbol=XAUUSD" -Headers @{ "x-mt5-api-key" = $apiKey } -Method Get -TimeoutSec 10)
+if ($positions.Count -gt 0) {
+  $tickets = ($positions | ForEach-Object { $_.ticket }) -join ","
+  throw "Phase 7C activation blocked: open XAUUSD broker position(s) detected. Count=$($positions.Count), tickets=$tickets. Do not delete local state; reconcile/close the position before clean activation."
+}
+Write-Host "PHASE7C_ACTIVATE_OPEN_XAUUSD_POSITIONS=0"
+Write-Host "PHASE7C_ACTIVATE_PREFLIGHT=PASS"
 
 $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 $fromMs = $nowMs - 2 * 60 * 60 * 1000
@@ -206,7 +272,7 @@ while ((Get-Date) -lt $webDeadline) {
 }
 
 if ($null -eq $demo -or $null -eq $risk -or $null -eq $mode -or -not $uiReady) {
-  throw "Phase 7C API/UI self-test failed after restart."
+  throw "Phase 7C API/UI self-test failed after restart. Check the Web/API scheduled task and its logs."
 }
 if ($risk.safety.executionMutation -ne $false -or $risk.safety.phase7bFixedVolumeUnchanged -ne $true) {
   throw "Phase 7C Auto Lot safety assertion failed."
