@@ -1,5 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 
 const token = requiredEnv("ZIQ_TELEGRAM_BOT_TOKEN");
 const chatId = requiredEnv("ZIQ_TELEGRAM_CHAT_ID");
@@ -11,20 +11,46 @@ const heartbeatMinutes = clampInt(process.env.ZIQ_PHASE7C_REGIME_HEARTBEAT_MINUT
 const stateFile = resolve(
   process.env.ZIQ_PHASE7C_REGIME_STATE_FILE?.trim() || ".runtime/phase7c-regime-notifier-state.json",
 );
+const decisionJournalFile = resolve(
+  process.env.ZIQ_PHASE7C_AUTO_JOURNAL_FILE?.trim() || join(dirname(stateFile), "auto-decisions.jsonl"),
+);
+const decisionStateFile = resolve(
+  process.env.ZIQ_PHASE7C_AUTO_JOURNAL_STATE_FILE?.trim() || join(dirname(stateFile), "auto-journal-state.json"),
+);
 const telegramBase = `https://api.telegram.org/bot${token}`;
 
-let state = await loadState();
+let state = await loadJsonState(stateFile);
+let decisionState = await loadJsonState(decisionStateFile);
 console.log("PHASE7C_REGIME_NOTIFIER=RUNNING");
 console.log(`PHASE7C_REGIME_API=${apiBase}`);
 console.log(`PHASE7C_REGIME_SYMBOL=${symbol}`);
 console.log(`PHASE7C_REGIME_INTERVAL_MS=${intervalMs}`);
 console.log(`PHASE7C_REGIME_HEARTBEAT_MINUTES=${heartbeatMinutes}`);
+console.log(`PHASE7C_AUTO_JOURNAL_FILE=${decisionJournalFile}`);
 console.log("PHASE7C_MT5_ORDER_PERMISSION=NONE");
 
 while (true) {
   const startedAt = Date.now();
   try {
     const snapshot = await fetchRegime();
+
+    const journalReasons = decisionJournalReasons(snapshot, decisionState);
+    if (journalReasons.length > 0) {
+      await appendDecisionJournal(snapshot, journalReasons, startedAt);
+      decisionState = {
+        regime: snapshot.regime,
+        recommendedMode: snapshot.recommendedMode,
+        activeMode: snapshot.activeMode,
+        confidence: snapshot.confidence,
+        lastCandleCloseTime: snapshot.lastCandleCloseTime,
+        updatedAt: startedAt,
+      };
+      await saveJsonState(decisionStateFile, decisionState);
+      console.log(
+        `PHASE7C_AUTO_DECISION=${snapshot.regime}|RECOMMENDED=${snapshot.recommendedMode}|ACTIVE=${snapshot.activeMode}|CONFIDENCE=${snapshot.confidence}|REASONS=${journalReasons.join(",")}`,
+      );
+    }
+
     const reason = notificationReason(snapshot, state, startedAt);
     if (reason) {
       await sendTelegram(snapshot, reason);
@@ -35,7 +61,7 @@ while (true) {
         lastCandleCloseTime: snapshot.lastCandleCloseTime,
         lastNotifiedAt: startedAt,
       };
-      await saveState(state);
+      await saveJsonState(stateFile, state);
       console.log(
         `PHASE7C_REGIME_NOTIFICATION=${snapshot.regime}|RECOMMENDED=${snapshot.recommendedMode}|ACTIVE=${snapshot.activeMode}|REASON=${reason}`,
       );
@@ -47,7 +73,7 @@ while (true) {
         activeMode: snapshot.activeMode,
         lastCandleCloseTime: snapshot.lastCandleCloseTime,
       };
-      await saveState(state);
+      await saveJsonState(stateFile, state);
     }
   } catch (error) {
     console.error(`PHASE7C_REGIME_NOTIFIER_ERROR=${errorMessage(error)}`);
@@ -55,6 +81,19 @@ while (true) {
 
   const elapsed = Date.now() - startedAt;
   await sleep(Math.max(1000, intervalMs - elapsed));
+}
+
+function decisionJournalReasons(snapshot, previous) {
+  const reasons = [];
+  if (!previous.regime) {
+    reasons.push("INITIAL");
+    return reasons;
+  }
+  if (snapshot.regime !== previous.regime) reasons.push("REGIME_CHANGED");
+  if (snapshot.recommendedMode !== previous.recommendedMode) reasons.push("RECOMMENDATION_CHANGED");
+  if (snapshot.activeMode !== previous.activeMode) reasons.push("ACTIVE_MODE_CHANGED");
+  if (Number(snapshot.lastCandleCloseTime) !== Number(previous.lastCandleCloseTime)) reasons.push("M15_CLOSED");
+  return reasons;
 }
 
 function notificationReason(snapshot, previous, now) {
@@ -73,6 +112,27 @@ function notificationReason(snapshot, previous, now) {
   }
 
   return "";
+}
+
+async function appendDecisionJournal(snapshot, reasons, now) {
+  await mkdir(dirname(decisionJournalFile), { recursive: true });
+  const row = {
+    timestamp: now,
+    timestampIso: new Date(now).toISOString(),
+    type: "AUTO_DECISION",
+    symbol,
+    activeMode: String(snapshot.activeMode),
+    regime: String(snapshot.regime),
+    recommendedMode: String(snapshot.recommendedMode),
+    confidence: finiteNumber(snapshot.confidence),
+    modeMatchesRecommendation: Boolean(snapshot.modeMatchesRecommendation),
+    lastCandleCloseTime: finiteNumber(snapshot.lastCandleCloseTime),
+    metrics: snapshot.metrics ?? null,
+    supplyDemandRange: snapshot.supplyDemandRange ?? null,
+    reasons,
+    source: "REGIME_NOTIFIER",
+  };
+  await appendFile(decisionJournalFile, `${JSON.stringify(row)}\n`, "utf8");
 }
 
 async function fetchRegime() {
@@ -207,20 +267,20 @@ function regimeIcon(regime) {
   return "⚪";
 }
 
-async function loadState() {
+async function loadJsonState(file) {
   try {
-    const raw = await readFile(stateFile, "utf8");
+    const raw = await readFile(file, "utf8");
     return JSON.parse(raw);
   } catch {
     return {};
   }
 }
 
-async function saveState(nextState) {
-  await mkdir(dirname(stateFile), { recursive: true });
-  const temporary = `${stateFile}.${process.pid}.tmp`;
+async function saveJsonState(file, nextState) {
+  await mkdir(dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.tmp`;
   await writeFile(temporary, `${JSON.stringify(nextState, null, 2)}\n`, "utf8");
-  await rename(temporary, stateFile);
+  await rename(temporary, file);
 }
 
 function firstNumber(object, keys) {
@@ -229,6 +289,11 @@ function firstNumber(object, keys) {
     if (Number.isFinite(value)) return value;
   }
   return null;
+}
+
+function finiteNumber(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function percentage(value) {
