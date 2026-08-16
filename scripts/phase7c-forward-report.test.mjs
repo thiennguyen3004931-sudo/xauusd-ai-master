@@ -98,6 +98,24 @@ test("summarizeDeals monitored mode excludes positions opened before baseline", 
   assert.equal(summary.TREND.netPnl, 4.9);
 });
 
+test("summarizeDeals can count today's exit for a position opened after global monitoring baseline", () => {
+  const deals = [
+    { isTradingDeal: true, timestamp: 120, positionId: "VALID", magic: 270713, comment: "phase7b-demo", entry: "IN", volume: 0.03, profit: 0, commission: -0.1, swap: 0, fee: 0, netPnl: -0.1 },
+    { isTradingDeal: true, timestamp: 260, positionId: "VALID", magic: 270713, comment: "p7b-exit", entry: "OUT", volume: 0.03, profit: 7, commission: 0, swap: 0, fee: 0, netPnl: 7 },
+    { isTradingDeal: true, timestamp: 80, positionId: "LEGACY", magic: 270713, comment: "phase7b-demo", entry: "IN", volume: 0.03, profit: 0, commission: -0.1, swap: 0, fee: 0, netPnl: -0.1 },
+    { isTradingDeal: true, timestamp: 270, positionId: "LEGACY", magic: 270713, comment: "p7b-exit", entry: "OUT", volume: 0.03, profit: -9, commission: 0, swap: 0, fee: 0, netPnl: -9 },
+  ];
+  const summary = summarizeDeals(deals, 270713, 270714, {
+    fromMs: 200,
+    toMs: 300,
+    positionOpenedAfterMs: 100,
+  });
+  assert.equal(summary.TREND.deals, 1);
+  assert.equal(summary.TREND.entryDeals, 0);
+  assert.equal(summary.TREND.exitDeals, 1);
+  assert.equal(summary.TREND.netPnl, 7);
+});
+
 test("blockedReasonCounts and regimeDistribution summarize telemetry", () => {
   assert.deepEqual(blockedReasonCounts([{ type: "ENTRY_MODE_BLOCK" }, { type: "ENTRY_MODE_BLOCK" }, { type: "ENTRY_FILLED" }]), { ENTRY_MODE_BLOCK: 2 });
   const distribution = regimeDistribution([
