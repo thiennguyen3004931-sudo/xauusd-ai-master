@@ -21,6 +21,7 @@ if (Test-Path $TelegramEnvFile) { $TelegramEnvFile = (Resolve-Path $TelegramEnvF
 $RuntimeDir = Join-Path $WorkDir "phase7c-executors"
 $TrendStatePath = Join-Path $WorkDir "phase7b-demo-forward\phase7b-demo-state.json"
 $SidewayStatePath = Join-Path $WorkDir "phase7c-sideway-forward\phase7c-sideway-state.json"
+$TelegramModeStatusPath = Join-Path $RuntimeDir "telegram-mode-status.json"
 
 function Read-EnvValueFromFile([string]$Path, [string]$Name) {
   if (-not (Test-Path $Path)) { return "" }
@@ -130,8 +131,34 @@ foreach ($name in @("supervisor", "trend", "sideway", "telegram-mode", "regime-n
   Write-Host "PHASE7C_VERIFY_${label}_PID=$($status.pid)"
   Write-Host "PHASE7C_VERIFY_${label}_ALIVE=$($status.alive)"
 }
+
+$telegramModeReady = $false
+$telegramModeStatus = "MISSING"
+$telegramModeHeartbeatAgeMs = $null
+if (Test-Path $TelegramModeStatusPath) {
+  try {
+    $telegramRuntime = Get-Content -LiteralPath $TelegramModeStatusPath -Raw | ConvertFrom-Json
+    $telegramModeStatus = [string]$telegramRuntime.status
+    if ($null -ne $telegramRuntime.lastTelegramSuccessAt) {
+      $telegramModeHeartbeatAgeMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$telegramRuntime.lastTelegramSuccessAt
+    }
+    $telegramModeReady = [bool]$telegramRuntime.ready -and
+      $null -ne $telegramModeHeartbeatAgeMs -and
+      $telegramModeHeartbeatAgeMs -ge -10000 -and
+      $telegramModeHeartbeatAgeMs -le 60000
+  } catch {
+    $telegramModeStatus = "INVALID_STATUS_FILE"
+  }
+}
+Write-Host "PHASE7C_VERIFY_TELEGRAM_MODE_READY=$telegramModeReady"
+Write-Host "PHASE7C_VERIFY_TELEGRAM_MODE_RUNTIME_STATUS=$telegramModeStatus"
+Write-Host "PHASE7C_VERIFY_TELEGRAM_MODE_HEARTBEAT_AGE_MS=$telegramModeHeartbeatAgeMs"
+
 if ($RequireTelegram -and (-not $pidStatuses["telegram-mode"].alive -or -not $pidStatuses["regime-notifier"].alive)) {
   throw "Telegram verification requires both telegram-mode and regime-notifier processes to be alive."
+}
+if ($RequireTelegram -and -not $telegramModeReady) {
+  throw "Telegram mode controller process is alive but not ready/fresh. Check phase7c-executors\telegram-mode.err.log and telegram-mode-status.json."
 }
 
 $apiBase = $ControlApiUrl.TrimEnd('/')
@@ -242,7 +269,7 @@ $lockPath = Join-Path $RuntimeDir "phase7c-execution.lock"
 Write-Host "PHASE7C_VERIFY_EXECUTION_LOCK_PRESENT=$(Test-Path $lockPath)"
 Write-Host "PHASE7C_VERIFY_OWNERSHIP=PASS"
 if ($telegramConfigured) {
-  $telegramStatus = if ($pidStatuses["telegram-mode"].alive -and $pidStatuses["regime-notifier"].alive) { "PASS" } else { "DEGRADED_NON_FATAL" }
+  $telegramStatus = if ($pidStatuses["telegram-mode"].alive -and $pidStatuses["regime-notifier"].alive -and $telegramModeReady) { "PASS" } else { "DEGRADED_NON_FATAL" }
   Write-Host "PHASE7C_VERIFY_TELEGRAM_STATUS=$telegramStatus"
 } else {
   Write-Host "PHASE7C_VERIFY_TELEGRAM_STATUS=NOT_CONFIGURED"
