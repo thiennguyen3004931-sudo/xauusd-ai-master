@@ -178,6 +178,116 @@ export function oneThirdPartialVolume(initialVolume, currentVolume, minVolume, s
   return desired;
 }
 
+export function matchPendingEntryPosition(pending, positions, spec, now = Date.now()) {
+  if (!pending || !Array.isArray(positions) || positions.length !== 1) {
+    return { matched: false, reason: "PENDING_REQUIRES_EXACTLY_ONE_POSITION", position: null };
+  }
+
+  const position = positions[0];
+  const step = Number(spec?.volumeStep);
+  const point = Number(spec?.point);
+  if (!(step > 0) || !(point > 0)) {
+    return { matched: false, reason: "PENDING_BROKER_SPEC_INVALID", position: null };
+  }
+
+  const expectedSide = pending.side === "BUY" ? "LONG" : pending.side === "SELL" ? "SHORT" : null;
+  if (!expectedSide || position?.side !== expectedSide) {
+    return { matched: false, reason: "PENDING_SIDE_MISMATCH", position: null };
+  }
+
+  const volumeTolerance = step / 2 + 1e-9;
+  if (Math.abs(Number(position.volume) - Number(pending.volume)) > volumeTolerance) {
+    return { matched: false, reason: "PENDING_VOLUME_MISMATCH", position: null };
+  }
+
+  const priceTolerance = Math.max(point * 2, 1e-6);
+  if (Math.abs(Number(position.stopLoss) - Number(pending.stopLoss)) > priceTolerance) {
+    return { matched: false, reason: "PENDING_STOP_LOSS_MISMATCH", position: null };
+  }
+  if (Math.abs(Number(position.takeProfit) - Number(pending.tp2)) > priceTolerance) {
+    return { matched: false, reason: "PENDING_TAKE_PROFIT_MISMATCH", position: null };
+  }
+
+  const createdAt = Number(pending.createdAt);
+  const openedAt = Number(position.openedAt);
+  if (!Number.isFinite(createdAt) || !Number.isFinite(openedAt)) {
+    return { matched: false, reason: "PENDING_TIMESTAMP_INVALID", position: null };
+  }
+  if (openedAt < createdAt - 120_000 || openedAt > Number(now) + 10_000) {
+    return { matched: false, reason: "PENDING_OPEN_TIME_MISMATCH", position: null };
+  }
+
+  return { matched: true, reason: "PENDING_POSITION_MATCHED", position };
+}
+
+export function reconcileManagedBrokerState(managed, position, spec) {
+  if (!managed || !position) {
+    return { accepted: false, reason: "MANAGED_OR_POSITION_MISSING", managed, events: [] };
+  }
+
+  const step = Number(spec?.volumeStep);
+  const minVolume = Number(spec?.minVolume);
+  const point = Number(spec?.point);
+  if (!(step > 0) || !(minVolume > 0) || !(point > 0)) {
+    return { accepted: false, reason: "BROKER_SPEC_INVALID", managed, events: [] };
+  }
+
+  const next = { ...managed };
+  const events = [];
+  const expectedSide = next.side === "BUY" ? "LONG" : next.side === "SELL" ? "SHORT" : null;
+  if (!expectedSide || position.side !== expectedSide) {
+    return { accepted: false, reason: "MANAGED_SIDE_MISMATCH", managed: next, events };
+  }
+
+  const actualVolume = Number(position.volume);
+  const expectedVolume = Number(next.expectedRemainingVolume);
+  const volumeTolerance = step / 2 + 1e-9;
+  if (Math.abs(actualVolume - expectedVolume) > volumeTolerance) {
+    if (!next.partialApplied && actualVolume < expectedVolume) {
+      const partialVolume = oneThirdPartialVolume(
+        Number(next.initialVolume),
+        expectedVolume,
+        minVolume,
+        step,
+      );
+      const expectedAfterPartial = normalizeVolume(expectedVolume - partialVolume, step);
+      if (partialVolume > 0 && Math.abs(actualVolume - expectedAfterPartial) <= volumeTolerance) {
+        next.partialApplied = true;
+        next.expectedRemainingVolume = actualVolume;
+        events.push({ type: "TP1_PARTIAL_RECOVERED_FROM_BROKER_VOLUME", actualVolume, partialVolume });
+      } else {
+        return {
+          accepted: false,
+          reason: "MANAGED_VOLUME_MISMATCH",
+          managed: next,
+          events,
+          expectedVolume,
+          actualVolume,
+        };
+      }
+    } else {
+      return {
+        accepted: false,
+        reason: "MANAGED_VOLUME_MISMATCH",
+        managed: next,
+        events,
+        expectedVolume,
+        actualVolume,
+      };
+    }
+  }
+
+  const stopLoss = Number(position.stopLoss);
+  const entry = Number(next.entry);
+  const priceTolerance = Math.max(point * 2, 1e-6);
+  if (next.partialApplied && !next.breakEvenApplied && Number.isFinite(stopLoss) && Number.isFinite(entry) && Math.abs(stopLoss - entry) <= priceTolerance) {
+    next.breakEvenApplied = true;
+    events.push({ type: "BREAK_EVEN_RECOVERED_FROM_BROKER_STOP", stopLoss });
+  }
+
+  return { accepted: true, reason: "MANAGED_BROKER_STATE_RECONCILED", managed: next, events };
+}
+
 function validBar(bar) {
   return bar && [bar.open, bar.high, bar.low, bar.close].every(Number.isFinite);
 }
