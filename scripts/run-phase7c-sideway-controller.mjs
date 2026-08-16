@@ -5,8 +5,10 @@ import {
   chooseRangeSide,
   detectM5Confirmation,
   estimateVolumePoc,
+  matchPendingEntryPosition,
   normalizeVolume,
   oneThirdPartialVolume,
+  reconcileManagedBrokerState,
   resolveSidewayPermission,
   targetReached,
 } from "./phase7c-sideway-logic.mjs";
@@ -23,6 +25,7 @@ const armed = truthy(process.env.ZIQ_PHASE7C_SIDEWAY_ARMED);
 const once = truthy(process.env.ZIQ_PHASE7C_SIDEWAY_ONCE);
 const workDir = process.env.ZIQ_PHASE7C_SIDEWAY_WORK_DIR?.trim() || path.resolve(".runtime", "phase7c-sideway");
 const maxHoldingMinutes = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_MAX_HOLD_MINUTES, 180, 30, 720);
+const pendingRecoveryWaitMs = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_PENDING_RECOVERY_MS, 60_000, 10_000, 300_000);
 const magicNumber = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER, 270714, 1, 2147483647);
 const deviationPoints = clampInteger(process.env.MT5_DEVIATION_POINTS, 50, 1, 10000);
 const allowReal = truthy(process.env.MT5_ALLOW_REAL_ACCOUNT);
@@ -52,10 +55,12 @@ console.log(`PHASE7C_SIDEWAY_RISK_PERCENT=${riskPercent}`);
 console.log(`PHASE7C_SIDEWAY_MAX_LOT=${maxLot}`);
 console.log(`PHASE7C_SIDEWAY_MIN_REGIME_CONFIDENCE=${minRegimeConfidence}`);
 console.log(`PHASE7C_SIDEWAY_MAX_HOLD_MINUTES=${maxHoldingMinutes}`);
+console.log(`PHASE7C_SIDEWAY_PENDING_RECOVERY_MS=${pendingRecoveryWaitMs}`);
 console.log("PHASE7C_SIDEWAY_ENTRY=M15_RANGING_PLUS_SUPPLY_DEMAND_EDGE_PLUS_M5_CONFIRMATION");
 console.log("PHASE7C_SIDEWAY_TP1=VOLUME_POC_OR_RANGE_MID_FALLBACK");
 console.log("PHASE7C_SIDEWAY_TP2=OPPOSITE_RANGE_BOUNDARY");
 console.log("PHASE7C_SIDEWAY_MANAGEMENT=ONE_THIRD_PARTIAL_THEN_BREAK_EVEN_NO_TRAILING");
+console.log("PHASE7C_SIDEWAY_CRASH_RECOVERY=PENDING_ENTRY_PLUS_PARTIAL_PLUS_BREAK_EVEN");
 console.log("PHASE7C_SIDEWAY_FAIL_CLOSED=TRUE");
 console.log(`PHASE7C_SIDEWAY_STATE=${statePath}`);
 console.log(`PHASE7C_SIDEWAY_JOURNAL=${journalPath}`);
@@ -133,6 +138,56 @@ async function cycle() {
     bridgeGet(`/v1/symbols/${encodeURIComponent(symbol)}/spec`),
   ]);
 
+  if (!Array.isArray(positions)) {
+    journal("POSITIONS_DATA_INVALID", {});
+    return;
+  }
+
+  if (!state.managed && state.pendingEntry) {
+    const pending = state.pendingEntry;
+    const recovery = matchPendingEntryPosition(pending, positions, spec);
+    if (recovery.matched && recovery.position) {
+      state.managed = buildManagedState(recovery.position, pending);
+      state.pendingEntry = null;
+      saveState();
+      journal("PENDING_ENTRY_RECOVERED", {
+        orderId: pending.orderId,
+        ticket: state.managed.ticket,
+        side: state.managed.side,
+        volume: state.managed.initialVolume,
+      });
+      await managePosition(recovery.position, quote, spec);
+      return;
+    }
+
+    const pendingAgeMs = Math.max(0, Date.now() - Number(pending.createdAt ?? Date.now()));
+    if (positions.length === 0 && pendingAgeMs >= pendingRecoveryWaitMs) {
+      journal("PENDING_ENTRY_EXPIRED_NO_POSITION", {
+        orderId: pending.orderId,
+        ageMs: pendingAgeMs,
+        recoveryReason: recovery.reason,
+      });
+      state.pendingEntry = null;
+      saveState();
+      return;
+    }
+
+    journal("PENDING_ENTRY_RECOVERY_BLOCK", {
+      orderId: pending.orderId,
+      ageMs: pendingAgeMs,
+      positions: positions.map((position) => ({
+        ticket: position.ticket,
+        side: position.side,
+        volume: position.volume,
+        stopLoss: position.stopLoss,
+        takeProfit: position.takeProfit,
+        openedAt: position.openedAt,
+      })),
+      recoveryReason: recovery.reason,
+    });
+    return;
+  }
+
   if (state.managed) {
     const managedPosition = positions.find((position) => String(position.ticket) === state.managed.ticket);
     if (!managedPosition) {
@@ -145,19 +200,28 @@ async function cycle() {
       journal("UNEXPECTED_ADDITIONAL_POSITION", { managedTicket: state.managed.ticket, positions: positions.map((position) => position.ticket) });
       return;
     }
-    const expectedSide = state.managed.side === "BUY" ? "LONG" : "SHORT";
-    if (managedPosition.side !== expectedSide) {
-      journal("MANAGED_POSITION_SIDE_MISMATCH", { ticket: managedPosition.ticket, expectedSide, actualSide: managedPosition.side });
-      return;
-    }
-    if (Math.abs(Number(managedPosition.volume) - state.managed.expectedRemainingVolume) > Number(spec.volumeStep) / 2 + 1e-9) {
-      journal("MANAGED_POSITION_VOLUME_MISMATCH", {
+
+    const reconciliation = reconcileManagedBrokerState(state.managed, managedPosition, spec);
+    if (!reconciliation.accepted) {
+      journal("MANAGED_POSITION_RECONCILIATION_BLOCK", {
         ticket: managedPosition.ticket,
-        expected: state.managed.expectedRemainingVolume,
-        actual: managedPosition.volume,
+        reason: reconciliation.reason,
+        expectedVolume: reconciliation.expectedVolume ?? state.managed.expectedRemainingVolume,
+        actualVolume: reconciliation.actualVolume ?? managedPosition.volume,
+        expectedSide: state.managed.side === "BUY" ? "LONG" : "SHORT",
+        actualSide: managedPosition.side,
       });
       return;
     }
+
+    if (reconciliation.events.length > 0) {
+      state.managed = reconciliation.managed;
+      saveState();
+      for (const event of reconciliation.events) {
+        journal(event.type, { ticket: managedPosition.ticket, ...event });
+      }
+    }
+
     await managePosition(managedPosition, quote, spec);
     return;
   }
@@ -303,6 +367,22 @@ async function cycle() {
     return;
   }
 
+  state.pendingEntry = {
+    orderId,
+    side,
+    signalM5CloseTime: closeTime,
+    volume,
+    stopLoss: plan.stopLoss,
+    stopDistance: plan.stopDistance,
+    tp1: plan.tp1,
+    tp1Kind: plan.tp1Kind,
+    tp2: plan.takeProfit,
+    lastRegimeCloseChecked: Number(freshRegime?.lastCandleCloseTime ?? 0),
+    createdAt: Date.now(),
+  };
+  saveState();
+  journal("ENTRY_PENDING_DURABLE", { orderId, side, volume, stopLoss: plan.stopLoss, tp2: plan.takeProfit });
+
   const order = await bridgeRequest("POST", "/v1/orders", {
     symbol,
     side,
@@ -321,6 +401,8 @@ async function cycle() {
 
   if (!order.accepted) {
     journal("ENTRY_REJECTED", { orderId, message: order.message, retcode: order.retcode });
+    state.pendingEntry = null;
+    saveState();
     return;
   }
 
@@ -334,29 +416,36 @@ async function cycle() {
     return;
   }
 
-  state.managed = {
+  state.managed = buildManagedState(opened, state.pendingEntry);
+  state.pendingEntry = null;
+  saveState();
+  journal("ENTRY_FILLED", { orderId, position: opened, management: state.managed });
+}
+
+function buildManagedState(opened, pending) {
+  if (!pending) throw new Error("Cannot build Sideway management state without durable pending entry metadata.");
+  const openedAt = Number.isFinite(Number(opened.openedAt)) ? Number(opened.openedAt) : Date.now();
+  return {
     ticket: String(opened.ticket),
-    side,
-    signalM5CloseTime: closeTime,
+    side: pending.side,
+    signalM5CloseTime: Number(pending.signalM5CloseTime),
     entry: Number(opened.entry),
     initialVolume: Number(opened.volume),
     expectedRemainingVolume: Number(opened.volume),
-    stopLoss: plan.stopLoss,
-    stopDistance: Math.abs(Number(opened.entry) - plan.stopLoss),
-    tp1: plan.tp1,
-    tp1Kind: plan.tp1Kind,
-    tp2: plan.takeProfit,
+    stopLoss: Number(pending.stopLoss),
+    stopDistance: Math.abs(Number(opened.entry) - Number(pending.stopLoss)),
+    tp1: Number(pending.tp1),
+    tp1Kind: pending.tp1Kind,
+    tp2: Number(pending.tp2),
     partialApplied: false,
     breakEvenApplied: false,
-    lastRegimeCloseChecked: Number(freshRegime?.lastCandleCloseTime ?? 0),
-    openedAt: Date.now(),
-    timeStopAt: Date.now() + maxHoldingMinutes * 60_000,
+    lastRegimeCloseChecked: Number(pending.lastRegimeCloseChecked ?? 0),
+    openedAt,
+    timeStopAt: openedAt + maxHoldingMinutes * 60_000,
     partialAttempt: 0,
     breakEvenAttempt: 0,
     exitAttempt: 0,
   };
-  saveState();
-  journal("ENTRY_FILLED", { orderId, position: opened, management: state.managed });
 }
 
 async function managePosition(position, quote, spec) {
@@ -364,7 +453,7 @@ async function managePosition(position, quote, spec) {
   const marketPrice = managed.side === "BUY" ? Number(quote.bid) : Number(quote.ask);
 
   if (Date.now() >= managed.timeStopAt) {
-    await closeAll(position, "TIME_STOP_180M");
+    await closeAll(position, `TIME_STOP_${maxHoldingMinutes}M`);
     return;
   }
 
@@ -524,7 +613,7 @@ function validateVolume(volume, spec) {
 
 function loadState() {
   if (!fs.existsSync(statePath)) {
-    return { version: 1, accountLogin: null, lastEvaluatedM5Close: 0, managed: null };
+    return { version: 1, accountLogin: null, lastEvaluatedM5Close: 0, pendingEntry: null, managed: null };
   }
   try {
     const parsed = JSON.parse(fs.readFileSync(statePath, "utf8"));
@@ -533,6 +622,7 @@ function loadState() {
       version: 1,
       accountLogin: Number.isFinite(Number(parsed.accountLogin)) ? Number(parsed.accountLogin) : null,
       lastEvaluatedM5Close: Number(parsed.lastEvaluatedM5Close ?? 0),
+      pendingEntry: parsed.pendingEntry ?? null,
       managed: parsed.managed ?? null,
     };
   } catch (error) {
