@@ -15,6 +15,8 @@ if (-not [System.IO.Path]::IsPathRooted($EnvFile)) { $EnvFile = Join-Path $Proje
 if (-not (Test-Path $EnvFile)) { throw "EnvFile not found: $EnvFile" }
 $EnvFile = (Resolve-Path $EnvFile).Path
 $RuntimeDir = Join-Path $WorkDir "phase7c-executors"
+$TrendStatePath = Join-Path $WorkDir "phase7b-demo-forward\phase7b-demo-state.json"
+$SidewayStatePath = Join-Path $WorkDir "phase7c-sideway-forward\phase7c-sideway-state.json"
 
 function Read-EnvValue([string]$Name) {
   foreach ($raw in Get-Content -LiteralPath $EnvFile) {
@@ -41,6 +43,52 @@ function Read-PidStatus([string]$Name) {
   } catch {
     return [pscustomobject]@{ name = $Name; pid = $null; alive = $false; pidFile = $true }
   }
+}
+
+function Read-StateJson([string]$Path, [string]$Label) {
+  if (-not (Test-Path $Path)) { return $null }
+  try {
+    return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+  } catch {
+    throw "Cannot parse $Label state: $Path. $($_.Exception.Message)"
+  }
+}
+
+function State-Ticket($State) {
+  if ($null -eq $State -or $null -eq $State.managed -or [string]::IsNullOrWhiteSpace([string]$State.managed.ticket)) {
+    return ""
+  }
+  return [string]$State.managed.ticket
+}
+
+function Assert-StateAccount($State, [string]$Label, [long]$AccountLogin) {
+  if ($null -eq $State -or $null -eq $State.accountLogin) { return }
+  $stateLogin = [long]$State.accountLogin
+  if ($stateLogin -gt 0 -and $stateLogin -ne $AccountLogin) {
+    throw "$Label state belongs to account $stateLogin but MT5 is $AccountLogin."
+  }
+}
+
+function Test-PendingMatchesPosition($Pending, $Position, $Spec) {
+  if ($null -eq $Pending -or $null -eq $Position -or $null -eq $Spec) { return $false }
+  $expectedSide = if ([string]$Pending.side -eq "BUY") { "LONG" } elseif ([string]$Pending.side -eq "SELL") { "SHORT" } else { "" }
+  if (-not $expectedSide -or [string]$Position.side -ne $expectedSide) { return $false }
+
+  $volumeStep = [double]$Spec.volumeStep
+  $point = [double]$Spec.point
+  if ($volumeStep -le 0 -or $point -le 0) { return $false }
+  if ([math]::Abs([double]$Position.volume - [double]$Pending.volume) -gt ($volumeStep / 2.0 + 1e-9)) { return $false }
+
+  $priceTolerance = [math]::Max($point * 2.0, 0.000001)
+  if ([math]::Abs([double]$Position.stopLoss - [double]$Pending.stopLoss) -gt $priceTolerance) { return $false }
+  if ([math]::Abs([double]$Position.takeProfit - [double]$Pending.tp2) -gt $priceTolerance) { return $false }
+
+  $createdAt = [double]$Pending.createdAt
+  $openedAt = [double]$Position.openedAt
+  $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  if ($createdAt -le 0 -or $openedAt -le 0) { return $false }
+  if ($openedAt -lt ($createdAt - 120000) -or $openedAt -gt ($nowMs + 10000)) { return $false }
+  return $true
 }
 
 $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -84,11 +132,65 @@ $health = Invoke-RestMethod -Uri "$bridgeBase/health" -Headers $headers -Method 
 if (-not $health.connected -or $health.status -ne "ok") { throw "MT5 bridge is not healthy/connected." }
 if ($health.accountMode -ne "demo") { throw "Phase 7C verifier requires DEMO; current accountMode=$($health.accountMode)." }
 $positions = @(Invoke-RestMethod -Uri "$bridgeBase/v1/positions?symbol=XAUUSD" -Headers $headers -Method Get -TimeoutSec 5)
+$spec = Invoke-RestMethod -Uri "$bridgeBase/v1/symbols/XAUUSD/spec" -Headers $headers -Method Get -TimeoutSec 5
 Write-Host "PHASE7C_VERIFY_ACCOUNT_LOGIN=$($health.accountLogin)"
 Write-Host "PHASE7C_VERIFY_ACCOUNT_MODE=$($health.accountMode)"
 Write-Host "PHASE7C_VERIFY_TRADING_ENABLED=$($health.tradingEnabled)"
 Write-Host "PHASE7C_VERIFY_XAUUSD_POSITIONS=$($positions.Count)"
+if ($positions.Count -gt 1) { throw "Phase 7C requires at most one XAUUSD position; broker currently has $($positions.Count)." }
+
+$trendState = Read-StateJson $TrendStatePath "Trend"
+$sidewayState = Read-StateJson $SidewayStatePath "Sideway"
+Assert-StateAccount $trendState "Trend" ([long]$health.accountLogin)
+Assert-StateAccount $sidewayState "Sideway" ([long]$health.accountLogin)
+
+$trendTicket = State-Ticket $trendState
+$sidewayTicket = State-Ticket $sidewayState
+$sidewayPending = if ($null -ne $sidewayState) { $sidewayState.pendingEntry } else { $null }
+$pendingOrderId = if ($null -ne $sidewayPending) { [string]$sidewayPending.orderId } else { "" }
+
+Write-Host "PHASE7C_VERIFY_TREND_MANAGED_TICKET=$(if ($trendTicket) { $trendTicket } else { 'NONE' })"
+Write-Host "PHASE7C_VERIFY_SIDEWAY_MANAGED_TICKET=$(if ($sidewayTicket) { $sidewayTicket } else { 'NONE' })"
+Write-Host "PHASE7C_VERIFY_SIDEWAY_PENDING_ORDER=$(if ($pendingOrderId) { $pendingOrderId } else { 'NONE' })"
+
+if ($trendTicket -and $sidewayTicket) {
+  throw "Ownership conflict: Trend and Sideway both have managed position state (Trend=$trendTicket Sideway=$sidewayTicket)."
+}
+if ($trendTicket -and $null -ne $sidewayPending) {
+  throw "Ownership conflict: Trend has a managed ticket while Sideway has a durable pending entry."
+}
+
+$owner = "NONE"
+if ($positions.Count -eq 1) {
+  $position = $positions[0]
+  $brokerTicket = [string]$position.ticket
+  if ($trendTicket -eq $brokerTicket) {
+    $owner = "TREND"
+  } elseif ($sidewayTicket -eq $brokerTicket) {
+    $owner = "SIDEWAY"
+  } elseif ($null -ne $sidewayPending -and (Test-PendingMatchesPosition $sidewayPending $position $spec)) {
+    $owner = "SIDEWAY_PENDING_RECOVERY"
+  } else {
+    throw "Orphan/unmanaged XAUUSD position $brokerTicket detected. Neither Trend nor Sideway state safely owns it."
+  }
+} elseif ($positions.Count -eq 0) {
+  if ($trendTicket) {
+    Write-Host "PHASE7C_VERIFY_TREND_STATE=STALE_MANAGED_TICKET_NO_BROKER_POSITION"
+  }
+  if ($sidewayTicket) {
+    Write-Host "PHASE7C_VERIFY_SIDEWAY_STATE=STALE_MANAGED_TICKET_NO_BROKER_POSITION"
+  }
+  if ($null -ne $sidewayPending) {
+    $pendingAgeMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$sidewayPending.createdAt
+    Write-Host "PHASE7C_VERIFY_SIDEWAY_PENDING_AGE_MS=$pendingAgeMs"
+    if ($pendingAgeMs -gt 300000) {
+      throw "Sideway durable pending entry is older than 5 minutes but no broker position exists. Run the Sideway controller recovery cycle before arming."
+    }
+  }
+}
+Write-Host "PHASE7C_VERIFY_POSITION_OWNER=$owner"
 
 $lockPath = Join-Path $RuntimeDir "phase7c-execution.lock"
 Write-Host "PHASE7C_VERIFY_EXECUTION_LOCK_PRESENT=$(Test-Path $lockPath)"
+Write-Host "PHASE7C_VERIFY_OWNERSHIP=PASS"
 Write-Host "PHASE7C_VERIFY_STATUS=PASS"
