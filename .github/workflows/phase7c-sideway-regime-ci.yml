@@ -119,6 +119,7 @@ jobs:
           node --check scripts/run-phase7c-telegram-mode-controller.mjs
           node --check scripts/run-phase7c-regime-notifier.mjs
           node --check scripts/run-phase7c-auto-journal.mjs
+          node --check scripts/run-phase7c-forward-dashboard.mjs
           node --check scripts/run-phase7c-trend-controller.mjs
           node --check scripts/phase7c-sideway-logic.mjs
           node --check scripts/phase7c-sideway-execution-guards.mjs
@@ -135,6 +136,7 @@ jobs:
             "scripts/run-phase7c-telegram-mode-controller-local.ps1",
             "scripts/run-phase7c-regime-notifier-local.ps1",
             "scripts/run-phase7c-auto-journal-local.ps1",
+            "scripts/run-phase7c-forward-dashboard-local.ps1",
             "scripts/report-phase7c-forward-local.ps1",
             "scripts/run-phase7c-trend-controller-local.ps1",
             "scripts/run-phase7c-sideway-controller-local.ps1",
