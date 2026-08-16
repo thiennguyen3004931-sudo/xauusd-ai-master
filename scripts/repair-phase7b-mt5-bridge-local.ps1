@@ -89,7 +89,13 @@ foreach ($listener in $listeners) {
   $cmd = if ($null -ne $proc) { [string]$proc.CommandLine } else { "" }
   $name = if ($null -ne $proc) { [string]$proc.Name } else { "UNKNOWN" }
   Write-Host "PHASE7B_BRIDGE_REPAIR_EXISTING_LISTENER=PID:$pidValue|PROCESS:$name"
-  if ($name -match '^(?i:python|python.exe)$' -and $cmd -match 'mt5_bridge\.app:app') {
+
+  $isPython = $name -match '^(?i:python|python.exe)$'
+  $isPhase7BUvicorn = $cmd -match 'mt5_bridge\.app:app' -or $cmd -match '(?i)-m\s+uvicorn\s+mt5_bridge\.app:app'
+  $safeCmd = if ([string]::IsNullOrWhiteSpace($cmd)) { "UNAVAILABLE" } else { ($cmd -replace '(?i)(MT5_API_KEY|MT5_PASSWORD)=[^\s]+', '$1=REDACTED') }
+  Write-Host "PHASE7B_BRIDGE_REPAIR_LISTENER_COMMAND=$safeCmd"
+
+  if ($isPython -and $isPhase7BUvicorn) {
     Write-Host "PHASE7B_BRIDGE_REPAIR_STALE_LISTENER_ACTION=STOP"
     Stop-Process -Id $pidValue -Force -ErrorAction Stop
   } else {
