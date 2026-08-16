@@ -232,8 +232,11 @@ Write-Host "PHASE7C_ACTIVATE_ACCOUNT_MODE=$($health.accountMode)"
 Write-Host "PHASE7C_ACTIVATE_SERVER=$($health.server)"
 
 # Broker truth is authoritative for clean activation. Always check positions,
-# even when the API warm-start preflight was available.
-$positions = @(Invoke-RestMethod -Uri "$bridgeUrl/v1/positions?symbol=XAUUSD" -Headers @{ "x-mt5-api-key" = $apiKey } -Method Get -TimeoutSec 10)
+# even when the API warm-start preflight was available. Windows PowerShell 5.1
+# can preserve a JSON array returned by Invoke-RestMethod as one pipeline object,
+# so capture first, then expand the variable into a normal PowerShell array.
+$positionsResponse = Invoke-RestMethod -Uri "$bridgeUrl/v1/positions?symbol=XAUUSD" -Headers @{ "x-mt5-api-key" = $apiKey } -Method Get -TimeoutSec 10
+$positions = @($positionsResponse)
 if ($positions.Count -gt 0) {
   $tickets = ($positions | ForEach-Object { $_.ticket }) -join ","
   throw "Phase 7C activation blocked: open XAUUSD broker position(s) detected. Count=$($positions.Count), tickets=$tickets. Do not delete local state; reconcile/close the position before clean activation."
