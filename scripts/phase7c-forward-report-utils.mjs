@@ -81,10 +81,25 @@ export function summarizeDeals(deals, trendMagic, sidewayMagic) {
     SIDEWAY: emptyDealSummary(),
     OTHER: emptyDealSummary(),
   };
+
+  // Close/modify commands in the bridge use its configured magic number, which
+  // may differ from the strategy-specific magic used to open a Sideway trade.
+  // Establish ownership from the opening deal and then attribute every deal
+  // sharing the same positionId to that strategy.
+  const positionOwners = new Map();
   for (const deal of deals) {
     if (!deal?.isTradingDeal) continue;
-    const magic = Number(deal.magic);
-    const bucket = magic === trendMagic ? "TREND" : magic === sidewayMagic ? "SIDEWAY" : "OTHER";
+    const entry = String(deal.entry ?? "");
+    if (!['IN', 'INOUT'].includes(entry)) continue;
+    const owner = classifyDealOwner(deal, trendMagic, sidewayMagic);
+    const positionId = String(deal.positionId ?? "");
+    if (positionId && owner !== "OTHER") positionOwners.set(positionId, owner);
+  }
+
+  for (const deal of deals) {
+    if (!deal?.isTradingDeal) continue;
+    const positionId = String(deal.positionId ?? "");
+    const bucket = positionOwners.get(positionId) ?? classifyDealOwner(deal, trendMagic, sidewayMagic);
     const target = summary[bucket];
     target.deals += 1;
     target.volume += finiteNumber(deal.volume) ?? 0;
@@ -115,6 +130,16 @@ export function regimeDistribution(decisions) {
     recommendedMode: sortObjectByValue(recommended),
     activeMode: sortObjectByValue(active),
   };
+}
+
+function classifyDealOwner(deal, trendMagic, sidewayMagic) {
+  const magic = Number(deal?.magic);
+  if (magic === sidewayMagic) return "SIDEWAY";
+  if (magic === trendMagic) return "TREND";
+  const comment = String(deal?.comment ?? "").toLowerCase();
+  if (comment.includes("phase7c-sideway") || comment.includes("p7c-sideway")) return "SIDEWAY";
+  if (comment.includes("phase7b-demo") || comment.includes("p7b-")) return "TREND";
+  return "OTHER";
 }
 
 function emptyDealSummary() {
