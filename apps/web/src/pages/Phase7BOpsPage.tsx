@@ -93,14 +93,14 @@ async function runAction(path: string): Promise<ActionResponse> {
   }));
 }
 
-async function sendTelegramTest(): Promise<ActionResponse> {
-  return readJson<ActionResponse>(await fetch(`${API_BASE}/api/v1/phase7b-telegram-test`, {
+
+async function sendTelegramRecoveryTest(): Promise<ActionResponse> {
+  return readJson<ActionResponse>(await fetch(`${API_BASE}/api/v1/phase7b-telegram-test/recovery`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: "{}",
   }));
 }
-
 function StatusCard({ icon, title, status, detail, online }: { icon: React.ReactNode; title: string; status: string; detail: string; online: boolean }) {
   return (
     <Card variant="outlined" sx={{ height: "100%" }}>
@@ -132,7 +132,7 @@ export function Phase7BOpsPage() {
       await queryClient.invalidateQueries({ queryKey: ["phase7b-ops-status"] });
     },
   });
-  const testTelegram = useMutation({ mutationFn: sendTelegramTest });
+  const recoveryTelegramTest = useMutation({ mutationFn: sendTelegramRecoveryTest });
 
   if (query.isLoading) return <LoadingState />;
   if (query.isError || !query.data) {
@@ -270,19 +270,9 @@ export function Phase7BOpsPage() {
                 >
                   {telegramStopping ? "ĐANG TẮT..." : "TẮT TELEGRAM"}
                 </Button>
-                <Button
-                  variant="outlined"
-                  color="primary"
-                  startIcon={<SendRounded />}
-                  disabled={testTelegram.isPending || !o.controlEnabled}
-                  onClick={() => testTelegram.mutate()}
-                  sx={{ fontWeight: 900, minWidth: 210 }}
-                >
-                  {testTelegram.isPending ? "ĐANG GỬI TIN TEST..." : "GỬI TIN TEST TELEGRAM"}
-                </Button>
               </Stack>
               <Typography variant="caption" color="text.secondary" display="block" mt={1.5}>
-                Tin test là one-shot: gửi một nội dung mẫu rồi tự thoát, không cần bật notifier thường trực.
+                Mẫu hồi phục là one-shot, chỉ gửi PREVIEW; không đặt/sửa/đóng lệnh MT5 và không ghi journal giao dịch.
               </Typography>
             </CardContent>
           </Card>
@@ -295,10 +285,10 @@ export function Phase7BOpsPage() {
           {mutate.error instanceof Error ? mutate.error.message : "Không thực hiện được thao tác."}
         </Alert>
       )}
-      {testTelegram.isSuccess && <Alert severity="success">{testTelegram.data.message}</Alert>}
-      {testTelegram.isError && (
+      {recoveryTelegramTest.isSuccess && <Alert severity="success">{recoveryTelegramTest.data.message}</Alert>}
+      {recoveryTelegramTest.isError && (
         <Alert severity="error" sx={{ whiteSpace: "pre-wrap" }}>
-          {testTelegram.error instanceof Error ? testTelegram.error.message : "Không gửi được tin test Telegram."}
+          {recoveryTelegramTest.error instanceof Error ? recoveryTelegramTest.error.message : "Không gửi được mẫu hồi phục Telegram."}
         </Alert>
       )}
 
