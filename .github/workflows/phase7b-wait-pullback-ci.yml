@@ -10,6 +10,7 @@ on:
       - "scripts/run-phase7b-demo-controller.ts"
       - "scripts/run-phase7b-wait-pullback-shadow.ts"
       - "scripts/run-phase7b-wait-pullback-shadow-local.ps1"
+      - "scripts/repair-phase7b-mt5-bridge-local.ps1"
       - "scripts/upgrade-phase7b-wait-pullback-demo-local.ps1"
       - "scripts/activate-phase7b-wait-pullback-demo-local.ps1"
       - "scripts/summarize-phase7b-wait-pullback-journal-local.mjs"
@@ -96,6 +97,7 @@ jobs:
         run: |
           $files = @(
             "scripts/run-phase7b-wait-pullback-shadow-local.ps1",
+            "scripts/repair-phase7b-mt5-bridge-local.ps1",
             "scripts/upgrade-phase7b-wait-pullback-demo-local.ps1",
             "scripts/activate-phase7b-wait-pullback-demo-local.ps1"
           )
@@ -113,6 +115,17 @@ jobs:
             }
             Write-Host "PHASE7B_POWERSHELL_PARSE_PASS=$file"
           }
+
+      - name: Smoke-test bridge listener recognition
+        shell: pwsh
+        run: |
+          $cmd = 'C:\repo\packages\mt5-broker\bridge\.venv\Scripts\python.exe -m uvicorn mt5_bridge.app:app --host 127.0.0.1 --port 8765'
+          $isPhase7BUvicorn = $cmd -match 'mt5_bridge\.app:app' -or $cmd -match '(?i)-m\s+uvicorn\s+mt5_bridge\.app:app'
+          if (-not $isPhase7BUvicorn) {
+            Write-Error 'PHASE7B_BRIDGE_LISTENER_RECOGNITION=FAIL'
+            exit 1
+          }
+          Write-Host 'PHASE7B_BRIDGE_LISTENER_RECOGNITION=PASS'
 
       - name: Smoke-test WAIT_PULLBACK journal summary
         shell: bash
