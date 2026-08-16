@@ -73,6 +73,34 @@ function Stop-PidFile([string]$Path) {
   Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
 }
 
+function Read-LogTail([string]$Path, [int]$Lines = 30) {
+  if (-not (Test-Path $Path)) { return "<log not found: $Path>" }
+  try {
+    return ((Get-Content -LiteralPath $Path -Tail $Lines -ErrorAction Stop) -join [Environment]::NewLine)
+  } catch {
+    return "<could not read log: $Path>"
+  }
+}
+
+function Assert-ShadowProcessSuccess($Process, [string]$Label, [string]$StdOut, [string]$StdErr, [string]$PassMarker) {
+  $Process.Refresh()
+  $exitCode = $Process.ExitCode
+  $exitCodeKnown = $null -ne $exitCode
+  $outText = if (Test-Path $StdOut) { Get-Content -LiteralPath $StdOut -Raw -ErrorAction SilentlyContinue } else { "" }
+  $markerFound = -not [string]::IsNullOrWhiteSpace($outText) -and $outText.Contains($PassMarker)
+
+  if (($exitCodeKnown -and [int]$exitCode -ne 0) -or -not $markerFound) {
+    $exitText = if ($exitCodeKnown) { [string]$exitCode } else { "UNAVAILABLE" }
+    $stderrTail = Read-LogTail $StdErr
+    $stdoutTail = Read-LogTail $StdOut
+    throw "$Label shadow/preflight failed. exitCode=$exitText markerFound=$markerFound`nSTDERR:`n$stderrTail`nSTDOUT:`n$stdoutTail"
+  }
+
+  $safeExitCode = if ($exitCodeKnown) { [string]$exitCode } else { "UNAVAILABLE" }
+  Write-Host "PHASE7C_${Label}_SHADOW_EXIT_CODE=$safeExitCode"
+  Write-Host "PHASE7C_${Label}_SHADOW_PREFLIGHT=PASS"
+}
+
 function Wait-Phase7CDependencies {
   $apiKey = Read-EnvValue "MT5_API_KEY"
   $bridgeHost = Read-EnvValue "MT5_BRIDGE_HOST"
@@ -181,8 +209,8 @@ try {
   if ($Once -or -not $Armed) {
     $trend.WaitForExit()
     $sideway.WaitForExit()
-    if ($trend.ExitCode -ne 0) { throw "Trend shadow/preflight exited with code $($trend.ExitCode). Check $TrendErr" }
-    if ($sideway.ExitCode -ne 0) { throw "Sideway shadow/preflight exited with code $($sideway.ExitCode). Check $SidewayErr" }
+    Assert-ShadowProcessSuccess $trend "TREND" $TrendOut $TrendErr "PHASE7B_DEMO_PREFLIGHT_STATUS=PASS"
+    Assert-ShadowProcessSuccess $sideway "SIDEWAY" $SidewayOut $SidewayErr "PHASE7C_SIDEWAY_PREFLIGHT_STATUS=PASS"
     Write-Host "PHASE7C_EXECUTOR_SHADOW_STATUS=PASS"
     return
   }
