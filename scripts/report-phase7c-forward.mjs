@@ -32,6 +32,12 @@ const decisionPath = path.join(workDir, "phase7c-executors", "auto-decisions.jso
 const reportDir = path.join(workDir, "phase7c-reports");
 fs.mkdirSync(reportDir, { recursive: true });
 
+const health = await bridgeGet("/health");
+if (!health?.connected || health?.status !== "ok") throw new Error("MT5 bridge is not healthy/connected for forward report.");
+if (String(health?.accountMode ?? "").toLowerCase() !== "demo") {
+  throw new Error(`Phase7C forward report is DEMO-only; current accountMode=${health?.accountMode ?? "unknown"}.`);
+}
+
 const trendRows = filterWindow(readJsonl(trendPath), fromMs, toMs);
 const sidewayRows = filterWindow(readJsonl(sidewayPath), fromMs, toMs);
 const decisionRows = filterWindow(readJsonl(decisionPath), fromMs, toMs);
@@ -57,7 +63,12 @@ const report = {
   generatedAt: Date.now(),
   generatedAtIso: new Date().toISOString(),
   symbol,
-  accountMode: "demo",
+  account: {
+    login: finiteNumber(health.accountLogin),
+    mode: String(health.accountMode),
+    server: health.server ?? null,
+    currency: health.accountCurrency ?? null,
+  },
   range: {
     fromMs,
     fromIso: new Date(fromMs).toISOString(),
@@ -109,6 +120,8 @@ fs.writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
 fs.writeFileSync(markdownPath, renderMarkdown(report), "utf8");
 
 console.log("PHASE7C_FORWARD_REPORT=PASS");
+console.log(`PHASE7C_REPORT_ACCOUNT_LOGIN=${report.account.login}`);
+console.log(`PHASE7C_REPORT_ACCOUNT_MODE=${report.account.mode}`);
 console.log(`PHASE7C_REPORT_FROM=${report.range.fromIso}`);
 console.log(`PHASE7C_REPORT_TO=${report.range.toIso}`);
 console.log(`PHASE7C_REPORT_AUTO_DECISIONS=${decisionRows.filter((row) => row?.type === "AUTO_DECISION").length}`);
@@ -163,7 +176,7 @@ function renderMarkdown(value) {
     `- Generated: ${value.generatedAtIso}`,
     `- Window: ${value.range.fromIso} → ${value.range.toIso}`,
     `- Symbol: ${value.symbol}`,
-    `- Account mode: DEMO`,
+    `- Account: ${value.account.login ?? "n/a"} · ${value.account.mode} · ${value.account.server ?? "n/a"}`,
     `- Deal ownership lookback: ${value.brokerDeals.ownershipLookbackDays} days (used only to resolve position ownership)`,
     "",
     "## P/L from MT5 deal history",
