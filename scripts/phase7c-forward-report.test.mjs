@@ -8,6 +8,7 @@ import {
   filterWindow,
   nearestDecision,
   regimeDistribution,
+  summarizeClosedPositions,
   summarizeDeals,
 } from "./phase7c-forward-report-utils.mjs";
 
@@ -114,6 +115,32 @@ test("summarizeDeals can count today's exit for a position opened after global m
   assert.equal(summary.TREND.entryDeals, 0);
   assert.equal(summary.TREND.exitDeals, 1);
   assert.equal(summary.TREND.netPnl, 7);
+});
+
+test("summarizeClosedPositions counts fully closed monitored trades and Sideway partials correctly", () => {
+  const deals = [
+    { isTradingDeal: true, timestamp: 100, positionId: "LEGACY", magic: 270713, comment: "phase7b-demo", entry: "IN", volume: 0.03, netPnl: -0.1 },
+    { isTradingDeal: true, timestamp: 250, positionId: "LEGACY", magic: 270713, comment: "p7b-exit", entry: "OUT", volume: 0.03, netPnl: -10 },
+    { isTradingDeal: true, timestamp: 220, positionId: "TWIN", magic: 270713, comment: "phase7b-demo", entry: "IN", volume: 0.03, netPnl: -0.1 },
+    { isTradingDeal: true, timestamp: 280, positionId: "TWIN", magic: 270713, comment: "p7b-exit", entry: "OUT", volume: 0.03, netPnl: 5.1 },
+    { isTradingDeal: true, timestamp: 230, positionId: "SLOSS", magic: 270714, comment: "phase7c-sideway", entry: "IN", volume: 0.03, netPnl: -0.1 },
+    { isTradingDeal: true, timestamp: 260, positionId: "SLOSS", magic: 270713, comment: "p7c-sideway-tp1", entry: "OUT", volume: 0.01, netPnl: 1.2 },
+    { isTradingDeal: true, timestamp: 290, positionId: "SLOSS", magic: 270713, comment: "p7c-sideway-exit", entry: "OUT", volume: 0.02, netPnl: -2.2 },
+  ];
+  const closed = summarizeClosedPositions(deals, 270713, 270714, {
+    fromMs: 200,
+    toMs: 300,
+    positionOpenedAfterMs: 200,
+  });
+  assert.equal(closed.TREND.trades, 1);
+  assert.equal(closed.TREND.wins, 1);
+  assert.equal(closed.TREND.losses, 0);
+  assert.equal(closed.TREND.netPnl, 5);
+  assert.equal(closed.SIDEWAY.trades, 1);
+  assert.equal(closed.SIDEWAY.losses, 1);
+  assert.equal(closed.SIDEWAY.netPnl, -1.1);
+  assert.equal(closed.rows.length, 2);
+  assert.equal(closed.rows[0].strategy, "SIDEWAY");
 });
 
 test("blockedReasonCounts and regimeDistribution summarize telemetry", () => {
