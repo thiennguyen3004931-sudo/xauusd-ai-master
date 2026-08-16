@@ -5,8 +5,12 @@ const token = requiredEnv("ZIQ_TELEGRAM_BOT_TOKEN");
 const chatId = requiredEnv("ZIQ_TELEGRAM_CHAT_ID");
 const apiBase = (process.env.ZIQ_PHASE7C_CONTROL_API_URL?.trim() || "http://127.0.0.1:3711").replace(/\/$/, "");
 const intervalMs = Math.max(1000, Number(process.env.ZIQ_PHASE7C_CONTROL_INTERVAL_MS ?? "1500"));
+const inheritedRuntimeState = process.env.ZIQ_PHASE7C_REGIME_STATE_FILE?.trim();
+const defaultStatusFile = inheritedRuntimeState
+  ? resolve(dirname(inheritedRuntimeState), "telegram-mode-status.json")
+  : resolve(".runtime/phase7c-telegram-mode-status.json");
 const statusFile = resolve(
-  process.env.ZIQ_PHASE7C_TELEGRAM_MODE_STATUS_FILE?.trim() || ".runtime/phase7c-telegram-mode-status.json",
+  process.env.ZIQ_PHASE7C_TELEGRAM_MODE_STATUS_FILE?.trim() || defaultStatusFile,
 );
 const telegramBase = `https://api.telegram.org/bot${token}`;
 const validModes = new Set(["AUTO", "TREND", "SIDEWAY", "PAUSE"]);
