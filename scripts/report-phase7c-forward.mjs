@@ -8,6 +8,7 @@ import {
   eventTimeMs,
   filterWindow,
   regimeDistribution,
+  summarizeClosedPositions,
   summarizeDeals,
 } from "./phase7c-forward-report-utils.mjs";
 
@@ -69,6 +70,13 @@ const monitoredDealSummary = monitoringBaselineMs === null
       toMs,
       positionOpenedAfterMs: monitoringBaselineMs,
     });
+const closedTradePerformance = monitoringBaselineMs === null
+  ? summarizeClosedPositions([], trendMagic, sidewayMagic)
+  : summarizeClosedPositions(deals, trendMagic, sidewayMagic, {
+      fromMs,
+      toMs,
+      positionOpenedAfterMs: monitoringBaselineMs,
+    });
 const entries = buildEntryRows(trendRows, sidewayRows, decisionRows);
 const trendEvents = countByType(trendRows);
 const sidewayEvents = countByType(sidewayRows);
@@ -83,7 +91,7 @@ const windowDeals = deals.filter((deal) => {
 });
 
 const report = {
-  version: 2,
+  version: 3,
   generatedAt: Date.now(),
   generatedAtIso: new Date().toISOString(),
   symbol,
@@ -123,6 +131,7 @@ const report = {
   },
   blockedReasons: blocks,
   regimeDistribution: regimes,
+  closedTradePerformance,
   brokerDeals: {
     ownershipLookbackDays,
     ownershipFromMs,
@@ -174,6 +183,14 @@ console.log(`PHASE7C_REPORT_SIDEWAY_ENTRIES=${report.management.SIDEWAY.entriesF
 console.log(`PHASE7C_REPORT_TREND_NET_PNL=${monitoredDealSummary.TREND.netPnl}`);
 console.log(`PHASE7C_REPORT_SIDEWAY_NET_PNL=${monitoredDealSummary.SIDEWAY.netPnl}`);
 console.log(`PHASE7C_REPORT_TOTAL_NET_PNL=${monitoredTotal}`);
+console.log(`PHASE7C_REPORT_TREND_TRADES=${closedTradePerformance.TREND.trades}`);
+console.log(`PHASE7C_REPORT_TREND_WINS=${closedTradePerformance.TREND.wins}`);
+console.log(`PHASE7C_REPORT_TREND_LOSSES=${closedTradePerformance.TREND.losses}`);
+console.log(`PHASE7C_REPORT_TREND_WIN_RATE=${closedTradePerformance.TREND.winRate}`);
+console.log(`PHASE7C_REPORT_SIDEWAY_TRADES=${closedTradePerformance.SIDEWAY.trades}`);
+console.log(`PHASE7C_REPORT_SIDEWAY_WINS=${closedTradePerformance.SIDEWAY.wins}`);
+console.log(`PHASE7C_REPORT_SIDEWAY_LOSSES=${closedTradePerformance.SIDEWAY.losses}`);
+console.log(`PHASE7C_REPORT_SIDEWAY_WIN_RATE=${closedTradePerformance.SIDEWAY.winRate}`);
 console.log(`PHASE7C_REPORT_RAW_WINDOW_TREND_NET_PNL=${rawWindowDealSummary.TREND.netPnl}`);
 console.log(`PHASE7C_REPORT_RAW_WINDOW_SIDEWAY_NET_PNL=${rawWindowDealSummary.SIDEWAY.netPnl}`);
 console.log(`PHASE7C_REPORT_RAW_WINDOW_TOTAL_NET_PNL=${rawTotal}`);
@@ -218,6 +235,8 @@ function renderMarkdown(value) {
   const monitoredSideway = value.brokerDeals.summary.SIDEWAY;
   const rawTrend = value.brokerDeals.rawWindowSummary.TREND;
   const rawSideway = value.brokerDeals.rawWindowSummary.SIDEWAY;
+  const tradeTrend = value.closedTradePerformance.TREND;
+  const tradeSideway = value.closedTradePerformance.SIDEWAY;
   const monitoredTotal = round(monitoredTrend.netPnl + monitoredSideway.netPnl, 4);
   const rawTotal = round(rawTrend.netPnl + rawSideway.netPnl, 4);
   const lines = [
@@ -240,6 +259,15 @@ function renderMarkdown(value) {
     `| TREND | ${monitoredTrend.deals} | ${monitoredTrend.entryDeals} | ${monitoredTrend.exitDeals} | ${monitoredTrend.netPnl} |`,
     `| SIDEWAY | ${monitoredSideway.deals} | ${monitoredSideway.entryDeals} | ${monitoredSideway.exitDeals} | ${monitoredSideway.netPnl} |`,
     `| TOTAL | ${monitoredTrend.deals + monitoredSideway.deals} | ${monitoredTrend.entryDeals + monitoredSideway.entryDeals} | ${monitoredTrend.exitDeals + monitoredSideway.exitDeals} | ${monitoredTotal} |`,
+    "",
+    "## Closed trade performance",
+    "",
+    "A trade is counted once only after its full position volume is closed. Sideway partial exits remain part of the same trade.",
+    "",
+    "| Strategy | Trades | Wins | Losses | BE | Win rate | Net P/L | Profit factor |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|",
+    `| TREND | ${tradeTrend.trades} | ${tradeTrend.wins} | ${tradeTrend.losses} | ${tradeTrend.breakeven} | ${tradeTrend.winRate}% | ${tradeTrend.netPnl} | ${formatProfitFactor(tradeTrend.profitFactor, tradeTrend)} |`,
+    `| SIDEWAY | ${tradeSideway.trades} | ${tradeSideway.wins} | ${tradeSideway.losses} | ${tradeSideway.breakeven} | ${tradeSideway.winRate}% | ${tradeSideway.netPnl} | ${formatProfitFactor(tradeSideway.profitFactor, tradeSideway)} |`,
     "",
     "## Raw broker-window P/L (diagnostic, not Phase7C forward performance)",
     "",
@@ -268,10 +296,20 @@ function renderMarkdown(value) {
     "",
     ...objectBullets(value.blockedReasons.SIDEWAY),
     "",
-    "## Entries with nearest AUTO decision snapshot",
+    "## Recent closed trades",
     "",
   ];
 
+  if (value.closedTradePerformance.rows.length === 0) {
+    lines.push("No monitored closed trades in this report window.");
+  } else {
+    lines.push("| Closed | Strategy | Position | Opened volume | Net P/L |", "|---|---|---|---:|---:|");
+    for (const trade of value.closedTradePerformance.rows.slice(0, 20)) {
+      lines.push(`| ${trade.closedAtIso} | ${trade.strategy} | ${trade.positionId} | ${trade.openedVolume} | ${trade.netPnl} |`);
+    }
+  }
+
+  lines.push("", "## Entries with nearest AUTO decision snapshot", "");
   if (value.entries.length === 0) {
     lines.push("No monitored filled entries in this report window.");
   } else {
@@ -281,8 +319,13 @@ function renderMarkdown(value) {
     }
   }
 
-  lines.push("", "Monitored P/L is sourced from MT5 deal history but excludes positions opened before the first AUTO_DECISION baseline. Raw broker-window P/L is retained only for reconciliation. Position ownership is resolved from opening deals before deal-window filtering, so bridge close magic cannot reassign Sideway P/L to Trend. AUTO decision telemetry is deduplicated for analytics while the raw JSONL journal remains unchanged for audit.", "");
+  lines.push("", "Monitored P/L is sourced from MT5 deal history but excludes positions opened before the first AUTO_DECISION baseline. Raw broker-window P/L is retained only for reconciliation. Closed-trade win/loss statistics are position-based, so partial exits are never counted as separate trades. Position ownership is resolved from opening deals before deal-window filtering, so bridge close magic cannot reassign Sideway P/L to Trend. AUTO decision telemetry is deduplicated for analytics while the raw JSONL journal remains unchanged for audit.", "");
   return lines.join("\n");
+}
+
+function formatProfitFactor(value, summary) {
+  if (value !== null && value !== undefined) return String(value);
+  return summary?.grossProfit > 0 && summary?.grossLoss === 0 ? "∞" : "n/a";
 }
 
 function objectBullets(object) {
