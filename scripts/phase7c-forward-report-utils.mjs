@@ -120,17 +120,24 @@ export function summarizeDeals(deals, trendMagic, sidewayMagic, window = {}) {
   // Establish ownership from opening deals across the supplied ownership
   // lookback, then count only deals inside the requested report window.
   const positionOwners = new Map();
+  const positionOpenTimes = new Map();
   for (const deal of deals) {
     if (!deal?.isTradingDeal) continue;
     const entry = String(deal.entry ?? "");
     if (!["IN", "INOUT"].includes(entry)) continue;
     const owner = classifyDealOwner(deal, trendMagic, sidewayMagic);
     const positionId = String(deal.positionId ?? "");
+    const timestamp = eventTimeMs(deal);
     if (positionId && owner !== "OTHER") positionOwners.set(positionId, owner);
+    if (positionId && timestamp !== null) {
+      const current = positionOpenTimes.get(positionId);
+      if (current === undefined || timestamp < current) positionOpenTimes.set(positionId, timestamp);
+    }
   }
 
   const fromMs = finiteNumber(window.fromMs);
   const toMs = finiteNumber(window.toMs);
+  const requirePositionOpenedInWindow = Boolean(window.requirePositionOpenedInWindow);
   for (const deal of deals) {
     if (!deal?.isTradingDeal) continue;
     const timestamp = eventTimeMs(deal);
@@ -138,6 +145,16 @@ export function summarizeDeals(deals, trendMagic, sidewayMagic, window = {}) {
     if (toMs !== null && (timestamp === null || timestamp > toMs)) continue;
 
     const positionId = String(deal.positionId ?? "");
+    if (requirePositionOpenedInWindow && fromMs !== null) {
+      if (positionId) {
+        const openedAt = positionOpenTimes.get(positionId);
+        if (openedAt === undefined || openedAt < fromMs) continue;
+      } else {
+        const entry = String(deal.entry ?? "");
+        if (!["IN", "INOUT"].includes(entry)) continue;
+      }
+    }
+
     const bucket = positionOwners.get(positionId) ?? classifyDealOwner(deal, trendMagic, sidewayMagic);
     const target = summary[bucket];
     target.deals += 1;
