@@ -8,6 +8,7 @@ on:
       - "packages/strategy-engine/**"
       - "apps/api/src/routes/phase7c.route.ts"
       - "apps/api/src/services/phase7c-*.ts"
+      - "scripts/run-phase7b-demo-controller.ts"
       - "scripts/run-phase7c-*.mjs"
       - "scripts/run-phase7c-*.ps1"
       - "scripts/phase7c-sideway-*.mjs"
@@ -22,6 +23,7 @@ on:
       - "packages/strategy-engine/**"
       - "apps/api/src/routes/phase7c.route.ts"
       - "apps/api/src/services/phase7c-*.ts"
+      - "scripts/run-phase7b-demo-controller.ts"
       - "scripts/run-phase7c-*.mjs"
       - "scripts/run-phase7c-*.ps1"
       - "scripts/phase7c-sideway-*.mjs"
@@ -72,6 +74,37 @@ jobs:
 
       - name: Build API dependency graph
         run: pnpm --filter @xauusd/api... build
+
+      - name: Validate legacy Trend ESM transform
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const ts = require("typescript");
+          const source = fs.readFileSync("scripts/run-phase7b-demo-controller.ts", "utf8");
+          const transformed = ts.transpileModule(source, {
+            fileName: "run-phase7b-demo-controller.ts",
+            reportDiagnostics: true,
+            compilerOptions: {
+              target: ts.ScriptTarget.ES2022,
+              module: ts.ModuleKind.ESNext,
+              moduleResolution: ts.ModuleResolutionKind.Bundler,
+              verbatimModuleSyntax: false,
+            },
+          });
+          const errors = (transformed.diagnostics || []).filter(
+            (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
+          );
+          if (errors.length) {
+            for (const diagnostic of errors) {
+              console.error(ts.flattenDiagnosticMessageText(diagnostic.messageText, " "));
+            }
+            process.exit(1);
+          }
+          fs.writeFileSync(".phase7c-trend-legacy-ci.mjs", transformed.outputText, "utf8");
+          NODE
+          node --check .phase7c-trend-legacy-ci.mjs
+          rm -f .phase7c-trend-legacy-ci.mjs
 
       - name: Parse Phase7C Node controllers
         shell: bash
