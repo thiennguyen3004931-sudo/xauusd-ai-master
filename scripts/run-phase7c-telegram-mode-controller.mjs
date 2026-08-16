@@ -19,6 +19,8 @@ let ready = false;
 let initialPanelSent = false;
 let lastMode = "UNKNOWN";
 let nextStartupAttemptAt = 0;
+let lastTelegramSuccessAt = 0;
+let lastApiSuccessAt = 0;
 
 console.log("PHASE7C_TELEGRAM_MODE_CONTROLLER=RUNNING");
 console.log(`PHASE7C_CONTROL_API=${apiBase}`);
@@ -29,6 +31,8 @@ await writeStatus({
   status: "STARTING",
   startedAt: Date.now(),
   pid: process.pid,
+  lastTelegramSuccessAt: null,
+  lastApiSuccessAt: null,
 });
 
 while (true) {
@@ -37,10 +41,13 @@ while (true) {
   if (!ready && now >= nextStartupAttemptAt) {
     try {
       const initial = await getBotMode();
+      lastApiSuccessAt = Date.now();
       lastMode = initial.mode;
       await telegramRequest("getMe");
+      lastTelegramSuccessAt = Date.now();
       if (!initialPanelSent) {
         await sendPanel(initial.mode, "Bảng điều khiển bot đã sẵn sàng.");
+        lastTelegramSuccessAt = Date.now();
         initialPanelSent = true;
       }
       ready = true;
@@ -50,8 +57,8 @@ while (true) {
         status: "READY",
         pid: process.pid,
         mode: lastMode,
-        lastApiSuccessAt: successAt,
-        lastTelegramSuccessAt: successAt,
+        lastApiSuccessAt,
+        lastTelegramSuccessAt,
         updatedAt: successAt,
       });
       console.log(`PHASE7C_TELEGRAM_MODE_READY=PASS|MODE=${initial.mode}`);
@@ -63,6 +70,8 @@ while (true) {
         status: "STARTUP_RETRY",
         pid: process.pid,
         mode: lastMode,
+        lastApiSuccessAt: lastApiSuccessAt || null,
+        lastTelegramSuccessAt: lastTelegramSuccessAt || null,
         lastError: message,
         retryAt: nextStartupAttemptAt,
         updatedAt: Date.now(),
@@ -73,14 +82,15 @@ while (true) {
 
   try {
     await pollTelegram();
-    const successAt = Date.now();
+    lastTelegramSuccessAt = Date.now();
     await writeStatus({
       ready,
       status: ready ? "READY" : "WAITING_STARTUP",
       pid: process.pid,
       mode: lastMode,
-      lastTelegramSuccessAt: successAt,
-      updatedAt: successAt,
+      lastApiSuccessAt: lastApiSuccessAt || null,
+      lastTelegramSuccessAt,
+      updatedAt: lastTelegramSuccessAt,
     });
   } catch (error) {
     const message = errorMessage(error);
@@ -89,6 +99,8 @@ while (true) {
       status: ready ? "DEGRADED_RETRYING" : "WAITING_STARTUP",
       pid: process.pid,
       mode: lastMode,
+      lastApiSuccessAt: lastApiSuccessAt || null,
+      lastTelegramSuccessAt: lastTelegramSuccessAt || null,
       lastError: message,
       updatedAt: Date.now(),
     });
@@ -131,6 +143,7 @@ async function handleCallback(callback) {
   const data = String(callback.data ?? "");
   if (data === "p7c:REFRESH") {
     const current = await getBotMode();
+    lastApiSuccessAt = Date.now();
     lastMode = current.mode;
     if (callbackId) await answerCallback(callbackId, `Mode hiện tại: ${current.mode}`);
     await editPanel(callback.message, current.mode, "Đã làm mới trạng thái.");
@@ -144,6 +157,7 @@ async function handleCallback(callback) {
   }
 
   const state = await setBotMode(mode, "telegram");
+  lastApiSuccessAt = Date.now();
   lastMode = state.mode;
   if (callbackId) await answerCallback(callbackId, `Đã chọn ${state.mode}`);
   await editPanel(callback.message, state.mode, `Đã chuyển sang ${state.mode}.`);
@@ -166,6 +180,7 @@ async function handleMessage(message) {
 
   if (command === "/mode" || command === "/bots") {
     const current = await getBotMode();
+    lastApiSuccessAt = Date.now();
     lastMode = current.mode;
     await sendPanel(current.mode, "Chọn bot bạn muốn cho phép hoạt động.");
     return;
@@ -174,6 +189,7 @@ async function handleMessage(message) {
   const mode = commands[command];
   if (!mode) return;
   const state = await setBotMode(mode, "telegram-command");
+  lastApiSuccessAt = Date.now();
   lastMode = state.mode;
   await sendPanel(state.mode, `Đã chuyển sang ${state.mode}.`);
   console.log(`PHASE7C_MODE_CHANGED=${state.mode}|SOURCE=TELEGRAM_COMMAND`);
@@ -187,6 +203,7 @@ async function sendPanel(mode, note) {
     disable_web_page_preview: true,
     reply_markup: keyboard(mode),
   });
+  lastTelegramSuccessAt = Date.now();
 }
 
 async function editPanel(message, mode, note) {
@@ -205,6 +222,7 @@ async function editPanel(message, mode, note) {
       disable_web_page_preview: true,
       reply_markup: keyboard(mode),
     });
+    lastTelegramSuccessAt = Date.now();
   } catch (error) {
     if (!errorMessage(error).includes("message is not modified")) throw error;
   }
@@ -291,6 +309,7 @@ async function answerCallback(callbackQueryId, text) {
     text,
     show_alert: false,
   });
+  lastTelegramSuccessAt = Date.now();
 }
 
 async function writeStatus(next) {
