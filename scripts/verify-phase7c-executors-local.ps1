@@ -134,7 +134,8 @@ $headers = @{ "x-mt5-api-key" = $apiKey }
 $health = Invoke-RestMethod -Uri "$bridgeBase/health" -Headers $headers -Method Get -TimeoutSec 5
 if (-not $health.connected -or $health.status -ne "ok") { throw "MT5 bridge is not healthy/connected." }
 if ($health.accountMode -ne "demo") { throw "Phase 7C verifier requires DEMO; current accountMode=$($health.accountMode)." }
-$positions = @(Invoke-RestMethod -Uri "$bridgeBase/v1/positions?symbol=XAUUSD" -Headers $headers -Method Get -TimeoutSec 5)
+$positionsResponse = Invoke-RestMethod -Uri "$bridgeBase/v1/positions?symbol=XAUUSD" -Headers $headers -Method Get -TimeoutSec 5
+$positions = @($positionsResponse)
 $spec = Invoke-RestMethod -Uri "$bridgeBase/v1/symbols/XAUUSD/spec" -Headers $headers -Method Get -TimeoutSec 5
 Write-Host "PHASE7C_VERIFY_ACCOUNT_LOGIN=$($health.accountLogin)"
 Write-Host "PHASE7C_VERIFY_ACCOUNT_MODE=$($health.accountMode)"
