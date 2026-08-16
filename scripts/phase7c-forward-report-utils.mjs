@@ -75,7 +75,7 @@ export function buildEntryRows(trendRows, sidewayRows, decisions) {
   return entries.sort((a, b) => a.timestamp - b.timestamp);
 }
 
-export function summarizeDeals(deals, trendMagic, sidewayMagic) {
+export function summarizeDeals(deals, trendMagic, sidewayMagic, window = {}) {
   const summary = {
     TREND: emptyDealSummary(),
     SIDEWAY: emptyDealSummary(),
@@ -84,20 +84,26 @@ export function summarizeDeals(deals, trendMagic, sidewayMagic) {
 
   // Close/modify commands in the bridge use its configured magic number, which
   // may differ from the strategy-specific magic used to open a Sideway trade.
-  // Establish ownership from the opening deal and then attribute every deal
-  // sharing the same positionId to that strategy.
+  // Establish ownership from opening deals across the supplied ownership
+  // lookback, then count only deals inside the requested report window.
   const positionOwners = new Map();
   for (const deal of deals) {
     if (!deal?.isTradingDeal) continue;
     const entry = String(deal.entry ?? "");
-    if (!['IN', 'INOUT'].includes(entry)) continue;
+    if (!["IN", "INOUT"].includes(entry)) continue;
     const owner = classifyDealOwner(deal, trendMagic, sidewayMagic);
     const positionId = String(deal.positionId ?? "");
     if (positionId && owner !== "OTHER") positionOwners.set(positionId, owner);
   }
 
+  const fromMs = finiteNumber(window.fromMs);
+  const toMs = finiteNumber(window.toMs);
   for (const deal of deals) {
     if (!deal?.isTradingDeal) continue;
+    const timestamp = eventTimeMs(deal);
+    if (fromMs !== null && (timestamp === null || timestamp < fromMs)) continue;
+    if (toMs !== null && (timestamp === null || timestamp > toMs)) continue;
+
     const positionId = String(deal.positionId ?? "");
     const bucket = positionOwners.get(positionId) ?? classifyDealOwner(deal, trendMagic, sidewayMagic);
     const target = summary[bucket];
