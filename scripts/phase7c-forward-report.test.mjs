@@ -80,6 +80,24 @@ test("summarizeDeals uses pre-window opening deal only for ownership, not pnl", 
   assert.equal(summary.TREND.deals, 0);
 });
 
+test("summarizeDeals monitored mode excludes positions opened before baseline", () => {
+  const deals = [
+    { isTradingDeal: true, timestamp: 100, positionId: "OLD", magic: 270713, comment: "phase7b-demo", entry: "IN", volume: 0.03, profit: 0, commission: -0.1, swap: 0, fee: 0, netPnl: -0.1 },
+    { isTradingDeal: true, timestamp: 250, positionId: "OLD", magic: 270713, comment: "p7b-exit", entry: "OUT", volume: 0.03, profit: -10, commission: 0, swap: 0, fee: 0, netPnl: -10 },
+    { isTradingDeal: true, timestamp: 220, positionId: "NEW", magic: 270713, comment: "phase7b-demo", entry: "IN", volume: 0.03, profit: 0, commission: -0.1, swap: 0, fee: 0, netPnl: -0.1 },
+    { isTradingDeal: true, timestamp: 280, positionId: "NEW", magic: 270713, comment: "p7b-exit", entry: "OUT", volume: 0.03, profit: 5, commission: 0, swap: 0, fee: 0, netPnl: 5 },
+  ];
+  const summary = summarizeDeals(deals, 270713, 270714, {
+    fromMs: 200,
+    toMs: 300,
+    requirePositionOpenedInWindow: true,
+  });
+  assert.equal(summary.TREND.deals, 2);
+  assert.equal(summary.TREND.entryDeals, 1);
+  assert.equal(summary.TREND.exitDeals, 1);
+  assert.equal(summary.TREND.netPnl, 4.9);
+});
+
 test("blockedReasonCounts and regimeDistribution summarize telemetry", () => {
   assert.deepEqual(blockedReasonCounts([{ type: "ENTRY_MODE_BLOCK" }, { type: "ENTRY_MODE_BLOCK" }, { type: "ENTRY_FILLED" }]), { ENTRY_MODE_BLOCK: 2 });
   const distribution = regimeDistribution([
