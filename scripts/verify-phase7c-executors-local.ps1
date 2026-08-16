@@ -3,7 +3,9 @@ param(
   [string]$TaskName = "XAUUSD-Phase7B-Bot",
   [string]$ControlApiUrl = "http://127.0.0.1:3711",
   [string]$EnvFile = "packages/mt5-broker/bridge/.env.phase7b-demo",
-  [switch]$RequireMigratedTask
+  [string]$TelegramEnvFile = ".env.phase7b-telegram",
+  [switch]$RequireMigratedTask,
+  [switch]$RequireTelegram
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,12 +16,15 @@ $WorkDir = (Resolve-Path $WorkDir).Path
 if (-not [System.IO.Path]::IsPathRooted($EnvFile)) { $EnvFile = Join-Path $ProjectRoot $EnvFile }
 if (-not (Test-Path $EnvFile)) { throw "EnvFile not found: $EnvFile" }
 $EnvFile = (Resolve-Path $EnvFile).Path
+if (-not [System.IO.Path]::IsPathRooted($TelegramEnvFile)) { $TelegramEnvFile = Join-Path $ProjectRoot $TelegramEnvFile }
+if (Test-Path $TelegramEnvFile) { $TelegramEnvFile = (Resolve-Path $TelegramEnvFile).Path }
 $RuntimeDir = Join-Path $WorkDir "phase7c-executors"
 $TrendStatePath = Join-Path $WorkDir "phase7b-demo-forward\phase7b-demo-state.json"
 $SidewayStatePath = Join-Path $WorkDir "phase7c-sideway-forward\phase7c-sideway-state.json"
 
-function Read-EnvValue([string]$Name) {
-  foreach ($raw in Get-Content -LiteralPath $EnvFile) {
+function Read-EnvValueFromFile([string]$Path, [string]$Name) {
+  if (-not (Test-Path $Path)) { return "" }
+  foreach ($raw in Get-Content -LiteralPath $Path) {
     $line = $raw.Trim()
     if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) { continue }
     $index = $line.IndexOf("=")
@@ -29,6 +34,10 @@ function Read-EnvValue([string]$Name) {
     return $value
   }
   return ""
+}
+
+function Read-EnvValue([string]$Name) {
+  return Read-EnvValueFromFile $EnvFile $Name
 }
 
 function Read-PidStatus([string]$Name) {
@@ -105,10 +114,24 @@ if ($null -eq $task) {
   if (-not $migrated -and $task.State -eq "Running") { throw "Raw/unverified legacy bot task is running. Stop it before Phase 7C execution." }
 }
 
-foreach ($name in @("supervisor", "trend", "sideway")) {
+$telegramToken = Read-EnvValueFromFile $TelegramEnvFile "ZIQ_TELEGRAM_BOT_TOKEN"
+$telegramChatId = Read-EnvValueFromFile $TelegramEnvFile "ZIQ_TELEGRAM_CHAT_ID"
+$telegramConfigured = (Test-Path $TelegramEnvFile) -and -not [string]::IsNullOrWhiteSpace($telegramToken) -and -not [string]::IsNullOrWhiteSpace($telegramChatId)
+Write-Host "PHASE7C_VERIFY_TELEGRAM_CONFIGURED=$telegramConfigured"
+if ($RequireTelegram -and -not $telegramConfigured) {
+  throw "Telegram verification was required, but $TelegramEnvFile is missing or incomplete."
+}
+
+$pidStatuses = @{}
+foreach ($name in @("supervisor", "trend", "sideway", "telegram-mode", "regime-notifier")) {
   $status = Read-PidStatus $name
-  Write-Host "PHASE7C_VERIFY_$($name.ToUpper())_PID=$($status.pid)"
-  Write-Host "PHASE7C_VERIFY_$($name.ToUpper())_ALIVE=$($status.alive)"
+  $pidStatuses[$name] = $status
+  $label = $name.ToUpper().Replace("-", "_")
+  Write-Host "PHASE7C_VERIFY_${label}_PID=$($status.pid)"
+  Write-Host "PHASE7C_VERIFY_${label}_ALIVE=$($status.alive)"
+}
+if ($RequireTelegram -and (-not $pidStatuses["telegram-mode"].alive -or -not $pidStatuses["regime-notifier"].alive)) {
+  throw "Telegram verification requires both telegram-mode and regime-notifier processes to be alive."
 }
 
 $apiBase = $ControlApiUrl.TrimEnd('/')
@@ -218,4 +241,10 @@ Write-Host "PHASE7C_VERIFY_POSITION_OWNER=$owner"
 $lockPath = Join-Path $RuntimeDir "phase7c-execution.lock"
 Write-Host "PHASE7C_VERIFY_EXECUTION_LOCK_PRESENT=$(Test-Path $lockPath)"
 Write-Host "PHASE7C_VERIFY_OWNERSHIP=PASS"
+if ($telegramConfigured) {
+  $telegramStatus = if ($pidStatuses["telegram-mode"].alive -and $pidStatuses["regime-notifier"].alive) { "PASS" } else { "DEGRADED_NON_FATAL" }
+  Write-Host "PHASE7C_VERIFY_TELEGRAM_STATUS=$telegramStatus"
+} else {
+  Write-Host "PHASE7C_VERIFY_TELEGRAM_STATUS=NOT_CONFIGURED"
+}
 Write-Host "PHASE7C_VERIFY_STATUS=PASS"
