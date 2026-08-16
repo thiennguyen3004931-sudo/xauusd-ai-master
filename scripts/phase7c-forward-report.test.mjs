@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   blockedReasonCounts,
   buildEntryRows,
+  dedupeAutoDecisions,
   eventTimeMs,
   filterWindow,
   nearestDecision,
@@ -18,6 +19,20 @@ test("eventTimeMs parses numeric and ISO timestamps", () => {
 test("filterWindow keeps only in-range rows", () => {
   const rows = [{ timestamp: 100 }, { timestamp: 200 }, { timestamp: 300 }];
   assert.deepEqual(filterWindow(rows, 150, 250), [{ timestamp: 200 }]);
+});
+
+test("dedupeAutoDecisions removes only near-identical duplicate telemetry", () => {
+  const rows = [
+    { type: "AUTO_DECISION", timestamp: 1000, activeMode: "AUTO", regime: "UNCERTAIN", recommendedMode: "PAUSE", confidence: 50, lastCandleCloseTime: 500, reasons: ["ACTIVE_MODE_CHANGED"] },
+    { type: "AUTO_DECISION", timestamp: 3000, activeMode: "AUTO", regime: "UNCERTAIN", recommendedMode: "PAUSE", confidence: 50, lastCandleCloseTime: 500, reasons: ["ACTIVE_MODE_CHANGED"] },
+    { type: "AUTO_DECISION", timestamp: 4000, activeMode: "PAUSE", regime: "UNCERTAIN", recommendedMode: "PAUSE", confidence: 50, lastCandleCloseTime: 500, reasons: ["ACTIVE_MODE_CHANGED"] },
+    { type: "AUTO_DECISION", timestamp: 50_000, activeMode: "PAUSE", regime: "UNCERTAIN", recommendedMode: "PAUSE", confidence: 50, lastCandleCloseTime: 500, reasons: ["ACTIVE_MODE_CHANGED"] },
+  ];
+  const deduped = dedupeAutoDecisions(rows, 30_000);
+  assert.equal(deduped.length, 3);
+  assert.equal(deduped[0].timestamp, 1000);
+  assert.equal(deduped[1].timestamp, 4000);
+  assert.equal(deduped[2].timestamp, 50_000);
 });
 
 test("nearestDecision selects latest snapshot at or before entry", () => {
