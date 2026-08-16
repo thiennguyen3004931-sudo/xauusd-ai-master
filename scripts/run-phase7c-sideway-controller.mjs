@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  evaluateTimestampFreshness,
+  validateAutoLotSnapshot,
+} from "./phase7c-sideway-execution-guards.mjs";
+import {
   buildSidewayPlan,
   chooseRangeSide,
   detectM5Confirmation,
@@ -26,6 +30,10 @@ const once = truthy(process.env.ZIQ_PHASE7C_SIDEWAY_ONCE);
 const workDir = process.env.ZIQ_PHASE7C_SIDEWAY_WORK_DIR?.trim() || path.resolve(".runtime", "phase7c-sideway");
 const maxHoldingMinutes = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_MAX_HOLD_MINUTES, 180, 30, 720);
 const pendingRecoveryWaitMs = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_PENDING_RECOVERY_MS, 60_000, 10_000, 300_000);
+const maxQuoteAgeMs = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_MAX_QUOTE_AGE_MS, 30_000, 5_000, 300_000);
+const maxM5AgeMs = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_MAX_M5_AGE_MS, 10 * 60_000, 60_000, 60 * 60_000);
+const maxM15AgeMs = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_MAX_M15_AGE_MS, 30 * 60_000, 5 * 60_000, 2 * 60 * 60_000);
+const autoLotMaxAgeMs = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_AUTO_LOT_MAX_AGE_MS, 10_000, 1_000, 60_000);
 const magicNumber = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER, 270714, 1, 2147483647);
 const deviationPoints = clampInteger(process.env.MT5_DEVIATION_POINTS, 50, 1, 10000);
 const allowReal = truthy(process.env.MT5_ALLOW_REAL_ACCOUNT);
@@ -56,11 +64,16 @@ console.log(`PHASE7C_SIDEWAY_MAX_LOT=${maxLot}`);
 console.log(`PHASE7C_SIDEWAY_MIN_REGIME_CONFIDENCE=${minRegimeConfidence}`);
 console.log(`PHASE7C_SIDEWAY_MAX_HOLD_MINUTES=${maxHoldingMinutes}`);
 console.log(`PHASE7C_SIDEWAY_PENDING_RECOVERY_MS=${pendingRecoveryWaitMs}`);
+console.log(`PHASE7C_SIDEWAY_MAX_QUOTE_AGE_MS=${maxQuoteAgeMs}`);
+console.log(`PHASE7C_SIDEWAY_MAX_M5_AGE_MS=${maxM5AgeMs}`);
+console.log(`PHASE7C_SIDEWAY_MAX_M15_AGE_MS=${maxM15AgeMs}`);
+console.log(`PHASE7C_SIDEWAY_AUTO_LOT_MAX_AGE_MS=${autoLotMaxAgeMs}`);
 console.log("PHASE7C_SIDEWAY_ENTRY=M15_RANGING_PLUS_SUPPLY_DEMAND_EDGE_PLUS_M5_CONFIRMATION");
 console.log("PHASE7C_SIDEWAY_TP1=VOLUME_POC_OR_RANGE_MID_FALLBACK");
 console.log("PHASE7C_SIDEWAY_TP2=OPPOSITE_RANGE_BOUNDARY");
 console.log("PHASE7C_SIDEWAY_MANAGEMENT=ONE_THIRD_PARTIAL_THEN_BREAK_EVEN_NO_TRAILING");
 console.log("PHASE7C_SIDEWAY_CRASH_RECOVERY=PENDING_ENTRY_PLUS_PARTIAL_PLUS_BREAK_EVEN");
+console.log("PHASE7C_SIDEWAY_FINAL_GATE=FRESH_MODE_REGIME_QUOTE_PLUS_FINAL_AUTO_LOT");
 console.log("PHASE7C_SIDEWAY_FAIL_CLOSED=TRUE");
 console.log(`PHASE7C_SIDEWAY_STATE=${statePath}`);
 console.log(`PHASE7C_SIDEWAY_JOURNAL=${journalPath}`);
@@ -231,6 +244,12 @@ async function cycle() {
     return;
   }
 
+  const quoteFreshness = evaluateTimestampFreshness(quote?.timestamp, { maxAgeMs: maxQuoteAgeMs });
+  if (!quoteFreshness.fresh) {
+    journal("ENTRY_QUOTE_FRESHNESS_BLOCK", { reason: quoteFreshness.reason, ageMs: quoteFreshness.ageMs, quoteTimestamp: quote?.timestamp ?? null });
+    return;
+  }
+
   const maxSpread = Number(spec.maxSpread);
   if (Number.isFinite(maxSpread) && maxSpread > 0 && Number(quote.spread) > maxSpread) {
     journal("ENTRY_SPREAD_BLOCK", { spread: quote.spread, maxSpread });
@@ -252,6 +271,22 @@ async function cycle() {
   if (closeTime <= state.lastEvaluatedM5Close) return;
   state.lastEvaluatedM5Close = closeTime;
   saveState();
+
+  const m5Freshness = evaluateTimestampFreshness(closeTime, { maxAgeMs: maxM5AgeMs });
+  if (!m5Freshness.fresh) {
+    journal("ENTRY_M5_FRESHNESS_BLOCK", { closeTime, reason: m5Freshness.reason, ageMs: m5Freshness.ageMs });
+    return;
+  }
+
+  const regimeFreshness = evaluateTimestampFreshness(regime?.lastCandleCloseTime, { maxAgeMs: maxM15AgeMs });
+  if (!regimeFreshness.fresh) {
+    journal("ENTRY_M15_FRESHNESS_BLOCK", {
+      closeTime: regime?.lastCandleCloseTime ?? null,
+      reason: regimeFreshness.reason,
+      ageMs: regimeFreshness.ageMs,
+    });
+    return;
+  }
 
   const activeMode = String(modePayload?.state?.mode ?? "PAUSE").toUpperCase();
   const permission = resolveSidewayPermission(activeMode, regime?.recommendedMode);
@@ -298,7 +333,7 @@ async function cycle() {
   const lower = Number(regime.supplyDemandRange.demand.high);
   const upper = Number(regime.supplyDemandRange.supply.low);
   const poc = estimateVolumePoc(m5.slice(-96), lower, upper, 24);
-  const plan = buildSidewayPlan({
+  const initialPlan = buildSidewayPlan({
     side,
     bid: Number(quote.bid),
     ask: Number(quote.ask),
@@ -310,44 +345,94 @@ async function cycle() {
     digits: Number(spec.digits ?? 2),
   });
 
-  if (!plan.accepted) {
-    journal("ENTRY_PLAN_BLOCK", { closeTime, side, plan });
+  if (!initialPlan.accepted) {
+    journal("ENTRY_PLAN_BLOCK", { closeTime, side, plan: initialPlan });
     return;
   }
 
-  const autoLot = await controlGet(
-    `/api/v1/phase7c/auto-lot-preview?stopDistance=${encodeURIComponent(plan.stopDistance)}&riskPercent=${encodeURIComponent(riskPercent)}&maxLot=${encodeURIComponent(maxLot)}`,
-  );
-  const preview = autoLot?.preview;
-  if (!preview?.approved || !(Number(preview.recommendedLot) > 0)) {
-    journal("ENTRY_AUTO_LOT_BLOCK", { closeTime, side, stopDistance: plan.stopDistance, preview: preview ?? null });
-    return;
-  }
-
-  const volume = Number(preview.recommendedLot);
-  validateVolume(volume, spec);
-
-  // Re-check the mode/regime immediately before mutation to close the gap
-  // between signal evaluation and order submission.
-  const [freshMode, freshRegime] = await Promise.all([
+  // Re-check all mutable market/control inputs immediately before calculating
+  // the final risk and submitting the order. Auto Lot deliberately runs after
+  // this gate so its stop distance belongs to the final broker-facing plan.
+  const [freshMode, freshRegime, freshQuote] = await Promise.all([
     controlGet("/api/v1/phase7c/bot-mode"),
     controlGet(`/api/v1/phase7c/live-regime?symbol=${encodeURIComponent(symbol)}&count=${regimeCandleCount}`),
+    bridgeGet(`/v1/quotes/${encodeURIComponent(symbol)}`),
   ]);
   const finalPermission = resolveSidewayPermission(freshMode?.state?.mode, freshRegime?.recommendedMode);
+  const finalQuoteFreshness = evaluateTimestampFreshness(freshQuote?.timestamp, { maxAgeMs: maxQuoteAgeMs });
+  const finalRegimeFreshness = evaluateTimestampFreshness(freshRegime?.lastCandleCloseTime, { maxAgeMs: maxM15AgeMs });
+  const finalSide = freshRegime?.supplyDemandRange
+    ? chooseRangeSide(freshRegime.supplyDemandRange, Number(freshQuote?.bid), Number(freshQuote?.ask))
+    : null;
+  const finalSpreadBlocked = Number.isFinite(maxSpread) && maxSpread > 0 && Number(freshQuote?.spread) > maxSpread;
+
   if (
     !finalPermission.allowed ||
     freshRegime?.regime !== "RANGING" ||
     freshRegime?.recommendedMode !== "SIDEWAY" ||
-    Number(freshRegime?.confidence ?? 0) < minRegimeConfidence
+    !freshRegime?.supplyDemandRange ||
+    Number(freshRegime?.confidence ?? 0) < minRegimeConfidence ||
+    !finalQuoteFreshness.fresh ||
+    !finalRegimeFreshness.fresh ||
+    finalSpreadBlocked ||
+    finalSide !== side
   ) {
     journal("ENTRY_FINAL_GATE_BLOCK", {
       finalPermission,
       regime: freshRegime?.regime ?? null,
       confidence: freshRegime?.confidence ?? null,
       minRegimeConfidence,
+      hasRange: Boolean(freshRegime?.supplyDemandRange),
+      finalSide,
+      expectedSide: side,
+      quoteFreshness: finalQuoteFreshness,
+      regimeFreshness: finalRegimeFreshness,
+      spread: freshQuote?.spread ?? null,
+      maxSpread,
     });
     return;
   }
+
+  const finalPlan = buildSidewayPlan({
+    side,
+    bid: Number(freshQuote.bid),
+    ask: Number(freshQuote.ask),
+    range: freshRegime.supplyDemandRange,
+    atr: Number(freshRegime.metrics?.atr),
+    poc,
+    point: Number(spec.point),
+    stopsLevelTicks: Number(spec.stopsLevelTicks ?? 0),
+    digits: Number(spec.digits ?? 2),
+  });
+  if (!finalPlan.accepted) {
+    journal("ENTRY_FINAL_PLAN_BLOCK", { closeTime, side, plan: finalPlan });
+    return;
+  }
+
+  const autoLot = await controlGet(
+    `/api/v1/phase7c/auto-lot-preview?stopDistance=${encodeURIComponent(finalPlan.stopDistance)}&riskPercent=${encodeURIComponent(riskPercent)}&maxLot=${encodeURIComponent(maxLot)}`,
+  );
+  const autoLotValidation = validateAutoLotSnapshot(autoLot, {
+    accountLogin: Number(health.accountLogin),
+    brokerSymbol: String(spec.brokerSymbol ?? ""),
+    riskPercent,
+    maxLot,
+    stopDistance: Number(finalPlan.stopDistance),
+    maxAgeMs: autoLotMaxAgeMs,
+  });
+  if (!autoLotValidation.accepted) {
+    journal("ENTRY_AUTO_LOT_BLOCK", {
+      closeTime,
+      side,
+      stopDistance: finalPlan.stopDistance,
+      validation: autoLotValidation,
+      preview: autoLot?.preview ?? null,
+    });
+    return;
+  }
+
+  const volume = Number(autoLotValidation.recommendedLot);
+  validateVolume(volume, spec);
 
   const orderId = `p7c-sideway-${closeTime}-${side}`;
   journal("ENTRY_SUBMIT", {
@@ -357,13 +442,14 @@ async function cycle() {
     confirmation: confirmation.pattern,
     volume,
     riskPercent,
-    estimatedRiskUsd: preview.estimatedRiskUsd,
-    plan,
+    estimatedRiskUsd: autoLotValidation.estimatedRiskUsd,
+    plan: finalPlan,
     regimeConfidence: freshRegime?.confidence,
+    finalQuoteTimestamp: freshQuote.timestamp,
   });
 
   if (!armed) {
-    journal("ENTRY_SHADOW_READY", { orderId, side, volume, plan });
+    journal("ENTRY_SHADOW_READY", { orderId, side, volume, plan: finalPlan });
     return;
   }
 
@@ -372,16 +458,16 @@ async function cycle() {
     side,
     signalM5CloseTime: closeTime,
     volume,
-    stopLoss: plan.stopLoss,
-    stopDistance: plan.stopDistance,
-    tp1: plan.tp1,
-    tp1Kind: plan.tp1Kind,
-    tp2: plan.takeProfit,
+    stopLoss: finalPlan.stopLoss,
+    stopDistance: finalPlan.stopDistance,
+    tp1: finalPlan.tp1,
+    tp1Kind: finalPlan.tp1Kind,
+    tp2: finalPlan.takeProfit,
     lastRegimeCloseChecked: Number(freshRegime?.lastCandleCloseTime ?? 0),
     createdAt: Date.now(),
   };
   saveState();
-  journal("ENTRY_PENDING_DURABLE", { orderId, side, volume, stopLoss: plan.stopLoss, tp2: plan.takeProfit });
+  journal("ENTRY_PENDING_DURABLE", { orderId, side, volume, stopLoss: finalPlan.stopLoss, tp2: finalPlan.takeProfit });
 
   const order = await bridgeRequest("POST", "/v1/orders", {
     symbol,
@@ -389,9 +475,9 @@ async function cycle() {
     orderType: "MARKET",
     timeInForce: "GTC",
     volume,
-    requestedPrice: plan.entry,
-    stopLoss: plan.stopLoss,
-    takeProfit: plan.takeProfit,
+    requestedPrice: finalPlan.entry,
+    stopLoss: finalPlan.stopLoss,
+    takeProfit: finalPlan.takeProfit,
     deviationPoints,
     magicNumber,
     comment: "phase7c-sideway",
@@ -450,7 +536,6 @@ function buildManagedState(opened, pending) {
 
 async function managePosition(position, quote, spec) {
   const managed = state.managed;
-  const marketPrice = managed.side === "BUY" ? Number(quote.bid) : Number(quote.ask);
 
   if (Date.now() >= managed.timeStopAt) {
     await closeAll(position, `TIME_STOP_${maxHoldingMinutes}M`);
@@ -460,7 +545,15 @@ async function managePosition(position, quote, spec) {
   try {
     const regime = await controlGet(`/api/v1/phase7c/live-regime?symbol=${encodeURIComponent(symbol)}&count=${regimeCandleCount}`);
     const regimeClose = Number(regime?.lastCandleCloseTime ?? 0);
-    if (regimeClose > managed.lastRegimeCloseChecked) {
+    const regimeFreshness = evaluateTimestampFreshness(regimeClose, { maxAgeMs: maxM15AgeMs });
+    if (!regimeFreshness.fresh) {
+      journal("MANAGEMENT_REGIME_FRESHNESS_SKIP", {
+        ticket: managed.ticket,
+        closeTime: regimeClose,
+        reason: regimeFreshness.reason,
+        ageMs: regimeFreshness.ageMs,
+      });
+    } else if (regimeClose > managed.lastRegimeCloseChecked) {
       managed.lastRegimeCloseChecked = regimeClose;
       saveState();
       if (regime?.regime !== "RANGING" || regime?.recommendedMode !== "SIDEWAY") {
@@ -480,6 +573,19 @@ async function managePosition(position, quote, spec) {
     journal("MANAGEMENT_REGIME_CHECK_ERROR", { ticket: managed.ticket, message: errorMessage(error) });
   }
 
+  const quoteFreshness = evaluateTimestampFreshness(quote?.timestamp, { maxAgeMs: maxQuoteAgeMs });
+  if (!quoteFreshness.fresh) {
+    journal("MANAGEMENT_QUOTE_FRESHNESS_SKIP", {
+      ticket: managed.ticket,
+      reason: quoteFreshness.reason,
+      ageMs: quoteFreshness.ageMs,
+      quoteTimestamp: quote?.timestamp ?? null,
+      note: "Broker SL/TP remains active; dynamic TP1/BE actions are skipped on stale quote data.",
+    });
+    return;
+  }
+
+  const marketPrice = managed.side === "BUY" ? Number(quote.bid) : Number(quote.ask);
   if (!managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {
     const closeVolume = oneThirdPartialVolume(
       managed.initialVolume,
