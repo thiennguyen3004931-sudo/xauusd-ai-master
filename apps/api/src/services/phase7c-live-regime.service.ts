@@ -33,7 +33,11 @@ function bridgeBaseUrl(): string {
 }
 
 function bridgeApiKey(): string {
-  return (process.env.MT5_BRIDGE_API_KEY ?? "").trim();
+  return (
+    process.env.MT5_BRIDGE_API_KEY?.trim() ||
+    process.env.MT5_API_KEY?.trim() ||
+    ""
+  );
 }
 
 function recommendMode(regime: string): BotMode {
@@ -45,7 +49,7 @@ function recommendMode(regime: string): BotMode {
 async function loadM15Candles(symbol: string, count: number): Promise<Candle[]> {
   const apiKey = bridgeApiKey();
   if (!apiKey) {
-    throw new Error("MT5_BRIDGE_API_KEY is required for Phase 7C live regime detection.");
+    throw new Error("MT5_BRIDGE_API_KEY or MT5_API_KEY is required for Phase 7C live regime detection.");
   }
 
   const controller = new AbortController();
