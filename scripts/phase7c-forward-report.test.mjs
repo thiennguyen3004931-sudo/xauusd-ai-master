@@ -38,18 +38,31 @@ test("buildEntryRows correlates entries with regime journal", () => {
   assert.equal(rows[0].recommendedMode, "TREND");
 });
 
-test("summarizeDeals keeps Sideway exits with the Sideway position even when bridge close magic is Trend magic", () => {
+test("summarizeDeals keeps Sideway exits with Sideway position when bridge close magic is Trend magic", () => {
   const deals = [
-    { isTradingDeal: true, positionId: "T1", magic: 270713, comment: "phase7b-demo", entry: "IN", volume: 0.03, profit: 0, commission: -0.1, swap: 0, fee: 0, netPnl: -0.1 },
-    { isTradingDeal: true, positionId: "T1", magic: 270713, comment: "p7b-exit", entry: "OUT", volume: 0.03, profit: 9, commission: -0.1, swap: 0, fee: 0, netPnl: 8.9 },
-    { isTradingDeal: true, positionId: "S1", magic: 270714, comment: "phase7c-sideway", entry: "IN", volume: 0.03, profit: 0, commission: -0.1, swap: 0, fee: 0, netPnl: -0.1 },
-    { isTradingDeal: true, positionId: "S1", magic: 270713, comment: "p7c-sideway-tp1", entry: "OUT", volume: 0.01, profit: 4, commission: 0, swap: 0, fee: 0, netPnl: 4 },
+    { isTradingDeal: true, timestamp: 100, positionId: "T1", magic: 270713, comment: "phase7b-demo", entry: "IN", volume: 0.03, profit: 0, commission: -0.1, swap: 0, fee: 0, netPnl: -0.1 },
+    { isTradingDeal: true, timestamp: 200, positionId: "T1", magic: 270713, comment: "p7b-exit", entry: "OUT", volume: 0.03, profit: 9, commission: -0.1, swap: 0, fee: 0, netPnl: 8.9 },
+    { isTradingDeal: true, timestamp: 100, positionId: "S1", magic: 270714, comment: "phase7c-sideway", entry: "IN", volume: 0.03, profit: 0, commission: -0.1, swap: 0, fee: 0, netPnl: -0.1 },
+    { isTradingDeal: true, timestamp: 200, positionId: "S1", magic: 270713, comment: "p7c-sideway-tp1", entry: "OUT", volume: 0.01, profit: 4, commission: 0, swap: 0, fee: 0, netPnl: 4 },
   ];
   const summary = summarizeDeals(deals, 270713, 270714);
   assert.equal(summary.TREND.deals, 2);
   assert.equal(summary.TREND.netPnl, 8.8);
   assert.equal(summary.SIDEWAY.deals, 2);
   assert.equal(summary.SIDEWAY.netPnl, 3.9);
+});
+
+test("summarizeDeals uses pre-window opening deal only for ownership, not pnl", () => {
+  const deals = [
+    { isTradingDeal: true, timestamp: 100, positionId: "S2", magic: 270714, comment: "phase7c-sideway", entry: "IN", volume: 0.03, profit: 0, commission: -0.1, swap: 0, fee: 0, netPnl: -0.1 },
+    { isTradingDeal: true, timestamp: 250, positionId: "S2", magic: 270713, comment: "p7c-sideway-exit", entry: "OUT", volume: 0.03, profit: 6, commission: -0.1, swap: 0, fee: 0, netPnl: 5.9 },
+  ];
+  const summary = summarizeDeals(deals, 270713, 270714, { fromMs: 200, toMs: 300 });
+  assert.equal(summary.SIDEWAY.deals, 1);
+  assert.equal(summary.SIDEWAY.entryDeals, 0);
+  assert.equal(summary.SIDEWAY.exitDeals, 1);
+  assert.equal(summary.SIDEWAY.netPnl, 5.9);
+  assert.equal(summary.TREND.deals, 0);
 });
 
 test("blockedReasonCounts and regimeDistribution summarize telemetry", () => {
