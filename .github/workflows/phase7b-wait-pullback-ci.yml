@@ -55,6 +55,42 @@ jobs:
           node --check scripts/apply-phase7b-wait-pullback-demo-controller-hook.mjs
           node --check scripts/summarize-phase7b-wait-pullback-journal-local.mjs
 
+      - name: Reject top-level await in Windows shadow runtime
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const ts = require('typescript');
+          const file = 'scripts/run-phase7b-wait-pullback-shadow.ts';
+          const source = fs.readFileSync(file, 'utf8');
+          const ast = ts.createSourceFile(file, source, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS);
+          const violations = [];
+
+          function visit(node, functionDepth) {
+            const isFunction =
+              ts.isFunctionDeclaration(node) ||
+              ts.isFunctionExpression(node) ||
+              ts.isArrowFunction(node) ||
+              ts.isMethodDeclaration(node) ||
+              ts.isGetAccessorDeclaration(node) ||
+              ts.isSetAccessorDeclaration(node) ||
+              ts.isConstructorDeclaration(node);
+            const nextDepth = functionDepth + (isFunction ? 1 : 0);
+            if (ts.isAwaitExpression(node) && functionDepth === 0) {
+              const pos = ast.getLineAndCharacterOfPosition(node.getStart(ast));
+              violations.push(`${file}:${pos.line + 1}:${pos.character + 1}`);
+            }
+            ts.forEachChild(node, (child) => visit(child, nextDepth));
+          }
+
+          visit(ast, 0);
+          if (violations.length) {
+            console.error(`PHASE7B_SHADOW_TOP_LEVEL_AWAIT=FAIL ${violations.join(',')}`);
+            process.exit(1);
+          }
+          console.log('PHASE7B_SHADOW_TOP_LEVEL_AWAIT=PASS');
+          NODE
+
       - name: Parse Phase7B PowerShell scripts
         shell: pwsh
         run: |
