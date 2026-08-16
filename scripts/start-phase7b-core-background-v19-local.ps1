@@ -95,6 +95,23 @@ $bridgeReady = Wait-Until {
 } 45 "PHASE7B_V19_BRIDGE_READY"
 if (-not $bridgeReady) { throw "Bridge DEMO did not become ready." }
 
+# The API imports workspace packages through their built dist exports. Rebuild the
+# strategy engine before API startup so a source update can never be paired with
+# stale dist output (for example a newly exported RangeBoundaryUtils symbol).
+Write-CoreLog "STRATEGY_ENGINE_BUILD_STARTING=TRUE"
+Push-Location $Root
+try {
+  & $pnpm --filter '@xauusd/strategy-engine' build
+  $strategyBuildExit = $LASTEXITCODE
+} finally {
+  Pop-Location
+}
+if ($strategyBuildExit -ne 0) {
+  Write-CoreLog "PHASE7B_V19_STRATEGY_ENGINE_BUILD=FAIL"
+  throw "Strategy engine build failed with exit code $strategyBuildExit."
+}
+Write-CoreLog "PHASE7B_V19_STRATEGY_ENGINE_BUILD=PASS"
+
 # Force a fresh API process on each logon/start so PHASE7B_DEMO_WORK_DIR can never
 # inherit an old historical-replay work folder.
 Stop-ListeningPort $ApiPort "API"
