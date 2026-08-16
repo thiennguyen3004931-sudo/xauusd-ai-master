@@ -67,6 +67,7 @@ jobs:
       - name: Test Phase7C execution logic
         run: |
           node --test scripts/phase7c-sideway-logic.test.mjs
+          node --test scripts/phase7c-sideway-execution-guards.test.mjs
           node --test scripts/phase7c-execution-lock.test.mjs
 
       - name: Build API dependency graph
@@ -79,6 +80,7 @@ jobs:
           node --check scripts/run-phase7c-regime-notifier.mjs
           node --check scripts/run-phase7c-trend-controller.mjs
           node --check scripts/phase7c-sideway-logic.mjs
+          node --check scripts/phase7c-sideway-execution-guards.mjs
           node --check scripts/phase7c-execution-lock.mjs
           node --check scripts/run-phase7c-sideway-controller.mjs
           node --check scripts/run-phase7c-sideway-locked.mjs
