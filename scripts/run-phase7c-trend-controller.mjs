@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import ts from "typescript";
 import { acquireExecutionLock } from "./phase7c-execution-lock.mjs";
 
 const nativeFetch = globalThis.fetch.bind(globalThis);
@@ -73,7 +75,45 @@ globalThis.fetch = async function phase7CTrendGate(input, init = undefined) {
   }
 };
 
-await import("./run-phase7b-demo-controller.ts");
+await importLegacyTrendController();
+
+async function importLegacyTrendController() {
+  // `tsx` resolves .ts files according to the repository's CommonJS package
+  // context. The legacy controller intentionally uses top-level await, which
+  // cannot be transformed to CJS. Transpile only its TypeScript syntax to ESM
+  // in memory, then import it in this same process so the Phase 7C fetch gate
+  // and execution lock remain active around every new-order request.
+  const sourceUrl = new URL("./run-phase7b-demo-controller.ts", import.meta.url);
+  const source = fs.readFileSync(sourceUrl, "utf8");
+  const transformed = ts.transpileModule(source, {
+    fileName: "run-phase7b-demo-controller.ts",
+    reportDiagnostics: true,
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      verbatimModuleSyntax: false,
+    },
+  });
+
+  const errors = (transformed.diagnostics ?? []).filter(
+    (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
+  );
+  if (errors.length > 0) {
+    const detail = errors
+      .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, " "))
+      .join(" | ");
+    throw new Error(`Legacy Trend TypeScript transpile failed: ${detail}`);
+  }
+
+  const sourceLabel = sourceUrl.href.replace(/\s/g, "%20");
+  const payload = Buffer.from(
+    `${transformed.outputText}\n//# sourceURL=${sourceLabel}\n`,
+    "utf8",
+  ).toString("base64");
+  console.log("PHASE7C_TREND_LEGACY_TRANSPILE=ESM");
+  await import(`data:text/javascript;base64,${payload}`);
+}
 
 async function evaluateTrendEntryPermission() {
   const modePayload = await controlRequest("/api/v1/phase7c/bot-mode");
