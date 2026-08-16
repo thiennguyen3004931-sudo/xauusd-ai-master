@@ -114,27 +114,7 @@ export function summarizeDeals(deals, trendMagic, sidewayMagic, window = {}) {
     SIDEWAY: emptyDealSummary(),
     OTHER: emptyDealSummary(),
   };
-
-  // Close/modify commands in the bridge use its configured magic number, which
-  // may differ from the strategy-specific magic used to open a Sideway trade.
-  // Establish ownership from opening deals across the supplied ownership
-  // lookback, then count only deals inside the requested report window.
-  const positionOwners = new Map();
-  const positionOpenTimes = new Map();
-  for (const deal of deals) {
-    if (!deal?.isTradingDeal) continue;
-    const entry = String(deal.entry ?? "");
-    if (!["IN", "INOUT"].includes(entry)) continue;
-    const owner = classifyDealOwner(deal, trendMagic, sidewayMagic);
-    const positionId = String(deal.positionId ?? "");
-    const timestamp = eventTimeMs(deal);
-    if (positionId && owner !== "OTHER") positionOwners.set(positionId, owner);
-    if (positionId && timestamp !== null) {
-      const current = positionOpenTimes.get(positionId);
-      if (current === undefined || timestamp < current) positionOpenTimes.set(positionId, timestamp);
-    }
-  }
-
+  const positions = buildPositionIndex(deals, trendMagic, sidewayMagic);
   const fromMs = finiteNumber(window.fromMs);
   const toMs = finiteNumber(window.toMs);
   const explicitPositionBaselineMs = finiteNumber(window.positionOpenedAfterMs);
@@ -148,17 +128,17 @@ export function summarizeDeals(deals, trendMagic, sidewayMagic, window = {}) {
     if (toMs !== null && (timestamp === null || timestamp > toMs)) continue;
 
     const positionId = String(deal.positionId ?? "");
+    const position = positionId ? positions.get(positionId) : null;
     if (minimumPositionOpenMs !== null) {
       if (positionId) {
-        const openedAt = positionOpenTimes.get(positionId);
-        if (openedAt === undefined || openedAt < minimumPositionOpenMs) continue;
+        if (!position || position.openedAt === null || position.openedAt < minimumPositionOpenMs) continue;
       } else {
         const entry = String(deal.entry ?? "");
         if (!["IN", "INOUT"].includes(entry) || timestamp < minimumPositionOpenMs) continue;
       }
     }
 
-    const bucket = positionOwners.get(positionId) ?? classifyDealOwner(deal, trendMagic, sidewayMagic);
+    const bucket = position?.owner ?? classifyDealOwner(deal, trendMagic, sidewayMagic);
     const target = summary[bucket];
     target.deals += 1;
     target.volume += finiteNumber(deal.volume) ?? 0;
@@ -172,6 +152,65 @@ export function summarizeDeals(deals, trendMagic, sidewayMagic, window = {}) {
   }
   for (const value of Object.values(summary)) roundSummary(value);
   return summary;
+}
+
+export function summarizeClosedPositions(deals, trendMagic, sidewayMagic, window = {}) {
+  const positions = buildPositionIndex(deals, trendMagic, sidewayMagic);
+  const fromMs = finiteNumber(window.fromMs);
+  const toMs = finiteNumber(window.toMs);
+  const baselineMs = finiteNumber(window.positionOpenedAfterMs);
+  const rows = [];
+  const summary = {
+    TREND: emptyTradeSummary(),
+    SIDEWAY: emptyTradeSummary(),
+    OTHER: emptyTradeSummary(),
+  };
+
+  for (const position of positions.values()) {
+    if (position.openedAt === null || position.closedAt === null) continue;
+    if (baselineMs !== null && position.openedAt < baselineMs) continue;
+    if (fromMs !== null && position.closedAt < fromMs) continue;
+    if (toMs !== null && position.closedAt > toMs) continue;
+    if (!(position.inVolume > 0) || position.outVolume + 1e-8 < position.inVolume) continue;
+
+    let netPnl = 0;
+    let grossProfit = 0;
+    let grossLoss = 0;
+    for (const deal of position.deals) {
+      const value = finiteNumber(deal.netPnl) ?? 0;
+      netPnl += value;
+      if (value > 0) grossProfit += value;
+      if (value < 0) grossLoss += value;
+    }
+    netPnl = round4(netPnl);
+    grossProfit = round4(grossProfit);
+    grossLoss = round4(grossLoss);
+
+    const target = summary[position.owner];
+    target.trades += 1;
+    target.netPnl += netPnl;
+    target.grossProfit += grossProfit;
+    target.grossLoss += grossLoss;
+    if (netPnl > 0.0001) target.wins += 1;
+    else if (netPnl < -0.0001) target.losses += 1;
+    else target.breakeven += 1;
+
+    rows.push({
+      positionId: position.positionId,
+      strategy: position.owner,
+      openedAt: position.openedAt,
+      openedAtIso: new Date(position.openedAt).toISOString(),
+      closedAt: position.closedAt,
+      closedAtIso: new Date(position.closedAt).toISOString(),
+      openedVolume: round4(position.inVolume),
+      closedVolume: round4(position.outVolume),
+      netPnl,
+    });
+  }
+
+  for (const target of Object.values(summary)) finalizeTradeSummary(target);
+  rows.sort((a, b) => b.closedAt - a.closedAt);
+  return { ...summary, rows };
 }
 
 export function regimeDistribution(decisions) {
@@ -191,6 +230,48 @@ export function regimeDistribution(decisions) {
   };
 }
 
+function buildPositionIndex(deals, trendMagic, sidewayMagic) {
+  const positions = new Map();
+  for (const deal of deals) {
+    if (!deal?.isTradingDeal) continue;
+    const positionId = String(deal.positionId ?? "");
+    if (!positionId) continue;
+    const timestamp = eventTimeMs(deal);
+    const entry = String(deal.entry ?? "");
+    const volume = Math.max(0, finiteNumber(deal.volume) ?? 0);
+    let position = positions.get(positionId);
+    if (!position) {
+      position = {
+        positionId,
+        owner: "OTHER",
+        openedAt: null,
+        closedAt: null,
+        inVolume: 0,
+        outVolume: 0,
+        deals: [],
+      };
+      positions.set(positionId, position);
+    }
+    position.deals.push(deal);
+
+    if (["IN", "INOUT"].includes(entry)) {
+      const owner = classifyDealOwner(deal, trendMagic, sidewayMagic);
+      if (position.owner === "OTHER" && owner !== "OTHER") position.owner = owner;
+      if (timestamp !== null && (position.openedAt === null || timestamp < position.openedAt)) {
+        position.openedAt = timestamp;
+      }
+      if (entry === "IN") position.inVolume += volume;
+    }
+    if (["OUT", "OUT_BY", "INOUT"].includes(entry)) {
+      position.outVolume += volume;
+      if (timestamp !== null && (position.closedAt === null || timestamp > position.closedAt)) {
+        position.closedAt = timestamp;
+      }
+    }
+  }
+  return positions;
+}
+
 function classifyDealOwner(deal, trendMagic, sidewayMagic) {
   const magic = Number(deal?.magic);
   if (magic === sidewayMagic) return "SIDEWAY";
@@ -205,10 +286,26 @@ function emptyDealSummary() {
   return { deals: 0, entryDeals: 0, exitDeals: 0, volume: 0, profit: 0, commission: 0, swap: 0, fee: 0, netPnl: 0 };
 }
 
+function emptyTradeSummary() {
+  return { trades: 0, wins: 0, losses: 0, breakeven: 0, winRate: 0, grossProfit: 0, grossLoss: 0, netPnl: 0, profitFactor: null };
+}
+
 function roundSummary(value) {
   for (const key of ["volume", "profit", "commission", "swap", "fee", "netPnl"]) {
-    value[key] = Math.round((Number(value[key]) + Number.EPSILON) * 10000) / 10000;
+    value[key] = round4(value[key]);
   }
+}
+
+function finalizeTradeSummary(value) {
+  value.grossProfit = round4(value.grossProfit);
+  value.grossLoss = round4(value.grossLoss);
+  value.netPnl = round4(value.netPnl);
+  value.winRate = value.trades > 0 ? round4((value.wins / value.trades) * 100) : 0;
+  value.profitFactor = value.grossLoss < -0.0001
+    ? round4(value.grossProfit / Math.abs(value.grossLoss))
+    : value.grossProfit > 0.0001
+      ? null
+      : 0;
 }
 
 function increment(target, key) {
@@ -222,4 +319,8 @@ function sortObjectByValue(input) {
 function finiteNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function round4(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 10000) / 10000;
 }
