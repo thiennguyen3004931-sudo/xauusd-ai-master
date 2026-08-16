@@ -40,8 +40,13 @@ function Stop-PidFile([string]$Path, [string]$Label) {
   Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
 }
 
-# Stop children first, then supervisor, so a forced supervisor shutdown cannot
-# leave live order executors behind.
+# Telegram helpers have no MT5 order permission, but stop them explicitly so a
+# supervisor restart cannot leave duplicate getUpdates/notifier processes.
+Stop-PidFile (Join-Path $RuntimeDir "telegram-mode.pid") "TELEGRAM_MODE"
+Stop-PidFile (Join-Path $RuntimeDir "regime-notifier.pid") "REGIME_NOTIFIER"
+
+# Stop order-capable children before the supervisor, so a forced supervisor
+# shutdown cannot leave live executors behind.
 Stop-PidFile (Join-Path $RuntimeDir "trend.pid") "TREND"
 Stop-PidFile (Join-Path $RuntimeDir "sideway.pid") "SIDEWAY"
 Stop-PidFile (Join-Path $RuntimeDir "supervisor.pid") "SUPERVISOR"
