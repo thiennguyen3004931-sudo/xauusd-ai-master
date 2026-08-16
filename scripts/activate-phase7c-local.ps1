@@ -161,15 +161,17 @@ try {
   $current = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7b-demo" -Method Get -TimeoutSec 5
   Write-Host "PHASE7C_ACTIVATE_PREFLIGHT_API=AVAILABLE"
   Write-Host "PHASE7C_ACTIVATE_CURRENT_BOT_STATUS=$($current.botStatus)"
-  if ($current.botStatus -ne "WAITING_SIGNAL") {
-    throw "Phase 7C activation requires botStatus=WAITING_SIGNAL. Current=$($current.botStatus)"
+  $acceptedIdleStatuses = @("WAITING_SIGNAL", "READY_NOT_ARMED")
+  if ($acceptedIdleStatuses -notcontains [string]$current.botStatus) {
+    throw "Phase 7C activation requires an idle botStatus in [WAITING_SIGNAL, READY_NOT_ARMED]. Current=$($current.botStatus)"
   }
+  Write-Host "PHASE7C_ACTIVATE_PREFLIGHT_BOT_STATUS=SAFE_IDLE"
   if ($null -ne $current.mt5.managedPosition) {
     throw "Managed XAUUSD position is present. Activation is blocked until the trade is closed."
   }
 } catch {
   $message = $_.Exception.Message
-  if ($message -like "*requires botStatus*" -or $message -like "*Managed XAUUSD*") { throw }
+  if ($message -like "*requires an idle botStatus*" -or $message -like "*Managed XAUUSD*") { throw }
   $preflightSource = "COLD_START_LOCAL_STATE_PLUS_BRIDGE"
   Write-Host "PHASE7C_ACTIVATE_PREFLIGHT_API=UNAVAILABLE_COLD_START"
   Write-Host "PHASE7C_ACTIVATE_PREFLIGHT_API_DETAIL=$message"
