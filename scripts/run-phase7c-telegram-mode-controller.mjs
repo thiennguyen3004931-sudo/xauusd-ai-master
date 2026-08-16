@@ -1,24 +1,96 @@
+import { mkdir, rename, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+
 const token = requiredEnv("ZIQ_TELEGRAM_BOT_TOKEN");
 const chatId = requiredEnv("ZIQ_TELEGRAM_CHAT_ID");
 const apiBase = (process.env.ZIQ_PHASE7C_CONTROL_API_URL?.trim() || "http://127.0.0.1:3711").replace(/\/$/, "");
 const intervalMs = Math.max(1000, Number(process.env.ZIQ_PHASE7C_CONTROL_INTERVAL_MS ?? "1500"));
+const statusFile = resolve(
+  process.env.ZIQ_PHASE7C_TELEGRAM_MODE_STATUS_FILE?.trim() || ".runtime/phase7c-telegram-mode-status.json",
+);
 const telegramBase = `https://api.telegram.org/bot${token}`;
 const validModes = new Set(["AUTO", "TREND", "SIDEWAY", "PAUSE"]);
 let updateOffset = 0;
+let ready = false;
+let initialPanelSent = false;
+let lastMode = "UNKNOWN";
+let nextStartupAttemptAt = 0;
 
-const initial = await getBotMode();
-await sendPanel(initial.mode, "Bảng điều khiển bot đã sẵn sàng.");
-console.log(`PHASE7C_TELEGRAM_MODE_CONTROLLER=RUNNING`);
+console.log("PHASE7C_TELEGRAM_MODE_CONTROLLER=RUNNING");
 console.log(`PHASE7C_CONTROL_API=${apiBase}`);
-console.log(`PHASE7C_INITIAL_MODE=${initial.mode}`);
+console.log(`PHASE7C_TELEGRAM_STATUS_FILE=${statusFile}`);
 console.log("PHASE7C_MT5_ORDER_PERMISSION=NONE");
+await writeStatus({
+  ready: false,
+  status: "STARTING",
+  startedAt: Date.now(),
+  pid: process.pid,
+});
 
 while (true) {
+  const now = Date.now();
+
+  if (!ready && now >= nextStartupAttemptAt) {
+    try {
+      const initial = await getBotMode();
+      lastMode = initial.mode;
+      await telegramRequest("getMe");
+      if (!initialPanelSent) {
+        await sendPanel(initial.mode, "Bảng điều khiển bot đã sẵn sàng.");
+        initialPanelSent = true;
+      }
+      ready = true;
+      const successAt = Date.now();
+      await writeStatus({
+        ready: true,
+        status: "READY",
+        pid: process.pid,
+        mode: lastMode,
+        lastApiSuccessAt: successAt,
+        lastTelegramSuccessAt: successAt,
+        updatedAt: successAt,
+      });
+      console.log(`PHASE7C_TELEGRAM_MODE_READY=PASS|MODE=${initial.mode}`);
+    } catch (error) {
+      const message = errorMessage(error);
+      nextStartupAttemptAt = Date.now() + 10_000;
+      await writeStatus({
+        ready: false,
+        status: "STARTUP_RETRY",
+        pid: process.pid,
+        mode: lastMode,
+        lastError: message,
+        retryAt: nextStartupAttemptAt,
+        updatedAt: Date.now(),
+      });
+      console.error(`PHASE7C_TELEGRAM_MODE_STARTUP_RETRY=${message}`);
+    }
+  }
+
   try {
     await pollTelegram();
+    const successAt = Date.now();
+    await writeStatus({
+      ready,
+      status: ready ? "READY" : "WAITING_STARTUP",
+      pid: process.pid,
+      mode: lastMode,
+      lastTelegramSuccessAt: successAt,
+      updatedAt: successAt,
+    });
   } catch (error) {
-    console.error(`PHASE7C_TELEGRAM_CONTROL_ERROR=${errorMessage(error)}`);
+    const message = errorMessage(error);
+    await writeStatus({
+      ready,
+      status: ready ? "DEGRADED_RETRYING" : "WAITING_STARTUP",
+      pid: process.pid,
+      mode: lastMode,
+      lastError: message,
+      updatedAt: Date.now(),
+    });
+    console.error(`PHASE7C_TELEGRAM_CONTROL_ERROR=${message}`);
   }
+
   await sleep(intervalMs);
 }
 
@@ -55,6 +127,7 @@ async function handleCallback(callback) {
   const data = String(callback.data ?? "");
   if (data === "p7c:REFRESH") {
     const current = await getBotMode();
+    lastMode = current.mode;
     if (callbackId) await answerCallback(callbackId, `Mode hiện tại: ${current.mode}`);
     await editPanel(callback.message, current.mode, "Đã làm mới trạng thái.");
     return;
@@ -67,6 +140,7 @@ async function handleCallback(callback) {
   }
 
   const state = await setBotMode(mode, "telegram");
+  lastMode = state.mode;
   if (callbackId) await answerCallback(callbackId, `Đã chọn ${state.mode}`);
   await editPanel(callback.message, state.mode, `Đã chuyển sang ${state.mode}.`);
   console.log(`PHASE7C_MODE_CHANGED=${state.mode}|SOURCE=TELEGRAM`);
@@ -88,6 +162,7 @@ async function handleMessage(message) {
 
   if (command === "/mode" || command === "/bots") {
     const current = await getBotMode();
+    lastMode = current.mode;
     await sendPanel(current.mode, "Chọn bot bạn muốn cho phép hoạt động.");
     return;
   }
@@ -95,6 +170,7 @@ async function handleMessage(message) {
   const mode = commands[command];
   if (!mode) return;
   const state = await setBotMode(mode, "telegram-command");
+  lastMode = state.mode;
   await sendPanel(state.mode, `Đã chuyển sang ${state.mode}.`);
   console.log(`PHASE7C_MODE_CHANGED=${state.mode}|SOURCE=TELEGRAM_COMMAND`);
 }
@@ -192,7 +268,7 @@ async function apiRequest(method, endpoint, body) {
 }
 
 async function telegramRequest(method, body) {
-  const url = method.includes("?") ? `${telegramBase}/${method}` : `${telegramBase}/${method}`;
+  const url = `${telegramBase}/${method}`;
   const response = await fetch(url, body === undefined ? undefined : {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -211,6 +287,20 @@ async function answerCallback(callbackQueryId, text) {
     text,
     show_alert: false,
   });
+}
+
+async function writeStatus(next) {
+  const now = Date.now();
+  const payload = {
+    version: 1,
+    ...next,
+    updatedAt: next.updatedAt ?? now,
+    updatedAtIso: new Date(next.updatedAt ?? now).toISOString(),
+  };
+  await mkdir(dirname(statusFile), { recursive: true });
+  const temporary = `${statusFile}.${process.pid}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  await rename(temporary, statusFile);
 }
 
 function requiredEnv(name) {
