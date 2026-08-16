@@ -137,7 +137,10 @@ export function summarizeDeals(deals, trendMagic, sidewayMagic, window = {}) {
 
   const fromMs = finiteNumber(window.fromMs);
   const toMs = finiteNumber(window.toMs);
+  const explicitPositionBaselineMs = finiteNumber(window.positionOpenedAfterMs);
   const requirePositionOpenedInWindow = Boolean(window.requirePositionOpenedInWindow);
+  const minimumPositionOpenMs = explicitPositionBaselineMs ?? (requirePositionOpenedInWindow ? fromMs : null);
+
   for (const deal of deals) {
     if (!deal?.isTradingDeal) continue;
     const timestamp = eventTimeMs(deal);
@@ -145,13 +148,13 @@ export function summarizeDeals(deals, trendMagic, sidewayMagic, window = {}) {
     if (toMs !== null && (timestamp === null || timestamp > toMs)) continue;
 
     const positionId = String(deal.positionId ?? "");
-    if (requirePositionOpenedInWindow && fromMs !== null) {
+    if (minimumPositionOpenMs !== null) {
       if (positionId) {
         const openedAt = positionOpenTimes.get(positionId);
-        if (openedAt === undefined || openedAt < fromMs) continue;
+        if (openedAt === undefined || openedAt < minimumPositionOpenMs) continue;
       } else {
         const entry = String(deal.entry ?? "");
-        if (!["IN", "INOUT"].includes(entry)) continue;
+        if (!["IN", "INOUT"].includes(entry) || timestamp < minimumPositionOpenMs) continue;
       }
     }
 
