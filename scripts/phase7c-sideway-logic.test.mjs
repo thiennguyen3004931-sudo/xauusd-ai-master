@@ -5,7 +5,9 @@ import {
   chooseRangeSide,
   detectM5Confirmation,
   estimateVolumePoc,
+  matchPendingEntryPosition,
   oneThirdPartialVolume,
+  reconcileManagedBrokerState,
   resolveSidewayPermission,
   targetReached,
 } from "./phase7c-sideway-logic.mjs";
@@ -88,4 +90,83 @@ test("target checks are directional", () => {
   assert.equal(targetReached("BUY", 2398, 2399), false);
   assert.equal(targetReached("SELL", 2398, 2399), true);
   assert.equal(targetReached("SELL", 2400, 2399), false);
+});
+
+test("pending entry recovery only adopts the exact broker-protected position", () => {
+  const now = 1_700_000_100_000;
+  const pending = {
+    side: "BUY",
+    volume: 0.03,
+    stopLoss: 2389,
+    tp2: 2408,
+    createdAt: now - 5_000,
+  };
+  const position = {
+    ticket: "2001",
+    side: "LONG",
+    volume: 0.03,
+    stopLoss: 2389,
+    takeProfit: 2408,
+    openedAt: now - 4_000,
+  };
+  const spec = { volumeStep: 0.01, point: 0.01 };
+
+  assert.equal(matchPendingEntryPosition(pending, [position], spec, now).matched, true);
+  assert.equal(matchPendingEntryPosition(pending, [{ ...position, stopLoss: 2388.5 }], spec, now).matched, false);
+  assert.equal(matchPendingEntryPosition(pending, [{ ...position, side: "SHORT" }], spec, now).matched, false);
+  assert.equal(matchPendingEntryPosition(pending, [position, { ...position, ticket: "2002" }], spec, now).matched, false);
+});
+
+test("managed state recovers a completed one-third partial after a crash", () => {
+  const managed = {
+    side: "BUY",
+    entry: 2392.3,
+    initialVolume: 0.03,
+    expectedRemainingVolume: 0.03,
+    partialApplied: false,
+    breakEvenApplied: false,
+  };
+  const position = {
+    side: "LONG",
+    volume: 0.02,
+    stopLoss: 2389,
+  };
+  const result = reconcileManagedBrokerState(managed, position, {
+    minVolume: 0.01,
+    volumeStep: 0.01,
+    point: 0.01,
+  });
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.managed.partialApplied, true);
+  assert.equal(result.managed.expectedRemainingVolume, 0.02);
+  assert.equal(result.events[0]?.type, "TP1_PARTIAL_RECOVERED_FROM_BROKER_VOLUME");
+});
+
+test("managed state recovers break-even from broker stop and rejects unknown volume mutation", () => {
+  const managed = {
+    side: "SELL",
+    entry: 2407.7,
+    initialVolume: 0.03,
+    expectedRemainingVolume: 0.02,
+    partialApplied: true,
+    breakEvenApplied: false,
+  };
+  const spec = { minVolume: 0.01, volumeStep: 0.01, point: 0.01 };
+  const recovered = reconcileManagedBrokerState(managed, {
+    side: "SHORT",
+    volume: 0.02,
+    stopLoss: 2407.7,
+  }, spec);
+  assert.equal(recovered.accepted, true);
+  assert.equal(recovered.managed.breakEvenApplied, true);
+  assert.equal(recovered.events[0]?.type, "BREAK_EVEN_RECOVERED_FROM_BROKER_STOP");
+
+  const blocked = reconcileManagedBrokerState(managed, {
+    side: "SHORT",
+    volume: 0.01,
+    stopLoss: 2407.7,
+  }, spec);
+  assert.equal(blocked.accepted, false);
+  assert.equal(blocked.reason, "MANAGED_VOLUME_MISMATCH");
 });
