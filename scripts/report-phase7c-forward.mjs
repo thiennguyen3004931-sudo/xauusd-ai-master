@@ -4,6 +4,7 @@ import {
   blockedReasonCounts,
   buildEntryRows,
   countByType,
+  eventTimeMs,
   filterWindow,
   regimeDistribution,
   summarizeDeals,
@@ -19,6 +20,8 @@ const apiKey = process.env.MT5_API_KEY || process.env.MT5_BRIDGE_API_KEY || "";
 const bridgeBase = `http://${bridgeHost}:${bridgePort}`;
 const trendMagic = finiteNumber(process.env.MT5_MAGIC_NUMBER) ?? 270713;
 const sidewayMagic = finiteNumber(process.env.ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER) ?? 270714;
+const ownershipLookbackDays = Math.max(1, Math.min(365, finiteNumber(process.env.ZIQ_PHASE7C_REPORT_OWNERSHIP_LOOKBACK_DAYS) ?? 30));
+const ownershipFromMs = Math.max(0, fromMs - ownershipLookbackDays * 24 * 60 * 60 * 1000);
 
 if (!apiKey.trim()) throw new Error("MT5_API_KEY or MT5_BRIDGE_API_KEY is required for forward report.");
 if (!(toMs > fromMs)) throw new Error("Report range is invalid: toMs must be greater than fromMs.");
@@ -32,10 +35,10 @@ fs.mkdirSync(reportDir, { recursive: true });
 const trendRows = filterWindow(readJsonl(trendPath), fromMs, toMs);
 const sidewayRows = filterWindow(readJsonl(sidewayPath), fromMs, toMs);
 const decisionRows = filterWindow(readJsonl(decisionPath), fromMs, toMs);
-const deals = await bridgeGet(`/v1/history/deals?fromMs=${fromMs}&toMs=${toMs}&symbol=${encodeURIComponent(symbol)}`);
+const deals = await bridgeGet(`/v1/history/deals?fromMs=${ownershipFromMs}&toMs=${toMs}&symbol=${encodeURIComponent(symbol)}`);
 if (!Array.isArray(deals)) throw new Error("MT5 deal history did not return an array.");
 
-const dealSummary = summarizeDeals(deals, trendMagic, sidewayMagic);
+const dealSummary = summarizeDeals(deals, trendMagic, sidewayMagic, { fromMs, toMs });
 const entries = buildEntryRows(trendRows, sidewayRows, decisionRows);
 const trendEvents = countByType(trendRows);
 const sidewayEvents = countByType(sidewayRows);
@@ -44,6 +47,10 @@ const blocks = {
   SIDEWAY: blockedReasonCounts(sidewayRows),
 };
 const regimes = regimeDistribution(decisionRows);
+const windowDeals = deals.filter((deal) => {
+  const timestamp = eventTimeMs(deal);
+  return deal?.isTradingDeal && timestamp !== null && timestamp >= fromMs && timestamp <= toMs;
+});
 
 const report = {
   version: 1,
@@ -68,7 +75,11 @@ const report = {
   blockedReasons: blocks,
   regimeDistribution: regimes,
   brokerDeals: {
-    matchedWindowDeals: deals.filter((deal) => deal?.isTradingDeal).length,
+    ownershipLookbackDays,
+    ownershipFromMs,
+    ownershipFromIso: new Date(ownershipFromMs).toISOString(),
+    historyDealsLoaded: deals.length,
+    matchedWindowDeals: windowDeals.length,
     summary: dealSummary,
   },
   management: {
@@ -153,6 +164,7 @@ function renderMarkdown(value) {
     `- Window: ${value.range.fromIso} → ${value.range.toIso}`,
     `- Symbol: ${value.symbol}`,
     `- Account mode: DEMO`,
+    `- Deal ownership lookback: ${value.brokerDeals.ownershipLookbackDays} days (used only to resolve position ownership)`,
     "",
     "## P/L from MT5 deal history",
     "",
@@ -192,7 +204,7 @@ function renderMarkdown(value) {
     }
   }
 
-  lines.push("", "P/L is sourced from the MT5 broker deal-history endpoint and grouped by strategy magic number. Journal-derived management counts are observational and are not used to fabricate P/L.", "");
+  lines.push("", "P/L is sourced from the MT5 broker deal-history endpoint. Position ownership is resolved from the opening deal before window filtering, so bridge close magic cannot reassign Sideway P/L to Trend. Journal-derived management counts are observational and are not used to fabricate P/L.", "");
   return lines.join("\n");
 }
 
