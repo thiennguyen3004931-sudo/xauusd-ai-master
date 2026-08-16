@@ -28,8 +28,14 @@ function bridgeBase(): string {
 }
 
 function bridgeApiKey(): string {
-  const value = process.env.MT5_BRIDGE_API_KEY?.trim() ?? "";
-  if (!value) throw new Error("MT5_BRIDGE_API_KEY is not configured for Phase 7C.");
+  const value = (
+    process.env.MT5_BRIDGE_API_KEY?.trim() ||
+    process.env.MT5_API_KEY?.trim() ||
+    ""
+  );
+  if (!value) {
+    throw new Error("MT5_BRIDGE_API_KEY or MT5_API_KEY is not configured for Phase 7C.");
+  }
   return value;
 }
 
