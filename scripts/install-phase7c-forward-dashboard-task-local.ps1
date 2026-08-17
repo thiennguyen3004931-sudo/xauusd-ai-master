@@ -14,9 +14,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$Launcher = Join-Path $PSScriptRoot "run-phase7c-forward-dashboard-local.ps1"
+$TaskRunner = Join-Path $PSScriptRoot "run-phase7c-forward-dashboard-task-runner-local.ps1"
+$ConfigPath = Join-Path $ProjectRoot ".runtime\phase7c-dashboard-task-config.json"
 
-if (-not (Test-Path $Launcher)) { throw "Phase 7C forward dashboard launcher not found: $Launcher" }
+if (-not (Test-Path $TaskRunner)) { throw "Phase 7C forward dashboard task runner not found: $TaskRunner" }
 if ($HostAddress -notin @("127.0.0.1", "localhost", "::1")) { throw "Dashboard task must remain loopback-only. Refused HostAddress=$HostAddress" }
 if ($Port -lt 1 -or $Port -gt 65535) { throw "Port must be between 1 and 65535." }
 if ($RefreshSeconds -lt 5 -or $RefreshSeconds -gt 300) { throw "RefreshSeconds must be between 5 and 300." }
@@ -42,22 +43,29 @@ $executionActionsBefore = @($executionTask.Actions)
 if ($executionActionsBefore.Count -ne 1) { throw "Execution task $ExecutionTaskName must have exactly one action." }
 $executionFingerprintBefore = "$([string]$executionActionsBefore[0].Execute)|$([string]$executionActionsBefore[0].Arguments)|$([string]$executionActionsBefore[0].WorkingDirectory)|$([string]$executionTask.Principal.UserId)|$([string]$executionTask.Principal.GroupId)|$([string]$executionTask.Principal.LogonType)|$([string]$executionTask.Principal.RunLevel)"
 
-$arguments = @(
-  "-NoProfile",
-  "-ExecutionPolicy Bypass",
-  ('-File "{0}"' -f $Launcher),
-  ('-WorkDir "{0}"' -f $WorkDir),
-  ('-ControlApiUrl "{0}"' -f $ControlApiUrl),
-  ('-EnvFile "{0}"' -f $EnvFile),
-  ('-HostAddress "{0}"' -f $HostAddress),
-  ('-Port {0}' -f $Port),
-  ('-RefreshSeconds {0}' -f $RefreshSeconds),
-  ('-ReportRefreshSeconds {0}' -f $ReportRefreshSeconds),
-  ('-ReportLookbackDays {0}' -f $ReportLookbackDays)
-) -join " "
+$config = [pscustomobject]@{
+  version = 1
+  workDir = $WorkDir
+  controlApiUrl = $ControlApiUrl.TrimEnd('/')
+  envFile = $EnvFile
+  hostAddress = $HostAddress
+  port = $Port
+  refreshSeconds = $RefreshSeconds
+  reportRefreshSeconds = $ReportRefreshSeconds
+  reportLookbackDays = $ReportLookbackDays
+  readOnly = $true
+  mt5Mutation = $false
+  updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+}
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ConfigPath) | Out-Null
+$config | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $ConfigPath -Encoding utf8
 
-if ($arguments -match "(?i)(MT5_(?:API|BRIDGE_API)_KEY\s*=|ZIQ_TELEGRAM_BOT_TOKEN\s*=|x-phase7c-token)") {
-  throw "Refusing to register dashboard task because a secret-like value appears in task arguments."
+$taskCommand = ('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $TaskRunner)
+if ($taskCommand.Length -gt 240) {
+  throw "Dashboard task command is unexpectedly long ($($taskCommand.Length) chars); refusing schtasks registration."
+}
+if ($taskCommand -match "(?i)(MT5_(?:API|BRIDGE_API)_KEY\s*=|ZIQ_TELEGRAM_BOT_TOKEN\s*=|x-phase7c-token)") {
+  throw "Refusing to register dashboard task because a secret-like value appears in task command."
 }
 
 $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -65,104 +73,57 @@ if ($null -ne $existing) {
   $existingActions = @($existing.Actions)
   if ($existingActions.Count -ne 1) { throw "Existing dashboard task $TaskName has $($existingActions.Count) actions; refusing replacement." }
   $existingText = "$([string]$existingActions[0].Execute) $([string]$existingActions[0].Arguments)"
-  if ($existingText -notlike "*run-phase7c-forward-dashboard-local.ps1*") {
+  if ($existingText -notlike "*run-phase7c-forward-dashboard-task-runner-local.ps1*" -and $existingText -notlike "*run-phase7c-forward-dashboard-local.ps1*") {
     throw "Task $TaskName already exists but does not belong to the Phase 7C dashboard."
   }
   Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 }
 
-function XmlEscape([string]$Value) {
-  if ($null -eq $Value) { return "" }
-  return [System.Security.SecurityElement]::Escape($Value)
+$schtasks = Join-Path $env:SystemRoot "System32\schtasks.exe"
+if (-not (Test-Path $schtasks)) { throw "schtasks.exe not found: $schtasks" }
+
+$nativeOutput = & $schtasks `
+  /Create `
+  /TN $TaskName `
+  /SC ONSTART `
+  /RU SYSTEM `
+  /RL HIGHEST `
+  /TR $taskCommand `
+  /F 2>&1
+$nativeExitCode = $LASTEXITCODE
+if ($nativeExitCode -ne 0) {
+  throw "schtasks.exe failed with exitCode=$nativeExitCode. Output=$($nativeOutput -join ' ')"
 }
 
-$commandXml = XmlEscape "powershell.exe"
-$argumentsXml = XmlEscape $arguments
-$workingDirectoryXml = XmlEscape $ProjectRoot
-$descriptionXml = XmlEscape "XAUUSD Phase7C Forward DEMO dashboard + read-only report refresh. Independent from trade execution."
-
-$taskXml = @"
-<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo>
-    <Description>$descriptionXml</Description>
-  </RegistrationInfo>
-  <Triggers>
-    <BootTrigger>
-      <Enabled>true</Enabled>
-    </BootTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id="Author">
-      <UserId>S-1-5-18</UserId>
-      <LogonType>ServiceAccount</LogonType>
-      <RunLevel>HighestAvailable</RunLevel>
-    </Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <AllowHardTerminate>true</AllowHardTerminate>
-    <StartWhenAvailable>true</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-    <IdleSettings>
-      <StopOnIdleEnd>false</StopOnIdleEnd>
-      <RestartOnIdle>false</RestartOnIdle>
-    </IdleSettings>
-    <AllowStartOnDemand>true</AllowStartOnDemand>
-    <Enabled>true</Enabled>
-    <Hidden>false</Hidden>
-    <RunOnlyIfIdle>false</RunOnlyIfIdle>
-    <WakeToRun>false</WakeToRun>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <Priority>7</Priority>
-    <RestartOnFailure>
-      <Interval>PT1M</Interval>
-      <Count>3</Count>
-    </RestartOnFailure>
-  </Settings>
-  <Actions Context="Author">
-    <Exec>
-      <Command>$commandXml</Command>
-      <Arguments>$argumentsXml</Arguments>
-      <WorkingDirectory>$workingDirectoryXml</WorkingDirectory>
-    </Exec>
-  </Actions>
-</Task>
-"@
-
-$tempXml = Join-Path $env:TEMP ("phase7c-dashboard-task-{0}.xml" -f ([guid]::NewGuid().ToString("N")))
-try {
-  Set-Content -LiteralPath $tempXml -Value $taskXml -Encoding Unicode
-  $schtasks = Join-Path $env:SystemRoot "System32\schtasks.exe"
-  if (-not (Test-Path $schtasks)) { throw "schtasks.exe not found: $schtasks" }
-
-  $nativeOutput = & $schtasks /Create /TN $TaskName /XML $tempXml /F 2>&1
-  $nativeExitCode = $LASTEXITCODE
-  if ($nativeExitCode -ne 0) {
-    throw "schtasks.exe failed with exitCode=$nativeExitCode. Output=$($nativeOutput -join ' ')"
-  }
-}
-finally {
-  Remove-Item -LiteralPath $tempXml -Force -ErrorAction SilentlyContinue
-}
+# schtasks.exe is deliberately used for principal/trigger creation because some
+# Windows builds reject Register-ScheduledTask when UserId is returned blank.
+# Updating Settings after creation does not replace or rewrite the principal.
+$settings = New-ScheduledTaskSettingsSet `
+  -StartWhenAvailable `
+  -AllowStartIfOnBatteries `
+  -DontStopIfGoingOnBatteries `
+  -MultipleInstances IgnoreNew `
+  -ExecutionTimeLimit ([TimeSpan]::Zero)
+Set-ScheduledTask -TaskName $TaskName -Settings $settings -ErrorAction Stop | Out-Null
 
 $registered = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 $registeredActions = @($registered.Actions)
 if ($registeredActions.Count -ne 1) { throw "Dashboard task registration verification failed: expected exactly one action." }
 $registeredText = "$([string]$registeredActions[0].Execute) $([string]$registeredActions[0].Arguments)"
-if ([string]$registeredActions[0].Execute -notmatch "powershell" -or $registeredText -notlike "*run-phase7c-forward-dashboard-local.ps1*" -or $registeredText -notlike "*-Port $Port*") {
+if ([string]$registeredActions[0].Execute -notmatch "powershell" -or $registeredText -notlike "*run-phase7c-forward-dashboard-task-runner-local.ps1*") {
   throw "Dashboard task registration verification failed: action mismatch."
 }
 if ($registeredText -match "(?i)(MT5_(?:API|BRIDGE_API)_KEY\s*=|ZIQ_TELEGRAM_BOT_TOKEN\s*=|x-phase7c-token)") {
-  throw "Dashboard task registration verification failed: secret-like value found in task arguments."
+  throw "Dashboard task registration verification failed: secret-like value found in task command."
 }
 $bootTrigger = @($registered.Triggers | Where-Object { $_.CimClass.CimClassName -eq "MSFT_TaskBootTrigger" })
 if ($bootTrigger.Count -lt 1) { throw "Dashboard task registration verification failed: startup trigger missing." }
 $registeredPrincipal = ([string]$registered.Principal.UserId).Trim()
 if ($registeredPrincipal -notmatch '^(?i)(SYSTEM|NT AUTHORITY\\SYSTEM|S-1-5-18)$') {
   throw "Dashboard task principal is not SYSTEM: $registeredPrincipal"
+}
+if ($registered.Settings.ExecutionTimeLimit -ne [TimeSpan]::Zero) {
+  throw "Dashboard task ExecutionTimeLimit is not unlimited: $($registered.Settings.ExecutionTimeLimit)"
 }
 
 $executionTaskAfter = Get-ScheduledTask -TaskName $ExecutionTaskName -ErrorAction Stop
@@ -174,12 +135,14 @@ if ($executionFingerprintAfter -ne $executionFingerprintBefore) { throw "Executi
 Write-Host "PHASE7C_DASHBOARD_TASK_INSTALL=PASS"
 Write-Host "PHASE7C_DASHBOARD_TASK_NAME=$TaskName"
 Write-Host "PHASE7C_DASHBOARD_TASK_TRIGGER=AT_STARTUP"
-Write-Host "PHASE7C_DASHBOARD_TASK_PRINCIPAL_KIND=SYSTEM_NATIVE_XML"
+Write-Host "PHASE7C_DASHBOARD_TASK_PRINCIPAL_KIND=SYSTEM_NATIVE_SCHTASKS"
 Write-Host "PHASE7C_DASHBOARD_TASK_PRINCIPAL_USER=$registeredPrincipal"
-Write-Host "PHASE7C_DASHBOARD_TASK_ACTION=FORWARD_DASHBOARD_READ_ONLY"
+Write-Host "PHASE7C_DASHBOARD_TASK_ACTION=FORWARD_DASHBOARD_TASK_RUNNER_READ_ONLY"
+Write-Host "PHASE7C_DASHBOARD_TASK_CONFIG=$ConfigPath"
 Write-Host "PHASE7C_DASHBOARD_TASK_URL=http://${HostAddress}:${Port}/"
 Write-Host "PHASE7C_DASHBOARD_TASK_REPORT_REFRESH_SECONDS=$ReportRefreshSeconds"
 Write-Host "PHASE7C_DASHBOARD_TASK_REPORT_LOOKBACK_DAYS=$ReportLookbackDays"
+Write-Host "PHASE7C_DASHBOARD_TASK_EXECUTION_TIME_LIMIT=UNLIMITED"
 Write-Host "PHASE7C_DASHBOARD_TASK_SECRETS_IN_ARGUMENTS=False"
 Write-Host "PHASE7C_DASHBOARD_TASK_MT5_MUTATION=False"
 Write-Host "PHASE7C_DASHBOARD_TASK_EXECUTION_TASK_UNCHANGED=True"
