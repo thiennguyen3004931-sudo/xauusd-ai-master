@@ -8,12 +8,14 @@ on:
       - "scripts/apply-phase7b-supertrend-entry-gates-local.mjs"
       - "scripts/apply-phase7b-supertrend-entry-gates-v2-local.mjs"
       - "scripts/apply-phase7b-canonical-entry-v3-local.mjs"
+      - "scripts/apply-phase7b-canonical-runner-v4-local.mjs"
       - ".github/workflows/phase7b-supertrend-entry-gates-ci.yml"
   pull_request:
     paths:
       - "scripts/apply-phase7b-supertrend-entry-gates-local.mjs"
       - "scripts/apply-phase7b-supertrend-entry-gates-v2-local.mjs"
       - "scripts/apply-phase7b-canonical-entry-v3-local.mjs"
+      - "scripts/apply-phase7b-canonical-runner-v4-local.mjs"
       - ".github/workflows/phase7b-supertrend-entry-gates-ci.yml"
 
 jobs:
@@ -54,22 +56,22 @@ jobs:
           node scripts/apply-phase7b-pattern-ui-clock-local.mjs --apply
           grep -q 'inferBrokerClockOffset' apps/api/src/routes/phase7b-demo.route.ts
 
-      - name: Check canonical V3 without mutation
+      - name: Check canonical runner V4 without mutation
         run: |
-          node --check scripts/apply-phase7b-canonical-entry-v3-local.mjs
-          node scripts/apply-phase7b-canonical-entry-v3-local.mjs | tee /tmp/canonical-v3-check.log
-          grep -q 'PHASE7B_CANONICAL_ENTRY_V3_CHECK=PASS' /tmp/canonical-v3-check.log
-          grep -q 'PHASE7B_CANONICAL_ENTRY_V3_ORIGINAL_MUTATION=False' /tmp/canonical-v3-check.log
-          grep -q 'PHASE7B_CANONICAL_ENTRY_V3_MA20_MA50=CONFIDENCE_ONLY_NOT_ENTRY_GATE' /tmp/canonical-v3-check.log
-          grep -q 'PHASE7B_CANONICAL_ENTRY_V3_MA200=TREND_MANAGEMENT_HOLD_EXIT_NOT_ENTRY_GATE' /tmp/canonical-v3-check.log
-          grep -q 'PHASE7B_CANONICAL_ENTRY_V3_REAL_ACCOUNT_ALLOWED=False' /tmp/canonical-v3-check.log
+          node --check scripts/apply-phase7b-canonical-runner-v4-local.mjs
+          node scripts/apply-phase7b-canonical-runner-v4-local.mjs | tee /tmp/canonical-v4-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_CHECK=PASS' /tmp/canonical-v4-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_ORIGINAL_MUTATION=False' /tmp/canonical-v4-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_REAL_ACCOUNT_ALLOWED=False' /tmp/canonical-v4-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_RUNNER_SL=M15_CONFIRMED_STRUCTURE_TRAILING' /tmp/canonical-v4-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_RUNNER_EXIT=M15_CLOSE_BREAKS_MA50_AFTER_PLUS10_PARTIAL_ONLY' /tmp/canonical-v4-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_MA200=MACRO_CONTEXT_ONLY_NOT_ENTRY_OR_EXIT_GATE' /tmp/canonical-v4-check.log
 
-      - name: Apply canonical V3 in CI checkout
+      - name: Apply canonical runner V4 in CI checkout
         run: |
-          node scripts/apply-phase7b-canonical-entry-v3-local.mjs --apply | tee /tmp/canonical-v3-apply.log
-          grep -q 'PHASE7B_CANONICAL_ENTRY_V3_APPLY=PASS' /tmp/canonical-v3-apply.log
-          grep -q 'PHASE7B_CANONICAL_ENTRY_V3_VALIDATION=PASS' /tmp/canonical-v3-apply.log
-          grep -q 'PHASE7B_CANONICAL_ENTRY_V3_DEMO_ONLY=True' /tmp/canonical-v3-apply.log
+          node scripts/apply-phase7b-canonical-runner-v4-local.mjs --apply | tee /tmp/canonical-v4-apply.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_APPLY=PASS' /tmp/canonical-v4-apply.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_DEMO_ONLY=True' /tmp/canonical-v4-apply.log
 
       - name: Build risk-engine dependency graph
         run: pnpm --filter @xauusd/risk-engine... build
@@ -111,30 +113,28 @@ jobs:
             }
             process.exit(1);
           }
-          fs.writeFileSync(".phase7b-supertrend-gates-ci.mjs", transformed.outputText, "utf8");
+          fs.writeFileSync(".phase7b-canonical-runner-v4-ci.mjs", transformed.outputText, "utf8");
           NODE
-          node --check .phase7b-supertrend-gates-ci.mjs
-          rm -f .phase7b-supertrend-gates-ci.mjs
+          node --check .phase7b-canonical-runner-v4-ci.mjs
+          rm -f .phase7b-canonical-runner-v4-ci.mjs
 
-      - name: Verify canonical entry and MA roles
+      - name: Verify canonical entry and runner roles
         run: |
-          grep -q 'phase7BSupertrend' scripts/run-phase7b-demo-controller.ts
-          grep -q 'PHASE7B_DEMO_ENTRY_GATE=PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE' scripts/run-phase7b-demo-controller.ts
+          grep -q 'PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE' scripts/run-phase7b-demo-controller.ts
           grep -q 'PHASE7B_DEMO_MA20_MA50=CONFIDENCE_ONLY_NOT_ENTRY_GATE' scripts/run-phase7b-demo-controller.ts
-          grep -q 'PHASE7B_DEMO_MA200=TREND_MANAGEMENT_HOLD_EXIT_NOT_ENTRY_GATE' scripts/run-phase7b-demo-controller.ts
-          ! grep -q 'trendMatches(trigger.side, current.close, ma20, ma50, ma200)' scripts/run-phase7b-demo-controller.ts
-          grep -q 'while (m5SignalIndex >= 0 && m5\[m5SignalIndex\]!.closeTime > current.closeTime)' scripts/run-phase7b-demo-controller.ts
-          grep -q 'm15Direction !== trigger.side || m5Direction !== trigger.side' scripts/run-phase7b-demo-controller.ts
-          grep -q 'await closeAll(position, "TREND_MA200", latest.closeTime)' scripts/run-phase7b-demo-controller.ts
-          ! grep -q 'await closeAll(position, "TREND_MA20", latest.closeTime)' scripts/run-phase7b-demo-controller.ts
+          grep -q 'PHASE7B_DEMO_MA50=RUNNER_HOLD_EXIT_AFTER_PLUS10_PARTIAL_ONLY' scripts/run-phase7b-demo-controller.ts
+          grep -q 'PHASE7B_DEMO_RUNNER_SL=M15_CONFIRMED_STRUCTURE_TRAILING' scripts/run-phase7b-demo-controller.ts
+          grep -q 'PHASE7B_DEMO_MA200=MACRO_CONTEXT_ONLY_NOT_ENTRY_OR_EXIT_GATE' scripts/run-phase7b-demo-controller.ts
+          grep -q 'latestConfirmedStructureStop' scripts/run-phase7b-demo-controller.ts
+          grep -q 'STRUCTURAL_SL_TIGHTEN' scripts/run-phase7b-demo-controller.ts
+          grep -q 'runnerTrendBroken = managed.partialApplied && !ma50TrendIntact' scripts/run-phase7b-demo-controller.ts
+          grep -q 'RUNNER_TREND_MA50' scripts/run-phase7b-demo-controller.ts
+          ! grep -q 'TREND_MA20' scripts/run-phase7b-demo-controller.ts
+          ! grep -q 'TREND_MA200' scripts/run-phase7b-demo-controller.ts
+          ! grep -q 'if (!trendMatches(trigger.side, current.close, ma20, ma50, ma200)) return null;' scripts/run-phase7b-demo-controller.ts
           grep -q 'const eligible = Boolean(pattern && supertrendAligned && validStructure);' apps/api/src/routes/phase7b-demo.route.ts
-          grep -q 'const buyAligned = ma20 > ma50 && current.close > ma20;' apps/api/src/routes/phase7b-demo.route.ts
-          grep -q 'const sellAligned = ma20 < ma50 && current.close < ma20;' apps/api/src/routes/phase7b-demo.route.ts
-          grep -q 'while (m5SignalIndex >= 0 && m5Bars\[m5SignalIndex\]!.closeTime > current.closeTime)' apps/api/src/routes/phase7b-demo.route.ts
-          grep -q 'rule: "PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE"' apps/api/src/routes/phase7b-demo.route.ts
-          grep -q 'MA20/50 chỉ tăng độ tin cậy; MA200 dùng giữ/chốt trend' apps/web/src/ui/DashboardLayout.tsx
-          grep -q 'MA20/50 chỉ xác nhận độ tin cậy, không chặn entry' apps/web/src/pages/Phase7BPatternCheckPage.tsx
-          grep -q 'MA200 xác nhận xu hướng để giữ runner hoặc chốt' apps/web/src/pages/Phase7BPatternCheckPage.tsx
           grep -q 'THREE_CANDLE_BODY_DOMINANCE' scripts/run-phase7b-demo-controller.ts
           grep -q 'inferBrokerClockOffset' apps/api/src/routes/phase7b-demo.route.ts
           grep -q 'const now = Number(quote.timestamp)' scripts/run-phase7b-demo-controller.ts
+          grep -q 'runner dời SL theo cấu trúc M15' apps/web/src/ui/DashboardLayout.tsx
+          grep -q 'MA200 chỉ xác nhận xu hướng khung lớn' apps/web/src/pages/Phase7BPatternCheckPage.tsx
