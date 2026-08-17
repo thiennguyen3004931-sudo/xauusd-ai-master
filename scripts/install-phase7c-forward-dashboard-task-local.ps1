@@ -39,45 +39,8 @@ $EnvFile = (Resolve-Path $EnvFile).Path
 
 $executionTask = Get-ScheduledTask -TaskName $ExecutionTaskName -ErrorAction Stop
 $executionActionsBefore = @($executionTask.Actions)
-if ($executionActionsBefore.Count -ne 1) { throw "Execution task $ExecutionTaskName must have exactly one action before its principal can be reused safely." }
+if ($executionActionsBefore.Count -ne 1) { throw "Execution task $ExecutionTaskName must have exactly one action." }
 $executionFingerprintBefore = "$([string]$executionActionsBefore[0].Execute)|$([string]$executionActionsBefore[0].Arguments)|$([string]$executionActionsBefore[0].WorkingDirectory)|$([string]$executionTask.Principal.UserId)|$([string]$executionTask.Principal.GroupId)|$([string]$executionTask.Principal.LogonType)|$([string]$executionTask.Principal.RunLevel)"
-
-# A principal CIM instance returned by Get-ScheduledTask is not always safe to pass
-# directly back into Register-ScheduledTask. In particular, group/service principals
-# can expose an empty UserId, which Task Scheduler rejects with HRESULT 0x80070057.
-# Reconstruct a fresh principal from the source task instead.
-$sourcePrincipal = $executionTask.Principal
-$sourceUserId = ([string]$sourcePrincipal.UserId).Trim()
-$sourceGroupId = ([string]$sourcePrincipal.GroupId).Trim()
-$sourceLogonType = ([string]$sourcePrincipal.LogonType).Trim()
-$sourceRunLevel = ([string]$sourcePrincipal.RunLevel).Trim()
-if ([string]::IsNullOrWhiteSpace($sourceRunLevel)) { $sourceRunLevel = "Highest" }
-
-$dashboardPrincipal = $null
-$principalKind = ""
-if (-not [string]::IsNullOrWhiteSpace($sourceUserId)) {
-  if ($sourceUserId -match '^(?i)(SYSTEM|NT AUTHORITY\\SYSTEM|S-1-5-18)$') {
-    $dashboardPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    $principalKind = "SYSTEM"
-  } else {
-    if ([string]::IsNullOrWhiteSpace($sourceLogonType) -or $sourceLogonType -eq "None") {
-      throw "Execution task principal has UserId=$sourceUserId but no reusable LogonType. Refusing to guess credentials."
-    }
-    $dashboardPrincipal = New-ScheduledTaskPrincipal -UserId $sourceUserId -LogonType $sourceLogonType -RunLevel $sourceRunLevel
-    $principalKind = "USER"
-  }
-} elseif (-not [string]::IsNullOrWhiteSpace($sourceGroupId)) {
-  $dashboardPrincipal = New-ScheduledTaskPrincipal -GroupId $sourceGroupId -RunLevel $sourceRunLevel
-  $principalKind = "GROUP"
-} else {
-  # The execution task is already proven to run unattended, but some Windows builds
-  # return both UserId and GroupId as blank for service principals. SYSTEM is the
-  # narrowest credential-free startup identity for this local read-only dashboard.
-  $dashboardPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-  $principalKind = "SYSTEM_FALLBACK"
-}
-
-if ($null -eq $dashboardPrincipal) { throw "Unable to construct a valid dashboard task principal." }
 
 $arguments = @(
   "-NoProfile",
@@ -97,64 +60,122 @@ if ($arguments -match "(?i)(MT5_(?:API|BRIDGE_API)_KEY\s*=|ZIQ_TELEGRAM_BOT_TOKE
   throw "Refusing to register dashboard task because a secret-like value appears in task arguments."
 }
 
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arguments -WorkingDirectory $ProjectRoot
-$trigger = New-ScheduledTaskTrigger -AtStartup
-$settings = New-ScheduledTaskSettingsSet `
-  -StartWhenAvailable `
-  -AllowStartIfOnBatteries `
-  -DontStopIfGoingOnBatteries `
-  -MultipleInstances IgnoreNew `
-  -RestartCount 3 `
-  -RestartInterval (New-TimeSpan -Minutes 1) `
-  -ExecutionTimeLimit ([TimeSpan]::Zero)
-
 $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($null -ne $existing) {
   $existingActions = @($existing.Actions)
-  if ($existingActions.Count -ne 1) { throw "Existing dashboard task $TaskName has $($existingActions.Count) actions; refusing automatic replacement." }
+  if ($existingActions.Count -ne 1) { throw "Existing dashboard task $TaskName has $($existingActions.Count) actions; refusing replacement." }
   $existingText = "$([string]$existingActions[0].Execute) $([string]$existingActions[0].Arguments)"
   if ($existingText -notlike "*run-phase7c-forward-dashboard-local.ps1*") {
-    throw "Task $TaskName already exists but does not belong to the Phase 7C forward dashboard. Refusing replacement."
+    throw "Task $TaskName already exists but does not belong to the Phase 7C dashboard."
   }
   Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 }
 
-Register-ScheduledTask `
-  -TaskName $TaskName `
-  -Action $action `
-  -Trigger $trigger `
-  -Settings $settings `
-  -Principal $dashboardPrincipal `
-  -Description "XAUUSD Phase7C Forward DEMO dashboard + read-only report refresh. Independent from trade execution." `
-  -Force `
-  -ErrorAction Stop | Out-Null
+function XmlEscape([string]$Value) {
+  if ($null -eq $Value) { return "" }
+  return [System.Security.SecurityElement]::Escape($Value)
+}
+
+$commandXml = XmlEscape "powershell.exe"
+$argumentsXml = XmlEscape $arguments
+$workingDirectoryXml = XmlEscape $ProjectRoot
+$descriptionXml = XmlEscape "XAUUSD Phase7C Forward DEMO dashboard + read-only report refresh. Independent from trade execution."
+
+$taskXml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>$descriptionXml</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <BootTrigger>
+      <Enabled>true</Enabled>
+    </BootTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <LogonType>ServiceAccount</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>$commandXml</Command>
+      <Arguments>$argumentsXml</Arguments>
+      <WorkingDirectory>$workingDirectoryXml</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+"@
+
+$tempXml = Join-Path $env:TEMP ("phase7c-dashboard-task-{0}.xml" -f ([guid]::NewGuid().ToString("N")))
+try {
+  Set-Content -LiteralPath $tempXml -Value $taskXml -Encoding Unicode
+  $schtasks = Join-Path $env:SystemRoot "System32\schtasks.exe"
+  if (-not (Test-Path $schtasks)) { throw "schtasks.exe not found: $schtasks" }
+
+  $nativeOutput = & $schtasks /Create /TN $TaskName /XML $tempXml /F 2>&1
+  $nativeExitCode = $LASTEXITCODE
+  if ($nativeExitCode -ne 0) {
+    throw "schtasks.exe failed with exitCode=$nativeExitCode. Output=$($nativeOutput -join ' ')"
+  }
+}
+finally {
+  Remove-Item -LiteralPath $tempXml -Force -ErrorAction SilentlyContinue
+}
 
 $registered = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 $registeredActions = @($registered.Actions)
 if ($registeredActions.Count -ne 1) { throw "Dashboard task registration verification failed: expected exactly one action." }
 $registeredText = "$([string]$registeredActions[0].Execute) $([string]$registeredActions[0].Arguments)"
 if ([string]$registeredActions[0].Execute -notmatch "powershell" -or $registeredText -notlike "*run-phase7c-forward-dashboard-local.ps1*" -or $registeredText -notlike "*-Port $Port*") {
-  throw "Dashboard task registration verification failed: action does not match the read-only dashboard launcher."
+  throw "Dashboard task registration verification failed: action mismatch."
 }
 if ($registeredText -match "(?i)(MT5_(?:API|BRIDGE_API)_KEY\s*=|ZIQ_TELEGRAM_BOT_TOKEN\s*=|x-phase7c-token)") {
   throw "Dashboard task registration verification failed: secret-like value found in task arguments."
 }
 $bootTrigger = @($registered.Triggers | Where-Object { $_.CimClass.CimClassName -eq "MSFT_TaskBootTrigger" })
 if ($bootTrigger.Count -lt 1) { throw "Dashboard task registration verification failed: startup trigger missing." }
+$registeredPrincipal = ([string]$registered.Principal.UserId).Trim()
+if ($registeredPrincipal -notmatch '^(?i)(SYSTEM|NT AUTHORITY\\SYSTEM|S-1-5-18)$') {
+  throw "Dashboard task principal is not SYSTEM: $registeredPrincipal"
+}
 
 $executionTaskAfter = Get-ScheduledTask -TaskName $ExecutionTaskName -ErrorAction Stop
 $executionActionsAfter = @($executionTaskAfter.Actions)
 if ($executionActionsAfter.Count -ne 1) { throw "Execution task changed unexpectedly while dashboard task was installed." }
 $executionFingerprintAfter = "$([string]$executionActionsAfter[0].Execute)|$([string]$executionActionsAfter[0].Arguments)|$([string]$executionActionsAfter[0].WorkingDirectory)|$([string]$executionTaskAfter.Principal.UserId)|$([string]$executionTaskAfter.Principal.GroupId)|$([string]$executionTaskAfter.Principal.LogonType)|$([string]$executionTaskAfter.Principal.RunLevel)"
-if ($executionFingerprintAfter -ne $executionFingerprintBefore) { throw "Execution task action/principal changed unexpectedly. Dashboard task installation refuses this state." }
+if ($executionFingerprintAfter -ne $executionFingerprintBefore) { throw "Execution task action/principal changed unexpectedly." }
 
 Write-Host "PHASE7C_DASHBOARD_TASK_INSTALL=PASS"
 Write-Host "PHASE7C_DASHBOARD_TASK_NAME=$TaskName"
 Write-Host "PHASE7C_DASHBOARD_TASK_TRIGGER=AT_STARTUP"
-Write-Host "PHASE7C_DASHBOARD_TASK_PRINCIPAL_SOURCE=$ExecutionTaskName"
-Write-Host "PHASE7C_DASHBOARD_TASK_PRINCIPAL_KIND=$principalKind"
-Write-Host "PHASE7C_DASHBOARD_TASK_PRINCIPAL_USER=$($registered.Principal.UserId)"
-Write-Host "PHASE7C_DASHBOARD_TASK_PRINCIPAL_GROUP=$($registered.Principal.GroupId)"
+Write-Host "PHASE7C_DASHBOARD_TASK_PRINCIPAL_KIND=SYSTEM_NATIVE_XML"
+Write-Host "PHASE7C_DASHBOARD_TASK_PRINCIPAL_USER=$registeredPrincipal"
 Write-Host "PHASE7C_DASHBOARD_TASK_ACTION=FORWARD_DASHBOARD_READ_ONLY"
 Write-Host "PHASE7C_DASHBOARD_TASK_URL=http://${HostAddress}:${Port}/"
 Write-Host "PHASE7C_DASHBOARD_TASK_REPORT_REFRESH_SECONDS=$ReportRefreshSeconds"
