@@ -46,8 +46,21 @@ $principal = ([string]$task.Principal.UserId).Trim()
 if ($principal -notmatch '^(?i)(SYSTEM|NT AUTHORITY\\SYSTEM|S-1-5-18)$') {
   throw "Dashboard task principal is not SYSTEM: $principal"
 }
-if ($task.Settings.ExecutionTimeLimit -ne [TimeSpan]::Zero) {
-  throw "Dashboard task ExecutionTimeLimit is not unlimited: $($task.Settings.ExecutionTimeLimit)"
+
+$executionTimeLimitRaw = $task.Settings.ExecutionTimeLimit
+$executionTimeLimit = $null
+if ($executionTimeLimitRaw -is [TimeSpan]) {
+  $executionTimeLimit = [TimeSpan]$executionTimeLimitRaw
+} else {
+  try {
+    $executionTimeLimit = [System.Xml.XmlConvert]::ToTimeSpan([string]$executionTimeLimitRaw)
+  }
+  catch {
+    throw "Dashboard task ExecutionTimeLimit could not be parsed: $executionTimeLimitRaw"
+  }
+}
+if ($executionTimeLimit -ne [TimeSpan]::Zero) {
+  throw "Dashboard task ExecutionTimeLimit is not unlimited: $executionTimeLimitRaw"
 }
 
 Write-Host "PHASE7C_DASHBOARD_VERIFY_TASK_STATE=$($task.State)"
