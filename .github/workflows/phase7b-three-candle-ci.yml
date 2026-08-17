@@ -51,6 +51,9 @@ jobs:
           grep -q 'THREE_CANDLE_BODY_DOMINANCE' apps/api/src/routes/phase7b-demo.route.ts
           grep -q 'THREE_CANDLE_BODY_DOMINANCE' apps/web/src/pages/Phase7BPatternCheckPage.tsx
 
+      - name: Build risk-engine dependency graph
+        run: pnpm --filter @xauusd/risk-engine... build
+
       - name: Typecheck and test risk engine
         run: |
           pnpm --filter @xauusd/risk-engine typecheck
