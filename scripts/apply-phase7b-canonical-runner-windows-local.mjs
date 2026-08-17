@@ -55,21 +55,36 @@ try {
   console.log("PHASE7B_CANONICAL_RUNNER_WINDOWS_NESTED_PATCHERS_NORMALIZED=True");
   console.log("PHASE7B_CANONICAL_RUNNER_WINDOWS_REAL_ACCOUNT_ALLOWED=False");
 
-  const runner = path.join(tempRoot, "scripts", "apply-phase7b-canonical-runner-v4b-local.mjs");
-  const child = spawnSync(process.execPath, [runner, "--apply"], {
-    cwd: tempRoot,
-    env: {
-      ...process.env,
-      PHASE7B_CANONICAL_RUNNER_V4_ROOT: tempRoot,
-      PHASE7B_CANONICAL_ENTRY_V3_ROOT: tempRoot,
-      PHASE7B_SUPERTREND_GATE_PATCH_ROOT: tempRoot,
-    },
-    encoding: "utf8",
-  });
-  if (child.stdout) process.stdout.write(child.stdout);
-  if (child.stderr) process.stderr.write(child.stderr);
-  if (child.error) throw child.error;
-  if (child.status !== 0) throw new Error(`Temporary canonical runner patch failed with exit code ${child.status}.`);
+  let alreadyCanonical = false;
+  try {
+    validateTempResult();
+    alreadyCanonical = true;
+  } catch {
+    alreadyCanonical = false;
+  }
+
+  if (alreadyCanonical) {
+    console.log("PHASE7B_CANONICAL_RUNNER_WINDOWS_CURRENT_CANONICAL=True");
+    console.log("PHASE7B_CANONICAL_RUNNER_V4_RUNNER_SL=M15_CONFIRMED_STRUCTURE_TRAILING");
+    console.log("PHASE7B_CANONICAL_RUNNER_V4_RUNNER_EXIT=M15_CLOSE_BREAKS_MA50_AFTER_PLUS10_PARTIAL_ONLY");
+    console.log("PHASE7B_CANONICAL_RUNNER_V4_MA200=MACRO_CONTEXT_ONLY_NOT_ENTRY_OR_EXIT_GATE");
+  } else {
+    const runner = path.join(tempRoot, "scripts", "apply-phase7b-canonical-runner-v4b-local.mjs");
+    const child = spawnSync(process.execPath, [runner, "--apply"], {
+      cwd: tempRoot,
+      env: {
+        ...process.env,
+        PHASE7B_CANONICAL_RUNNER_V4_ROOT: tempRoot,
+        PHASE7B_CANONICAL_ENTRY_V3_ROOT: tempRoot,
+        PHASE7B_SUPERTREND_GATE_PATCH_ROOT: tempRoot,
+      },
+      encoding: "utf8",
+    });
+    if (child.stdout) process.stdout.write(child.stdout);
+    if (child.stderr) process.stderr.write(child.stderr);
+    if (child.error) throw child.error;
+    if (child.status !== 0) throw new Error(`Temporary canonical runner patch failed with exit code ${child.status}.`);
+  }
 
   validateTempResult();
   console.log("PHASE7B_CANONICAL_RUNNER_WINDOWS_TEMP_VALIDATION=PASS");
