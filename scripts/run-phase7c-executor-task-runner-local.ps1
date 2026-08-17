@@ -29,26 +29,92 @@ if (-not (Test-Path $telegramEnvFile)) { throw "Executor task TelegramEnvFile no
 if ($sidewayRiskPercent -le 0 -or $sidewayRiskPercent -gt 5) { throw "Executor task sidewayRiskPercent is invalid: $sidewayRiskPercent" }
 if ($sidewayMaxLot -le 0) { throw "Executor task sidewayMaxLot is invalid: $sidewayMaxLot" }
 
+$runtimeDir = Join-Path $workDir "phase7c-executors"
+New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
+$runnerStatusPath = Join-Path $runtimeDir "startup-runner-status.json"
+$runnerErrLog = Join-Path $runtimeDir "startup-runner.err.log"
+$supervisorOut = Join-Path $runtimeDir "startup-supervisor.out.log"
+$supervisorErr = Join-Path $runtimeDir "startup-supervisor.err.log"
+
+function Write-RunnerStatus(
+  [string]$Status,
+  [string]$Message,
+  [int]$Attempt,
+  [Nullable[int]]$SupervisorPid,
+  [Nullable[int]]$ExitCode
+) {
+  [pscustomobject]@{
+    version = 1
+    status = $Status
+    runnerPid = $PID
+    supervisorPid = if ($null -ne $SupervisorPid) { [int]$SupervisorPid } else { $null }
+    attempt = $Attempt
+    exitCode = if ($null -ne $ExitCode) { [int]$ExitCode } else { $null }
+    demoOnly = $true
+    armed = $true
+    message = $Message
+    updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $runnerStatusPath -Encoding utf8
+}
+
+function Append-RunnerError([string]$Message) {
+  $stamp = [DateTimeOffset]::Now.ToString("o")
+  Add-Content -LiteralPath $runnerErrLog -Value "[$stamp] $Message" -Encoding utf8
+}
+
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER=RUNNING"
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_DEMO_ONLY=TRUE"
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_ARMED=TRUE"
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_CONTROL_API=$controlApiUrl"
+Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_STATUS=$runnerStatusPath"
 
+$attempt = 0
 while ($true) {
+  $attempt++
+  $process = $null
   try {
-    & $Supervisor `
-      -WorkDir $workDir `
-      -ControlApiUrl $controlApiUrl `
-      -EnvFile $envFile `
-      -TelegramEnvFile $telegramEnvFile `
-      -SidewayRiskPercent $sidewayRiskPercent `
-      -SidewayMaxLot $sidewayMaxLot `
-      -Armed
+    $arguments = @(
+      "-NoProfile",
+      "-ExecutionPolicy", "Bypass",
+      "-File", ('"{0}"' -f $Supervisor),
+      "-WorkDir", ('"{0}"' -f $workDir),
+      "-ControlApiUrl", ('"{0}"' -f $controlApiUrl),
+      "-EnvFile", ('"{0}"' -f $envFile),
+      "-TelegramEnvFile", ('"{0}"' -f $telegramEnvFile),
+      "-SidewayRiskPercent", $sidewayRiskPercent.ToString([System.Globalization.CultureInfo]::InvariantCulture),
+      "-SidewayMaxLot", $sidewayMaxLot.ToString([System.Globalization.CultureInfo]::InvariantCulture),
+      "-Armed"
+    )
 
-    Write-Warning "Phase 7C executor supervisor exited normally; restarting in $RestartDelaySeconds seconds."
+    Write-RunnerStatus "STARTING_SUPERVISOR" "Launching Phase 7C executor supervisor." $attempt $null $null
+    $process = Start-Process `
+      -FilePath "powershell.exe" `
+      -ArgumentList $arguments `
+      -WorkingDirectory $ProjectRoot `
+      -RedirectStandardOutput $supervisorOut `
+      -RedirectStandardError $supervisorErr `
+      -PassThru
+
+    Write-RunnerStatus "SUPERVISOR_RUNNING" "Phase 7C executor supervisor process is running." $attempt $process.Id $null
+
+    while (-not $process.HasExited) {
+      Start-Sleep -Seconds 10
+      $process.Refresh()
+      if (-not $process.HasExited) {
+        Write-RunnerStatus "SUPERVISOR_RUNNING" "Phase 7C executor supervisor process is running." $attempt $process.Id $null
+      }
+    }
+
+    $exitCode = $process.ExitCode
+    $message = "Phase 7C executor supervisor exited with code $exitCode; restarting in $RestartDelaySeconds seconds."
+    Append-RunnerError $message
+    Write-RunnerStatus "ERROR_RETRYING" $message $attempt $process.Id $exitCode
   }
   catch {
-    Write-Warning "Phase 7C executor supervisor failed: $($_.Exception.Message). Restarting in $RestartDelaySeconds seconds."
+    $message = "Phase 7C executor supervisor launch/monitor failed: $($_.Exception.Message). Restarting in $RestartDelaySeconds seconds."
+    Append-RunnerError $message
+    $pidValue = if ($null -ne $process) { [Nullable[int]]$process.Id } else { $null }
+    Write-RunnerStatus "ERROR_RETRYING" $message $attempt $pidValue $null
   }
 
   Start-Sleep -Seconds $RestartDelaySeconds
