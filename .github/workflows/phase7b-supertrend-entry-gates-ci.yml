@@ -10,6 +10,7 @@ on:
       - "scripts/apply-phase7b-canonical-entry-v3-local.mjs"
       - "scripts/apply-phase7b-canonical-runner-v4-local.mjs"
       - "scripts/apply-phase7b-canonical-runner-v4b-local.mjs"
+      - "scripts/apply-phase7b-canonical-runner-v4c-windows-local.mjs"
       - ".github/workflows/phase7b-supertrend-entry-gates-ci.yml"
   pull_request:
     paths:
@@ -18,6 +19,7 @@ on:
       - "scripts/apply-phase7b-canonical-entry-v3-local.mjs"
       - "scripts/apply-phase7b-canonical-runner-v4-local.mjs"
       - "scripts/apply-phase7b-canonical-runner-v4b-local.mjs"
+      - "scripts/apply-phase7b-canonical-runner-v4c-windows-local.mjs"
       - ".github/workflows/phase7b-supertrend-entry-gates-ci.yml"
 
 jobs:
@@ -58,24 +60,38 @@ jobs:
           node scripts/apply-phase7b-pattern-ui-clock-local.mjs --apply
           grep -q 'inferBrokerClockOffset' apps/api/src/routes/phase7b-demo.route.ts
 
-      - name: Check canonical runner V4B without mutation
+      - name: Simulate Windows CRLF canonical V4 patcher
         run: |
-          node --check scripts/apply-phase7b-canonical-runner-v4b-local.mjs
-          node scripts/apply-phase7b-canonical-runner-v4b-local.mjs | tee /tmp/canonical-v4b-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4B_RESULT=PASS' /tmp/canonical-v4b-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_CHECK=PASS' /tmp/canonical-v4b-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_ORIGINAL_MUTATION=False' /tmp/canonical-v4b-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_REAL_ACCOUNT_ALLOWED=False' /tmp/canonical-v4b-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_RUNNER_SL=M15_CONFIRMED_STRUCTURE_TRAILING' /tmp/canonical-v4b-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_RUNNER_EXIT=M15_CLOSE_BREAKS_MA50_AFTER_PLUS10_PARTIAL_ONLY' /tmp/canonical-v4b-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_MA200=MACRO_CONTEXT_ONLY_NOT_ENTRY_OR_EXIT_GATE' /tmp/canonical-v4b-check.log
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/apply-phase7b-canonical-runner-v4-local.mjs')
+          data = p.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+          p.write_bytes(data)
+          assert b'\r\n' in data
+          print('PHASE7B_CANONICAL_RUNNER_CI_BASE_EOL=CRLF')
+          PY
 
-      - name: Apply canonical runner V4B in CI checkout
+      - name: Check canonical runner V4C without mutation
         run: |
-          node scripts/apply-phase7b-canonical-runner-v4b-local.mjs --apply | tee /tmp/canonical-v4b-apply.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4B_RESULT=PASS' /tmp/canonical-v4b-apply.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_APPLY=PASS' /tmp/canonical-v4b-apply.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_DEMO_ONLY=True' /tmp/canonical-v4b-apply.log
+          node --check scripts/apply-phase7b-canonical-runner-v4c-windows-local.mjs
+          node scripts/apply-phase7b-canonical-runner-v4c-windows-local.mjs | tee /tmp/canonical-v4c-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4C_BASE_EOL=CRLF' /tmp/canonical-v4c-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4C_EOL_NORMALIZATION=TEMP_ONLY' /tmp/canonical-v4c-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4C_BASE_PATCHER_MUTATION=False' /tmp/canonical-v4c-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4C_RESULT=PASS' /tmp/canonical-v4c-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_CHECK=PASS' /tmp/canonical-v4c-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_ORIGINAL_MUTATION=False' /tmp/canonical-v4c-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_REAL_ACCOUNT_ALLOWED=False' /tmp/canonical-v4c-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_RUNNER_SL=M15_CONFIRMED_STRUCTURE_TRAILING' /tmp/canonical-v4c-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_RUNNER_EXIT=M15_CLOSE_BREAKS_MA50_AFTER_PLUS10_PARTIAL_ONLY' /tmp/canonical-v4c-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_MA200=MACRO_CONTEXT_ONLY_NOT_ENTRY_OR_EXIT_GATE' /tmp/canonical-v4c-check.log
+
+      - name: Apply canonical runner V4C in CI checkout
+        run: |
+          node scripts/apply-phase7b-canonical-runner-v4c-windows-local.mjs --apply | tee /tmp/canonical-v4c-apply.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4C_RESULT=PASS' /tmp/canonical-v4c-apply.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_APPLY=PASS' /tmp/canonical-v4c-apply.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_DEMO_ONLY=True' /tmp/canonical-v4c-apply.log
 
       - name: Build risk-engine dependency graph
         run: pnpm --filter @xauusd/risk-engine... build
@@ -117,10 +133,10 @@ jobs:
             }
             process.exit(1);
           }
-          fs.writeFileSync(".phase7b-canonical-runner-v4b-ci.mjs", transformed.outputText, "utf8");
+          fs.writeFileSync(".phase7b-canonical-runner-v4c-ci.mjs", transformed.outputText, "utf8");
           NODE
-          node --check .phase7b-canonical-runner-v4b-ci.mjs
-          rm -f .phase7b-canonical-runner-v4b-ci.mjs
+          node --check .phase7b-canonical-runner-v4c-ci.mjs
+          rm -f .phase7b-canonical-runner-v4c-ci.mjs
 
       - name: Verify canonical entry and runner roles
         run: |
