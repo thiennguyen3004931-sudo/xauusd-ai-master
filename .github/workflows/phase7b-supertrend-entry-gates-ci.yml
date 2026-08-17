@@ -117,9 +117,10 @@ jobs:
         run: |
           grep -q 'phase7BSupertrend' scripts/run-phase7b-demo-controller.ts
           grep -q 'PATTERN_PLUS_MA_PLUS_SUPERTREND_M15_M5' scripts/run-phase7b-demo-controller.ts
-          grep -q 'm5.findLastIndex((bar) => bar.closeTime <= current.closeTime)' scripts/run-phase7b-demo-controller.ts
+          grep -q 'while (m5SignalIndex >= 0 && m5\[m5SignalIndex\]!.closeTime > current.closeTime)' scripts/run-phase7b-demo-controller.ts
           grep -q 'm15Direction !== trigger.side || m5Direction !== trigger.side' scripts/run-phase7b-demo-controller.ts
           grep -q 'phase7BSupertrend' apps/api/src/routes/phase7b-demo.route.ts
+          grep -q 'while (m5SignalIndex >= 0 && m5Bars\[m5SignalIndex\]!.closeTime > current.closeTime)' apps/api/src/routes/phase7b-demo.route.ts
           grep -q 'm15Supertrend' apps/api/src/routes/phase7b-demo.route.ts
           grep -q 'm5Supertrend' apps/api/src/routes/phase7b-demo.route.ts
           grep -q '3 mô hình nến + Supertrend M15 10/3 + Supertrend M5 10/3' apps/web/src/ui/DashboardLayout.tsx
