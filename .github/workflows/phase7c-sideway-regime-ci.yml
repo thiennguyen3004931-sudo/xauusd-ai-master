@@ -16,6 +16,8 @@ on:
       - "scripts/phase7c-sideway-*.mjs"
       - "scripts/phase7c-execution-lock*.mjs"
       - "scripts/phase7c-forward-report*.mjs"
+      - "scripts/apply-phase7c-broker-clock-fix-local.mjs"
+      - "scripts/verify-phase7c-broker-clock-local.mjs"
       - "scripts/activate-phase7c-local.ps1"
       - "scripts/stop-phase7c-executors-local.ps1"
       - "scripts/upgrade-phase7c-executor-task-local.ps1"
@@ -38,6 +40,8 @@ on:
       - "scripts/phase7c-sideway-*.mjs"
       - "scripts/phase7c-execution-lock*.mjs"
       - "scripts/phase7c-forward-report*.mjs"
+      - "scripts/apply-phase7c-broker-clock-fix-local.mjs"
+      - "scripts/verify-phase7c-broker-clock-local.mjs"
       - "scripts/activate-phase7c-local.ps1"
       - "scripts/stop-phase7c-executors-local.ps1"
       - "scripts/upgrade-phase7c-executor-task-local.ps1"
@@ -136,6 +140,24 @@ jobs:
           node --check scripts/report-phase7c-forward.mjs
           node --check scripts/run-phase7c-sideway-controller.mjs
           node --check scripts/run-phase7c-sideway-locked.mjs
+          node --check scripts/apply-phase7c-broker-clock-fix-local.mjs
+          node --check scripts/verify-phase7c-broker-clock-local.mjs
+
+      - name: Dry-run broker clock controller patch
+        shell: bash
+        run: |
+          node scripts/apply-phase7c-broker-clock-fix-local.mjs
+          rm -rf .phase7c-broker-clock-ci
+          mkdir -p .phase7c-broker-clock-ci/scripts
+          cp scripts/run-phase7b-demo-controller.ts .phase7c-broker-clock-ci/scripts/
+          cp scripts/run-phase7c-sideway-controller.mjs .phase7c-broker-clock-ci/scripts/
+          PHASE7C_BROKER_CLOCK_PATCH_ROOT="$PWD/.phase7c-broker-clock-ci" \
+            node scripts/apply-phase7c-broker-clock-fix-local.mjs --apply
+          node --check .phase7c-broker-clock-ci/scripts/run-phase7c-sideway-controller.mjs
+          grep -q 'const now = Number(quote.timestamp);' .phase7c-broker-clock-ci/scripts/run-phase7b-demo-controller.ts
+          grep -q 'managed.partialActivatedAt = Number(quote.timestamp);' .phase7c-broker-clock-ci/scripts/run-phase7b-demo-controller.ts
+          grep -q 'brokerClockOffsetMs' .phase7c-broker-clock-ci/scripts/run-phase7c-sideway-controller.mjs
+          rm -rf .phase7c-broker-clock-ci
 
       - name: Parse Phase7C PowerShell launchers
         shell: pwsh
