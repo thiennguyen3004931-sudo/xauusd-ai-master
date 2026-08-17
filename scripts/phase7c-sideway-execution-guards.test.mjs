@@ -26,9 +26,9 @@ test("DBG-style whole-hour broker clock offset normalizes quote and candle fresh
   const quoteFreshness = evaluateTimestampFreshness(brokerQuote, {
     now,
     maxAgeMs: 30_000,
-    clockOffsetMs: offset,
   });
   assert.equal(quoteFreshness.fresh, true);
+  assert.equal(quoteFreshness.clockOffsetMs, threeHours);
   assert.equal(quoteFreshness.ageMs, 1_500);
   assert.equal(quoteFreshness.rawAgeMs, -threeHours + 1_500);
 
@@ -36,9 +36,9 @@ test("DBG-style whole-hour broker clock offset normalizes quote and candle fresh
   const candleFreshness = evaluateTimestampFreshness(latestM15Close, {
     now,
     maxAgeMs: 30 * 60_000,
-    clockOffsetMs: offset,
   });
   assert.equal(candleFreshness.fresh, true);
+  assert.equal(candleFreshness.clockOffsetMs, threeHours);
   assert.equal(candleFreshness.ageMs, 5 * 60_000);
 });
 
@@ -46,6 +46,13 @@ test("broker clock inference fails closed on non-hour or excessive skew", () => 
   const now = 1_700_000_000_000;
   assert.equal(inferBrokerClockOffset(now + 37 * 60_000, { systemTimestamp: now }), null);
   assert.equal(inferBrokerClockOffset(now + 15 * 60 * 60_000, { systemTimestamp: now }), null);
+
+  const nonHourFreshness = evaluateTimestampFreshness(now + 37 * 60_000, {
+    now,
+    maxAgeMs: 10_000,
+  });
+  assert.equal(nonHourFreshness.fresh, false);
+  assert.equal(nonHourFreshness.reason, "TIMESTAMP_TOO_FAR_IN_FUTURE");
 });
 
 function validPayload(now = 1_700_000_000_000) {
