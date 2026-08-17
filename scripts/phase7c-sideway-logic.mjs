@@ -31,7 +31,6 @@ export function chooseRangeSide(range, bid, ask) {
   if (![demandLow, lower, upper, supplyHigh].every(Number.isFinite) || upper <= lower || lower < demandLow || supplyHigh < upper) return null;
 
   const mid = (bid + ask) / 2;
-  // Never fade a confirmed live breakout beyond the outer zone boundaries.
   if (mid < demandLow || mid > supplyHigh) return null;
 
   const position = clamp((mid - lower) / (upper - lower), 0, 1);
@@ -178,7 +177,7 @@ export function oneThirdPartialVolume(initialVolume, currentVolume, minVolume, s
   return desired;
 }
 
-export function matchPendingEntryPosition(pending, positions, spec, now = Date.now()) {
+export function matchPendingEntryPosition(pending, positions, spec, now = Date.now(), brokerClockOffsetMs = 0) {
   if (!pending || !Array.isArray(positions) || positions.length !== 1) {
     return { matched: false, reason: "PENDING_REQUIRES_EXACTLY_ONE_POSITION", position: null };
   }
@@ -209,15 +208,33 @@ export function matchPendingEntryPosition(pending, positions, spec, now = Date.n
   }
 
   const createdAt = Number(pending.createdAt);
-  const openedAt = Number(position.openedAt);
-  if (!Number.isFinite(createdAt) || !Number.isFinite(openedAt)) {
+  const openedAtBroker = Number(position.openedAt);
+  const offset = Number(brokerClockOffsetMs);
+  const current = Number(now);
+  if (![createdAt, openedAtBroker, offset, current].every(Number.isFinite)) {
     return { matched: false, reason: "PENDING_TIMESTAMP_INVALID", position: null };
   }
-  if (openedAt < createdAt - 120_000 || openedAt > Number(now) + 10_000) {
-    return { matched: false, reason: "PENDING_OPEN_TIME_MISMATCH", position: null };
+
+  const openedAt = openedAtBroker - offset;
+  if (openedAt < createdAt - 120_000 || openedAt > current + 10_000) {
+    return {
+      matched: false,
+      reason: "PENDING_OPEN_TIME_MISMATCH",
+      position: null,
+      openedAtBroker,
+      openedAtNormalized: openedAt,
+      brokerClockOffsetMs: offset,
+    };
   }
 
-  return { matched: true, reason: "PENDING_POSITION_MATCHED", position };
+  return {
+    matched: true,
+    reason: "PENDING_POSITION_MATCHED",
+    position,
+    openedAtBroker,
+    openedAtNormalized: openedAt,
+    brokerClockOffsetMs: offset,
+  };
 }
 
 export function reconcileManagedBrokerState(managed, position, spec) {
