@@ -1,0 +1,124 @@
+name: Phase7B Supertrend Entry Gates CI
+
+on:
+  push:
+    branches:
+      - phase7c-sideway-supply-demand
+    paths:
+      - "scripts/apply-phase7b-supertrend-entry-gates-local.mjs"
+      - ".github/workflows/phase7b-supertrend-entry-gates-ci.yml"
+  pull_request:
+    paths:
+      - "scripts/apply-phase7b-supertrend-entry-gates-local.mjs"
+      - ".github/workflows/phase7b-supertrend-entry-gates-ci.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply three-candle prerequisite
+        run: |
+          node scripts/apply-phase7b-three-candle-pattern-local.mjs --apply
+          grep -q 'THREE_CANDLE_BODY_DOMINANCE' scripts/run-phase7b-demo-controller.ts
+
+      - name: Apply broker clock prerequisite
+        run: |
+          node scripts/apply-phase7c-broker-clock-fix-local.mjs --apply
+          grep -q 'const now = Number(quote.timestamp)' scripts/run-phase7b-demo-controller.ts
+
+      - name: Apply UI clock prerequisite
+        run: |
+          node scripts/apply-phase7b-pattern-ui-clock-local.mjs --apply
+          grep -q 'inferBrokerClockOffset' apps/api/src/routes/phase7b-demo.route.ts
+
+      - name: Check Supertrend migration without mutation
+        run: |
+          node --check scripts/apply-phase7b-supertrend-entry-gates-local.mjs
+          node scripts/apply-phase7b-supertrend-entry-gates-local.mjs | tee /tmp/supertrend-check.log
+          grep -q 'PHASE7B_SUPERTREND_GATE_CHECK=PASS' /tmp/supertrend-check.log
+          grep -q 'PHASE7B_SUPERTREND_GATE_ORIGINAL_MUTATION=False' /tmp/supertrend-check.log
+          grep -q 'PHASE7B_SUPERTREND_GATE_REAL_ACCOUNT_ALLOWED=False' /tmp/supertrend-check.log
+
+      - name: Apply Supertrend migration in CI checkout
+        run: |
+          node scripts/apply-phase7b-supertrend-entry-gates-local.mjs --apply | tee /tmp/supertrend-apply.log
+          grep -q 'PHASE7B_SUPERTREND_GATE_APPLY=PASS' /tmp/supertrend-apply.log
+          grep -q 'PHASE7B_SUPERTREND_GATE_DEMO_ONLY=True' /tmp/supertrend-apply.log
+
+      - name: Build risk-engine dependency graph
+        run: pnpm --filter @xauusd/risk-engine... build
+
+      - name: Test Supertrend service and risk engine
+        run: |
+          pnpm --filter @xauusd/risk-engine typecheck
+          pnpm --filter @xauusd/risk-engine test
+
+      - name: Build API
+        run: pnpm --filter @xauusd/api... build
+
+      - name: Build Web
+        run: pnpm --filter @xauusd/web... build
+
+      - name: Validate Trend controller TypeScript transform
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const ts = require("typescript");
+          const source = fs.readFileSync("scripts/run-phase7b-demo-controller.ts", "utf8");
+          const transformed = ts.transpileModule(source, {
+            fileName: "run-phase7b-demo-controller.ts",
+            reportDiagnostics: true,
+            compilerOptions: {
+              target: ts.ScriptTarget.ES2022,
+              module: ts.ModuleKind.ESNext,
+              moduleResolution: ts.ModuleResolutionKind.Bundler,
+              verbatimModuleSyntax: false,
+            },
+          });
+          const errors = (transformed.diagnostics || []).filter(
+            (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
+          );
+          if (errors.length) {
+            for (const diagnostic of errors) {
+              console.error(ts.flattenDiagnosticMessageText(diagnostic.messageText, " "));
+            }
+            process.exit(1);
+          }
+          fs.writeFileSync(".phase7b-supertrend-gates-ci.mjs", transformed.outputText, "utf8");
+          NODE
+          node --check .phase7b-supertrend-gates-ci.mjs
+          rm -f .phase7b-supertrend-gates-ci.mjs
+
+      - name: Verify mandatory Supertrend gates and no-lookahead M5
+        run: |
+          grep -q 'phase7BSupertrend' scripts/run-phase7b-demo-controller.ts
+          grep -q 'PATTERN_PLUS_MA_PLUS_SUPERTREND_M15_M5' scripts/run-phase7b-demo-controller.ts
+          grep -q 'm5.findLastIndex((bar) => bar.closeTime <= current.closeTime)' scripts/run-phase7b-demo-controller.ts
+          grep -q 'm15Direction !== trigger.side || m5Direction !== trigger.side' scripts/run-phase7b-demo-controller.ts
+          grep -q 'phase7BSupertrend' apps/api/src/routes/phase7b-demo.route.ts
+          grep -q 'm15Supertrend' apps/api/src/routes/phase7b-demo.route.ts
+          grep -q 'm5Supertrend' apps/api/src/routes/phase7b-demo.route.ts
+          grep -q '3 mô hình nến + Supertrend M15 10/3 + Supertrend M5 10/3' apps/web/src/ui/DashboardLayout.tsx
+          grep -q 'THREE_CANDLE_BODY_DOMINANCE' scripts/run-phase7b-demo-controller.ts
+          grep -q 'inferBrokerClockOffset' apps/api/src/routes/phase7b-demo.route.ts
+          grep -q 'const now = Number(quote.timestamp)' scripts/run-phase7b-demo-controller.ts
