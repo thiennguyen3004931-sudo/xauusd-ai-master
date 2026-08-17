@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)] [string]$WorkDir,
-  [string]$TaskName = "XAUUSD-Phase7B-Bot"
+  [string]$TaskName = "XAUUSD-Phase7C-Executors"
 )
 
 $ErrorActionPreference = "Stop"

@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)] [string]$WorkDir,
-  [string]$TaskName = "XAUUSD-Phase7B-Bot",
+  [string]$TaskName = "XAUUSD-Phase7C-Executors",
   [string]$ControlApiUrl = "http://127.0.0.1:3711",
   [string]$EnvFile = "packages/mt5-broker/bridge/.env.phase7b-demo",
   [string]$TelegramEnvFile = ".env.phase7b-telegram",
