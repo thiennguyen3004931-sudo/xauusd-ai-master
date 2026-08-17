@@ -11,6 +11,9 @@ on:
       - "scripts/apply-phase7b-canonical-runner-v4-local.mjs"
       - "scripts/apply-phase7b-canonical-runner-v4b-local.mjs"
       - "scripts/apply-phase7b-canonical-runner-windows-local.mjs"
+      - "scripts/apply-phase7b-three-candle-pattern-local.mjs"
+      - "scripts/apply-phase7c-broker-clock-fix-local.mjs"
+      - "scripts/apply-phase7b-pattern-ui-clock-local.mjs"
       - ".github/workflows/phase7b-supertrend-entry-gates-ci.yml"
   pull_request:
     paths:
@@ -20,6 +23,9 @@ on:
       - "scripts/apply-phase7b-canonical-runner-v4-local.mjs"
       - "scripts/apply-phase7b-canonical-runner-v4b-local.mjs"
       - "scripts/apply-phase7b-canonical-runner-windows-local.mjs"
+      - "scripts/apply-phase7b-three-candle-pattern-local.mjs"
+      - "scripts/apply-phase7c-broker-clock-fix-local.mjs"
+      - "scripts/apply-phase7b-pattern-ui-clock-local.mjs"
       - ".github/workflows/phase7b-supertrend-entry-gates-ci.yml"
 
 jobs:
