@@ -122,8 +122,24 @@ $registeredPrincipal = ([string]$registered.Principal.UserId).Trim()
 if ($registeredPrincipal -notmatch '^(?i)(SYSTEM|NT AUTHORITY\\SYSTEM|S-1-5-18)$') {
   throw "Dashboard task principal is not SYSTEM: $registeredPrincipal"
 }
-if ($registered.Settings.ExecutionTimeLimit -ne [TimeSpan]::Zero) {
-  throw "Dashboard task ExecutionTimeLimit is not unlimited: $($registered.Settings.ExecutionTimeLimit)"
+
+# Depending on the ScheduledTasks provider/Windows build, ExecutionTimeLimit can
+# come back as either a TimeSpan or the ISO-8601 duration string "PT0S". Both
+# represent an unlimited task when the duration is zero.
+$executionTimeLimitRaw = $registered.Settings.ExecutionTimeLimit
+$executionTimeLimitIsUnlimited = $false
+if ($executionTimeLimitRaw -is [TimeSpan]) {
+  $executionTimeLimitIsUnlimited = ($executionTimeLimitRaw -eq [TimeSpan]::Zero)
+} else {
+  $executionTimeLimitText = ([string]$executionTimeLimitRaw).Trim()
+  try {
+    $executionTimeLimitIsUnlimited = ([System.Xml.XmlConvert]::ToTimeSpan($executionTimeLimitText) -eq [TimeSpan]::Zero)
+  } catch {
+    $executionTimeLimitIsUnlimited = $executionTimeLimitText -in @("00:00:00", "0.00:00:00")
+  }
+}
+if (-not $executionTimeLimitIsUnlimited) {
+  throw "Dashboard task ExecutionTimeLimit is not unlimited: $executionTimeLimitRaw"
 }
 
 $executionTaskAfter = Get-ScheduledTask -TaskName $ExecutionTaskName -ErrorAction Stop
