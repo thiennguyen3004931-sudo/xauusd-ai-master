@@ -62,12 +62,12 @@ replaceOnce(
 );
 
 replaceOnce(
-  /console\.log\("PHASE7B_DEMO_STRATEGY=M15_DUAL_PATTERN_MA_STRUCTURE_RIDER_FVG_CONFIRMATION"\);/,
+  /console\.log\("PHASE7B_DEMO_STRATEGY=[^"]+"\);/,
   `console.log("PHASE7B_DEMO_STRATEGY=M15_THREE_PATTERN_SUPERTREND_STRUCTURE_RIDER_FVG_CONFIRMATION");`,
   "strategy log",
 );
 replaceOnce(
-  /console\.log\("PHASE7B_DEMO_ENTRY_GATE=PATTERN_PLUS_MA_ONLY"\);/,
+  /console\.log\("PHASE7B_DEMO_ENTRY_GATE=[^"]+"\);/,
   `console.log("PHASE7B_DEMO_ENTRY_GATE=3_PATTERNS_PLUS_SUPERTREND_M15_M5_10_3");\nconsole.log("PHASE7B_DEMO_SUPERTREND=M15_M5_10_3");`,
   "entry gate log",
 );
