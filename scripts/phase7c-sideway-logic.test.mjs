@@ -117,6 +117,37 @@ test("pending entry recovery only adopts the exact broker-protected position", (
   assert.equal(matchPendingEntryPosition(pending, [position, { ...position, ticket: "2002" }], spec, now).matched, false);
 });
 
+test("pending recovery normalizes a +3h broker openedAt timestamp", () => {
+  const now = 1_700_000_100_000;
+  const offset = 3 * 60 * 60_000;
+  const pending = {
+    side: "SELL",
+    volume: 0.03,
+    stopLoss: 2411,
+    tp2: 2392,
+    createdAt: now - 5_000,
+  };
+  const position = {
+    ticket: "3001",
+    side: "SHORT",
+    volume: 0.03,
+    stopLoss: 2411,
+    takeProfit: 2392,
+    openedAt: now + offset - 4_000,
+  };
+  const result = matchPendingEntryPosition(
+    pending,
+    [position],
+    { volumeStep: 0.01, point: 0.01 },
+    now,
+    offset,
+  );
+
+  assert.equal(result.matched, true);
+  assert.equal(result.openedAtNormalized, now - 4_000);
+  assert.equal(result.brokerClockOffsetMs, offset);
+});
+
 test("managed state recovers a completed one-third partial after a crash", () => {
   const managed = {
     side: "BUY",
