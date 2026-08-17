@@ -19,6 +19,12 @@ if (count !== 1) {
 }
 source = source.replace(ambiguous, precise);
 
+// The base patcher contains template-literal snippets that belong to the target
+// API source. Escape only identifiers that do not exist in the patcher itself,
+// so Node does not try to interpolate them while constructing patch plans.
+source = source.replaceAll("${baseUrl}", "\\${baseUrl}");
+source = source.replaceAll("${pattern.side}", "\\${pattern.side}");
+
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "phase7b-supertrend-v2-"));
 const tempPatcher = path.join(tempDir, "apply-phase7b-supertrend-entry-gates-v2-runtime.mjs");
 fs.writeFileSync(tempPatcher, source, "utf8");
@@ -27,6 +33,7 @@ console.log("PHASE7B_SUPERTREND_GATE_V2=START");
 console.log(`PHASE7B_SUPERTREND_GATE_V2_ROOT=${root}`);
 console.log("PHASE7B_SUPERTREND_GATE_V2_BASE_PATCHER_MUTATION=False");
 console.log("PHASE7B_SUPERTREND_GATE_V2_CONTROLLER_SIGNAL_ANCHOR=DISAMBIGUATED");
+console.log("PHASE7B_SUPERTREND_GATE_V2_TARGET_INTERPOLATIONS=ESCAPED");
 
 const child = spawnSync(process.execPath, [tempPatcher, ...process.argv.slice(2)], {
   cwd: root,
