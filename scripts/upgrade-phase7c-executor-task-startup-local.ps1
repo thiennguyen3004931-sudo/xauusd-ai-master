@@ -39,6 +39,19 @@ if (-not [System.IO.Path]::IsPathRooted($TelegramEnvFile)) { $TelegramEnvFile = 
 if (-not (Test-Path $TelegramEnvFile)) { throw "Telegram environment file not found: $TelegramEnvFile" }
 $TelegramEnvFile = (Resolve-Path $TelegramEnvFile).Path
 
+$nodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+$pnpmCommand = Get-Command pnpm.cmd -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($null -eq $nodeCommand -or [string]::IsNullOrWhiteSpace([string]$nodeCommand.Source)) {
+  throw "node.exe was not found in the current Administrator PATH. Install/repair Node.js before startup conversion."
+}
+if ($null -eq $pnpmCommand -or [string]::IsNullOrWhiteSpace([string]$pnpmCommand.Source)) {
+  throw "pnpm.cmd was not found in the current Administrator PATH. Install/repair pnpm before startup conversion."
+}
+$NodePath = (Resolve-Path ([string]$nodeCommand.Source)).Path
+$PnpmPath = (Resolve-Path ([string]$pnpmCommand.Source)).Path
+if (-not (Test-Path $NodePath -PathType Leaf)) { throw "Resolved node.exe path does not exist: $NodePath" }
+if (-not (Test-Path $PnpmPath -PathType Leaf)) { throw "Resolved pnpm.cmd path does not exist: $PnpmPath" }
+
 function Read-EnvValueFromFile([string]$Path, [string]$Name) {
   foreach ($raw in Get-Content -LiteralPath $Path) {
     $line = $raw.Trim()
@@ -103,6 +116,8 @@ $config = [pscustomobject]@{
   controlApiUrl = $ControlApiUrl.TrimEnd('/')
   envFile = $EnvFile
   telegramEnvFile = $TelegramEnvFile
+  nodePath = $NodePath
+  pnpmPath = $PnpmPath
   sidewayRiskPercent = $SidewayRiskPercent
   sidewayMaxLot = $SidewayMaxLot
   armed = $true
@@ -180,6 +195,8 @@ Write-Host "PHASE7C_EXECUTOR_STARTUP_PRINCIPAL=SYSTEM"
 Write-Host "PHASE7C_EXECUTOR_STARTUP_ACTION=PHASE7C_ARMED_TASK_RUNNER"
 Write-Host "PHASE7C_EXECUTOR_STARTUP_DEMO_ONLY=True"
 Write-Host "PHASE7C_EXECUTOR_STARTUP_OPEN_XAUUSD_POSITIONS=0"
+Write-Host "PHASE7C_EXECUTOR_STARTUP_NODE_PATH=$NodePath"
+Write-Host "PHASE7C_EXECUTOR_STARTUP_PNPM_PATH=$PnpmPath"
 Write-Host "PHASE7C_EXECUTOR_STARTUP_EXECUTION_TIME_LIMIT=UNLIMITED"
 Write-Host "PHASE7C_EXECUTOR_STARTUP_SECRETS_IN_ARGUMENTS=False"
 Write-Host "PHASE7C_EXECUTOR_STARTUP_PREVIOUS_PRINCIPAL=$previousPrincipal"
