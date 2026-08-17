@@ -44,9 +44,22 @@ console.log(`PHASE7C_BROKER_CLOCK_OFFSET_MINUTES=${offset === null ? "INVALID" :
 
 if (offset === null) throw new Error("Broker clock is not a plausible whole-hour offset from system clock.");
 
-const quoteFreshness = evaluateTimestampFreshness(quote?.timestamp, { maxAgeMs: 30_000 });
-const m5Freshness = evaluateTimestampFreshness(latestM5?.closeTime, { maxAgeMs: 10 * 60_000 });
-const m15Freshness = evaluateTimestampFreshness(latestM15?.closeTime, { maxAgeMs: 30 * 60_000 });
+const now = Date.now();
+const quoteFreshness = evaluateTimestampFreshness(quote?.timestamp, {
+  now,
+  maxAgeMs: 30_000,
+  clockOffsetMs: offset,
+});
+const m5Freshness = evaluateTimestampFreshness(latestM5?.closeTime, {
+  now,
+  maxAgeMs: 10 * 60_000,
+  clockOffsetMs: offset,
+});
+const m15Freshness = evaluateTimestampFreshness(latestM15?.closeTime, {
+  now,
+  maxAgeMs: 30 * 60_000,
+  clockOffsetMs: offset,
+});
 
 printFreshness("QUOTE", quoteFreshness);
 printFreshness("M5", m5Freshness);
