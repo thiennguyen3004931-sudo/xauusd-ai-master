@@ -40,7 +40,44 @@ $EnvFile = (Resolve-Path $EnvFile).Path
 $executionTask = Get-ScheduledTask -TaskName $ExecutionTaskName -ErrorAction Stop
 $executionActionsBefore = @($executionTask.Actions)
 if ($executionActionsBefore.Count -ne 1) { throw "Execution task $ExecutionTaskName must have exactly one action before its principal can be reused safely." }
-$executionFingerprintBefore = "$([string]$executionActionsBefore[0].Execute)|$([string]$executionActionsBefore[0].Arguments)|$([string]$executionActionsBefore[0].WorkingDirectory)|$([string]$executionTask.Principal.UserId)|$([string]$executionTask.Principal.LogonType)|$([string]$executionTask.Principal.RunLevel)"
+$executionFingerprintBefore = "$([string]$executionActionsBefore[0].Execute)|$([string]$executionActionsBefore[0].Arguments)|$([string]$executionActionsBefore[0].WorkingDirectory)|$([string]$executionTask.Principal.UserId)|$([string]$executionTask.Principal.GroupId)|$([string]$executionTask.Principal.LogonType)|$([string]$executionTask.Principal.RunLevel)"
+
+# A principal CIM instance returned by Get-ScheduledTask is not always safe to pass
+# directly back into Register-ScheduledTask. In particular, group/service principals
+# can expose an empty UserId, which Task Scheduler rejects with HRESULT 0x80070057.
+# Reconstruct a fresh principal from the source task instead.
+$sourcePrincipal = $executionTask.Principal
+$sourceUserId = ([string]$sourcePrincipal.UserId).Trim()
+$sourceGroupId = ([string]$sourcePrincipal.GroupId).Trim()
+$sourceLogonType = ([string]$sourcePrincipal.LogonType).Trim()
+$sourceRunLevel = ([string]$sourcePrincipal.RunLevel).Trim()
+if ([string]::IsNullOrWhiteSpace($sourceRunLevel)) { $sourceRunLevel = "Highest" }
+
+$dashboardPrincipal = $null
+$principalKind = ""
+if (-not [string]::IsNullOrWhiteSpace($sourceUserId)) {
+  if ($sourceUserId -match '^(?i)(SYSTEM|NT AUTHORITY\\SYSTEM|S-1-5-18)$') {
+    $dashboardPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+    $principalKind = "SYSTEM"
+  } else {
+    if ([string]::IsNullOrWhiteSpace($sourceLogonType) -or $sourceLogonType -eq "None") {
+      throw "Execution task principal has UserId=$sourceUserId but no reusable LogonType. Refusing to guess credentials."
+    }
+    $dashboardPrincipal = New-ScheduledTaskPrincipal -UserId $sourceUserId -LogonType $sourceLogonType -RunLevel $sourceRunLevel
+    $principalKind = "USER"
+  }
+} elseif (-not [string]::IsNullOrWhiteSpace($sourceGroupId)) {
+  $dashboardPrincipal = New-ScheduledTaskPrincipal -GroupId $sourceGroupId -RunLevel $sourceRunLevel
+  $principalKind = "GROUP"
+} else {
+  # The execution task is already proven to run unattended, but some Windows builds
+  # return both UserId and GroupId as blank for service principals. SYSTEM is the
+  # narrowest credential-free startup identity for this local read-only dashboard.
+  $dashboardPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+  $principalKind = "SYSTEM_FALLBACK"
+}
+
+if ($null -eq $dashboardPrincipal) { throw "Unable to construct a valid dashboard task principal." }
 
 $arguments = @(
   "-NoProfile",
@@ -87,9 +124,10 @@ Register-ScheduledTask `
   -Action $action `
   -Trigger $trigger `
   -Settings $settings `
-  -Principal $executionTask.Principal `
+  -Principal $dashboardPrincipal `
   -Description "XAUUSD Phase7C Forward DEMO dashboard + read-only report refresh. Independent from trade execution." `
-  -Force | Out-Null
+  -Force `
+  -ErrorAction Stop | Out-Null
 
 $registered = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 $registeredActions = @($registered.Actions)
@@ -107,14 +145,16 @@ if ($bootTrigger.Count -lt 1) { throw "Dashboard task registration verification 
 $executionTaskAfter = Get-ScheduledTask -TaskName $ExecutionTaskName -ErrorAction Stop
 $executionActionsAfter = @($executionTaskAfter.Actions)
 if ($executionActionsAfter.Count -ne 1) { throw "Execution task changed unexpectedly while dashboard task was installed." }
-$executionFingerprintAfter = "$([string]$executionActionsAfter[0].Execute)|$([string]$executionActionsAfter[0].Arguments)|$([string]$executionActionsAfter[0].WorkingDirectory)|$([string]$executionTaskAfter.Principal.UserId)|$([string]$executionTaskAfter.Principal.LogonType)|$([string]$executionTaskAfter.Principal.RunLevel)"
+$executionFingerprintAfter = "$([string]$executionActionsAfter[0].Execute)|$([string]$executionActionsAfter[0].Arguments)|$([string]$executionActionsAfter[0].WorkingDirectory)|$([string]$executionTaskAfter.Principal.UserId)|$([string]$executionTaskAfter.Principal.GroupId)|$([string]$executionTaskAfter.Principal.LogonType)|$([string]$executionTaskAfter.Principal.RunLevel)"
 if ($executionFingerprintAfter -ne $executionFingerprintBefore) { throw "Execution task action/principal changed unexpectedly. Dashboard task installation refuses this state." }
 
 Write-Host "PHASE7C_DASHBOARD_TASK_INSTALL=PASS"
 Write-Host "PHASE7C_DASHBOARD_TASK_NAME=$TaskName"
 Write-Host "PHASE7C_DASHBOARD_TASK_TRIGGER=AT_STARTUP"
 Write-Host "PHASE7C_DASHBOARD_TASK_PRINCIPAL_SOURCE=$ExecutionTaskName"
+Write-Host "PHASE7C_DASHBOARD_TASK_PRINCIPAL_KIND=$principalKind"
 Write-Host "PHASE7C_DASHBOARD_TASK_PRINCIPAL_USER=$($registered.Principal.UserId)"
+Write-Host "PHASE7C_DASHBOARD_TASK_PRINCIPAL_GROUP=$($registered.Principal.GroupId)"
 Write-Host "PHASE7C_DASHBOARD_TASK_ACTION=FORWARD_DASHBOARD_READ_ONLY"
 Write-Host "PHASE7C_DASHBOARD_TASK_URL=http://${HostAddress}:${Port}/"
 Write-Host "PHASE7C_DASHBOARD_TASK_REPORT_REFRESH_SECONDS=$ReportRefreshSeconds"
