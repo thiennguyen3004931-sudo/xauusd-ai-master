@@ -9,9 +9,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$Launcher = Join-Path $PSScriptRoot "run-phase7c-forward-dashboard-local.ps1"
+$TaskRunner = Join-Path $PSScriptRoot "run-phase7c-forward-dashboard-task-runner-local.ps1"
+$ConfigPath = Join-Path $ProjectRoot ".runtime\phase7c-dashboard-task-config.json"
 
-if (-not (Test-Path $Launcher)) { throw "Phase 7C forward dashboard launcher not found: $Launcher" }
+if (-not (Test-Path $TaskRunner)) { throw "Phase 7C forward dashboard task runner not found: $TaskRunner" }
+if (-not (Test-Path $ConfigPath)) { throw "Phase 7C forward dashboard task config not found: $ConfigPath" }
 if ($HostAddress -notin @("127.0.0.1", "localhost", "::1")) { throw "Dashboard verifier only accepts loopback hosts." }
 if ($Port -lt 1 -or $Port -gt 65535) { throw "Port must be between 1 and 65535." }
 if ($HttpTimeoutSeconds -lt 1 -or $HttpTimeoutSeconds -gt 60) { throw "HttpTimeoutSeconds must be between 1 and 60." }
@@ -21,24 +23,41 @@ if (-not [System.IO.Path]::IsPathRooted($WorkDir)) { $WorkDir = Join-Path $Proje
 if (-not (Test-Path $WorkDir)) { throw "WorkDir not found: $WorkDir" }
 $WorkDir = (Resolve-Path $WorkDir).Path
 
+$config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+if ([int]$config.version -ne 1) { throw "Dashboard task config version is unsupported." }
+if (-not [bool]$config.readOnly) { throw "Dashboard task config reports readOnly=false." }
+if ([bool]$config.mt5Mutation) { throw "Dashboard task config reports mt5Mutation=true." }
+if ([string]$config.workDir -ne $WorkDir) { throw "Dashboard task config WorkDir mismatch: $($config.workDir)" }
+if ([int]$config.port -ne $Port) { throw "Dashboard task config Port mismatch: $($config.port)" }
+
 $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 $actions = @($task.Actions)
 if ($actions.Count -ne 1) { throw "Dashboard task must have exactly one action; found $($actions.Count)." }
 $action = $actions[0]
 $actionText = "$([string]$action.Execute) $([string]$action.Arguments)"
-$actionOk = [string]$action.Execute -match "powershell" -and $actionText -like "*run-phase7c-forward-dashboard-local.ps1*" -and $actionText -like "*-Port $Port*"
-if (-not $actionOk) { throw "Dashboard task action does not match the expected Phase 7C read-only launcher." }
+$actionOk = [string]$action.Execute -match "powershell" -and $actionText -like "*run-phase7c-forward-dashboard-task-runner-local.ps1*"
+if (-not $actionOk) { throw "Dashboard task action does not match the expected Phase 7C read-only task runner." }
 if ($actionText -match "(?i)(MT5_(?:API|BRIDGE_API)_KEY\s*=|ZIQ_TELEGRAM_BOT_TOKEN\s*=|x-phase7c-token)") {
   throw "Dashboard task action contains a secret-like value."
 }
 $bootTrigger = @($task.Triggers | Where-Object { $_.CimClass.CimClassName -eq "MSFT_TaskBootTrigger" })
 if ($bootTrigger.Count -lt 1) { throw "Dashboard task does not have an AtStartup trigger." }
+$principal = ([string]$task.Principal.UserId).Trim()
+if ($principal -notmatch '^(?i)(SYSTEM|NT AUTHORITY\\SYSTEM|S-1-5-18)$') {
+  throw "Dashboard task principal is not SYSTEM: $principal"
+}
+if ($task.Settings.ExecutionTimeLimit -ne [TimeSpan]::Zero) {
+  throw "Dashboard task ExecutionTimeLimit is not unlimited: $($task.Settings.ExecutionTimeLimit)"
+}
 
 Write-Host "PHASE7C_DASHBOARD_VERIFY_TASK_STATE=$($task.State)"
 Write-Host "PHASE7C_DASHBOARD_VERIFY_TASK_ACTION=PASS"
 Write-Host "PHASE7C_DASHBOARD_VERIFY_TASK_TRIGGER=AT_STARTUP"
-Write-Host "PHASE7C_DASHBOARD_VERIFY_TASK_PRINCIPAL=$($task.Principal.UserId)"
+Write-Host "PHASE7C_DASHBOARD_VERIFY_TASK_PRINCIPAL=$principal"
+Write-Host "PHASE7C_DASHBOARD_VERIFY_EXECUTION_TIME_LIMIT=UNLIMITED"
 Write-Host "PHASE7C_DASHBOARD_VERIFY_SECRETS_IN_ARGUMENTS=False"
+Write-Host "PHASE7C_DASHBOARD_VERIFY_CONFIG_READ_ONLY=$([bool]$config.readOnly)"
+Write-Host "PHASE7C_DASHBOARD_VERIFY_CONFIG_MT5_MUTATION=$([bool]$config.mt5Mutation)"
 
 if ([string]$task.State -ne "Running") {
   throw "Dashboard scheduled task is not Running. Current state=$($task.State). Start it after stopping any manually launched dashboard."
