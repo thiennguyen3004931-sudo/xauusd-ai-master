@@ -137,6 +137,7 @@ jobs:
             "scripts/run-phase7c-regime-notifier-local.ps1",
             "scripts/run-phase7c-auto-journal-local.ps1",
             "scripts/run-phase7c-forward-dashboard-local.ps1",
+            "scripts/run-phase7c-forward-report-refresh-local.ps1",
             "scripts/report-phase7c-forward-local.ps1",
             "scripts/run-phase7c-trend-controller-local.ps1",
             "scripts/run-phase7c-sideway-controller-local.ps1",
