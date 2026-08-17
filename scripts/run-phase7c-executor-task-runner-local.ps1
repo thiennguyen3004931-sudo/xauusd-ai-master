@@ -20,14 +20,27 @@ $workDir = [string]$config.workDir
 $controlApiUrl = [string]$config.controlApiUrl
 $envFile = [string]$config.envFile
 $telegramEnvFile = [string]$config.telegramEnvFile
+$nodePath = [string]$config.nodePath
+$pnpmPath = [string]$config.pnpmPath
 $sidewayRiskPercent = [double]$config.sidewayRiskPercent
 $sidewayMaxLot = [double]$config.sidewayMaxLot
 
 if (-not (Test-Path $workDir)) { throw "Executor task WorkDir not found: $workDir" }
 if (-not (Test-Path $envFile)) { throw "Executor task EnvFile not found: $envFile" }
 if (-not (Test-Path $telegramEnvFile)) { throw "Executor task TelegramEnvFile not found: $telegramEnvFile" }
+if ([string]::IsNullOrWhiteSpace($nodePath) -or -not (Test-Path $nodePath -PathType Leaf)) { throw "Executor task nodePath is missing/invalid: $nodePath" }
+if ([string]::IsNullOrWhiteSpace($pnpmPath) -or -not (Test-Path $pnpmPath -PathType Leaf)) { throw "Executor task pnpmPath is missing/invalid: $pnpmPath" }
 if ($sidewayRiskPercent -le 0 -or $sidewayRiskPercent -gt 5) { throw "Executor task sidewayRiskPercent is invalid: $sidewayRiskPercent" }
 if ($sidewayMaxLot -le 0) { throw "Executor task sidewayMaxLot is invalid: $sidewayMaxLot" }
+
+$nodeDir = Split-Path -Parent $nodePath
+$pnpmDir = Split-Path -Parent $pnpmPath
+$currentPathParts = @($env:PATH -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+$prepend = @($pnpmDir, $nodeDir) | Select-Object -Unique
+$remaining = @($currentPathParts | Where-Object { $prepend -notcontains $_ })
+$env:PATH = (@($prepend) + @($remaining)) -join ';'
+$env:PHASE7C_NODE_PATH = $nodePath
+$env:PHASE7C_PNPM_PATH = $pnpmPath
 
 $runtimeDir = Join-Path $workDir "phase7c-executors"
 New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
@@ -52,6 +65,8 @@ function Write-RunnerStatus(
     exitCode = if ($null -ne $ExitCode) { [int]$ExitCode } else { $null }
     demoOnly = $true
     armed = $true
+    nodePath = $nodePath
+    pnpmPath = $pnpmPath
     message = $Message
     updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $runnerStatusPath -Encoding utf8
@@ -66,6 +81,8 @@ Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER=RUNNING"
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_DEMO_ONLY=TRUE"
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_ARMED=TRUE"
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_CONTROL_API=$controlApiUrl"
+Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_NODE_PATH=$nodePath"
+Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_PNPM_PATH=$pnpmPath"
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_STATUS=$runnerStatusPath"
 
 $attempt = 0
