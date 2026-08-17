@@ -19,7 +19,9 @@ on:
       - "scripts/activate-phase7c-local.ps1"
       - "scripts/stop-phase7c-executors-local.ps1"
       - "scripts/upgrade-phase7c-executor-task-local.ps1"
+      - "scripts/upgrade-phase7c-executor-task-startup-local.ps1"
       - "scripts/verify-phase7c-executors-local.ps1"
+      - "scripts/verify-phase7c-executor-startup-task-local.ps1"
       - "scripts/install-phase7c-forward-dashboard-task-local.ps1"
       - "scripts/verify-phase7c-forward-dashboard-task-local.ps1"
       - ".github/workflows/phase7c-sideway-regime-ci.yml"
@@ -39,7 +41,9 @@ on:
       - "scripts/activate-phase7c-local.ps1"
       - "scripts/stop-phase7c-executors-local.ps1"
       - "scripts/upgrade-phase7c-executor-task-local.ps1"
+      - "scripts/upgrade-phase7c-executor-task-startup-local.ps1"
       - "scripts/verify-phase7c-executors-local.ps1"
+      - "scripts/verify-phase7c-executor-startup-task-local.ps1"
       - "scripts/install-phase7c-forward-dashboard-task-local.ps1"
       - "scripts/verify-phase7c-forward-dashboard-task-local.ps1"
       - ".github/workflows/phase7c-sideway-regime-ci.yml"
@@ -143,6 +147,7 @@ jobs:
             "scripts/run-phase7c-forward-dashboard-local.ps1",
             "scripts/run-phase7c-forward-dashboard-task-runner-local.ps1",
             "scripts/run-phase7c-forward-report-refresh-local.ps1",
+            "scripts/run-phase7c-executor-task-runner-local.ps1",
             "scripts/report-phase7c-forward-local.ps1",
             "scripts/run-phase7c-trend-controller-local.ps1",
             "scripts/run-phase7c-sideway-controller-local.ps1",
@@ -150,7 +155,9 @@ jobs:
             "scripts/stop-phase7c-executors-local.ps1",
             "scripts/activate-phase7c-local.ps1",
             "scripts/upgrade-phase7c-executor-task-local.ps1",
+            "scripts/upgrade-phase7c-executor-task-startup-local.ps1",
             "scripts/verify-phase7c-executors-local.ps1",
+            "scripts/verify-phase7c-executor-startup-task-local.ps1",
             "scripts/install-phase7c-forward-dashboard-task-local.ps1",
             "scripts/verify-phase7c-forward-dashboard-task-local.ps1"
           )
