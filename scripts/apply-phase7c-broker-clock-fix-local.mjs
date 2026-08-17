@@ -15,12 +15,6 @@ for (const target of [sidewayPath, trendPath]) {
 const patches = [
   {
     file: sidewayPath,
-    label: "SIDEWAY_IMPORT_CLOCK_HELPERS",
-    before: `import {\n  evaluateTimestampFreshness,\n  validateAutoLotSnapshot,\n} from "./phase7c-sideway-execution-guards.mjs";`,
-    after: `import {\n  evaluateTimestampFreshness,\n  inferBrokerClockOffset,\n  normalizeBrokerTimestamp,\n  validateAutoLotSnapshot,\n} from "./phase7c-sideway-execution-guards.mjs";`,
-  },
-  {
-    file: sidewayPath,
     label: "SIDEWAY_CLOCK_INFERENCE",
     before: `  const [positions, quote, spec] = await Promise.all([\n    bridgeGet(\`/v1/positions?symbol=\${encodeURIComponent(symbol)}\`),\n    bridgeGet(\`/v1/quotes/\${encodeURIComponent(symbol)}\`),\n    bridgeGet(\`/v1/symbols/\${encodeURIComponent(symbol)}/spec\`),\n  ]);\n\n  if (!Array.isArray(positions)) {`,
     after: `  const [positions, quote, spec] = await Promise.all([\n    bridgeGet(\`/v1/positions?symbol=\${encodeURIComponent(symbol)}\`),\n    bridgeGet(\`/v1/quotes/\${encodeURIComponent(symbol)}\`),\n    bridgeGet(\`/v1/symbols/\${encodeURIComponent(symbol)}/spec\`),\n  ]);\n\n  const brokerClockOffsetMs = inferBrokerClockOffset(quote?.timestamp, {\n    systemTimestamp: health.timestamp,\n  });\n  if (brokerClockOffsetMs === null) {\n    journal("BROKER_CLOCK_OFFSET_BLOCK", {\n      healthTimestamp: health.timestamp ?? null,\n      quoteTimestamp: quote?.timestamp ?? null,\n      reason: "BROKER_CLOCK_NOT_PLAUSIBLE_WHOLE_HOUR_OFFSET",\n    });\n    return;\n  }\n\n  if (!Array.isArray(positions)) {`,
@@ -134,6 +128,17 @@ for (const [file, filePatches] of byFile) {
   let source = fs.readFileSync(file, "utf8");
   const original = source;
 
+  if (file === sidewayPath) {
+    const importResult = ensureGuardImportNames(source, ["inferBrokerClockOffset", "normalizeBrokerTimestamp"]);
+    source = importResult.source;
+    if (importResult.changed) {
+      changesNeeded += 1;
+      console.log(`PHASE7C_BROKER_CLOCK_PATCH=SIDEWAY_IMPORT_CLOCK_HELPERS|${apply ? "APPLY" : "NEEDED"}`);
+    } else {
+      console.log("PHASE7C_BROKER_CLOCK_PATCH=SIDEWAY_IMPORT_CLOCK_HELPERS|ALREADY_APPLIED");
+    }
+  }
+
   for (const patch of filePatches) {
     if (source.includes(patch.after)) {
       console.log(`PHASE7C_BROKER_CLOCK_PATCH=${patch.label}|ALREADY_APPLIED`);
@@ -165,6 +170,35 @@ if (!apply && changesNeeded > 0) {
 }
 if (apply) {
   console.log("PHASE7C_BROKER_CLOCK_PATCH_RESULT=PASS");
+}
+
+function ensureGuardImportNames(source, requiredNames) {
+  const pattern = /import\s*\{([\s\S]*?)\}\s*from\s*(["'])\.\/phase7c-sideway-execution-guards\.mjs\2\s*;/g;
+  const matches = [...source.matchAll(pattern)];
+  if (matches.length !== 1) {
+    throw new Error(`SIDEWAY_IMPORT_CLOCK_HELPERS: expected exactly one guard import block, found ${matches.length}. Refusing to modify ${sidewayPath}.`);
+  }
+
+  const match = matches[0];
+  const names = match[1]
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!names.includes("evaluateTimestampFreshness") || !names.includes("validateAutoLotSnapshot")) {
+    throw new Error("SIDEWAY_IMPORT_CLOCK_HELPERS: guard import is missing required existing exports. Refusing to modify controller.");
+  }
+
+  const missing = requiredNames.filter((name) => !names.includes(name));
+  if (missing.length === 0) return { source, changed: false };
+
+  const insertionIndex = names.indexOf("evaluateTimestampFreshness") + 1;
+  names.splice(insertionIndex, 0, ...missing);
+  const quote = match[2];
+  const replacement = `import {\n${names.map((name) => `  ${name},`).join("\n")}\n} from ${quote}./phase7c-sideway-execution-guards.mjs${quote};`;
+  return {
+    source: source.slice(0, match.index) + replacement + source.slice(match.index + match[0].length),
+    changed: true,
+  };
 }
 
 function countOccurrences(source, needle) {
