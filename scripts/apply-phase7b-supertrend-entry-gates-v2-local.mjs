@@ -19,6 +19,17 @@ if (count !== 1) {
 }
 source = source.replace(ambiguous, precise);
 
+// Keep the generated controller/API source compatible with the workspace's
+// ES2022 TypeScript lib while preserving the same no-lookahead lookup rule.
+source = source.replace(
+  `const m5SignalIndex = m5.findLastIndex((bar) => bar.closeTime <= current.closeTime);`,
+  `let m5SignalIndex = m5.length - 1;\\n  while (m5SignalIndex >= 0 && m5[m5SignalIndex]!.closeTime > current.closeTime) m5SignalIndex -= 1;`,
+);
+source = source.replace(
+  `const m5SignalIndex = m5Bars.findLastIndex((bar) => bar.closeTime <= current.closeTime);`,
+  `let m5SignalIndex = m5Bars.length - 1;\\n  while (m5SignalIndex >= 0 && m5Bars[m5SignalIndex]!.closeTime > current.closeTime) m5SignalIndex -= 1;`,
+);
+
 // The base patcher contains template-literal snippets that belong to the target
 // API source. Escape only identifiers that do not exist in the patcher itself,
 // so Node does not try to interpolate them while constructing patch plans.
@@ -33,6 +44,7 @@ console.log("PHASE7B_SUPERTREND_GATE_V2=START");
 console.log(`PHASE7B_SUPERTREND_GATE_V2_ROOT=${root}`);
 console.log("PHASE7B_SUPERTREND_GATE_V2_BASE_PATCHER_MUTATION=False");
 console.log("PHASE7B_SUPERTREND_GATE_V2_CONTROLLER_SIGNAL_ANCHOR=DISAMBIGUATED");
+console.log("PHASE7B_SUPERTREND_GATE_V2_M5_LOOKUP=ES2022_COMPATIBLE_NO_LOOKAHEAD");
 console.log("PHASE7B_SUPERTREND_GATE_V2_TARGET_INTERPOLATIONS=ESCAPED");
 
 const child = spawnSync(process.execPath, [tempPatcher, ...process.argv.slice(2)], {
