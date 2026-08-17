@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   evaluateTimestampFreshness,
+  inferBrokerClockOffset,
+  normalizeBrokerTimestamp,
   validateAutoLotSnapshot,
 } from "./phase7c-sideway-execution-guards.mjs";
 
@@ -10,6 +12,40 @@ test("timestamp freshness blocks stale and future snapshots", () => {
   assert.equal(evaluateTimestampFreshness(now - 5_000, { now, maxAgeMs: 10_000 }).fresh, true);
   assert.equal(evaluateTimestampFreshness(now - 20_000, { now, maxAgeMs: 10_000 }).reason, "TIMESTAMP_STALE");
   assert.equal(evaluateTimestampFreshness(now + 20_000, { now, maxAgeMs: 10_000 }).reason, "TIMESTAMP_TOO_FAR_IN_FUTURE");
+});
+
+test("DBG-style whole-hour broker clock offset normalizes quote and candle freshness", () => {
+  const now = 1_700_000_000_000;
+  const threeHours = 3 * 60 * 60_000;
+  const brokerQuote = now + threeHours - 1_500;
+  const offset = inferBrokerClockOffset(brokerQuote, { systemTimestamp: now });
+
+  assert.equal(offset, threeHours);
+  assert.equal(normalizeBrokerTimestamp(brokerQuote, offset), now - 1_500);
+
+  const quoteFreshness = evaluateTimestampFreshness(brokerQuote, {
+    now,
+    maxAgeMs: 30_000,
+    clockOffsetMs: offset,
+  });
+  assert.equal(quoteFreshness.fresh, true);
+  assert.equal(quoteFreshness.ageMs, 1_500);
+  assert.equal(quoteFreshness.rawAgeMs, -threeHours + 1_500);
+
+  const latestM15Close = now + threeHours - 5 * 60_000;
+  const candleFreshness = evaluateTimestampFreshness(latestM15Close, {
+    now,
+    maxAgeMs: 30 * 60_000,
+    clockOffsetMs: offset,
+  });
+  assert.equal(candleFreshness.fresh, true);
+  assert.equal(candleFreshness.ageMs, 5 * 60_000);
+});
+
+test("broker clock inference fails closed on non-hour or excessive skew", () => {
+  const now = 1_700_000_000_000;
+  assert.equal(inferBrokerClockOffset(now + 37 * 60_000, { systemTimestamp: now }), null);
+  assert.equal(inferBrokerClockOffset(now + 15 * 60 * 60_000, { systemTimestamp: now }), null);
 });
 
 function validPayload(now = 1_700_000_000_000) {
