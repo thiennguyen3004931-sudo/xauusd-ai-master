@@ -6,10 +6,12 @@ on:
       - phase7c-sideway-supply-demand
     paths:
       - "scripts/apply-phase7b-supertrend-entry-gates-local.mjs"
+      - "scripts/apply-phase7b-supertrend-entry-gates-v2-local.mjs"
       - ".github/workflows/phase7b-supertrend-entry-gates-ci.yml"
   pull_request:
     paths:
       - "scripts/apply-phase7b-supertrend-entry-gates-local.mjs"
+      - "scripts/apply-phase7b-supertrend-entry-gates-v2-local.mjs"
       - ".github/workflows/phase7b-supertrend-entry-gates-ci.yml"
 
 jobs:
@@ -52,15 +54,17 @@ jobs:
 
       - name: Check Supertrend migration without mutation
         run: |
-          node --check scripts/apply-phase7b-supertrend-entry-gates-local.mjs
-          node scripts/apply-phase7b-supertrend-entry-gates-local.mjs | tee /tmp/supertrend-check.log
+          node --check scripts/apply-phase7b-supertrend-entry-gates-v2-local.mjs
+          node scripts/apply-phase7b-supertrend-entry-gates-v2-local.mjs | tee /tmp/supertrend-check.log
+          grep -q 'PHASE7B_SUPERTREND_GATE_V2_RESULT=PASS' /tmp/supertrend-check.log
           grep -q 'PHASE7B_SUPERTREND_GATE_CHECK=PASS' /tmp/supertrend-check.log
           grep -q 'PHASE7B_SUPERTREND_GATE_ORIGINAL_MUTATION=False' /tmp/supertrend-check.log
           grep -q 'PHASE7B_SUPERTREND_GATE_REAL_ACCOUNT_ALLOWED=False' /tmp/supertrend-check.log
 
       - name: Apply Supertrend migration in CI checkout
         run: |
-          node scripts/apply-phase7b-supertrend-entry-gates-local.mjs --apply | tee /tmp/supertrend-apply.log
+          node scripts/apply-phase7b-supertrend-entry-gates-v2-local.mjs --apply | tee /tmp/supertrend-apply.log
+          grep -q 'PHASE7B_SUPERTREND_GATE_V2_RESULT=PASS' /tmp/supertrend-apply.log
           grep -q 'PHASE7B_SUPERTREND_GATE_APPLY=PASS' /tmp/supertrend-apply.log
           grep -q 'PHASE7B_SUPERTREND_GATE_DEMO_ONLY=True' /tmp/supertrend-apply.log
 
