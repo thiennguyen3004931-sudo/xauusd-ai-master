@@ -56,14 +56,14 @@ const plans = [
   patch(
     files.api,
     "API_DIAGNOSTICS_BUILD_CALL",
-    `    return buildEntryDiagnostics(bars);`,
-    `    return buildEntryDiagnostics(bars, brokerClockOffsetMs);`,
+    `    return buildEntryDiagnostics(m15Bars, m5Bars);`,
+    `    return buildEntryDiagnostics(m15Bars, m5Bars, brokerClockOffsetMs);`,
   ),
   patch(
     files.api,
     "API_BUILD_SIGNATURE",
-    `function buildEntryDiagnostics(bars: M15Bar[]): EntryDiagnostics {`,
-    `function buildEntryDiagnostics(bars: M15Bar[], brokerClockOffsetMs: number): EntryDiagnostics {`,
+    `function buildEntryDiagnostics(bars: M15Bar[], m5Bars: M15Bar[]): EntryDiagnostics {`,
+    `function buildEntryDiagnostics(bars: M15Bar[], m5Bars: M15Bar[], brokerClockOffsetMs: number): EntryDiagnostics {`,
   ),
   patch(
     files.api,
