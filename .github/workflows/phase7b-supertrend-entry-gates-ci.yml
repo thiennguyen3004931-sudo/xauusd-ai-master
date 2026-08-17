@@ -9,6 +9,7 @@ on:
       - "scripts/apply-phase7b-supertrend-entry-gates-v2-local.mjs"
       - "scripts/apply-phase7b-canonical-entry-v3-local.mjs"
       - "scripts/apply-phase7b-canonical-runner-v4-local.mjs"
+      - "scripts/apply-phase7b-canonical-runner-v4b-local.mjs"
       - ".github/workflows/phase7b-supertrend-entry-gates-ci.yml"
   pull_request:
     paths:
@@ -16,6 +17,7 @@ on:
       - "scripts/apply-phase7b-supertrend-entry-gates-v2-local.mjs"
       - "scripts/apply-phase7b-canonical-entry-v3-local.mjs"
       - "scripts/apply-phase7b-canonical-runner-v4-local.mjs"
+      - "scripts/apply-phase7b-canonical-runner-v4b-local.mjs"
       - ".github/workflows/phase7b-supertrend-entry-gates-ci.yml"
 
 jobs:
@@ -56,22 +58,24 @@ jobs:
           node scripts/apply-phase7b-pattern-ui-clock-local.mjs --apply
           grep -q 'inferBrokerClockOffset' apps/api/src/routes/phase7b-demo.route.ts
 
-      - name: Check canonical runner V4 without mutation
+      - name: Check canonical runner V4B without mutation
         run: |
-          node --check scripts/apply-phase7b-canonical-runner-v4-local.mjs
-          node scripts/apply-phase7b-canonical-runner-v4-local.mjs | tee /tmp/canonical-v4-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_CHECK=PASS' /tmp/canonical-v4-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_ORIGINAL_MUTATION=False' /tmp/canonical-v4-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_REAL_ACCOUNT_ALLOWED=False' /tmp/canonical-v4-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_RUNNER_SL=M15_CONFIRMED_STRUCTURE_TRAILING' /tmp/canonical-v4-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_RUNNER_EXIT=M15_CLOSE_BREAKS_MA50_AFTER_PLUS10_PARTIAL_ONLY' /tmp/canonical-v4-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_MA200=MACRO_CONTEXT_ONLY_NOT_ENTRY_OR_EXIT_GATE' /tmp/canonical-v4-check.log
+          node --check scripts/apply-phase7b-canonical-runner-v4b-local.mjs
+          node scripts/apply-phase7b-canonical-runner-v4b-local.mjs | tee /tmp/canonical-v4b-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4B_RESULT=PASS' /tmp/canonical-v4b-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_CHECK=PASS' /tmp/canonical-v4b-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_ORIGINAL_MUTATION=False' /tmp/canonical-v4b-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_REAL_ACCOUNT_ALLOWED=False' /tmp/canonical-v4b-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_RUNNER_SL=M15_CONFIRMED_STRUCTURE_TRAILING' /tmp/canonical-v4b-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_RUNNER_EXIT=M15_CLOSE_BREAKS_MA50_AFTER_PLUS10_PARTIAL_ONLY' /tmp/canonical-v4b-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_MA200=MACRO_CONTEXT_ONLY_NOT_ENTRY_OR_EXIT_GATE' /tmp/canonical-v4b-check.log
 
-      - name: Apply canonical runner V4 in CI checkout
+      - name: Apply canonical runner V4B in CI checkout
         run: |
-          node scripts/apply-phase7b-canonical-runner-v4-local.mjs --apply | tee /tmp/canonical-v4-apply.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_APPLY=PASS' /tmp/canonical-v4-apply.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_DEMO_ONLY=True' /tmp/canonical-v4-apply.log
+          node scripts/apply-phase7b-canonical-runner-v4b-local.mjs --apply | tee /tmp/canonical-v4b-apply.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4B_RESULT=PASS' /tmp/canonical-v4b-apply.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_APPLY=PASS' /tmp/canonical-v4b-apply.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_DEMO_ONLY=True' /tmp/canonical-v4b-apply.log
 
       - name: Build risk-engine dependency graph
         run: pnpm --filter @xauusd/risk-engine... build
@@ -113,10 +117,10 @@ jobs:
             }
             process.exit(1);
           }
-          fs.writeFileSync(".phase7b-canonical-runner-v4-ci.mjs", transformed.outputText, "utf8");
+          fs.writeFileSync(".phase7b-canonical-runner-v4b-ci.mjs", transformed.outputText, "utf8");
           NODE
-          node --check .phase7b-canonical-runner-v4-ci.mjs
-          rm -f .phase7b-canonical-runner-v4-ci.mjs
+          node --check .phase7b-canonical-runner-v4b-ci.mjs
+          rm -f .phase7b-canonical-runner-v4b-ci.mjs
 
       - name: Verify canonical entry and runner roles
         run: |
