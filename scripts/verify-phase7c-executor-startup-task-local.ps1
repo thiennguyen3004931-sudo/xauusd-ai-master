@@ -21,6 +21,12 @@ if (-not [bool]$config.armed) { throw "Executor task config reports armed=false.
 if ([string]$config.workDir -ne $WorkDir) { throw "Executor task config WorkDir mismatch: $($config.workDir)" }
 if (-not (Test-Path ([string]$config.envFile))) { throw "Executor task config EnvFile not found: $($config.envFile)" }
 if (-not (Test-Path ([string]$config.telegramEnvFile))) { throw "Executor task config TelegramEnvFile not found: $($config.telegramEnvFile)" }
+if ([string]::IsNullOrWhiteSpace([string]$config.nodePath) -or -not (Test-Path ([string]$config.nodePath) -PathType Leaf)) {
+  throw "Executor task config nodePath is missing/invalid: $($config.nodePath)"
+}
+if ([string]::IsNullOrWhiteSpace([string]$config.pnpmPath) -or -not (Test-Path ([string]$config.pnpmPath) -PathType Leaf)) {
+  throw "Executor task config pnpmPath is missing/invalid: $($config.pnpmPath)"
+}
 
 $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 $actions = @($task.Actions)
@@ -65,6 +71,8 @@ Write-Host "PHASE7C_EXECUTOR_STARTUP_VERIFY_TRIGGER=AT_STARTUP"
 Write-Host "PHASE7C_EXECUTOR_STARTUP_VERIFY_LOGON_TRIGGER=False"
 Write-Host "PHASE7C_EXECUTOR_STARTUP_VERIFY_PRINCIPAL=$principal"
 Write-Host "PHASE7C_EXECUTOR_STARTUP_VERIFY_LOGON_TYPE=$($task.Principal.LogonType)"
+Write-Host "PHASE7C_EXECUTOR_STARTUP_VERIFY_NODE_PATH=$([string]$config.nodePath)"
+Write-Host "PHASE7C_EXECUTOR_STARTUP_VERIFY_PNPM_PATH=$([string]$config.pnpmPath)"
 Write-Host "PHASE7C_EXECUTOR_STARTUP_VERIFY_EXECUTION_TIME_LIMIT=UNLIMITED"
 Write-Host "PHASE7C_EXECUTOR_STARTUP_VERIFY_SECRETS_IN_ARGUMENTS=False"
 Write-Host "PHASE7C_EXECUTOR_STARTUP_VERIFY_CONFIG_DEMO_ONLY=$([bool]$config.demoOnly)"
