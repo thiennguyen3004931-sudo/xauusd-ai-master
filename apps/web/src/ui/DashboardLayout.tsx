@@ -79,7 +79,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
           <Typography variant="caption" fontWeight={900}>CHỈ TÀI KHOẢN DEMO</Typography>
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, lineHeight: 1.5 }}>
-          Tài khoản thật luôn bị khóa. Rule hiện hành: 2 mô hình nến + Supertrend M15 + M5 fresh flip; FVG chỉ là bối cảnh.
+          Tài khoản thật luôn bị khóa. Entry: 3 mô hình nến + Supertrend M15 10/3 + Supertrend M5 10/3 + SL cấu trúc. MA20/50 chỉ tăng độ tin cậy. Sau +10 chốt 1/3, runner dời SL theo cấu trúc M15 và chỉ chốt khi M15 đóng phá MA50 ngược hướng. MA200 chỉ xác nhận bối cảnh khung lớn.
         </Typography>
       </Box>
     </Box>
@@ -94,7 +94,7 @@ export function DashboardLayout() {
   let headerSubtitle = "XAUUSD · MT5 DEMO · tín hiệu / vị thế / quản lý lệnh";
   if (location.pathname.startsWith("/phase7b-pattern-check")) {
     headerTitle = "Điều kiện vào lệnh";
-    headerSubtitle = "Mô hình nến → Supertrend M15 → M5 fresh flip · FVG chỉ là bối cảnh";
+    headerSubtitle = "3 mô hình nến → Supertrend M15 10/3 → Supertrend M5 10/3 → SL cấu trúc · MA20/50 = độ tin cậy · runner: cấu trúc M15 + MA50 · MA200 = khung lớn";
   } else if (location.pathname.startsWith("/phase7b-ops")) {
     headerTitle = "Điều khiển Bot & Telegram";
     headerSubtitle = "Bật / dừng Bot DEMO · bật / tắt / kiểm tra thông báo Telegram";

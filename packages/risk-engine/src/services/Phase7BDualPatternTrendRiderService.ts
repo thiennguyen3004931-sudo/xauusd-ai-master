@@ -1,6 +1,6 @@
 import type { Phase7Bar, Phase7RunRequest, Phase7Side } from "../models";
 
-export type Phase7BPattern = "ENGULFING" | "TWO_CANDLE_BODY_DOMINANCE";
+export type Phase7BPattern = "ENGULFING" | "TWO_CANDLE_BODY_DOMINANCE" | "THREE_CANDLE_BODY_DOMINANCE";
 export type Phase7BExitReason =
   | "ENTRY_NOT_FILLED"
   | "STOP"
@@ -59,6 +59,7 @@ export interface Phase7BMetrics {
   m15Bars: number;
   engulfingTriggers: number;
   twoCandleTriggers: number;
+  threeCandleTriggers: number;
   trendAligned: number;
   fvgConfirmed: number;
   signals: number;
@@ -111,6 +112,7 @@ export class Phase7BDualPatternTrendRiderService {
 
     let engulfingTriggers = 0;
     let twoCandleTriggers = 0;
+    let threeCandleTriggers = 0;
     let trendAligned = 0;
     let fvgConfirmed = 0;
     const signals: Phase7BSignal[] = [];
@@ -119,7 +121,8 @@ export class Phase7BDualPatternTrendRiderService {
       const trigger = detectPattern(m15, index);
       if (!trigger) continue;
       if (trigger.pattern === "ENGULFING") engulfingTriggers += 1;
-      else twoCandleTriggers += 1;
+      else if (trigger.pattern === "TWO_CANDLE_BODY_DOMINANCE") twoCandleTriggers += 1;
+      else threeCandleTriggers += 1;
 
       const closes = m15.slice(0, index + 1).map((bar) => bar.close);
       const ma20 = sma(closes, 20);
@@ -172,6 +175,7 @@ export class Phase7BDualPatternTrendRiderService {
         m15.length,
         engulfingTriggers,
         twoCandleTriggers,
+        threeCandleTriggers,
         trendAligned,
         fvgConfirmed,
         signals,
@@ -188,10 +192,12 @@ export class Phase7BDualPatternTrendRiderService {
     const sell = summarize(result.trades.filter((trade) => trade.side === "SELL"));
     const engulf = summarize(result.trades.filter((trade) => trade.pattern === "ENGULFING"));
     const two = summarize(result.trades.filter((trade) => trade.pattern === "TWO_CANDLE_BODY_DOMINANCE"));
+    const three = summarize(result.trades.filter((trade) => trade.pattern === "THREE_CANDLE_BODY_DOMINANCE"));
     return [
-      "PHASE7B_STRATEGY=M15_DUAL_PATTERN_MA_FVG_STRUCTURE_RIDER",
-      "PHASE7B_TRIGGER=ENGULFING_OR_TWO_SAME_COLOR_BODY_DOMINANCE",
+      "PHASE7B_STRATEGY=M15_TRIPLE_PATTERN_MA_FVG_STRUCTURE_RIDER",
+      "PHASE7B_TRIGGER=ENGULFING_OR_TWO_OR_THREE_SAME_COLOR_BODY_DOMINANCE",
       "PHASE7B_TWO_CANDLE_RULE=FIRST_SAME_COLOR_BODY_LT_PREVIOUS_OPPOSITE_BODY_AND_SUM_TWO_GT_PREVIOUS_OPPOSITE_BODY",
+      "PHASE7B_THREE_CANDLE_RULE=A_OPPOSITE_BCD_SAME_COLOR_AND_BODY_B_PLUS_C_PLUS_D_GT_BODY_A",
       "PHASE7B_MA_TREND=MANDATORY",
       "PHASE7B_FVG=MANDATORY_SAME_DIRECTION",
       "PHASE7B_INITIAL_SL=PRICE_DISTANCE_CLAMPED_6_TO_10",
@@ -204,6 +210,7 @@ export class Phase7BDualPatternTrendRiderService {
       `PHASE7B_M15_BARS=${m.m15Bars}`,
       `PHASE7B_ENGULFING_TRIGGERS=${m.engulfingTriggers}`,
       `PHASE7B_TWO_CANDLE_TRIGGERS=${m.twoCandleTriggers}`,
+      `PHASE7B_THREE_CANDLE_TRIGGERS=${m.threeCandleTriggers}`,
       `PHASE7B_TREND_ALIGNED=${m.trendAligned}`,
       `PHASE7B_FVG_CONFIRMED=${m.fvgConfirmed}`,
       `PHASE7B_SIGNALS=${m.signals}`,
@@ -225,6 +232,7 @@ export class Phase7BDualPatternTrendRiderService {
       `PHASE7B_SELL=FILLED=${sell.filled}|WR=${sell.winRatePercent}|NET=${sell.netPnl}|PF=${sell.profitFactor ?? "INF"}|EXP=${sell.expectancy}|AVG_R=${sell.averageR}`,
       `PHASE7B_PATTERN_ENGULFING=FILLED=${engulf.filled}|WR=${engulf.winRatePercent}|NET=${engulf.netPnl}|PF=${engulf.profitFactor ?? "INF"}|EXP=${engulf.expectancy}|AVG_R=${engulf.averageR}`,
       `PHASE7B_PATTERN_TWO_CANDLE=FILLED=${two.filled}|WR=${two.winRatePercent}|NET=${two.netPnl}|PF=${two.profitFactor ?? "INF"}|EXP=${two.expectancy}|AVG_R=${two.averageR}`,
+      `PHASE7B_PATTERN_THREE_CANDLE=FILLED=${three.filled}|WR=${three.winRatePercent}|NET=${three.netPnl}|PF=${three.profitFactor ?? "INF"}|EXP=${three.expectancy}|AVG_R=${three.averageR}`,
       "PHASE7B_NO_LOOKAHEAD_ENTRY=PASS",
       "PHASE7B_REVERSAL_EXIT_AFTER_PLUS10_ONLY=PASS",
       "PHASE7B_RESEARCH_ONLY=PASS",
@@ -466,6 +474,41 @@ function detectPattern(
       patternExtreme: Math.max(priorOpposite.high, first.high, second.high),
     };
   }
+
+  if (index < 3) return null;
+  const anchor = bars[index - 3]!;
+  const b = bars[index - 2]!;
+  const c = bars[index - 1]!;
+  const d = current;
+  const anchorBody = bodySize(anchor);
+  const threeBodyTotal = bodySize(b) + bodySize(c) + bodySize(d);
+
+  if (
+    isBearish(anchor) &&
+    isBullish(b) &&
+    isBullish(c) &&
+    isBullish(d) &&
+    threeBodyTotal > anchorBody
+  ) {
+    return {
+      side: "BUY",
+      pattern: "THREE_CANDLE_BODY_DOMINANCE",
+      patternExtreme: Math.min(anchor.low, b.low, c.low, d.low),
+    };
+  }
+  if (
+    isBullish(anchor) &&
+    isBearish(b) &&
+    isBearish(c) &&
+    isBearish(d) &&
+    threeBodyTotal > anchorBody
+  ) {
+    return {
+      side: "SELL",
+      pattern: "THREE_CANDLE_BODY_DOMINANCE",
+      patternExtreme: Math.max(anchor.high, b.high, c.high, d.high),
+    };
+  }
   return null;
 }
 
@@ -628,6 +671,7 @@ function buildMetrics(
   m15Bars: number,
   engulfingTriggers: number,
   twoCandleTriggers: number,
+  threeCandleTriggers: number,
   trendAligned: number,
   fvgConfirmed: number,
   signals: readonly Phase7BSignal[],
@@ -650,6 +694,7 @@ function buildMetrics(
     m15Bars,
     engulfingTriggers,
     twoCandleTriggers,
+    threeCandleTriggers,
     trendAligned,
     fvgConfirmed,
     signals: signals.length,

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { type Phase7Bar, type Phase7BSignal } from "@xauusd/risk-engine";
+import { phase7BSupertrend, type Phase7Bar, type Phase7BSignal } from "@xauusd/risk-engine";
 
 type Health = {
   status: "ok" | "degraded";
@@ -132,12 +132,18 @@ const statePath = path.join(workDir, "phase7b-demo-state.json");
 const journalPath = path.join(workDir, "phase7b-demo-events.jsonl");
 let state = loadState(statePath);
 
-console.log("PHASE7B_DEMO_STRATEGY=M15_DUAL_PATTERN_MA_STRUCTURE_RIDER_FVG_CONFIRMATION");
+console.log("PHASE7B_DEMO_STRATEGY=M15_TRIPLE_PATTERN_SUPERTREND_STRUCTURE_RIDER_MA_CONFIDENCE_FVG_CONTEXT");
 console.log(`PHASE7B_DEMO_SYMBOL=${symbol}`);
 console.log(`PHASE7B_DEMO_FIXED_VOLUME=${fixedVolume}`);
 console.log(`PHASE7B_DEMO_INTERVAL_SECONDS=${intervalSeconds}`);
 console.log(`PHASE7B_DEMO_ARMED=${armed ? "YES" : "NO"}`);
-console.log("PHASE7B_DEMO_ENTRY_GATE=PATTERN_PLUS_MA_ONLY");
+console.log("PHASE7B_DEMO_ENTRY_GATE=PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE");
+console.log("PHASE7B_DEMO_SUPERTREND=M15_10_3_AND_M5_10_3_MANDATORY");
+console.log("PHASE7B_DEMO_MA20_MA50=CONFIDENCE_ONLY_NOT_ENTRY_GATE");
+console.log("PHASE7B_DEMO_MA50=RUNNER_HOLD_EXIT_AFTER_PLUS10_PARTIAL_ONLY");
+console.log("PHASE7B_DEMO_RUNNER_SL=M15_CONFIRMED_STRUCTURE_TRAILING");
+console.log("PHASE7B_DEMO_MA200=MACRO_CONTEXT_ONLY_NOT_ENTRY_OR_EXIT_GATE");
+console.log("PHASE7B_DEMO_M5_FLIP_AGE=REFERENCE_ONLY_NOT_ENTRY_GATE");
 console.log(`PHASE7B_DEMO_ENGULF_BODY_TOLERANCE_PRICE=${ENGULF_BODY_TOLERANCE_PRICE}`);
 console.log("PHASE7B_DEMO_FVG_ENTRY_GATE=OFF");
 console.log("PHASE7B_DEMO_FVG_ROLE=HOLD_CONFIRMATION_PLUS_ADDON_SHADOW");
@@ -206,11 +212,12 @@ async function preflight(): Promise<void> {
 }
 
 async function previewLatestSignal(): Promise<void> {
-  const [m15, spec] = await Promise.all([
+  const [m15, m5, spec] = await Promise.all([
     get<Phase7Bar[]>(`/v1/candles/${encodeURIComponent(symbol)}?timeframe=M15&count=320`),
+    get<Phase7Bar[]>(`/v1/candles/${encodeURIComponent(symbol)}?timeframe=M5&count=420`),
     get<SymbolSpec>(`/v1/symbols/${encodeURIComponent(symbol)}/spec`),
   ]);
-  const signal = latestSignal(m15, spec);
+  const signal = latestSignal(m15, m5, spec);
   const latest = m15.at(-1);
   console.log(`PHASE7B_DEMO_LATEST_M15_CLOSE=${latest?.closeTime ?? "NONE"}`);
   if (!signal || !latest || signal.signalTimestamp !== latest.closeTime) {
@@ -242,8 +249,9 @@ async function cycle(): Promise<void> {
     return;
   }
 
-  const [m15, spec, positions, quote] = await Promise.all([
+  const [m15, m5, spec, positions, quote] = await Promise.all([
     get<Phase7Bar[]>(`/v1/candles/${encodeURIComponent(symbol)}?timeframe=M15&count=320`),
+    get<Phase7Bar[]>(`/v1/candles/${encodeURIComponent(symbol)}?timeframe=M5&count=420`),
     get<SymbolSpec>(`/v1/symbols/${encodeURIComponent(symbol)}/spec`),
     get<Position[]>(`/v1/positions?symbol=${encodeURIComponent(symbol)}`),
     get<Quote>(`/v1/quotes/${encodeURIComponent(symbol)}`),
@@ -292,18 +300,23 @@ async function cycle(): Promise<void> {
   state.lastEvaluatedM15Close = latest.closeTime;
   saveState();
 
-  const signal = latestSignal(m15, spec);
+  const signal = latestSignal(m15, m5, spec);
   if (!signal || signal.signalTimestamp !== latest.closeTime) {
     journal("M15_NO_ENTRY_SIGNAL", {
       closeTime: latest.closeTime,
       close: latest.close,
-      entryRule: "PATTERN_PLUS_MA",
+      entryRule: "PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE",
+      supertrend: "M15_10_3_AND_M5_10_3",
       engulfBodyTolerancePrice: ENGULF_BODY_TOLERANCE_PRICE,
     });
     return;
   }
 
-  const now = Date.now();
+  const now = Number(quote.timestamp);
+  if (!Number.isFinite(now)) {
+    journal("QUOTE_TIMESTAMP_INVALID", { quoteTimestamp: quote.timestamp });
+    return;
+  }
   if (now > signal.signalTimestamp + 15 * 60_000) {
     journal("SIGNAL_EXPIRED", { id: signal.id, signalTimestamp: signal.signalTimestamp, now });
     return;
@@ -331,7 +344,8 @@ async function cycle(): Promise<void> {
     stopDistance: signal.stopDistance,
     stopLoss,
     volume: fixedVolume,
-    entryRule: "PATTERN_PLUS_MA",
+    entryRule: "PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE",
+    supertrend: "M15_10_3_AND_M5_10_3",
     engulfBodyTolerancePrice: ENGULF_BODY_TOLERANCE_PRICE,
     fvgConfirmedAtEntry,
     fvgRequiredForEntry: false,
@@ -398,7 +412,7 @@ async function cycle(): Promise<void> {
   });
 }
 
-function latestSignal(m15: Phase7Bar[], spec: SymbolSpec): Phase7BSignal | null {
+function latestSignal(m15: Phase7Bar[], m5: Phase7Bar[], spec: SymbolSpec): Phase7BSignal | null {
   const index = m15.length - 1;
   if (index < 200) return null;
   const current = m15[index]!;
@@ -409,7 +423,15 @@ function latestSignal(m15: Phase7Bar[], spec: SymbolSpec): Phase7BSignal | null 
   const ma20 = smaPeriod(closes, 20);
   const ma50 = smaPeriod(closes, 50);
   const ma200 = smaPeriod(closes, 200);
-  if (!trendMatches(trigger.side, current.close, ma20, ma50, ma200)) return null;
+  const m15Supertrend = phase7BSupertrend(m15.slice(0, index + 1), 10, 3);
+  const m15Direction = m15Supertrend.direction[index] ?? null;
+  let m5SignalIndex = m5.length - 1;
+  while (m5SignalIndex >= 0 && m5[m5SignalIndex]!.closeTime > current.closeTime) m5SignalIndex -= 1;
+  if (m5SignalIndex < 9) return null;
+  const m5AtSignal = m5.slice(0, m5SignalIndex + 1);
+  const m5Supertrend = phase7BSupertrend(m5AtSignal, 10, 3);
+  const m5Direction = m5Supertrend.direction[m5SignalIndex] ?? null;
+  if (m15Direction !== trigger.side || m5Direction !== trigger.side) return null;
 
   const entry = current.close;
   const structuralStopDistance = trigger.side === "BUY"
@@ -499,6 +521,41 @@ function detectEntryPattern(
       patternExtreme: Math.max(priorOpposite.high, first.high, current.high),
     };
   }
+
+  if (index < 3) return null;
+  const anchor = bars[index - 3]!;
+  const b = bars[index - 2]!;
+  const c = bars[index - 1]!;
+  const d = current;
+  const anchorBody = bodySize(anchor);
+  const threeBodyTotal = bodySize(b) + bodySize(c) + bodySize(d);
+
+  if (
+    isBearish(anchor) &&
+    isBullish(b) &&
+    isBullish(c) &&
+    isBullish(d) &&
+    threeBodyTotal > anchorBody
+  ) {
+    return {
+      side: "BUY",
+      pattern: "THREE_CANDLE_BODY_DOMINANCE",
+      patternExtreme: Math.min(anchor.low, b.low, c.low, d.low),
+    };
+  }
+  if (
+    isBullish(anchor) &&
+    isBearish(b) &&
+    isBearish(c) &&
+    isBearish(d) &&
+    threeBodyTotal > anchorBody
+  ) {
+    return {
+      side: "SELL",
+      pattern: "THREE_CANDLE_BODY_DOMINANCE",
+      patternExtreme: Math.max(anchor.high, b.high, c.high, d.high),
+    };
+  }
   return null;
 }
 
@@ -538,7 +595,7 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
       });
       if (response.success) {
         managed.partialApplied = true;
-        managed.partialActivatedAt = Date.now();
+        managed.partialActivatedAt = Number(quote.timestamp);
         managed.expectedRemainingVolume = normalizeVolume(position.volume - closeVolume, spec.volumeStep);
         saveState();
         journal("PLUS10_PARTIAL_ONE_THIRD", {
@@ -604,10 +661,11 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
     const ma20 = smaPeriod(closes, 20);
     const ma50 = smaPeriod(closes, 50);
     const ma200 = smaPeriod(closes, 200);
-    const trendStillAligned = trendMatches(managed.side, latest.close, ma20, ma50, ma200);
+    const ma50TrendIntact = managed.side === "BUY" ? latest.close >= ma50 : latest.close <= ma50;
+    const ma200MacroAligned = managed.side === "BUY" ? latest.close >= ma200 : latest.close <= ma200;
     const sameDirectionFvg = hasRelevantFvg(m15, m15.length - 1, managed.side, 12);
 
-    if (sameDirectionFvg && trendStillAligned) {
+    if (sameDirectionFvg && ma50TrendIntact) {
       journal("FVG_HOLD_CONFIRMED", {
         ticket: managed.ticket,
         side: managed.side,
@@ -616,6 +674,8 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
         ma20: roundValue(ma20, 5),
         ma50: roundValue(ma50, 5),
         ma200: roundValue(ma200, 5),
+        ma50TrendIntact,
+        ma200MacroAligned,
       });
 
       if (favorable > 0) {
@@ -627,16 +687,16 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
           referenceVolume: fixedVolume,
           shadowOnly: true,
           orderSent: false,
-          reason: "SAME_DIRECTION_FVG_PLUS_MA_WHILE_POSITION_WINNING",
+          reason: "SAME_DIRECTION_FVG_PLUS_MA50_TREND_WHILE_POSITION_WINNING",
         });
       }
     }
 
     managed.lastTrendM15CloseChecked = latest.closeTime;
     saveState();
-    const trendBroken = managed.side === "BUY" ? latest.close < ma20 : latest.close > ma20;
-    if (trendBroken) {
-      await closeAll(position, "TREND_MA20", latest.closeTime);
+    const runnerTrendBroken = managed.partialApplied && !ma50TrendIntact;
+    if (runnerTrendBroken) {
+      await closeAll(position, "RUNNER_TREND_MA50", latest.closeTime);
     }
   }
 }

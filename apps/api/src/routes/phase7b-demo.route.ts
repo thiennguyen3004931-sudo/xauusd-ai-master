@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Router, type Request, type Response } from "express";
+import { phase7BSupertrend, type Phase7Bar } from "@xauusd/risk-engine";
 import { getMt5Telemetry } from "../services/mt5.service";
 
 type ManagedState = {
@@ -42,7 +43,7 @@ type DemoEvent = Record<string, unknown> & {
 };
 
 type Phase7BSide = "BUY" | "SELL";
-type Phase7BPattern = "ENGULFING" | "TWO_CANDLE_BODY_DOMINANCE";
+type Phase7BPattern = "ENGULFING" | "TWO_CANDLE_BODY_DOMINANCE" | "THREE_CANDLE_BODY_DOMINANCE";
 
 type M15Bar = {
   openTime?: number;
@@ -76,6 +77,16 @@ type EntryDiagnostics = {
     buyAligned: boolean;
     sellAligned: boolean;
     matchedPatternSide: boolean;
+    m15Supertrend: Phase7BSide | null;
+    m5Supertrend: Phase7BSide | null;
+    m5FlipAgeBars: number | null;
+    m15SupertrendLine: number | null;
+    m5SupertrendLine: number | null;
+    m15TrendlineDistance: number | null;
+    m5TrendlineDistance: number | null;
+    m15TrendlineReaction: boolean;
+    m5TrendlineReaction: boolean;
+    confidenceLevel: "CHƯA_ĐÁNH_GIÁ" | "TIÊU_CHUẨN" | "CAO" | "RẤT_CAO";
   };
   fvg: {
     buyConfirmed: boolean;
@@ -86,7 +97,7 @@ type EntryDiagnostics = {
   entry: {
     eligible: boolean;
     side: Phase7BSide | null;
-    rule: "PATTERN_PLUS_MA";
+    rule: "PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE";
     referenceEntry: number;
     structuralStopDistance: number | null;
     stopDistance: number | null;
@@ -95,6 +106,25 @@ type EntryDiagnostics = {
 };
 
 const ENGULF_BODY_TOLERANCE_PRICE = 0.1;
+const BROKER_CLOCK_HOUR_MS = 60 * 60_000;
+const BROKER_CLOCK_MAX_OFFSET_MS = 14 * BROKER_CLOCK_HOUR_MS;
+const BROKER_CLOCK_RESIDUAL_TOLERANCE_MS = 5 * 60_000;
+
+function inferBrokerClockOffset(brokerTimestamp: unknown, systemTimestamp: unknown): number | null {
+  const broker = Number(brokerTimestamp);
+  const system = Number(systemTimestamp);
+  if (!Number.isFinite(broker) || !Number.isFinite(system) || broker <= 0 || system <= 0) return null;
+  const rawOffset = broker - system;
+  const roundedOffset = Math.round(rawOffset / BROKER_CLOCK_HOUR_MS) * BROKER_CLOCK_HOUR_MS;
+  if (Math.abs(roundedOffset) > BROKER_CLOCK_MAX_OFFSET_MS) return null;
+  if (Math.abs(rawOffset - roundedOffset) > BROKER_CLOCK_RESIDUAL_TOLERANCE_MS) return null;
+  return roundedOffset;
+}
+
+function normalizeBrokerTimestamp(timestamp: number, brokerClockOffsetMs: number): number {
+  return timestamp - brokerClockOffsetMs;
+}
+
 const router = Router();
 
 router.get("/", async (_req: Request, res: Response) => {
@@ -144,7 +174,14 @@ router.get("/", async (_req: Request, res: Response) => {
     let entryDiagnosticsError: string | null = null;
     if (telemetry.reachable && telemetry.health?.accountMode === "demo") {
       try {
-        entryDiagnostics = await getEntryDiagnostics();
+        const brokerClockOffsetMs = inferBrokerClockOffset(
+          telemetry.quote?.timestamp,
+          telemetry.health?.timestamp ?? telemetry.checkedAt,
+        );
+        if (brokerClockOffsetMs === null) {
+          throw new Error("Broker clock offset is not a plausible whole-hour offset.");
+        }
+        entryDiagnostics = await getEntryDiagnostics(brokerClockOffsetMs);
       } catch (error) {
         entryDiagnosticsError = error instanceof Error ? error.message : "M15 entry diagnostics unavailable.";
       }
@@ -164,10 +201,10 @@ router.get("/", async (_req: Request, res: Response) => {
         heartbeatLimitMs,
       },
       strategy: {
-        name: "M15_DUAL_PATTERN_MA_STRUCTURE_RIDER_FVG_CONFIRMATION",
-        trigger: "ENGULFING_OR_TWO_SAME_COLOR_BODY_DOMINANCE",
+        name: "M15_TRIPLE_PATTERN_MA_STRUCTURE_RIDER_FVG_CONFIRMATION",
+        trigger: "ENGULFING_OR_TWO_OR_THREE_SAME_COLOR_BODY_DOMINANCE",
         engulfBodyTolerancePrice: ENGULF_BODY_TOLERANCE_PRICE,
-        trend: "MA20_MA50_MA200_MANDATORY",
+        trend: "SUPERTREND_M15_10_3_AND_M5_10_3_MANDATORY",
         fvg: "OPTIONAL_AT_ENTRY_HOLD_CONFIRMATION_ADDON_SHADOW",
         initialStop: "PRICE_DISTANCE_6_TO_10",
         plus6: "SL_TO_ENTRY",
@@ -202,7 +239,7 @@ router.get("/", async (_req: Request, res: Response) => {
   }
 });
 
-async function getEntryDiagnostics(): Promise<EntryDiagnostics> {
+async function getEntryDiagnostics(brokerClockOffsetMs: number): Promise<EntryDiagnostics> {
   const baseUrl = process.env.MT5_BRIDGE_BASE_URL?.trim().replace(/\/$/, "") ?? "";
   const apiKey = process.env.MT5_BRIDGE_API_KEY?.trim() ?? "";
   if (!baseUrl || !apiKey) throw new Error("Bridge read-only credentials are unavailable to the Phase 7B API.");
@@ -210,20 +247,28 @@ async function getEntryDiagnostics(): Promise<EntryDiagnostics> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3_000);
   try {
-    const response = await fetch(`${baseUrl}/v1/candles/XAUUSD?timeframe=M15&count=320`, {
-      headers: { "x-mt5-api-key": apiKey },
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    if (!response.ok) throw new Error(`Bridge M15 request failed ${response.status}: ${text}`);
-    const bars = JSON.parse(text) as M15Bar[];
-    return buildEntryDiagnostics(bars);
+    const [m15Response, m5Response] = await Promise.all([
+      fetch(`${baseUrl}/v1/candles/XAUUSD?timeframe=M15&count=320`, {
+        headers: { "x-mt5-api-key": apiKey },
+        signal: controller.signal,
+      }),
+      fetch(`${baseUrl}/v1/candles/XAUUSD?timeframe=M5&count=420`, {
+        headers: { "x-mt5-api-key": apiKey },
+        signal: controller.signal,
+      }),
+    ]);
+    const [m15Text, m5Text] = await Promise.all([m15Response.text(), m5Response.text()]);
+    if (!m15Response.ok) throw new Error(`Bridge M15 request failed ${m15Response.status}: ${m15Text}`);
+    if (!m5Response.ok) throw new Error(`Bridge M5 request failed ${m5Response.status}: ${m5Text}`);
+    const m15Bars = JSON.parse(m15Text) as M15Bar[];
+    const m5Bars = JSON.parse(m5Text) as M15Bar[];
+    return buildEntryDiagnostics(m15Bars, m5Bars, brokerClockOffsetMs);
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function buildEntryDiagnostics(bars: M15Bar[]): EntryDiagnostics {
+function buildEntryDiagnostics(bars: M15Bar[], m5Bars: M15Bar[], brokerClockOffsetMs: number): EntryDiagnostics {
   const index = bars.length - 1;
   if (index < 200) throw new Error(`Need at least 201 closed M15 bars, received ${bars.length}.`);
   const current = bars[index]!;
@@ -235,36 +280,73 @@ function buildEntryDiagnostics(bars: M15Bar[]): EntryDiagnostics {
   const ma20 = smaPeriod(closes, 20);
   const ma50 = smaPeriod(closes, 50);
   const ma200 = smaPeriod(closes, 200);
-  const buyAligned = ma20 > ma50 && ma50 > ma200 && current.close > ma20;
-  const sellAligned = ma20 < ma50 && ma50 < ma200 && current.close < ma20;
+  const buyAligned = ma20 > ma50 && current.close > ma20;
+  const sellAligned = ma20 < ma50 && current.close < ma20;
   const pattern = detectEntryPattern(bars, index);
   const matchedPatternSide = pattern?.side === "BUY" ? buyAligned : pattern?.side === "SELL" ? sellAligned : false;
   const buyFvg = hasRelevantFvg(bars, index, "BUY", 12);
   const sellFvg = hasRelevantFvg(bars, index, "SELL", 12);
   const sameDirectionConfirmed = pattern?.side === "BUY" ? buyFvg : pattern?.side === "SELL" ? sellFvg : false;
 
+  const m15SupertrendResult = phase7BSupertrend(bars as Phase7Bar[], 10, 3);
+  const m15Supertrend = m15SupertrendResult.direction[index] ?? null;
+  const m15SupertrendLine = m15SupertrendResult.line[index] ?? null;
+  let m5SignalIndex = m5Bars.length - 1;
+  while (m5SignalIndex >= 0 && m5Bars[m5SignalIndex]!.closeTime > current.closeTime) m5SignalIndex -= 1;
+  const m5AtSignal = m5SignalIndex >= 0 ? m5Bars.slice(0, m5SignalIndex + 1) : [];
+  const m5SupertrendResult = m5AtSignal.length >= 10
+    ? phase7BSupertrend(m5AtSignal as Phase7Bar[], 10, 3)
+    : { direction: [] as Array<Phase7BSide | null>, line: [] as Array<number | null> };
+  const m5Supertrend = m5SignalIndex >= 0 ? m5SupertrendResult.direction[m5SignalIndex] ?? null : null;
+  const m5SupertrendLine = m5SignalIndex >= 0 ? m5SupertrendResult.line[m5SignalIndex] ?? null : null;
+  const m5SignalBar = m5SignalIndex >= 0 ? m5Bars[m5SignalIndex]! : null;
+  const supertrendAligned = Boolean(pattern && m15Supertrend === pattern.side && m5Supertrend === pattern.side);
+  const m15TrendlineDistance = m15SupertrendLine === null ? null : Math.abs(current.close - m15SupertrendLine);
+  const m5TrendlineDistance = m5SignalBar === null || m5SupertrendLine === null
+    ? null
+    : Math.abs(m5SignalBar.close - m5SupertrendLine);
+  const m15TrendlineReaction = m15SupertrendLine !== null
+    && current.low <= m15SupertrendLine + 1e-9
+    && current.high >= m15SupertrendLine - 1e-9;
+  const m5TrendlineReaction = m5SignalBar !== null
+    && m5SupertrendLine !== null
+    && m5SignalBar.low <= m5SupertrendLine + 1e-9
+    && m5SignalBar.high >= m5SupertrendLine - 1e-9;
+  const m5FlipAgeBars = m5SignalIndex >= 0 && m5Supertrend !== null
+    ? directionAgeBars(m5SupertrendResult.direction, m5SignalIndex, m5Supertrend)
+    : null;
+  const confidenceLevel: EntryDiagnostics["trend"]["confidenceLevel"] = supertrendAligned
+    ? matchedPatternSide && (m15TrendlineReaction || m5TrendlineReaction)
+      ? "RẤT_CAO"
+      : matchedPatternSide || m15TrendlineReaction || m5TrendlineReaction
+        ? "CAO"
+        : "TIÊU_CHUẨN"
+    : "CHƯA_ĐÁNH_GIÁ";
+
   const structuralStopDistance = pattern
     ? pattern.side === "BUY" ? current.close - pattern.extreme : pattern.extreme - current.close
     : null;
   const validStructure = structuralStopDistance !== null && structuralStopDistance > 0;
-  const eligible = Boolean(pattern && matchedPatternSide && validStructure);
+  const eligible = Boolean(pattern && supertrendAligned && validStructure);
   const stopDistance = validStructure && structuralStopDistance !== null ? clamp(structuralStopDistance, 6, 10) : null;
 
-  let reason = `Chưa có Engulfing (cho phép sai số thân tối đa ${ENGULF_BODY_TOLERANCE_PRICE.toFixed(2)} giá) hoặc Two-candle hợp lệ: thân nến đầu tiên phải nhỏ hơn thân nến ngược màu trước đó, và tổng hai thân cùng màu phải lớn hơn thân nến trước.`;
-  if (pattern && !matchedPatternSide) {
-    reason = `${pattern.side} pattern đã xuất hiện nhưng MA20/50/200 chưa đồng thuận cùng hướng.`;
-  } else if (pattern && matchedPatternSide && !validStructure) {
-    reason = "Pattern + MA đạt nhưng cấu trúc không tạo được khoảng SL hợp lệ.";
+  let reason = `Chưa có một trong 3 mô hình: Engulfing (sai số thân tối đa ${ENGULF_BODY_TOLERANCE_PRICE.toFixed(2)} giá), Two-candle hợp lệ, hoặc Three-candle A-B-C-D với B+C+D cùng màu và tổng thân B+C+D > thân A.`;
+  if (pattern && !supertrendAligned) {
+    reason = `${pattern.side} pattern đã xuất hiện nhưng Supertrend M15/M5 10/3 chưa cùng hướng (M15=${m15Supertrend ?? "—"}, M5=${m5Supertrend ?? "—"}).`;
+  } else if (pattern && supertrendAligned && !validStructure) {
+    reason = "Pattern + Supertrend M15/M5 đạt nhưng cấu trúc không tạo được khoảng SL hợp lệ.";
   } else if (eligible) {
     reason = sameDirectionConfirmed
-      ? `${pattern!.side} đủ Pattern + MA; FVG cùng hướng cũng xác nhận.`
-      : `${pattern!.side} đủ Pattern + MA; FVG chưa xác nhận nhưng không chặn entry.`;
+      ? `${pattern!.side} đủ Pattern + Supertrend M15/M5 + SL cấu trúc; MA20/50 cùng hướng chỉ tăng độ tin cậy; FVG cùng hướng cũng xác nhận.`
+      : `${pattern!.side} đủ Pattern + Supertrend M15/M5 + SL cấu trúc; MA20/50 chỉ là độ tin cậy và FVG không chặn entry.`;
   }
+
+  const normalizedCloseTime = normalizeBrokerTimestamp(current.closeTime, brokerClockOffsetMs);
 
   return {
     source: "READ_ONLY_BRIDGE_M15",
-    closeTime: current.closeTime,
-    nextCloseTime: current.closeTime + 15 * 60_000,
+    closeTime: normalizedCloseTime,
+    nextCloseTime: normalizedCloseTime + 15 * 60_000,
     bar: {
       open: round(current.open, 5),
       high: round(current.high, 5),
@@ -284,6 +366,16 @@ function buildEntryDiagnostics(bars: M15Bar[]): EntryDiagnostics {
       buyAligned,
       sellAligned,
       matchedPatternSide,
+      m15Supertrend,
+      m5Supertrend,
+      m5FlipAgeBars,
+      m15SupertrendLine: m15SupertrendLine === null ? null : round(m15SupertrendLine, 5),
+      m5SupertrendLine: m5SupertrendLine === null ? null : round(m5SupertrendLine, 5),
+      m15TrendlineDistance: m15TrendlineDistance === null ? null : round(m15TrendlineDistance, 5),
+      m5TrendlineDistance: m5TrendlineDistance === null ? null : round(m5TrendlineDistance, 5),
+      m15TrendlineReaction,
+      m5TrendlineReaction,
+      confidenceLevel,
     },
     fvg: {
       buyConfirmed: buyFvg,
@@ -294,7 +386,7 @@ function buildEntryDiagnostics(bars: M15Bar[]): EntryDiagnostics {
     entry: {
       eligible,
       side: eligible ? pattern!.side : null,
-      rule: "PATTERN_PLUS_MA",
+      rule: "PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE",
       referenceEntry: round(current.close, 5),
       structuralStopDistance: structuralStopDistance === null ? null : round(structuralStopDistance, 5),
       stopDistance: stopDistance === null ? null : round(stopDistance, 5),
@@ -353,6 +445,33 @@ function detectEntryPattern(
   ) {
     return { side: "SELL", name: "TWO_CANDLE_BODY_DOMINANCE", extreme: Math.max(priorOpposite.high, first.high, current.high) };
   }
+
+  if (index < 3) return null;
+  const anchor = bars[index - 3]!;
+  const b = bars[index - 2]!;
+  const c = bars[index - 1]!;
+  const d = current;
+  const anchorBody = bodySize(anchor);
+  const threeBodyTotal = bodySize(b) + bodySize(c) + bodySize(d);
+
+  if (
+    isBearish(anchor) &&
+    isBullish(b) &&
+    isBullish(c) &&
+    isBullish(d) &&
+    threeBodyTotal > anchorBody
+  ) {
+    return { side: "BUY", name: "THREE_CANDLE_BODY_DOMINANCE", extreme: Math.min(anchor.low, b.low, c.low, d.low) };
+  }
+  if (
+    isBullish(anchor) &&
+    isBearish(b) &&
+    isBearish(c) &&
+    isBearish(d) &&
+    threeBodyTotal > anchorBody
+  ) {
+    return { side: "SELL", name: "THREE_CANDLE_BODY_DOMINANCE", extreme: Math.max(anchor.high, b.high, c.high, d.high) };
+  }
   return null;
 }
 
@@ -367,6 +486,16 @@ function hasRelevantFvg(bars: M15Bar[], index: number, side: Phase7BSide, lookba
     if (side === "SELL" && third.high < first.low && current.high >= third.high && current.low <= first.low) return true;
   }
   return false;
+}
+
+function directionAgeBars(
+  direction: Array<Phase7BSide | null>,
+  index: number,
+  current: Phase7BSide,
+): number {
+  let age = 0;
+  for (let i = index - 1; i >= 0 && direction[i] === current; i -= 1) age += 1;
+  return age;
 }
 
 function isBullish(bar: M15Bar): boolean { return bar.close > bar.open; }

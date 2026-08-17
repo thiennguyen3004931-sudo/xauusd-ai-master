@@ -11,7 +11,7 @@ import {
   Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { dateTime, price } from "../format";
+import { price } from "../format";
 import { ErrorState, LoadingState } from "../ui/PageState";
 
 type Side = "BUY" | "SELL";
@@ -21,6 +21,10 @@ type EntryDiagnostics = {
   nextCloseTime: number;
   pattern: { matched: boolean; name: string | null; side: Side | null };
   trend: {
+    ma20?: number;
+    ma50?: number;
+    ma200?: number;
+    matchedPatternSide?: boolean;
     m15Supertrend: Side | null;
     m5Supertrend: Side | null;
     m5FlipAgeBars: number | null;
@@ -77,6 +81,7 @@ function tenHuong(side: Side | null | undefined) {
 function tenMoHinh(name: string | null | undefined) {
   if (name === "ENGULFING") return "Nến nhấn chìm";
   if (name === "TWO_CANDLE_BODY_DOMINANCE") return "Hai nến thân chiếm ưu thế";
+  if (name === "THREE_CANDLE_BODY_DOMINANCE") return "Ba nến B+C+D > A";
   return "Chưa có mô hình";
 }
 
@@ -105,6 +110,14 @@ function GateCard({ label, value, status, detail }: { label: string; value: stri
   );
 }
 
+function vietnamDateTime(timestamp: number) {
+  return new Intl.DateTimeFormat("vi-VN", {
+    dateStyle: "short",
+    timeStyle: "medium",
+    timeZone: "Asia/Ho_Chi_Minh",
+  }).format(new Date(timestamp));
+}
+
 function countdown(ms: number) {
   const seconds = Math.max(0, Math.ceil(ms / 1000));
   const minutes = Math.floor(seconds / 60);
@@ -125,7 +138,8 @@ export function Phase7BPatternCheckPage() {
   }, []);
 
   const d = query.data?.entryDiagnostics ?? null;
-  const remainingMs = d ? d.nextCloseTime - now : 0;
+  const rawRemainingMs = d ? d.nextCloseTime - now : 0;
+  const remainingMs = Math.max(0, Math.min(15 * 60_000, rawRemainingMs));
   const progress = useMemo(() => d ? Math.max(0, Math.min(100, ((15 * 60_000 - remainingMs) / (15 * 60_000)) * 100)) : 0, [d, remainingMs]);
 
   if (query.isLoading) return <LoadingState />;
@@ -145,7 +159,7 @@ export function Phase7BPatternCheckPage() {
       ok: d.pattern.matched,
       text: d.pattern.matched
         ? `Mô hình ${tenMoHinh(d.pattern.name)} theo hướng ${tenHuong(d.pattern.side)} đã xuất hiện trên nến đóng.`
-        : "Chưa xuất hiện một trong 2 mô hình nến bắt buộc.",
+        : "Chưa xuất hiện một trong 3 mô hình nến bắt buộc.",
     },
     {
       ok: m15Pass,
@@ -194,7 +208,8 @@ export function Phase7BPatternCheckPage() {
             <Typography variant="caption" color="text.secondary" fontWeight={900}>CÒN LẠI ĐẾN KHI ĐÓNG NẾN M15</Typography>
             <Typography variant="h4" fontWeight={950}>{countdown(remainingMs)}</Typography>
             <LinearProgress value={progress} variant="determinate" sx={{ mt: 1.5, height: 7, borderRadius: 99 }} />
-            <Typography variant="caption" color="text.secondary" display="block" mt={1}>Nến vừa đóng: {dateTime(d.closeTime)}</Typography>
+            <Typography variant="caption" color="text.secondary" display="block" mt={1}>Nến vừa đóng (giờ Việt Nam): {vietnamDateTime(d.closeTime)}</Typography>
+            <Typography variant="caption" color="text.secondary" display="block">Đóng nến tiếp theo (giờ Việt Nam): {vietnamDateTime(d.nextCloseTime)}</Typography>
           </CardContent></Card>
         </Grid>
         <Grid size={{ xs: 12, md: 4 }}>
@@ -208,7 +223,7 @@ export function Phase7BPatternCheckPage() {
 
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <GateCard label="1 · MÔ HÌNH NẾN" value={tenMoHinh(d.pattern.name)} status={d.pattern.matched ? "ĐẠT" : "CHỜ"} detail={d.pattern.side ? `Hướng ${tenHuong(d.pattern.side)}` : "Chờ nến nhấn chìm hoặc hai nến thân chiếm ưu thế"} />
+          <GateCard label="1 · MÔ HÌNH NẾN" value={tenMoHinh(d.pattern.name)} status={d.pattern.matched ? "ĐẠT" : "CHỜ"} detail={d.pattern.side ? `Hướng ${tenHuong(d.pattern.side)}` : "Chờ nhấn chìm, 2 nến thân chiếm ưu thế, hoặc 3 nến B+C+D > A"} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
           <GateCard label="2 · SUPERTREND M15" value={tenHuong(d.trend.m15Supertrend)} status={wanted ? (m15Pass ? "ĐẠT" : "CHỜ") : "THÔNG TIN"} detail={wanted ? `Phải cùng hướng ${tenHuong(wanted)}` : "Đối chiếu sau khi có mô hình nến"} />
@@ -225,8 +240,8 @@ export function Phase7BPatternCheckPage() {
         <CardContent>
           <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1}>
             <Box>
-              <Typography variant="h6" fontWeight={900}>Độ tin cậy theo phản ứng gần đường Supertrend</Typography>
-              <Typography variant="body2" color="text.secondary" mt={0.5}>Đây là điểm cộng chất lượng, không phải điều kiện bắt buộc để vào lệnh.</Typography>
+              <Typography variant="h6" fontWeight={900}>Độ tin cậy: MA20/MA50 + phản ứng gần đường Supertrend</Typography>
+              <Typography variant="body2" color="text.secondary" mt={0.5}>MA20/50 chỉ xác nhận độ tin cậy, không chặn entry. Sau +10 chốt 1/3, runner dời SL theo cấu trúc M15; MA50 xác nhận giữ/chốt runner. MA200 chỉ xác nhận xu hướng khung lớn, không phải entry/exit gate.</Typography>
             </Box>
             <Chip label={tenDoTinCay(confidence)} color={confidence === "RẤT_CAO" || confidence === "CAO" ? "success" : "default"} variant="outlined" />
           </Stack>
@@ -256,6 +271,12 @@ export function Phase7BPatternCheckPage() {
               </Typography>
             ))}
             <Typography variant="body2" color="text.secondary" fontWeight={700}>
+              ℹ MA20/50: {d.trend.matchedPatternSide ? "CÙNG HƯỚNG MÔ HÌNH" : "CHƯA CÙNG HƯỚNG MÔ HÌNH"}. Chỉ dùng xác nhận độ tin cậy, không phải entry gate.
+            </Typography>
+            <Typography variant="body2" color="text.secondary" fontWeight={700}>
+              ℹ MA200: {d.trend.ma200 === undefined ? "—" : price(d.trend.ma200)}. Chỉ xác nhận xu hướng khung lớn; không chặn entry và không trực tiếp chốt runner.
+            </Typography>
+            <Typography variant="body2" color="text.secondary" fontWeight={700}>
               ℹ Flip age M5: {d.trend.m5FlipAgeBars ?? "—"} nến. Chỉ để tham khảo độ mới của xu hướng, không phải entry gate.
             </Typography>
             <Typography variant="body2" color="text.secondary" fontWeight={700}>
@@ -270,7 +291,7 @@ export function Phase7BPatternCheckPage() {
           ? `KẾT LUẬN: Có thể vào ${tenHuong(d.entry.side)} vì mô hình nến, Supertrend M15, Supertrend M5 và khoảng SL đều đạt. Độ tin cậy hiện tại: ${tenDoTinCay(confidence)}.`
           : "KẾT LUẬN: Chưa gửi lệnh. Bot tiếp tục chờ đến khi 4 điều kiện bắt buộc cùng đạt trên dữ liệu nến đã đóng."}
       </Alert>
-      <Alert severity="info">Quản lý sau khi khớp: +6 giá → dời SL về hòa vốn · +10 giá → chốt 1/3 · phần còn lại tiếp tục runner theo quản lý canonical. H1/H4, FVG và phản ứng trendline chỉ là bối cảnh/độ tin cậy, không phải TP cứng.</Alert>
+      <Alert severity="info">Quản lý sau khi khớp: +6 giá → dời SL về hòa vốn · +10 giá → chốt 1/3 · phần còn lại tiếp tục runner. MA200 chỉ xác nhận xu hướng khung lớn, không trực tiếp chốt runner; sau +10 chốt 1/3, runner chỉ chốt khi nến M15 đóng phá MA50 ngược hướng. H1/H4, FVG và phản ứng trendline là bối cảnh, không phải TP cứng.</Alert>
     </Stack>
   );
 }

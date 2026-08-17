@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   evaluateTimestampFreshness,
+  inferBrokerClockOffset,
+  normalizeBrokerTimestamp,
   validateAutoLotSnapshot,
 } from "./phase7c-sideway-execution-guards.mjs";
 import {
@@ -151,6 +153,18 @@ async function cycle() {
     bridgeGet(`/v1/symbols/${encodeURIComponent(symbol)}/spec`),
   ]);
 
+  const brokerClockOffsetMs = inferBrokerClockOffset(quote?.timestamp, {
+    systemTimestamp: health.timestamp,
+  });
+  if (brokerClockOffsetMs === null) {
+    journal("BROKER_CLOCK_OFFSET_BLOCK", {
+      healthTimestamp: health.timestamp ?? null,
+      quoteTimestamp: quote?.timestamp ?? null,
+      reason: "BROKER_CLOCK_NOT_PLAUSIBLE_WHOLE_HOUR_OFFSET",
+    });
+    return;
+  }
+
   if (!Array.isArray(positions)) {
     journal("POSITIONS_DATA_INVALID", {});
     return;
@@ -158,9 +172,9 @@ async function cycle() {
 
   if (!state.managed && state.pendingEntry) {
     const pending = state.pendingEntry;
-    const recovery = matchPendingEntryPosition(pending, positions, spec);
+    const recovery = matchPendingEntryPosition(pending, positions, spec, Date.now(), brokerClockOffsetMs);
     if (recovery.matched && recovery.position) {
-      state.managed = buildManagedState(recovery.position, pending);
+      state.managed = buildManagedState(recovery.position, pending, brokerClockOffsetMs);
       state.pendingEntry = null;
       saveState();
       journal("PENDING_ENTRY_RECOVERED", {
@@ -169,7 +183,7 @@ async function cycle() {
         side: state.managed.side,
         volume: state.managed.initialVolume,
       });
-      await managePosition(recovery.position, quote, spec);
+      await managePosition(recovery.position, quote, spec, brokerClockOffsetMs);
       return;
     }
 
@@ -235,7 +249,7 @@ async function cycle() {
       }
     }
 
-    await managePosition(managedPosition, quote, spec);
+    await managePosition(managedPosition, quote, spec, brokerClockOffsetMs);
     return;
   }
 
@@ -244,7 +258,7 @@ async function cycle() {
     return;
   }
 
-  const quoteFreshness = evaluateTimestampFreshness(quote?.timestamp, { maxAgeMs: maxQuoteAgeMs });
+  const quoteFreshness = evaluateTimestampFreshness(quote?.timestamp, { maxAgeMs: maxQuoteAgeMs, clockOffsetMs: brokerClockOffsetMs });
   if (!quoteFreshness.fresh) {
     journal("ENTRY_QUOTE_FRESHNESS_BLOCK", { reason: quoteFreshness.reason, ageMs: quoteFreshness.ageMs, quoteTimestamp: quote?.timestamp ?? null });
     return;
@@ -272,13 +286,13 @@ async function cycle() {
   state.lastEvaluatedM5Close = closeTime;
   saveState();
 
-  const m5Freshness = evaluateTimestampFreshness(closeTime, { maxAgeMs: maxM5AgeMs });
+  const m5Freshness = evaluateTimestampFreshness(closeTime, { maxAgeMs: maxM5AgeMs, clockOffsetMs: brokerClockOffsetMs });
   if (!m5Freshness.fresh) {
     journal("ENTRY_M5_FRESHNESS_BLOCK", { closeTime, reason: m5Freshness.reason, ageMs: m5Freshness.ageMs });
     return;
   }
 
-  const regimeFreshness = evaluateTimestampFreshness(regime?.lastCandleCloseTime, { maxAgeMs: maxM15AgeMs });
+  const regimeFreshness = evaluateTimestampFreshness(regime?.lastCandleCloseTime, { maxAgeMs: maxM15AgeMs, clockOffsetMs: brokerClockOffsetMs });
   if (!regimeFreshness.fresh) {
     journal("ENTRY_M15_FRESHNESS_BLOCK", {
       closeTime: regime?.lastCandleCloseTime ?? null,
@@ -359,8 +373,8 @@ async function cycle() {
     bridgeGet(`/v1/quotes/${encodeURIComponent(symbol)}`),
   ]);
   const finalPermission = resolveSidewayPermission(freshMode?.state?.mode, freshRegime?.recommendedMode);
-  const finalQuoteFreshness = evaluateTimestampFreshness(freshQuote?.timestamp, { maxAgeMs: maxQuoteAgeMs });
-  const finalRegimeFreshness = evaluateTimestampFreshness(freshRegime?.lastCandleCloseTime, { maxAgeMs: maxM15AgeMs });
+  const finalQuoteFreshness = evaluateTimestampFreshness(freshQuote?.timestamp, { maxAgeMs: maxQuoteAgeMs, clockOffsetMs: brokerClockOffsetMs });
+  const finalRegimeFreshness = evaluateTimestampFreshness(freshRegime?.lastCandleCloseTime, { maxAgeMs: maxM15AgeMs, clockOffsetMs: brokerClockOffsetMs });
   const finalSide = freshRegime?.supplyDemandRange
     ? chooseRangeSide(freshRegime.supplyDemandRange, Number(freshQuote?.bid), Number(freshQuote?.ask))
     : null;
@@ -502,15 +516,17 @@ async function cycle() {
     return;
   }
 
-  state.managed = buildManagedState(opened, state.pendingEntry);
+  state.managed = buildManagedState(opened, state.pendingEntry, brokerClockOffsetMs);
   state.pendingEntry = null;
   saveState();
   journal("ENTRY_FILLED", { orderId, position: opened, management: state.managed });
 }
 
-function buildManagedState(opened, pending) {
+function buildManagedState(opened, pending, brokerClockOffsetMs = 0) {
   if (!pending) throw new Error("Cannot build Sideway management state without durable pending entry metadata.");
-  const openedAt = Number.isFinite(Number(opened.openedAt)) ? Number(opened.openedAt) : Date.now();
+  const brokerOpenedAt = Number(opened.openedAt);
+  const normalizedOpenedAt = normalizeBrokerTimestamp(brokerOpenedAt, brokerClockOffsetMs);
+  const openedAt = Number.isFinite(normalizedOpenedAt) ? normalizedOpenedAt : Date.now();
   return {
     ticket: String(opened.ticket),
     side: pending.side,
@@ -534,7 +550,7 @@ function buildManagedState(opened, pending) {
   };
 }
 
-async function managePosition(position, quote, spec) {
+async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
   const managed = state.managed;
 
   if (Date.now() >= managed.timeStopAt) {
@@ -545,7 +561,7 @@ async function managePosition(position, quote, spec) {
   try {
     const regime = await controlGet(`/api/v1/phase7c/live-regime?symbol=${encodeURIComponent(symbol)}&count=${regimeCandleCount}`);
     const regimeClose = Number(regime?.lastCandleCloseTime ?? 0);
-    const regimeFreshness = evaluateTimestampFreshness(regimeClose, { maxAgeMs: maxM15AgeMs });
+    const regimeFreshness = evaluateTimestampFreshness(regimeClose, { maxAgeMs: maxM15AgeMs, clockOffsetMs: brokerClockOffsetMs });
     if (!regimeFreshness.fresh) {
       journal("MANAGEMENT_REGIME_FRESHNESS_SKIP", {
         ticket: managed.ticket,
@@ -573,7 +589,7 @@ async function managePosition(position, quote, spec) {
     journal("MANAGEMENT_REGIME_CHECK_ERROR", { ticket: managed.ticket, message: errorMessage(error) });
   }
 
-  const quoteFreshness = evaluateTimestampFreshness(quote?.timestamp, { maxAgeMs: maxQuoteAgeMs });
+  const quoteFreshness = evaluateTimestampFreshness(quote?.timestamp, { maxAgeMs: maxQuoteAgeMs, clockOffsetMs: brokerClockOffsetMs });
   if (!quoteFreshness.fresh) {
     journal("MANAGEMENT_QUOTE_FRESHNESS_SKIP", {
       ticket: managed.ticket,
