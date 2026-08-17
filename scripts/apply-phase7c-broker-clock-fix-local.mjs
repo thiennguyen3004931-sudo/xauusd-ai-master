@@ -39,6 +39,48 @@ const patches = [
   },
   {
     file: sidewayPath,
+    label: "SIDEWAY_RECOVERY_MANAGEMENT_CLOCK",
+    before: `      await managePosition(recovery.position, quote, spec);`,
+    after: `      await managePosition(recovery.position, quote, spec, brokerClockOffsetMs);`,
+  },
+  {
+    file: sidewayPath,
+    label: "SIDEWAY_EXISTING_MANAGEMENT_CLOCK",
+    before: `    await managePosition(managedPosition, quote, spec);`,
+    after: `    await managePosition(managedPosition, quote, spec, brokerClockOffsetMs);`,
+  },
+  {
+    file: sidewayPath,
+    label: "SIDEWAY_ENTRY_QUOTE_FRESHNESS_CLOCK",
+    before: `  const quoteFreshness = evaluateTimestampFreshness(quote?.timestamp, { maxAgeMs: maxQuoteAgeMs });\n  if (!quoteFreshness.fresh) {\n    journal("ENTRY_QUOTE_FRESHNESS_BLOCK",`,
+    after: `  const quoteFreshness = evaluateTimestampFreshness(quote?.timestamp, { maxAgeMs: maxQuoteAgeMs, clockOffsetMs: brokerClockOffsetMs });\n  if (!quoteFreshness.fresh) {\n    journal("ENTRY_QUOTE_FRESHNESS_BLOCK",`,
+  },
+  {
+    file: sidewayPath,
+    label: "SIDEWAY_M5_FRESHNESS_CLOCK",
+    before: `  const m5Freshness = evaluateTimestampFreshness(closeTime, { maxAgeMs: maxM5AgeMs });`,
+    after: `  const m5Freshness = evaluateTimestampFreshness(closeTime, { maxAgeMs: maxM5AgeMs, clockOffsetMs: brokerClockOffsetMs });`,
+  },
+  {
+    file: sidewayPath,
+    label: "SIDEWAY_ENTRY_M15_FRESHNESS_CLOCK",
+    before: `  const regimeFreshness = evaluateTimestampFreshness(regime?.lastCandleCloseTime, { maxAgeMs: maxM15AgeMs });\n  if (!regimeFreshness.fresh) {\n    journal("ENTRY_M15_FRESHNESS_BLOCK",`,
+    after: `  const regimeFreshness = evaluateTimestampFreshness(regime?.lastCandleCloseTime, { maxAgeMs: maxM15AgeMs, clockOffsetMs: brokerClockOffsetMs });\n  if (!regimeFreshness.fresh) {\n    journal("ENTRY_M15_FRESHNESS_BLOCK",`,
+  },
+  {
+    file: sidewayPath,
+    label: "SIDEWAY_FINAL_QUOTE_FRESHNESS_CLOCK",
+    before: `  const finalQuoteFreshness = evaluateTimestampFreshness(freshQuote?.timestamp, { maxAgeMs: maxQuoteAgeMs });`,
+    after: `  const finalQuoteFreshness = evaluateTimestampFreshness(freshQuote?.timestamp, { maxAgeMs: maxQuoteAgeMs, clockOffsetMs: brokerClockOffsetMs });`,
+  },
+  {
+    file: sidewayPath,
+    label: "SIDEWAY_FINAL_M15_FRESHNESS_CLOCK",
+    before: `  const finalRegimeFreshness = evaluateTimestampFreshness(freshRegime?.lastCandleCloseTime, { maxAgeMs: maxM15AgeMs });`,
+    after: `  const finalRegimeFreshness = evaluateTimestampFreshness(freshRegime?.lastCandleCloseTime, { maxAgeMs: maxM15AgeMs, clockOffsetMs: brokerClockOffsetMs });`,
+  },
+  {
+    file: sidewayPath,
     label: "SIDEWAY_NEW_MANAGED_CLOCK",
     before: `  state.managed = buildManagedState(opened, state.pendingEntry);`,
     after: `  state.managed = buildManagedState(opened, state.pendingEntry, brokerClockOffsetMs);`,
@@ -48,6 +90,24 @@ const patches = [
     label: "SIDEWAY_MANAGED_TIME_NORMALIZATION",
     before: `function buildManagedState(opened, pending) {\n  if (!pending) throw new Error("Cannot build Sideway management state without durable pending entry metadata.");\n  const openedAt = Number.isFinite(Number(opened.openedAt)) ? Number(opened.openedAt) : Date.now();`,
     after: `function buildManagedState(opened, pending, brokerClockOffsetMs = 0) {\n  if (!pending) throw new Error("Cannot build Sideway management state without durable pending entry metadata.");\n  const brokerOpenedAt = Number(opened.openedAt);\n  const normalizedOpenedAt = normalizeBrokerTimestamp(brokerOpenedAt, brokerClockOffsetMs);\n  const openedAt = Number.isFinite(normalizedOpenedAt) ? normalizedOpenedAt : Date.now();`,
+  },
+  {
+    file: sidewayPath,
+    label: "SIDEWAY_MANAGE_SIGNATURE_CLOCK",
+    before: `async function managePosition(position, quote, spec) {`,
+    after: `async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {`,
+  },
+  {
+    file: sidewayPath,
+    label: "SIDEWAY_MANAGEMENT_M15_FRESHNESS_CLOCK",
+    before: `    const regimeFreshness = evaluateTimestampFreshness(regimeClose, { maxAgeMs: maxM15AgeMs });`,
+    after: `    const regimeFreshness = evaluateTimestampFreshness(regimeClose, { maxAgeMs: maxM15AgeMs, clockOffsetMs: brokerClockOffsetMs });`,
+  },
+  {
+    file: sidewayPath,
+    label: "SIDEWAY_MANAGEMENT_QUOTE_FRESHNESS_CLOCK",
+    before: `  const quoteFreshness = evaluateTimestampFreshness(quote?.timestamp, { maxAgeMs: maxQuoteAgeMs });\n  if (!quoteFreshness.fresh) {\n    journal("MANAGEMENT_QUOTE_FRESHNESS_SKIP",`,
+    after: `  const quoteFreshness = evaluateTimestampFreshness(quote?.timestamp, { maxAgeMs: maxQuoteAgeMs, clockOffsetMs: brokerClockOffsetMs });\n  if (!quoteFreshness.fresh) {\n    journal("MANAGEMENT_QUOTE_FRESHNESS_SKIP",`,
   },
   {
     file: trendPath,
