@@ -107,12 +107,70 @@ async function importLegacyTrendController() {
   }
 
   const sourceLabel = sourceUrl.href.replace(/\s/g, "%20");
-  const payload = Buffer.from(
-    `${transformed.outputText}\n//# sourceURL=${sourceLabel}\n`,
-    "utf8",
-  ).toString("base64");
+
+  // Execute the transpiled legacy Trend controller from a real file URL.
+  // A data: URL has no hierarchical filesystem base, so Node cannot
+  // resolve workspace packages such as @xauusd/risk-engine from it.
+  const runtimeUrl = new URL(
+    `./.phase7c-trend-legacy-runtime-${process.pid}.mjs`,
+    import.meta.url,
+  );
+
+  const riskEngineUrl = new URL(
+    "../packages/risk-engine/dist/index.js",
+    import.meta.url,
+  ).href;
+
+  // The temporary legacy runtime lives under scripts/, while the root
+  // workspace does not expose @xauusd/risk-engine in root node_modules.
+  // Rewrite only this known runtime dependency to the already-built ESM file.
+  const previewCompleteSentinel = "__PHASE7C_TREND_PREVIEW_COMPLETE__";
+
+  const runtimeOutput = transformed.outputText
+    .replaceAll(
+      '"@xauusd/risk-engine"',
+      JSON.stringify(riskEngineUrl),
+    )
+    .replaceAll(
+      "'@xauusd/risk-engine'",
+      JSON.stringify(riskEngineUrl),
+    )
+    // The legacy preview path uses process.exit(0). Because this controller
+    // is imported into the Phase 7C/tsx host, forcing process termination can
+    // abort while loader handles are closing. Convert only the successful
+    // preview exit into a sentinel unwind handled below.
+    .replaceAll(
+      "process.exit(0);",
+      `throw new Error("${previewCompleteSentinel}");`,
+    );
+
+  const runtimeSource =
+    `${runtimeOutput}\n//# sourceURL=${sourceLabel}\n`;
+
+  fs.writeFileSync(runtimeUrl, runtimeSource, "utf8");
+
   console.log("PHASE7C_TREND_LEGACY_TRANSPILE=ESM");
-  await import(`data:text/javascript;base64,${payload}`);
+  console.log(`PHASE7C_TREND_LEGACY_RUNTIME=${runtimeUrl.href}`);
+
+  try {
+    await import(`${runtimeUrl.href}?pid=${process.pid}`);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === previewCompleteSentinel
+    ) {
+      console.log("PHASE7C_TREND_PREVIEW_COMPLETE=PASS");
+      return;
+    }
+
+    throw error;
+  } finally {
+    try {
+      fs.unlinkSync(runtimeUrl);
+    } catch {
+      // Best-effort cleanup only.
+    }
+  }
 }
 
 async function evaluateTrendEntryPermission() {

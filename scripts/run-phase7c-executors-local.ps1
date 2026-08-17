@@ -87,17 +87,88 @@ function Read-EnvValue([string]$Name) {
   return Read-EnvValueFromFile $EnvFile $Name
 }
 
-function Stop-PidFile([string]$Path) {
-  if (-not (Test-Path $Path)) { return }
+function Stop-ProcessTree([int]$ProcessId) {
+  if ($ProcessId -le 0) { return }
+
   try {
-    $pidValue = [int](Get-Content -LiteralPath $Path -Raw).Trim()
-    if ($pidValue -gt 0) {
-      Stop-Process -Id $pidValue -Force -ErrorAction SilentlyContinue
-    }
-  } catch {}
-  Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if ($null -eq $process) { return }
+
+    Write-Host "PHASE7C_STOP_PROCESS_TREE_PID=$ProcessId"
+
+    & "$env:SystemRoot\System32\taskkill.exe" `
+      /PID $ProcessId `
+      /T `
+      /F 2>$null | Out-Null
+  } catch {
+    Write-Warning "Could not stop process tree PID=$ProcessId : $($_.Exception.Message)"
+  }
 }
 
+function Stop-Phase7CExecutorOrphans {
+  $patterns = @(
+    "run-phase7c-trend-controller-local.ps1",
+    "run-phase7c-trend-controller.mjs",
+    ".phase7c-trend-legacy-runtime-",
+    "run-phase7c-sideway-controller-local.ps1",
+    "run-phase7c-sideway-locked.mjs",
+    "run-phase7c-telegram-mode-controller-local.ps1",
+    "run-phase7c-telegram-mode-controller.mjs",
+    "run-phase7c-regime-notifier-local.ps1",
+    "run-phase7c-regime-notifier.mjs"
+  )
+
+  $targets = @(
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+      Where-Object {
+        $commandLine = $_.CommandLine
+
+        if ([string]::IsNullOrWhiteSpace($commandLine)) {
+          return $false
+        }
+
+        foreach ($pattern in $patterns) {
+          if ($commandLine -like "*$pattern*") {
+            return $true
+          }
+        }
+
+        return $false
+      } |
+      Sort-Object ProcessId -Unique
+  )
+
+  foreach ($target in ($targets | Sort-Object ProcessId -Descending)) {
+
+    Write-Host "PHASE7C_ORPHAN_CLEANUP_PID=$($target.ProcessId)|NAME=$($target.Name)"
+
+    try {
+      & "$env:SystemRoot\System32\taskkill.exe" `
+        /PID $target.ProcessId `
+        /T `
+        /F 2>$null | Out-Null
+    } catch {}
+  }
+
+  Start-Sleep -Milliseconds 500
+}
+
+function Stop-PidFile([string]$Path) {
+  if (-not (Test-Path $Path)) { return }
+
+  try {
+    $pidValue = [int](Get-Content -LiteralPath $Path -Raw).Trim()
+
+    if ($pidValue -gt 0) {
+      Stop-ProcessTree $pidValue
+    }
+  } catch {}
+
+  Remove-Item `
+    -LiteralPath $Path `
+    -Force `
+    -ErrorAction SilentlyContinue
+}
 function Read-LogTail([string]$Path, [int]$Lines = 30) {
   if (-not (Test-Path $Path)) { return "<log not found: $Path>" }
   try {
@@ -191,6 +262,10 @@ Stop-PidFile $TrendPidPath
 Stop-PidFile $SidewayPidPath
 Stop-PidFile $TelegramModePidPath
 Stop-PidFile $RegimeNotifierPidPath
+
+# PID wrappers may already have exited while Node descendants remain.
+# Sweep all known Phase 7C executor command lines before relaunch.
+Stop-Phase7CExecutorOrphans
 Remove-Item -LiteralPath $env:ZIQ_PHASE7C_EXECUTION_LOCK -Force -ErrorAction SilentlyContinue
 Set-Content -LiteralPath $SupervisorPidPath -Value $PID -Encoding ascii
 
@@ -337,10 +412,24 @@ try {
   }
 }
 finally {
-  if ($null -ne $telegramMode -and -not $telegramMode.HasExited) { Stop-Process -Id $telegramMode.Id -Force -ErrorAction SilentlyContinue }
-  if ($null -ne $regimeNotifier -and -not $regimeNotifier.HasExited) { Stop-Process -Id $regimeNotifier.Id -Force -ErrorAction SilentlyContinue }
-  if ($null -ne $trend -and -not $trend.HasExited) { Stop-Process -Id $trend.Id -Force -ErrorAction SilentlyContinue }
-  if ($null -ne $sideway -and -not $sideway.HasExited) { Stop-Process -Id $sideway.Id -Force -ErrorAction SilentlyContinue }
+  if ($null -ne $telegramMode -and -not $telegramMode.HasExited) {
+    Stop-ProcessTree $telegramMode.Id
+  }
+
+  if ($null -ne $regimeNotifier -and -not $regimeNotifier.HasExited) {
+    Stop-ProcessTree $regimeNotifier.Id
+  }
+
+  if ($null -ne $trend -and -not $trend.HasExited) {
+    Stop-ProcessTree $trend.Id
+  }
+
+  if ($null -ne $sideway -and -not $sideway.HasExited) {
+    Stop-ProcessTree $sideway.Id
+  }
+
+  # Final fallback for children whose PowerShell wrapper already exited.
+  Stop-Phase7CExecutorOrphans
   Remove-Item -LiteralPath $TelegramModePidPath -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $RegimeNotifierPidPath -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $TrendPidPath -Force -ErrorAction SilentlyContinue
