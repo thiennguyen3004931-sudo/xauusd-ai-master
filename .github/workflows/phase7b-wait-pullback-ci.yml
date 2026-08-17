@@ -110,7 +110,7 @@ jobs:
           grep -q 'PLUS6_SL_TO_ENTRY' .phase7b-controller-ci.ts
           grep -q 'PLUS10_PARTIAL_ONE_THIRD' .phase7b-controller-ci.ts
           grep -q 'REVERSAL_FVG_REJECTION' .phase7b-controller-ci.ts
-          grep -q 'TREND_MA20' .phase7b-controller-ci.ts
+          grep -q 'PHASE7B_DEMO_MA20_MA50=CONFIDENCE_ONLY_NOT_ENTRY_GATE' .phase7b-controller-ci.ts
 
           if grep -q 'PRICE_DISTANCE_CLAMPED_6_TO_10' .phase7b-controller-ci.ts; then exit 1; fi
           if grep -q 'PATTERN_PLUS_MA_ONLY' .phase7b-controller-ci.ts; then exit 1; fi
