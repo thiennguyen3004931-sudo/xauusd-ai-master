@@ -10,7 +10,7 @@ on:
       - "scripts/apply-phase7b-canonical-entry-v3-local.mjs"
       - "scripts/apply-phase7b-canonical-runner-v4-local.mjs"
       - "scripts/apply-phase7b-canonical-runner-v4b-local.mjs"
-      - "scripts/apply-phase7b-canonical-runner-v4c-windows-local.mjs"
+      - "scripts/apply-phase7b-canonical-runner-windows-local.mjs"
       - ".github/workflows/phase7b-supertrend-entry-gates-ci.yml"
   pull_request:
     paths:
@@ -19,7 +19,7 @@ on:
       - "scripts/apply-phase7b-canonical-entry-v3-local.mjs"
       - "scripts/apply-phase7b-canonical-runner-v4-local.mjs"
       - "scripts/apply-phase7b-canonical-runner-v4b-local.mjs"
-      - "scripts/apply-phase7b-canonical-runner-v4c-windows-local.mjs"
+      - "scripts/apply-phase7b-canonical-runner-windows-local.mjs"
       - ".github/workflows/phase7b-supertrend-entry-gates-ci.yml"
 
 jobs:
@@ -60,38 +60,48 @@ jobs:
           node scripts/apply-phase7b-pattern-ui-clock-local.mjs --apply
           grep -q 'inferBrokerClockOffset' apps/api/src/routes/phase7b-demo.route.ts
 
-      - name: Simulate Windows CRLF canonical V4 patcher
+      - name: Simulate full Windows CRLF checkout
         run: |
           python - <<'PY'
           from pathlib import Path
-          p = Path('scripts/apply-phase7b-canonical-runner-v4-local.mjs')
-          data = p.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
-          p.write_bytes(data)
-          assert b'\r\n' in data
-          print('PHASE7B_CANONICAL_RUNNER_CI_BASE_EOL=CRLF')
+          paths = [
+              'scripts/run-phase7b-demo-controller.ts',
+              'apps/api/src/routes/phase7b-demo.route.ts',
+              'apps/web/src/ui/DashboardLayout.tsx',
+              'apps/web/src/pages/Phase7BPatternCheckPage.tsx',
+              'scripts/apply-phase7b-supertrend-entry-gates-local.mjs',
+              'scripts/apply-phase7b-supertrend-entry-gates-v2-local.mjs',
+              'scripts/apply-phase7b-canonical-entry-v3-local.mjs',
+              'scripts/apply-phase7b-canonical-runner-v4-local.mjs',
+              'scripts/apply-phase7b-canonical-runner-v4b-local.mjs',
+          ]
+          for name in paths:
+              p = Path(name)
+              data = p.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+              p.write_bytes(data)
+              assert b'\r\n' in data
+          print('PHASE7B_CANONICAL_RUNNER_CI_ALL_EOL=CRLF')
           PY
 
-      - name: Check canonical runner V4C without mutation
+      - name: Check Windows-safe canonical runner without mutation
         run: |
-          node --check scripts/apply-phase7b-canonical-runner-v4c-windows-local.mjs
-          node scripts/apply-phase7b-canonical-runner-v4c-windows-local.mjs | tee /tmp/canonical-v4c-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4C_BASE_EOL=CRLF' /tmp/canonical-v4c-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4C_EOL_NORMALIZATION=TEMP_ONLY' /tmp/canonical-v4c-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4C_BASE_PATCHER_MUTATION=False' /tmp/canonical-v4c-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4C_RESULT=PASS' /tmp/canonical-v4c-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_CHECK=PASS' /tmp/canonical-v4c-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_ORIGINAL_MUTATION=False' /tmp/canonical-v4c-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_REAL_ACCOUNT_ALLOWED=False' /tmp/canonical-v4c-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_RUNNER_SL=M15_CONFIRMED_STRUCTURE_TRAILING' /tmp/canonical-v4c-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_RUNNER_EXIT=M15_CLOSE_BREAKS_MA50_AFTER_PLUS10_PARTIAL_ONLY' /tmp/canonical-v4c-check.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_MA200=MACRO_CONTEXT_ONLY_NOT_ENTRY_OR_EXIT_GATE' /tmp/canonical-v4c-check.log
+          node --check scripts/apply-phase7b-canonical-runner-windows-local.mjs
+          node scripts/apply-phase7b-canonical-runner-windows-local.mjs | tee /tmp/canonical-windows-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_WINDOWS_PREFLIGHT=PASS' /tmp/canonical-windows-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_WINDOWS_NESTED_PATCHERS_NORMALIZED=True' /tmp/canonical-windows-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_WINDOWS_TEMP_VALIDATION=PASS' /tmp/canonical-windows-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_WINDOWS_ORIGINAL_MUTATION=False' /tmp/canonical-windows-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_WINDOWS_CHECK=PASS' /tmp/canonical-windows-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_RUNNER_SL=M15_CONFIRMED_STRUCTURE_TRAILING' /tmp/canonical-windows-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_RUNNER_EXIT=M15_CLOSE_BREAKS_MA50_AFTER_PLUS10_PARTIAL_ONLY' /tmp/canonical-windows-check.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_MA200=MACRO_CONTEXT_ONLY_NOT_ENTRY_OR_EXIT_GATE' /tmp/canonical-windows-check.log
 
-      - name: Apply canonical runner V4C in CI checkout
+      - name: Apply Windows-safe canonical runner in CI checkout
         run: |
-          node scripts/apply-phase7b-canonical-runner-v4c-windows-local.mjs --apply | tee /tmp/canonical-v4c-apply.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4C_RESULT=PASS' /tmp/canonical-v4c-apply.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_APPLY=PASS' /tmp/canonical-v4c-apply.log
-          grep -q 'PHASE7B_CANONICAL_RUNNER_V4_DEMO_ONLY=True' /tmp/canonical-v4c-apply.log
+          node scripts/apply-phase7b-canonical-runner-windows-local.mjs --apply | tee /tmp/canonical-windows-apply.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_WINDOWS_APPLY=PASS' /tmp/canonical-windows-apply.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_WINDOWS_LINE_ENDINGS=PRESERVED' /tmp/canonical-windows-apply.log
+          grep -q 'PHASE7B_CANONICAL_RUNNER_WINDOWS_DEMO_ONLY=True' /tmp/canonical-windows-apply.log
 
       - name: Build risk-engine dependency graph
         run: pnpm --filter @xauusd/risk-engine... build
@@ -133,10 +143,7 @@ jobs:
             }
             process.exit(1);
           }
-          fs.writeFileSync(".phase7b-canonical-runner-v4c-ci.mjs", transformed.outputText, "utf8");
           NODE
-          node --check .phase7b-canonical-runner-v4c-ci.mjs
-          rm -f .phase7b-canonical-runner-v4c-ci.mjs
 
       - name: Verify canonical entry and runner roles
         run: |
