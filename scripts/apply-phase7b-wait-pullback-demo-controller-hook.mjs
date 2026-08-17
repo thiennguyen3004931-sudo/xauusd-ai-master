@@ -38,7 +38,7 @@ function replaceOnce(pattern, replacement, label) {
 }
 
 replaceOnce(
-  /import \{ type Phase7Bar, type Phase7BSignal \} from "@xauusd\/risk-engine";/,
+  /import \{[^\n]*type Phase7Bar[^\n]*\} from "@xauusd\/risk-engine";/,
   `import {\n  Phase7BPullbackEntryService,\n  phase7BSupertrend,\n  type Phase7Bar,\n  type Phase7BPendingPullback,\n} from "@xauusd/risk-engine";`,
   "risk-engine import",
 );
