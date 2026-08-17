@@ -108,10 +108,13 @@ if ($null -eq $task) {
 } else {
   $actions = @($task.Actions)
   $actionText = if ($actions.Count -eq 1) { "$($actions[0].Execute) $($actions[0].Arguments)" } else { "MULTIPLE_ACTIONS" }
-  $migrated = $actions.Count -eq 1 -and $actionText -like "*run-phase7c-executors-local.ps1*" -and $actionText -like "*-Armed*"
+  $directSupervisor = $actions.Count -eq 1 -and $actionText -like "*run-phase7c-executors-local.ps1*" -and $actionText -like "*-Armed*"
+  $startupRunner = $actions.Count -eq 1 -and $actionText -like "*run-phase7c-executor-task-runner-local.ps1*"
+  $migrated = $directSupervisor -or $startupRunner
   Write-Host "PHASE7C_VERIFY_TASK_STATE=$($task.State)"
   Write-Host "PHASE7C_VERIFY_TASK_MIGRATED=$migrated"
-  if ($RequireMigratedTask -and -not $migrated) { throw "Scheduled task $TaskName is not migrated to Phase 7C executor supervisor." }
+  Write-Host "PHASE7C_VERIFY_TASK_STARTUP_RUNNER=$startupRunner"
+  if ($RequireMigratedTask -and -not $migrated) { throw "Scheduled task $TaskName is not migrated to a verified Phase 7C executor action." }
   if (-not $migrated -and $task.State -eq "Running") { throw "Raw/unverified legacy bot task is running. Stop it before Phase 7C execution." }
 }
 
