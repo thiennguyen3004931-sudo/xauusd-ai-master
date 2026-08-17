@@ -2,7 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 const apply = process.argv.includes("--apply");
-const root = process.cwd();
+const root = process.env.PHASE7C_BROKER_CLOCK_PATCH_ROOT
+  ? path.resolve(process.env.PHASE7C_BROKER_CLOCK_PATCH_ROOT)
+  : process.cwd();
 const sidewayPath = path.join(root, "scripts", "run-phase7c-sideway-controller.mjs");
 const trendPath = path.join(root, "scripts", "run-phase7b-demo-controller.ts");
 
@@ -95,6 +97,7 @@ for (const [file, filePatches] of byFile) {
   }
 }
 
+console.log(`PHASE7C_BROKER_CLOCK_PATCH_ROOT=${root}`);
 console.log(`PHASE7C_BROKER_CLOCK_PATCH_MODE=${apply ? "APPLY" : "CHECK_ONLY"}`);
 console.log(`PHASE7C_BROKER_CLOCK_CHANGES_NEEDED=${changesNeeded}`);
 if (!apply && changesNeeded > 0) {
