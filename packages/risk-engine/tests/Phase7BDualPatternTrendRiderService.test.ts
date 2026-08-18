@@ -75,7 +75,7 @@ function bullishThreeCandleM15(): Phase7Bar[] {
 
   // New A-B-C-D pattern: A is bearish; B/C/D are bullish.
   // Body(A)=1.20 while Body(B)+Body(C)+Body(D)=0.40+0.40+0.50=1.30 > 1.20.
-  // No requirement that Body(B) itself must be smaller than Body(A) for this new pattern.
+  // Canonical V2 also requires Body(B)+Body(C) < Body(A) before D completes the pattern.
   bars[198] = { ...bars[198]!, open: 120.0, high: 120.1, low: 118.7, close: 118.8 };
   bars[199] = { ...bars[199]!, open: 119.0, high: 119.5, low: 118.9, close: 119.4 };
   bars[200] = { ...bars[200]!, open: 120.3, high: 120.9, low: 120.2, close: 120.7 };
@@ -89,6 +89,25 @@ function bullishThreeCandleM15TooWeak(): Phase7Bar[] {
   bars[199] = { ...bars[199]!, open: 119.0, close: 119.3, high: 119.5, low: 118.9 };
   bars[200] = { ...bars[200]!, open: 120.3, close: 120.6, high: 120.8, low: 120.2 };
   bars[201] = { ...bars[201]!, open: 120.6, close: 120.9, high: 121.1, low: 120.0 };
+  return bars;
+}
+
+function bullishThreeCandlePrematureBreak(): Phase7Bar[] {
+  const bars = bullishThreeCandleM15();
+  // A=1.20; B=0.70 and C=0.60 => B+C=1.30 >= A before D.
+  // Even though B+C+D > A, this MUST NOT be classified as the 3-candle pattern.
+  bars[199] = { ...bars[199]!, open: 119.0, close: 119.7, high: 119.9, low: 118.9 };
+  bars[200] = { ...bars[200]!, open: 120.0, close: 120.6, high: 120.8, low: 119.9 };
+  bars[201] = { ...bars[201]!, open: 120.6, close: 121.1, high: 121.3, low: 120.5 };
+  return bars;
+}
+
+function bullishThreeCandleEqualityAtBC(): Phase7Bar[] {
+  const bars = bullishThreeCandleM15();
+  // A=1.20; B=0.60 and C=0.60 => B+C exactly equals A, so strict '<' must fail.
+  bars[199] = { ...bars[199]!, open: 119.0, close: 119.6, high: 119.8, low: 118.9 };
+  bars[200] = { ...bars[200]!, open: 120.0, close: 120.6, high: 120.8, low: 119.9 };
+  bars[201] = { ...bars[201]!, open: 120.6, close: 121.1, high: 121.3, low: 120.5 };
   return bars;
 }
 
@@ -188,6 +207,19 @@ describe("Phase7BDualPatternTrendRiderService", () => {
     });
 
     expect(result.signals.filter((signal) => signal.pattern === "THREE_CANDLE_BODY_DOMINANCE")).toHaveLength(0);
+  });
+
+  it("rejects three-candle when B+C already equals or exceeds A", () => {
+    const service = new Phase7BDualPatternTrendRiderService({ fvgLookbackBars: 2 });
+    for (const m15 of [bullishThreeCandlePrematureBreak(), bullishThreeCandleEqualityAtBC()]) {
+      const signalTimestamp = m15.at(-1)!.closeTime;
+      const result = service.run({
+        ...requestMeta,
+        m15Bars: m15,
+        m5Bars: m5TrendMove(signalTimestamp, m15.at(-1)!.close),
+      });
+      expect(result.signals.filter((signal) => signal.pattern === "THREE_CANDLE_BODY_DOMINANCE")).toHaveLength(0);
+    }
   });
 
   it("moves SL to entry at +6 and closes one third at +10 while keeping the remainder", () => {

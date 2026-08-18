@@ -57,8 +57,10 @@ function replaceFunction(source, functionName, replacement) {
   const marker = `function ${functionName}(`;
   const start = source.indexOf(marker);
   if (start < 0) throw new Error(`Function ${functionName} not found.`);
-  const openBrace = source.indexOf("{", start);
-  if (openBrace < 0) throw new Error(`Opening brace for ${functionName} not found.`);
+  const tail = source.slice(start);
+  const bodyMatch = /\|\s*null\s*\{/.exec(tail);
+  if (!bodyMatch) throw new Error(`Function body for ${functionName} not found.`);
+  const openBrace = start + bodyMatch.index + bodyMatch[0].lastIndexOf("{");
   let depth = 0;
   let end = -1;
   for (let i = openBrace; i < source.length; i += 1) {

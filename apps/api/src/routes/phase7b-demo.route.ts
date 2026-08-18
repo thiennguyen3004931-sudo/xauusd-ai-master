@@ -330,7 +330,7 @@ function buildEntryDiagnostics(bars: M15Bar[], m5Bars: M15Bar[], brokerClockOffs
   const eligible = Boolean(pattern && supertrendAligned && validStructure);
   const stopDistance = validStructure && structuralStopDistance !== null ? clamp(structuralStopDistance, 6, 10) : null;
 
-  let reason = `Chưa có một trong 3 mô hình: Engulfing (sai số thân tối đa ${ENGULF_BODY_TOLERANCE_PRICE.toFixed(2)} giá), Two-candle hợp lệ, hoặc Three-candle A-B-C-D với B+C+D cùng màu và tổng thân B+C+D > thân A.`;
+  let reason = `Chưa có một trong 3 mô hình: Engulfing (sai số thân tối đa ${ENGULF_BODY_TOLERANCE_PRICE.toFixed(2)} giá), Two-candle hợp lệ, hoặc Three-candle A-B-C-D hợp lệ khi B+C < A và B+C+D > A.`;
   if (pattern && !supertrendAligned) {
     reason = `${pattern.side} pattern đã xuất hiện nhưng Supertrend M15/M5 10/3 chưa cùng hướng (M15=${m15Supertrend ?? "—"}, M5=${m5Supertrend ?? "—"}).`;
   } else if (pattern && supertrendAligned && !validStructure) {
@@ -400,77 +400,69 @@ function detectEntryPattern(
   index: number,
 ): { side: Phase7BSide; name: Phase7BPattern; extreme: number } | null {
   const current = bars[index]!;
-  const previous = bars[index - 1]!;
 
-  if (
-    isBearish(previous) &&
-    isBullish(current) &&
-    current.open <= previous.close + ENGULF_BODY_TOLERANCE_PRICE + 1e-9 &&
-    current.close + ENGULF_BODY_TOLERANCE_PRICE + 1e-9 >= previous.open
-  ) {
-    return { side: "BUY", name: "ENGULFING", extreme: current.low };
-  }
-  if (
-    isBullish(previous) &&
-    isBearish(current) &&
-    current.open + ENGULF_BODY_TOLERANCE_PRICE + 1e-9 >= previous.close &&
-    current.close <= previous.open + ENGULF_BODY_TOLERANCE_PRICE + 1e-9
-  ) {
-    return { side: "SELL", name: "ENGULFING", extreme: current.high };
-  }
+  // Pattern Rule V2 priority: THREE -> TWO -> ENGULFING.
+  if (index >= 3) {
+    const anchor = bars[index - 3]!;
+    const b = bars[index - 2]!;
+    const c = bars[index - 1]!;
+    const d = current;
+    const anchorBody = bodySize(anchor);
+    const bcBodyTotal = bodySize(b) + bodySize(c);
+    const bcdBodyTotal = bcBodyTotal + bodySize(d);
 
-  if (index < 2) return null;
-  const priorOpposite = bars[index - 2]!;
-  const first = bars[index - 1]!;
-  const priorBody = bodySize(priorOpposite);
-  const firstBody = bodySize(first);
-  const combinedBody = firstBody + bodySize(current);
-  const firstBodyStillSmaller = firstBody < priorBody;
-
-  if (
-    isBearish(priorOpposite) &&
-    isBullish(first) &&
-    isBullish(current) &&
-    firstBodyStillSmaller &&
-    combinedBody > priorBody
-  ) {
-    return { side: "BUY", name: "TWO_CANDLE_BODY_DOMINANCE", extreme: Math.min(priorOpposite.low, first.low, current.low) };
-  }
-  if (
-    isBullish(priorOpposite) &&
-    isBearish(first) &&
-    isBearish(current) &&
-    firstBodyStillSmaller &&
-    combinedBody > priorBody
-  ) {
-    return { side: "SELL", name: "TWO_CANDLE_BODY_DOMINANCE", extreme: Math.max(priorOpposite.high, first.high, current.high) };
+    if (
+      isBearish(anchor) && isBullish(b) && isBullish(c) && isBullish(d) &&
+      bcBodyTotal < anchorBody && bcdBodyTotal > anchorBody
+    ) {
+      return { side: "BUY", name: "THREE_CANDLE_BODY_DOMINANCE", extreme: Math.min(anchor.low, b.low, c.low, d.low) };
+    }
+    if (
+      isBullish(anchor) && isBearish(b) && isBearish(c) && isBearish(d) &&
+      bcBodyTotal < anchorBody && bcdBodyTotal > anchorBody
+    ) {
+      return { side: "SELL", name: "THREE_CANDLE_BODY_DOMINANCE", extreme: Math.max(anchor.high, b.high, c.high, d.high) };
+    }
   }
 
-  if (index < 3) return null;
-  const anchor = bars[index - 3]!;
-  const b = bars[index - 2]!;
-  const c = bars[index - 1]!;
-  const d = current;
-  const anchorBody = bodySize(anchor);
-  const threeBodyTotal = bodySize(b) + bodySize(c) + bodySize(d);
+  if (index >= 2) {
+    const anchor = bars[index - 2]!;
+    const b = bars[index - 1]!;
+    const c = current;
+    const anchorBody = bodySize(anchor);
+    const bBody = bodySize(b);
+    const bcBodyTotal = bBody + bodySize(c);
 
-  if (
-    isBearish(anchor) &&
-    isBullish(b) &&
-    isBullish(c) &&
-    isBullish(d) &&
-    threeBodyTotal > anchorBody
-  ) {
-    return { side: "BUY", name: "THREE_CANDLE_BODY_DOMINANCE", extreme: Math.min(anchor.low, b.low, c.low, d.low) };
+    if (
+      isBearish(anchor) && isBullish(b) && isBullish(c) &&
+      bBody < anchorBody && bcBodyTotal > anchorBody
+    ) {
+      return { side: "BUY", name: "TWO_CANDLE_BODY_DOMINANCE", extreme: Math.min(anchor.low, b.low, c.low) };
+    }
+    if (
+      isBullish(anchor) && isBearish(b) && isBearish(c) &&
+      bBody < anchorBody && bcBodyTotal > anchorBody
+    ) {
+      return { side: "SELL", name: "TWO_CANDLE_BODY_DOMINANCE", extreme: Math.max(anchor.high, b.high, c.high) };
+    }
   }
-  if (
-    isBullish(anchor) &&
-    isBearish(b) &&
-    isBearish(c) &&
-    isBearish(d) &&
-    threeBodyTotal > anchorBody
-  ) {
-    return { side: "SELL", name: "THREE_CANDLE_BODY_DOMINANCE", extreme: Math.max(anchor.high, b.high, c.high, d.high) };
+
+  if (index >= 1) {
+    const previous = bars[index - 1]!;
+    if (
+      isBearish(previous) && isBullish(current) &&
+      current.open <= previous.close + ENGULF_BODY_TOLERANCE_PRICE + 1e-9 &&
+      current.close + ENGULF_BODY_TOLERANCE_PRICE + 1e-9 >= previous.open
+    ) {
+      return { side: "BUY", name: "ENGULFING", extreme: current.low };
+    }
+    if (
+      isBullish(previous) && isBearish(current) &&
+      current.open + ENGULF_BODY_TOLERANCE_PRICE + 1e-9 >= previous.close &&
+      current.close <= previous.open + ENGULF_BODY_TOLERANCE_PRICE + 1e-9
+    ) {
+      return { side: "SELL", name: "ENGULFING", extreme: current.high };
+    }
   }
   return null;
 }

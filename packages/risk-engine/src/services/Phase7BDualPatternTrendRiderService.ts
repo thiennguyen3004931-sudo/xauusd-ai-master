@@ -197,7 +197,7 @@ export class Phase7BDualPatternTrendRiderService {
       "PHASE7B_STRATEGY=M15_TRIPLE_PATTERN_MA_FVG_STRUCTURE_RIDER",
       "PHASE7B_TRIGGER=ENGULFING_OR_TWO_OR_THREE_SAME_COLOR_BODY_DOMINANCE",
       "PHASE7B_TWO_CANDLE_RULE=FIRST_SAME_COLOR_BODY_LT_PREVIOUS_OPPOSITE_BODY_AND_SUM_TWO_GT_PREVIOUS_OPPOSITE_BODY",
-      "PHASE7B_THREE_CANDLE_RULE=A_OPPOSITE_BCD_SAME_COLOR_AND_BODY_B_PLUS_C_PLUS_D_GT_BODY_A",
+      "PHASE7B_THREE_CANDLE_RULE=A_OPPOSITE_BCD_SAME_COLOR_AND_BODY_B_PLUS_C_LT_BODY_A_AND_BODY_B_PLUS_C_PLUS_D_GT_BODY_A",
       "PHASE7B_MA_TREND=MANDATORY",
       "PHASE7B_FVG=MANDATORY_SAME_DIRECTION",
       "PHASE7B_INITIAL_SL=PRICE_DISTANCE_CLAMPED_6_TO_10",
@@ -429,85 +429,94 @@ function detectPattern(
   index: number,
 ): { side: Phase7Side; pattern: Phase7BPattern; patternExtreme: number } | null {
   const current = bars[index]!;
-  const previous = bars[index - 1]!;
-  const engulf = engulfingSide(previous, current);
-  if (engulf) {
-    return {
-      side: engulf,
-      pattern: "ENGULFING",
-      patternExtreme: engulf === "BUY" ? current.low : current.high,
-    };
+
+  // Pattern Rule V2 priority: THREE -> TWO -> ENGULFING.
+  // This prevents a shorter/less-specific pattern from consuming a longer valid pattern.
+  if (index >= 3) {
+    const anchor = bars[index - 3]!;
+    const b = bars[index - 2]!;
+    const c = bars[index - 1]!;
+    const d = current;
+    const anchorBody = bodySize(anchor);
+    const bcBodyTotal = bodySize(b) + bodySize(c);
+    const bcdBodyTotal = bcBodyTotal + bodySize(d);
+
+    if (
+      isBearish(anchor) &&
+      isBullish(b) &&
+      isBullish(c) &&
+      isBullish(d) &&
+      bcBodyTotal < anchorBody &&
+      bcdBodyTotal > anchorBody
+    ) {
+      return {
+        side: "BUY",
+        pattern: "THREE_CANDLE_BODY_DOMINANCE",
+        patternExtreme: Math.min(anchor.low, b.low, c.low, d.low),
+      };
+    }
+    if (
+      isBullish(anchor) &&
+      isBearish(b) &&
+      isBearish(c) &&
+      isBearish(d) &&
+      bcBodyTotal < anchorBody &&
+      bcdBodyTotal > anchorBody
+    ) {
+      return {
+        side: "SELL",
+        pattern: "THREE_CANDLE_BODY_DOMINANCE",
+        patternExtreme: Math.max(anchor.high, b.high, c.high, d.high),
+      };
+    }
   }
 
-  if (index < 2) return null;
-  const priorOpposite = bars[index - 2]!;
-  const first = bars[index - 1]!;
-  const second = current;
-  const priorBody = bodySize(priorOpposite);
-  const firstBody = bodySize(first);
-  const combinedBody = firstBody + bodySize(second);
-  const firstBodyStillSmaller = firstBody < priorBody;
+  if (index >= 2) {
+    const anchor = bars[index - 2]!;
+    const b = bars[index - 1]!;
+    const c = current;
+    const anchorBody = bodySize(anchor);
+    const bBody = bodySize(b);
+    const bcBodyTotal = bBody + bodySize(c);
 
-  if (
-    isBearish(priorOpposite) &&
-    isBullish(first) &&
-    isBullish(second) &&
-    firstBodyStillSmaller &&
-    combinedBody > priorBody
-  ) {
-    return {
-      side: "BUY",
-      pattern: "TWO_CANDLE_BODY_DOMINANCE",
-      patternExtreme: Math.min(priorOpposite.low, first.low, second.low),
-    };
-  }
-  if (
-    isBullish(priorOpposite) &&
-    isBearish(first) &&
-    isBearish(second) &&
-    firstBodyStillSmaller &&
-    combinedBody > priorBody
-  ) {
-    return {
-      side: "SELL",
-      pattern: "TWO_CANDLE_BODY_DOMINANCE",
-      patternExtreme: Math.max(priorOpposite.high, first.high, second.high),
-    };
+    if (
+      isBearish(anchor) &&
+      isBullish(b) &&
+      isBullish(c) &&
+      bBody < anchorBody &&
+      bcBodyTotal > anchorBody
+    ) {
+      return {
+        side: "BUY",
+        pattern: "TWO_CANDLE_BODY_DOMINANCE",
+        patternExtreme: Math.min(anchor.low, b.low, c.low),
+      };
+    }
+    if (
+      isBullish(anchor) &&
+      isBearish(b) &&
+      isBearish(c) &&
+      bBody < anchorBody &&
+      bcBodyTotal > anchorBody
+    ) {
+      return {
+        side: "SELL",
+        pattern: "TWO_CANDLE_BODY_DOMINANCE",
+        patternExtreme: Math.max(anchor.high, b.high, c.high),
+      };
+    }
   }
 
-  if (index < 3) return null;
-  const anchor = bars[index - 3]!;
-  const b = bars[index - 2]!;
-  const c = bars[index - 1]!;
-  const d = current;
-  const anchorBody = bodySize(anchor);
-  const threeBodyTotal = bodySize(b) + bodySize(c) + bodySize(d);
-
-  if (
-    isBearish(anchor) &&
-    isBullish(b) &&
-    isBullish(c) &&
-    isBullish(d) &&
-    threeBodyTotal > anchorBody
-  ) {
-    return {
-      side: "BUY",
-      pattern: "THREE_CANDLE_BODY_DOMINANCE",
-      patternExtreme: Math.min(anchor.low, b.low, c.low, d.low),
-    };
-  }
-  if (
-    isBullish(anchor) &&
-    isBearish(b) &&
-    isBearish(c) &&
-    isBearish(d) &&
-    threeBodyTotal > anchorBody
-  ) {
-    return {
-      side: "SELL",
-      pattern: "THREE_CANDLE_BODY_DOMINANCE",
-      patternExtreme: Math.max(anchor.high, b.high, c.high, d.high),
-    };
+  if (index >= 1) {
+    const previous = bars[index - 1]!;
+    const engulf = engulfingSide(previous, current);
+    if (engulf) {
+      return {
+        side: engulf,
+        pattern: "ENGULFING",
+        patternExtreme: engulf === "BUY" ? current.low : current.high,
+      };
+    }
   }
   return null;
 }
