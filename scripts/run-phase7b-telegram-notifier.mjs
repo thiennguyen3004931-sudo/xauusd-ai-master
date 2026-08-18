@@ -1,13 +1,29 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const token = requiredEnv("ZIQ_TELEGRAM_BOT_TOKEN");
-const chatId = requiredEnv("ZIQ_TELEGRAM_CHAT_ID");
+const fallbackToken = requiredEnv("ZIQ_TELEGRAM_BOT_TOKEN");
+const fallbackChatId = requiredEnv("ZIQ_TELEGRAM_CHAT_ID");
+
+const tradeToken =
+  process.env.ZIQ_TELEGRAM_TRADE_BOT_TOKEN?.trim() || fallbackToken;
+const tradeChatId =
+  process.env.ZIQ_TELEGRAM_TRADE_CHAT_ID?.trim() || fallbackChatId;
+
+const controlToken =
+  process.env.ZIQ_TELEGRAM_CONTROL_BOT_TOKEN?.trim() || fallbackToken;
+const controlChatId =
+  process.env.ZIQ_TELEGRAM_CONTROL_CHAT_ID?.trim() || fallbackChatId;
 const journalPath = requiredEnv("ZIQ_TELEGRAM_JOURNAL_PATH");
 const statePath = requiredEnv("ZIQ_TELEGRAM_STATE_PATH");
 const symbol = process.env.ZIQ_TELEGRAM_SYMBOL ?? "XAUUSD";
 const intervalMs = Math.max(1000, Number(process.env.ZIQ_TELEGRAM_INTERVAL_MS ?? "2000"));
-const messageThreadId = optionalNumber(process.env.ZIQ_TELEGRAM_MESSAGE_THREAD_ID);
+const tradeMessageThreadId = optionalNumber(
+  process.env.ZIQ_TELEGRAM_TRADE_MESSAGE_THREAD_ID ??
+    process.env.ZIQ_TELEGRAM_MESSAGE_THREAD_ID,
+);
+const controlMessageThreadId = optionalNumber(
+  process.env.ZIQ_TELEGRAM_CONTROL_MESSAGE_THREAD_ID,
+);
 const monitorUrl = process.env.ZIQ_TELEGRAM_MONITOR_URL?.trim() ?? "";
 const monitorApiBase = (process.env.ZIQ_TELEGRAM_MONITOR_API_URL?.trim() || "http://127.0.0.1:3711").replace(/\/$/, "");
 const sendStartup = /^(1|true|yes|on)$/i.test(process.env.ZIQ_TELEGRAM_SEND_STARTUP ?? "true");
@@ -37,6 +53,23 @@ const interestingEvents = new Set([
   "CYCLE_ERROR",
 ]);
 
+const systemAlertTypes = new Set([
+  "DEMO_GUARD_BLOCK",
+  "UNMANAGED_POSITION_PRESENT",
+  "UNEXPECTED_ADDITIONAL_POSITION",
+  "CYCLE_ERROR",
+]);
+
+const systemRecoveryQuietMs = Math.max(
+  30_000,
+  Number(
+    process.env.ZIQ_TELEGRAM_SYSTEM_RECOVERY_QUIET_MS ??
+      "30000",
+  ),
+);
+
+let nextSystemHealthCheckAt = 0;
+
 fs.mkdirSync(path.dirname(statePath), { recursive: true });
 if (!fs.existsSync(journalPath)) fs.writeFileSync(journalPath, "", "utf8");
 let state = loadState();
@@ -61,6 +94,7 @@ if (!state.initialized) {
     sent: 0,
     lastEventAt: null,
     trade: null,
+    systemAlerts: {},
   };
   saveState();
   if (sendStartup) {
@@ -85,6 +119,7 @@ console.log("PHASE7B_TELEGRAM_ORDER_PERMISSION=NONE_READ_ONLY_JOURNAL_AND_MONITO
 while (true) {
   try {
     await poll();
+    await reconcileSystemAlerts();
   } catch (error) {
     console.error(`PHASE7B_TELEGRAM_ERROR=${errorMessage(error)}`);
   }
@@ -120,10 +155,22 @@ async function poll() {
       const type = String(event.type ?? "");
       if (!interestingEvents.has(type)) continue;
 
+      const route = notificationRoute(type);
+
+      if (route === "control" && shouldSuppressSystemAlert(event)) {
+        continue;
+      }
+
       const enrichment = await buildEnrichment(event);
       const html = await formatEvent(event, enrichment);
       if (!html) continue;
-      await sendHtml(html);
+
+      await sendHtml(html, route);
+
+      if (route === "control") {
+        markSystemAlert(event);
+      }
+
       applyEventState(event, enrichment);
       state.sent += 1;
       state.lastEventAt = String(event.timestamp ?? new Date().toISOString());
@@ -275,6 +322,181 @@ async function formatEvent(event, enrichment) {
   }
 
   return null;
+}
+
+function notificationRoute(type) {
+  return systemAlertTypes.has(String(type ?? ""))
+    ? "control"
+    : "trade";
+}
+
+function systemAlertKey(event) {
+  const type = String(event?.type ?? "");
+
+  if (type === "CYCLE_ERROR") {
+    return "CYCLE_ERROR";
+  }
+
+  return type;
+}
+
+function shouldSuppressSystemAlert(event) {
+  const key = systemAlertKey(event);
+  state.systemAlerts ??= {};
+
+  const current = state.systemAlerts[key];
+  if (!current?.active) return false;
+
+  current.lastSeenAt = String(
+    event?.timestamp ?? new Date().toISOString(),
+  );
+  current.lastSeenAtMs = Date.now();
+  current.message = String(
+    event?.message ??
+      event?.reason ??
+      event?.type ??
+      current.message ??
+      "",
+  );
+
+  saveState();
+  return true;
+}
+
+function markSystemAlert(event) {
+  const key = systemAlertKey(event);
+  state.systemAlerts ??= {};
+
+  state.systemAlerts[key] = {
+    active: true,
+    type: String(event?.type ?? ""),
+    message: String(
+      event?.message ??
+        event?.reason ??
+        event?.type ??
+        "",
+    ),
+    startedAt: String(
+      event?.timestamp ?? new Date().toISOString(),
+    ),
+    lastSeenAt: String(
+      event?.timestamp ?? new Date().toISOString(),
+    ),
+    lastSeenAtMs: Date.now(),
+  };
+}
+
+async function reconcileSystemAlerts() {
+  state.systemAlerts ??= {};
+
+  const activeKeys = Object.keys(state.systemAlerts).filter(
+    (key) => state.systemAlerts[key]?.active,
+  );
+
+  if (activeKeys.length === 0) return;
+
+  const now = Date.now();
+  if (now < nextSystemHealthCheckAt) return;
+  nextSystemHealthCheckAt = now + 10_000;
+
+  const snapshot = await getDemoSnapshot();
+  if (!snapshot) return;
+
+  const mt5 = snapshot?.mt5 ?? {};
+  const health = mt5?.health ?? {};
+  const positions = Array.isArray(mt5?.positions)
+    ? mt5.positions
+    : [];
+
+  const demoGuardHealthy =
+    mt5?.reachable === true &&
+    health?.accountMode === "demo" &&
+    health?.connected === true &&
+    health?.tradingEnabled === true &&
+    health?.terminalTradeAllowed === true &&
+    health?.expertTradeAllowed === true;
+
+  const alertLastSeenMs = (key) => {
+    const alert = state.systemAlerts[key];
+    const numeric = Number(alert?.lastSeenAtMs);
+
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return numeric;
+    }
+
+    const parsed = Date.parse(
+      String(alert?.lastSeenAt ?? alert?.startedAt ?? ""),
+    );
+
+    return Number.isFinite(parsed) ? parsed : now;
+  };
+
+  const quietEnough = (key) =>
+    now - alertLastSeenMs(key) >= systemRecoveryQuietMs;
+
+  const recovered = [];
+
+  if (
+    state.systemAlerts.DEMO_GUARD_BLOCK?.active &&
+    quietEnough("DEMO_GUARD_BLOCK") &&
+    demoGuardHealthy
+  ) {
+    recovered.push([
+      "DEMO_GUARD_BLOCK",
+      "DEMO GUARD đã hoạt động bình thường trở lại",
+    ]);
+  }
+
+  if (
+    state.systemAlerts.CYCLE_ERROR?.active &&
+    quietEnough("CYCLE_ERROR") &&
+    mt5?.reachable === true
+  ) {
+    recovered.push([
+      "CYCLE_ERROR",
+      "Kết nối dữ liệu / MT5 đã phục hồi",
+    ]);
+  }
+
+  if (
+    state.systemAlerts.UNMANAGED_POSITION_PRESENT?.active &&
+    quietEnough("UNMANAGED_POSITION_PRESENT") &&
+    (positions.length === 0 || Boolean(mt5?.managedPosition))
+  ) {
+    recovered.push([
+      "UNMANAGED_POSITION_PRESENT",
+      "Không còn position ngoài quyền quản lý",
+    ]);
+  }
+
+  if (
+    state.systemAlerts.UNEXPECTED_ADDITIONAL_POSITION?.active &&
+    quietEnough("UNEXPECTED_ADDITIONAL_POSITION") &&
+    positions.length <= 1
+  ) {
+    recovered.push([
+      "UNEXPECTED_ADDITIONAL_POSITION",
+      "Số lượng position đã trở lại bình thường",
+    ]);
+  }
+
+  if (recovered.length === 0) return;
+
+  for (const [key, message] of recovered) {
+    await sendHtml(
+      [
+        "✅ <b>🔔 SYSTEM RECOVERED</b>",
+        "<b>" + esc(message) + "</b>",
+      ].join("\n"),
+      "control",
+    );
+
+    delete state.systemAlerts[key];
+    state.sent += 1;
+    state.lastEventAt = new Date().toISOString();
+  }
+
+  saveState();
 }
 
 function applyEventState(event, enrichment) {
@@ -444,42 +666,100 @@ function line(icon, label, raw) {
   return `${icon} <b>${esc(label)}:</b> <code>${esc(value(raw))}</code>`;
 }
 
-async function sendHtml(text) {
+async function sendHtml(text, route = "trade") {
+  const isControl = route === "control";
+
+  const targetToken = isControl
+    ? controlToken
+    : tradeToken;
+
+  const targetChatId = isControl
+    ? controlChatId
+    : tradeChatId;
+
+  const targetThreadId = isControl
+    ? controlMessageThreadId
+    : tradeMessageThreadId;
+
   const highContrastText = String(text)
     .replaceAll("<code>", "<b>")
     .replaceAll("</code>", "</b>");
+
   const payload = {
-    chat_id: chatId,
+    chat_id: targetChatId,
     text: highContrastText.slice(0, 4096),
     parse_mode: "HTML",
     link_preview_options: { is_disabled: true },
-    ...(messageThreadId === null ? {} : { message_thread_id: messageThreadId }),
-    ...(monitorUrl ? {
-      reply_markup: {
-        inline_keyboard: [[{ text: "📊 Mở Phase 7B Monitor", url: monitorUrl }]],
-      },
-    } : {}),
+    ...(targetThreadId === null
+      ? {}
+      : { message_thread_id: targetThreadId }),
+    ...(!isControl && monitorUrl
+      ? {
+          reply_markup: {
+            inline_keyboard: [[
+              {
+                text: "📊 Mở Phase 7B Monitor",
+                url: monitorUrl,
+              },
+            ]],
+          },
+        }
+      : {}),
   };
+
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8_000);
+  const timeout = setTimeout(
+    () => controller.abort(),
+    8_000,
+  );
+
   try {
-    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
+    const response = await fetch(
+      "https://api.telegram.org/bot" +
+        targetToken +
+        "/sendMessage",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      },
+    );
+
     const body = await response.text();
-    if (!response.ok) throw new Error(`Telegram sendMessage ${response.status}: ${body}`);
+
+    if (!response.ok) {
+      throw new Error(
+        "Telegram sendMessage " +
+          response.status +
+          ": " +
+          body,
+      );
+    }
+
     const parsed = JSON.parse(body);
-    if (!parsed.ok) throw new Error(`Telegram sendMessage failed: ${body}`);
+
+    if (!parsed.ok) {
+      throw new Error(
+        "Telegram sendMessage failed: " + body,
+      );
+    }
   } finally {
     clearTimeout(timeout);
   }
 }
-
 function loadState() {
-  const blank = { version: 2, initialized: false, offset: 0, sent: 0, lastEventAt: null, trade: null };
+  const blank = {
+    version: 2,
+    initialized: false,
+    offset: 0,
+    sent: 0,
+    lastEventAt: null,
+    trade: null,
+    systemAlerts: {},
+  };
   if (!fs.existsSync(statePath)) return blank;
   try {
     const parsed = JSON.parse(fs.readFileSync(statePath, "utf8").replace(/^\uFEFF/, ""));
@@ -490,6 +770,11 @@ function loadState() {
       sent: Number.isFinite(parsed.sent) ? parsed.sent : 0,
       lastEventAt: parsed.lastEventAt ?? null,
       trade: parsed.trade && typeof parsed.trade === "object" ? parsed.trade : null,
+      systemAlerts:
+        parsed.systemAlerts &&
+        typeof parsed.systemAlerts === "object"
+          ? parsed.systemAlerts
+          : {},
     };
   } catch {
     return blank;

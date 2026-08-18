@@ -1,8 +1,13 @@
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
-const token = requiredEnv("ZIQ_TELEGRAM_BOT_TOKEN");
-const chatId = requiredEnv("ZIQ_TELEGRAM_CHAT_ID");
+const fallbackToken = requiredEnv("ZIQ_TELEGRAM_BOT_TOKEN");
+const fallbackChatId = requiredEnv("ZIQ_TELEGRAM_CHAT_ID");
+
+const token =
+  process.env.ZIQ_TELEGRAM_CONTROL_BOT_TOKEN?.trim() || fallbackToken;
+const chatId =
+  process.env.ZIQ_TELEGRAM_CONTROL_CHAT_ID?.trim() || fallbackChatId;
 const apiBase = (process.env.ZIQ_PHASE7C_CONTROL_API_URL?.trim() || "http://127.0.0.1:3711").replace(/\/$/, "");
 const intervalMs = Math.max(1000, Number(process.env.ZIQ_PHASE7C_CONTROL_INTERVAL_MS ?? "1500"));
 const inheritedRuntimeState = process.env.ZIQ_PHASE7C_REGIME_STATE_FILE?.trim();

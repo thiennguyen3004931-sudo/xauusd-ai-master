@@ -1,8 +1,13 @@
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
-const token = requiredEnv("ZIQ_TELEGRAM_BOT_TOKEN");
-const chatId = requiredEnv("ZIQ_TELEGRAM_CHAT_ID");
+const fallbackToken = requiredEnv("ZIQ_TELEGRAM_BOT_TOKEN");
+const fallbackChatId = requiredEnv("ZIQ_TELEGRAM_CHAT_ID");
+
+const token =
+  process.env.ZIQ_TELEGRAM_CONTROL_BOT_TOKEN?.trim() || fallbackToken;
+const chatId =
+  process.env.ZIQ_TELEGRAM_CONTROL_CHAT_ID?.trim() || fallbackChatId;
 const apiBase = (process.env.ZIQ_PHASE7C_CONTROL_API_URL?.trim() || "http://127.0.0.1:3711").replace(/\/$/, "");
 const symbol = process.env.ZIQ_PHASE7C_REGIME_SYMBOL?.trim().toUpperCase() || "XAUUSD";
 const candleCount = clampInt(process.env.ZIQ_PHASE7C_REGIME_CANDLE_COUNT, 320, 220, 1000);
@@ -169,7 +174,6 @@ async function sendTelegram(snapshot, reason) {
       text: formatMessage(snapshot, reason),
       parse_mode: "HTML",
       disable_web_page_preview: true,
-      reply_markup: keyboard(snapshot.activeMode),
     }),
   });
   const payload = await response.json();
@@ -224,7 +228,7 @@ function formatMessage(snapshot, reason) {
     recommendationText(recommended),
     `Trigger: ${escapeHtml(reason)}`,
     "",
-    "Chọn mode bên dưới. Panel chỉ đổi quyền mở lệnh mới; không gửi lệnh MT5 trực tiếp.",
+    "🎛 Đổi mode tại khung BOT MODE riêng bằng /mode hoặc /bots.",
   );
 
   return lines.join("\n");
