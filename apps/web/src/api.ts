@@ -11,6 +11,8 @@ import type {
   Phase7CAccountRiskSnapshot,
   Phase7CBacktestRequest,
   Phase7CBacktestResult,
+  Phase7CDailyRecoverySnapshot,
+  Phase7CLiveRegimeSnapshot,
 } from "./phase7c-types";
 import type { Phase7CForwardRangeResult } from "./phase7c-forward-types";
 import type { Phase7CAutoLotPreview } from "./phase7c-autolot-types";
@@ -116,6 +118,26 @@ export async function getMt5Performance(
 export async function getPhase7BDemo(): Promise<Phase7BDemoSnapshot> {
   return read<Phase7BDemoSnapshot>(
     await fetch(`${API_BASE}/api/v1/phase7b-demo`, { cache: "no-store" }),
+  );
+}
+
+export async function getPhase7CLiveRegime(): Promise<Phase7CLiveRegimeSnapshot> {
+  return read<Phase7CLiveRegimeSnapshot>(
+    await fetch(
+      `${API_BASE}/api/v1/phase7c/live-regime?symbol=XAUUSD`,
+      { cache: "no-store" },
+    ),
+  );
+}
+
+export async function getPhase7CDailyRecovery(
+  volume = 0.03,
+): Promise<Phase7CDailyRecoverySnapshot> {
+  return read<Phase7CDailyRecoverySnapshot>(
+    await fetch(
+      `${API_BASE}/api/v1/phase7c/daily-recovery?symbol=XAUUSD&volume=${encodeURIComponent(volume)}`,
+      { cache: "no-store" },
+    ),
   );
 }
 

@@ -166,6 +166,70 @@ export interface Phase7CAccountRiskSnapshot {
   }>;
 }
 
+export type Phase7CBotExecutionMode =
+  | "AUTO"
+  | "TREND"
+  | "SIDEWAY"
+  | "PAUSE";
+
+export interface Phase7CLiveRegimeSnapshot {
+  symbol: string;
+  timeframe: string;
+  regime: string;
+  confidence: number;
+  recommendedMode:
+    | "TREND"
+    | "SIDEWAY"
+    | "PAUSE";
+  activeMode: Phase7CBotExecutionMode;
+  modeMatchesRecommendation: boolean;
+  reasons: string[];
+  lastCandleCloseTime: number;
+  checkedAt: number;
+}
+
+export interface Phase7CDailyRecoverySnapshot {
+  source: "MT5_DEMO_READ_ONLY";
+  readOnly: true;
+  generatedAt: number;
+  symbol: string;
+  dayStartTime: number;
+  historyEndTime: number;
+  dealCount: number;
+  dailyNetPnl: number;
+  dailyMode:
+    | "NORMAL"
+    | "RECOVERY_TP";
+  nextEntryManagement:
+    | "REGIME_NATIVE"
+    | "FULL_POSITION_ADAPTIVE_TP_6_TO_10";
+  preview: {
+    volume: number;
+    cashPerPriceUnitPerLot:
+      | number
+      | null;
+    requiredUsd: number;
+    rawTpDistance:
+      | number
+      | null;
+    tpDistance:
+      | number
+      | null;
+    canRecoverInOneTrade: boolean;
+  };
+  strategy: {
+    trendMagicNumber: number;
+    sidewayMagicNumber: number;
+    targetNetUsd: number;
+    minTpDistance: number;
+    maxTpDistance: number;
+    lotEscalation: false;
+    forcedEntry: false;
+    forceRegime: false;
+    newPositionsOnly: true;
+  };
+}
+
 export interface Phase7CBacktestRequest {
   from: string;
   to: string;

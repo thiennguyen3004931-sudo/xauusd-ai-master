@@ -16,6 +16,7 @@ import {
   phase7CBotModeService,
 } from "../services/phase7c-bot-mode.service";
 import { getPhase7CLiveRegime } from "../services/phase7c-live-regime.service";
+import { getPhase7CDailyRecoveryView } from "../services/phase7c-daily-recovery-view.service";
 
 const router = Router();
 
@@ -78,6 +79,34 @@ router.get("/live-regime", async (req: Request, res: Response) => {
   } catch (error) {
     res.status(503).json({
       error: error instanceof Error ? error.message : "Phase 7C live regime detection failed.",
+    });
+  }
+});
+
+router.get("/daily-recovery", async (req: Request, res: Response) => {
+  try {
+    const symbol = String(
+      req.query.symbol ?? "XAUUSD",
+    )
+      .trim()
+      .toUpperCase();
+
+    const volume = Number(
+      req.query.volume ?? 0.03,
+    );
+
+    res.json(
+      await getPhase7CDailyRecoveryView(
+        symbol || "XAUUSD",
+        volume,
+      ),
+    );
+  } catch (error) {
+    res.status(503).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : "Phase 7C Daily Recovery view failed.",
     });
   }
 });
