@@ -163,7 +163,7 @@ async function cycle(): Promise<void> {
         ? pending.structuralStopPrice + pending.structuralStopDistanceAtSignal
         : pending.structuralStopPrice - pending.structuralStopDistanceAtSignal,
       structuralStopPrice: pending.structuralStopPrice,
-    }, marketEntry, spec, m15, m15Index, "PULLBACK_ENTRY");
+    }, marketEntry, quote, spec, m15, m15Index, "PULLBACK_ENTRY");
 
     if (submit !== "BROKER_GAP_WAIT") {
       state.pendingPullback = null;
@@ -236,12 +236,13 @@ async function cycle(): Promise<void> {
     structuralStopPrice: signal.structuralStopPrice,
     structuralStopDistance: decision.structuralStopDistance,
   });
-  await submitEntry(signal, marketEntry, spec, m15, m15Index, "ENTRY_IMMEDIATE");
+  await submitEntry(signal, marketEntry, quote, spec, m15, m15Index, "ENTRY_IMMEDIATE");
 }
 
 async function submitEntry(
   signal: EntrySignal,
   marketEntry: number,
+  quote: Quote,
   spec: SymbolSpec,
   m15: Phase7Bar[],
   m15Index: number,
@@ -263,6 +264,24 @@ async function submitEntry(
     return entryState === "PULLBACK_ENTRY" ? "BROKER_GAP_WAIT" : "REJECTED";
   }
 
+  const dailyRecovery =
+    await resolveDailyRecoveryPlan(
+      quote,
+      spec,
+    );
+
+  const takeProfit =
+    dailyRecovery.mode === "RECOVERY_TP"
+      ? roundPrice(
+          signal.side === "BUY"
+            ? marketEntry +
+              dailyRecovery.tpDistance
+            : marketEntry -
+              dailyRecovery.tpDistance,
+          spec.digits,
+        )
+      : 0;
+
   const fvgConfirmedAtEntry = hasRelevantFvg(m15, m15Index, signal.side, 12);
   const orderId = `p7b-${entryState === "PULLBACK_ENTRY" ? "pb" : "im"}-${signal.signalTimestamp}-${signal.side}`;
   journal("ENTRY_SUBMIT", {
@@ -278,6 +297,17 @@ async function submitEntry(
     entryRule: "3_PATTERNS_PLUS_SUPERTREND_M15_M5_10_3",
     fvgConfirmedAtEntry,
     fvgRequiredForEntry: false,
+    dailyMode: dailyRecovery.mode,
+    dailyNetPnl: dailyRecovery.dailyNetPnl,
+    recoveryTargetNetPnl:
+      dailyRecovery.targetNetPnl,
+    recoveryTpDistance:
+      dailyRecovery.tpDistance,
+    recoveryTakeProfit: takeProfit,
+    recoveryCanRecoverInOneTrade:
+      dailyRecovery.canRecoverInOneTrade,
+    recoveryDealCount:
+      dailyRecovery.dealCount,
   });
 
   const order = await post<OrderResponse>("/v1/orders", {
@@ -288,7 +318,7 @@ async function submitEntry(
     volume: fixedVolume,
     requestedPrice: marketEntry,
     stopLoss,
-    takeProfit: 0,
+    takeProfit,
     deviationPoints,
     magicNumber,
     comment: entryState === "PULLBACK_ENTRY" ? "phase7b-pullback" : "phase7b-immediate",
@@ -331,6 +361,17 @@ async function submitEntry(
     partialAttempt: 0,
     exitAttempt: 0,
     structureAttempt: 0,
+    dailyMode: dailyRecovery.mode,
+    dailyNetPnlAtEntry:
+      dailyRecovery.dailyNetPnl,
+    recoveryTargetNetPnl:
+      dailyRecovery.targetNetPnl,
+    recoveryTpDistance:
+      dailyRecovery.tpDistance,
+    recoveryTakeProfit:
+      takeProfit,
+    recoveryDayStartTime:
+      dailyRecovery.dayStartTime,
   };
   saveState();
   journal("ENTRY_FILLED", {
@@ -340,8 +381,149 @@ async function submitEntry(
     position: opened,
     fillPrice: order.fillPrice,
     fvgConfirmedAtEntry,
+    dailyMode: dailyRecovery.mode,
+    dailyNetPnlAtEntry:
+      dailyRecovery.dailyNetPnl,
+    recoveryTargetNetPnl:
+      dailyRecovery.targetNetPnl,
+    recoveryTpDistance:
+      dailyRecovery.tpDistance,
+    recoveryTakeProfit:
+      takeProfit,
+    recoveryCanRecoverInOneTrade:
+      dailyRecovery.canRecoverInOneTrade,
   });
   return "FILLED";
+}
+
+
+async function resolveDailyRecoveryPlan(
+  quote: Quote,
+  spec: SymbolSpec,
+): Promise<DailyRecoveryPlan> {
+  const boundary =
+    await get<TradingDayBoundary>(
+      `/v1/session/day-boundary/${encodeURIComponent(symbol)}`,
+    );
+
+  const dayStartTime =
+    Number(boundary.currentStartTime);
+
+  const historyEndTime =
+    Number(quote.timestamp);
+
+  if (
+    !Number.isFinite(dayStartTime) ||
+    dayStartTime <= 0 ||
+    !Number.isFinite(historyEndTime) ||
+    historyEndTime <= dayStartTime
+  ) {
+    throw new Error(
+      "Daily recovery broker day boundary is invalid.",
+    );
+  }
+
+  const deals =
+    await get<DealHistoryRow[]>(
+      `/v1/history/deals?fromMs=${dayStartTime}&toMs=${historyEndTime}&symbol=${encodeURIComponent(symbol)}`,
+    );
+
+  const botDeals = deals.filter(
+    (deal) =>
+      deal.isTradingDeal === true &&
+      dailyBotMagicNumbers.has(
+        Number(deal.magic),
+      ),
+  );
+
+  const dailyNetPnl =
+    botDeals.reduce(
+      (sum, deal) =>
+        sum +
+        Number(deal.netPnl || 0),
+      0,
+    );
+
+  if (dailyNetPnl >= 0) {
+    return {
+      mode: "TREND",
+      dayStartTime,
+      dailyNetPnl:
+        roundValue(dailyNetPnl, 4),
+      targetNetPnl:
+        DAILY_RECOVERY_TARGET_NET_USD,
+      requiredUsd: 0,
+      rawTpDistance: 0,
+      tpDistance: 0,
+      canRecoverInOneTrade: true,
+      dealCount: botDeals.length,
+    };
+  }
+
+  const cashPerPriceUnitPerLot =
+    Number(
+      spec.cashPerPriceUnitPerLot,
+    ) > 0
+      ? Number(
+          spec.cashPerPriceUnitPerLot,
+        )
+      : spec.tickSize > 0 &&
+          spec.effectiveTickValuePerLot > 0
+        ? spec.effectiveTickValuePerLot /
+          spec.tickSize
+        : 0;
+
+  if (!(cashPerPriceUnitPerLot > 0)) {
+    throw new Error(
+      "Daily recovery cannot determine cash per price unit per lot.",
+    );
+  }
+
+  const cashPerPriceUnit =
+    cashPerPriceUnitPerLot *
+    fixedVolume;
+
+  if (!(cashPerPriceUnit > 0)) {
+    throw new Error(
+      "Daily recovery cash value is invalid.",
+    );
+  }
+
+  const requiredUsd =
+    Math.abs(dailyNetPnl) +
+    DAILY_RECOVERY_TARGET_NET_USD;
+
+  const rawTpDistance =
+    requiredUsd /
+    cashPerPriceUnit;
+
+  const tpDistance = Math.min(
+    DAILY_RECOVERY_MAX_TP_DISTANCE,
+    Math.max(
+      DAILY_RECOVERY_MIN_TP_DISTANCE,
+      rawTpDistance,
+    ),
+  );
+
+  return {
+    mode: "RECOVERY_TP",
+    dayStartTime,
+    dailyNetPnl:
+      roundValue(dailyNetPnl, 4),
+    targetNetPnl:
+      DAILY_RECOVERY_TARGET_NET_USD,
+    requiredUsd:
+      roundValue(requiredUsd, 4),
+    rawTpDistance:
+      roundValue(rawTpDistance, 5),
+    tpDistance:
+      roundValue(tpDistance, 5),
+    canRecoverInOneTrade:
+      rawTpDistance <=
+      DAILY_RECOVERY_MAX_TP_DISTANCE +
+        1e-9,
+    dealCount: botDeals.length,
+  };
 }
 
 function entrySignalAt(m15: Phase7Bar[], m5: Phase7Bar[], m15Index: number): EntrySignal | null {

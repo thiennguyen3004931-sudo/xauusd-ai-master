@@ -16,7 +16,9 @@ if (!fs.existsSync(templatePath)) {
   process.exit(1);
 }
 
-let source = fs.readFileSync(target, "utf8");
+const sourceRaw = fs.readFileSync(target, "utf8");
+const sourceUsesCrLf = sourceRaw.includes("\r\n");
+let source = sourceRaw.replace(/\r\n/g, "\n");
 if (
   source.includes("PHASE7B_DEMO_STRUCTURAL_SL_GT_10=WAIT_PULLBACK") &&
   source.includes("Phase7BPullbackEntryService") &&
@@ -55,10 +57,32 @@ replaceOnce(
   "entry constants",
 );
 
-replaceOnce(
-  /if \(!\[fixedVolume, intervalSeconds, magicNumber, deviationPoints\]\.every\(\(value\) => Number\.isFinite\(value\) && value > 0\)\) \{/,
-  `if (![fixedVolume, intervalSeconds, magicNumber, deviationPoints, pullbackWaitMinutes].every((value) => Number.isFinite(value) && value > 0)) {`,
-  "numeric config validation",
+const numericConfigCandidates = [
+  "if (![fixedVolume, intervalSeconds, magicNumber, deviationPoints].every((value) => Number.isFinite(value) && value > 0)) {",
+  "if (![fixedVolume, intervalSeconds, magicNumber, sidewayMagicNumber, deviationPoints].every((value) => Number.isFinite(value) && value > 0)) {",
+];
+
+const numericConfigValidation =
+  numericConfigCandidates.find(
+    (candidate) =>
+      source.includes(candidate),
+  );
+
+if (!numericConfigValidation) {
+  throw new Error(
+    "Patch anchor not found: numeric config validation",
+  );
+}
+
+const numericConfigWithPullback =
+  numericConfigValidation.replace(
+    "deviationPoints]",
+    "deviationPoints, pullbackWaitMinutes]",
+  );
+
+source = source.replace(
+  numericConfigValidation,
+  numericConfigWithPullback,
 );
 
 replaceOnce(
@@ -82,7 +106,10 @@ const entryEnd = source.indexOf("async function managePosition(");
 if (entryStart < 0 || entryEnd < 0 || entryEnd <= entryStart) {
   throw new Error("Patch anchors not found for Phase 7B entry subsystem.");
 }
-const entrySubsystem = fs.readFileSync(templatePath, "utf8").trimEnd() + "\n\n";
+const entrySubsystem = fs
+  .readFileSync(templatePath, "utf8")
+  .replace(/\r\n/g, "\n")
+  .trimEnd() + "\n\n";
 source = source.slice(0, entryStart) + entrySubsystem + source.slice(entryEnd);
 
 const stateStart = source.indexOf("function loadState(file: string): BotState {");
@@ -102,6 +129,10 @@ const requiredAssertions = [
   "ORIGINAL_PATTERN_EXTREME_FIXED",
   "PULLBACK_STILL_TOO_WIDE",
   "PULLBACK_ENTRY",
+  "resolveDailyRecoveryPlan",
+  "dailyBotMagicNumbers",
+  "recoveryTpDistance",
+  "recoveryTakeProfit",
 ];
 for (const marker of requiredAssertions) {
   if (!source.includes(marker)) throw new Error(`Post-patch assertion failed: ${marker}`);
@@ -116,7 +147,11 @@ if (source.includes("Math.min(10, Math.max(6")) {
   throw new Error("Post-patch assertion failed: legacy 6-to-10 stop clamp remains.");
 }
 
-fs.writeFileSync(target, source, "utf8");
+const output = sourceUsesCrLf
+  ? source.replace(/\n/g, "\r\n")
+  : source;
+
+fs.writeFileSync(target, output, "utf8");
 console.log(`Phase 7B WAIT_PULLBACK demo-controller hook applied: ${target}`);
 console.log(`Backup: ${backup}`);
 console.log("ENTRY_GATE=3_PATTERNS_PLUS_SUPERTREND_M15_M5_10_3");
