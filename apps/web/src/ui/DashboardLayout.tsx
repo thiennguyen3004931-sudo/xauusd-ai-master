@@ -16,6 +16,7 @@ import {
 import SmartToyRounded from "@mui/icons-material/SmartToyRounded";
 import CandlestickChartRounded from "@mui/icons-material/CandlestickChartRounded";
 import PowerSettingsNewRounded from "@mui/icons-material/PowerSettingsNewRounded";
+import TuneRounded from "@mui/icons-material/TuneRounded";
 import InsightsRounded from "@mui/icons-material/InsightsRounded";
 import DnsRounded from "@mui/icons-material/DnsRounded";
 import MenuRounded from "@mui/icons-material/MenuRounded";
@@ -30,6 +31,7 @@ const links: readonly LinkRow[] = [
   ["/", "Theo dõi giao dịch", SmartToyRounded],
   ["/phase7b-pattern-check", "Điều kiện vào lệnh", CandlestickChartRounded],
   ["/phase7b-ops", "Bot & Telegram", PowerSettingsNewRounded],
+  ["/phase7c-control-center", "AUTO & Recovery", TuneRounded],
   ["/performance", "Hiệu suất", InsightsRounded],
   ["/system", "Trạng thái hệ thống", DnsRounded],
 ] as const;
@@ -98,6 +100,9 @@ export function DashboardLayout() {
   } else if (location.pathname.startsWith("/phase7b-ops")) {
     headerTitle = "Điều khiển Bot & Telegram";
     headerSubtitle = "Bật / dừng Bot DEMO · bật / tắt / kiểm tra thông báo Telegram";
+  } else if (location.pathname.startsWith("/phase7c-control-center")) {
+    headerTitle = "AUTO Regime & Daily Recovery";
+    headerSubtitle = "AUTO Trend / Sideway / Pause · P/L đã chốt · kế hoạch Recovery TP cho lệnh hợp lệ kế tiếp";
   } else if (location.pathname.startsWith("/performance")) {
     headerTitle = "Hiệu suất giao dịch DEMO";
     headerSubtitle = "Kết quả giao dịch XAUUSD do hệ thống thực hiện";
