@@ -157,10 +157,10 @@ export function Phase7BOpsPage() {
   return (
     <Stack spacing={2.5}>
       <Box>
-        <Typography variant="overline" color="primary" fontWeight={900}>ĐIỀU KHIỂN DEMO</Typography>
-        <Typography variant="h4" fontWeight={950}>Điều khiển Bot & Telegram</Typography>
+        <Typography variant="overline" color="primary" fontWeight={900}>VẬN HÀNH DEMO</Typography>
+        <Typography variant="h4" fontWeight={950}>Hệ thống & Telegram</Typography>
         <Typography variant="body2" color="text.secondary" mt={0.7}>
-          Chỉ điều khiển tiến trình trên máy local này. Tài khoản thật luôn bị khóa.
+          Một màn hình cho Bot DEMO, Telegram và MT5 Bridge. Tài khoản thật luôn bị khóa.
         </Typography>
       </Box>
 

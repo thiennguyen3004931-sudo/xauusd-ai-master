@@ -31,6 +31,7 @@ export interface Mt5PerformanceTrade {
   symbol: string;
   side: "BUY" | "SELL";
   ownership: "SYSTEM" | "VALIDATION" | "OTHER";
+  strategy: "TREND" | "SIDEWAY" | "OTHER";
   openedAt: number;
   closedAt: number;
   durationMinutes: number;
@@ -90,6 +91,7 @@ export interface Mt5PerformanceSnapshot {
   };
   trades: Mt5PerformanceTrade[];
   breakdown: {
+    strategy: Mt5PerformanceBucket[];
     side: Mt5PerformanceBucket[];
     session: Mt5PerformanceBucket[];
     weekday: Mt5PerformanceBucket[];
@@ -120,12 +122,57 @@ function validationComment(comment: string): boolean {
   return value.includes("gate2") || value.includes("gate3");
 }
 
+function strategyOf(
+  opening: Mt5BridgeDeal,
+  trendMagic: number,
+  sidewayMagic: number,
+): Mt5PerformanceTrade["strategy"] {
+  const magic = Number(opening.magic);
+
+  if (magic === sidewayMagic) return "SIDEWAY";
+  if (magic === trendMagic) return "TREND";
+
+  const comment =
+    String(opening.comment ?? "")
+      .toLowerCase();
+
+  if (
+    comment.includes("phase7c-sideway") ||
+    comment.includes("p7c-sideway")
+  ) {
+    return "SIDEWAY";
+  }
+
+  if (
+    comment.includes("phase7b-demo") ||
+    comment.includes("p7b-")
+  ) {
+    return "TREND";
+  }
+
+  return "OTHER";
+}
+
 function ownershipOf(
   opening: Mt5BridgeDeal,
-  systemMagic: number,
+  trendMagic: number,
+  sidewayMagic: number,
 ): Mt5PerformanceTrade["ownership"] {
-  if (validationComment(opening.comment ?? "")) return "VALIDATION";
-  return opening.magic === systemMagic ? "SYSTEM" : "OTHER";
+  if (
+    validationComment(
+      opening.comment ?? "",
+    )
+  ) {
+    return "VALIDATION";
+  }
+
+  return strategyOf(
+    opening,
+    trendMagic,
+    sidewayMagic,
+  ) === "OTHER"
+    ? "OTHER"
+    : "SYSTEM";
 }
 
 function sessionFromHour(hour: number): string {
@@ -138,7 +185,8 @@ function sessionFromHour(hour: number): string {
 
 function reconstructTrades(
   deals: readonly Mt5BridgeDeal[],
-  systemMagic: number,
+  trendMagic: number,
+  sidewayMagic: number,
 ): Mt5PerformanceTrade[] {
   const groups = new Map<string, Mt5BridgeDeal[]>();
 
@@ -170,12 +218,22 @@ function reconstructTrades(
     const netPnl = group.reduce((sum, deal) => sum + deal.netPnl, 0);
     const hour = new Date(firstOpen.timestamp).getUTCHours();
     const day = new Date(firstOpen.timestamp).getUTCDay();
+    const strategy = strategyOf(
+      firstOpen,
+      trendMagic,
+      sidewayMagic,
+    );
 
     trades.push({
       id: `mt5-${positionId}`,
       symbol: firstOpen.symbol || "XAUUSD",
       side: firstOpen.side,
-      ownership: ownershipOf(firstOpen, systemMagic),
+      ownership: ownershipOf(
+        firstOpen,
+        trendMagic,
+        sidewayMagic,
+      ),
+      strategy,
       openedAt: firstOpen.timestamp,
       closedAt: lastClose.timestamp,
       durationMinutes: round(Math.max(0, lastClose.timestamp - firstOpen.timestamp) / 60_000, 1),
@@ -385,14 +443,45 @@ export async function getMt5PerformanceSnapshot(
     await getMt5DealHistory(fromMs, brokerNow, normalizedSymbol)
   ).filter((deal) => deal.isTradingDeal && deal.symbol === normalizedSymbol);
 
-  const systemMagic = Number(
-    process.env.MT5_MAGIC_NUMBER ?? defaultMt5BrokerConfig.magicNumber,
+  const trendMagic = Number(
+    process.env.MT5_MAGIC_NUMBER ??
+      defaultMt5BrokerConfig.magicNumber,
   );
-  if (!Number.isInteger(systemMagic) || systemMagic <= 0) {
-    throw new Error("Configured system magic is invalid.");
+
+  const sidewayMagic = Number(
+    process.env.ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER ??
+      270714,
+  );
+
+  if (
+    !Number.isInteger(trendMagic) ||
+    trendMagic <= 0
+  ) {
+    throw new Error(
+      "Configured Trend magic is invalid.",
+    );
   }
 
-  const trades = reconstructTrades(deals, systemMagic);
+  if (
+    !Number.isInteger(sidewayMagic) ||
+    sidewayMagic <= 0
+  ) {
+    throw new Error(
+      "Configured Sideway magic is invalid.",
+    );
+  }
+
+  if (trendMagic === sidewayMagic) {
+    throw new Error(
+      "Trend and Sideway magic numbers must be distinct.",
+    );
+  }
+
+  const trades = reconstructTrades(
+    deals,
+    trendMagic,
+    sidewayMagic,
+  );
   const currentBalance = telemetry.health.accountBalance;
   const accountWindowPnl = trades.reduce((sum, trade) => sum + trade.netPnl, 0);
   const startingBalance =
@@ -434,12 +523,36 @@ export async function getMt5PerformanceSnapshot(
       session: bucket(trades, (trade) => trade.session),
       weekday: bucket(trades, (trade) => trade.weekday),
       hour: bucket(trades, (trade) => `${String(trade.brokerHour).padStart(2, "0")}:00`),
+      strategy: (["TREND", "SIDEWAY"] as const).map(
+        (strategy) => {
+          const metrics =
+            calculateMetrics(
+              systemTrades.filter(
+                (trade) =>
+                  trade.strategy === strategy,
+              ),
+            );
+
+          return {
+            key: strategy,
+            label: strategy,
+            totalTrades:
+              metrics.totalTrades,
+            netPnl:
+              metrics.netPnl,
+            winRatePercent:
+              metrics.winRatePercent,
+            profitFactor:
+              metrics.profitFactor,
+          };
+        },
+      ),
       ownership: bucket(trades, (trade) => trade.ownership),
     },
     recommendations: recommendations(systemTrades),
     notes: [
       "Account-wide metrics may include manual/external/validation trades.",
-      `SYSTEM ownership uses configured magic ${systemMagic}.`,
+      `SYSTEM ownership uses Trend magic ${trendMagic} and Sideway magic ${sidewayMagic}.`,
       "Phase 7B forward review waits for at least 30 closed system-owned trades before recommendations are considered sample-ready.",
       "Bridge trading may be enabled for the separate Phase 7B DEMO controller; this analytics endpoint remains read-only.",
       "Recommendations are advisory only; no strategy parameter is changed automatically.",

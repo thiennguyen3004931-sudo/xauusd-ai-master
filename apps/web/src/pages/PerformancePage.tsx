@@ -63,7 +63,7 @@ function MetricGrid({ metrics, currency }: { metrics: Mt5PerformanceMetrics; cur
   );
 }
 
-function BreakdownTable({ title, rows, currency }: { title: string; rows: Mt5PerformanceBucket[]; currency: string }) {
+function BreakdownTable({ title, rows, currency, minimumSample }: { title: string; rows: Mt5PerformanceBucket[]; currency: string; minimumSample?: number }) {
   return (
     <Card sx={{ height: "100%" }}>
       <CardContent>
@@ -77,6 +77,7 @@ function BreakdownTable({ title, rows, currency }: { title: string; rows: Mt5Per
                 <TableCell align="right">Tỷ lệ thắng</TableCell>
                 <TableCell align="right">Lãi/lỗ</TableCell>
                 <TableCell align="right">PF</TableCell>
+                {minimumSample !== undefined ? <TableCell align="right">Mẫu</TableCell> : null}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -87,6 +88,20 @@ function BreakdownTable({ title, rows, currency }: { title: string; rows: Mt5Per
                   <TableCell align="right">{row.winRatePercent.toFixed(1)}%</TableCell>
                   <TableCell align="right" sx={{ color: row.netPnl >= 0 ? "success.main" : "error.main" }}>{money(row.netPnl, currency)}</TableCell>
                   <TableCell align="right">{pf(row.profitFactor)}</TableCell>
+                  {minimumSample !== undefined ? (
+                    <TableCell align="right">
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        color={row.totalTrades >= minimumSample ? "success" : "warning"}
+                        label={
+                          row.totalTrades >= minimumSample
+                            ? "ĐỦ MẪU"
+                            : `${row.totalTrades}/${minimumSample}`
+                        }
+                      />
+                    </TableCell>
+                  ) : null}
                 </TableRow>
               ))}
             </TableBody>
@@ -117,9 +132,9 @@ export function PerformancePage() {
         <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2}>
           <Box>
             <Typography variant="overline" color="primary" fontWeight={800}>MT5 DEMO · CHỈ ĐỌC</Typography>
-            <Typography variant="h5" fontWeight={800}>Hiệu suất giao dịch DEMO</Typography>
+            <Typography variant="h5" fontWeight={800}>Hiệu suất chiến lược</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              Lịch sử deal MT5. Phần toàn tài khoản dùng để theo dõi tài khoản; phần lệnh của hệ thống dùng để đánh giá Bot.
+              Lịch sử deal MT5 read-only. Tách riêng hiệu quả TREND, SIDEWAY, hướng BUY/SELL và phiên giao dịch để đánh giá Bot.
             </Typography>
           </Box>
 
@@ -154,6 +169,7 @@ export function PerformancePage() {
       <MetricGrid metrics={system} currency={data.currency} />
 
       <Grid container spacing={2}>
+        <Grid size={{ xs: 12, xl: 6 }}><BreakdownTable title="Theo chiến lược TREND / SIDEWAY" rows={data.breakdown.strategy} currency={data.currency} minimumSample={data.systemOwned.minimumRecommendationSample} /></Grid>
         <Grid size={{ xs: 12, xl: 6 }}><BreakdownTable title="So sánh MUA và BÁN" rows={data.breakdown.side} currency={data.currency} /></Grid>
         <Grid size={{ xs: 12, xl: 6 }}><BreakdownTable title="Theo phiên giao dịch" rows={data.breakdown.session} currency={data.currency} /></Grid>
         <Grid size={{ xs: 12, xl: 6 }}><BreakdownTable title="Theo ngày trong tuần" rows={data.breakdown.weekday} currency={data.currency} /></Grid>
@@ -184,6 +200,7 @@ export function PerformancePage() {
                 <TableRow>
                   <TableCell>Thời điểm đóng</TableCell>
                   <TableCell>Hướng</TableCell>
+                  <TableCell>Chiến lược</TableCell>
                   <TableCell>Nguồn</TableCell>
                   <TableCell>Phiên</TableCell>
                   <TableCell align="right">Lot</TableCell>
@@ -198,6 +215,7 @@ export function PerformancePage() {
                   <TableRow key={trade.id}>
                     <TableCell>{dateTime(trade.closedAt)}</TableCell>
                     <TableCell><Chip size="small" label={trade.side === "BUY" ? "MUA" : "BÁN"} color={trade.side === "BUY" ? "success" : "error"} variant="outlined" /></TableCell>
+                    <TableCell>{trade.strategy}</TableCell>
                     <TableCell>{trade.ownership}</TableCell>
                     <TableCell>{trade.session}</TableCell>
                     <TableCell align="right">{trade.volume.toFixed(2)}</TableCell>

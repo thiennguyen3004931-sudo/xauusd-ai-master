@@ -18,7 +18,6 @@ import CandlestickChartRounded from "@mui/icons-material/CandlestickChartRounded
 import PowerSettingsNewRounded from "@mui/icons-material/PowerSettingsNewRounded";
 import TuneRounded from "@mui/icons-material/TuneRounded";
 import InsightsRounded from "@mui/icons-material/InsightsRounded";
-import DnsRounded from "@mui/icons-material/DnsRounded";
 import MenuRounded from "@mui/icons-material/MenuRounded";
 import LockRounded from "@mui/icons-material/LockRounded";
 import { StatusChip } from "./StatusChip";
@@ -28,12 +27,11 @@ const drawerWidth = 250;
 type LinkRow = readonly [string, string, typeof SmartToyRounded];
 
 const links: readonly LinkRow[] = [
-  ["/", "Theo dõi giao dịch", SmartToyRounded],
-  ["/phase7b-pattern-check", "Điều kiện vào lệnh", CandlestickChartRounded],
-  ["/phase7b-ops", "Bot & Telegram", PowerSettingsNewRounded],
+  ["/", "Tổng quan", SmartToyRounded],
+  ["/phase7b-pattern-check", "Điều kiện tín hiệu", CandlestickChartRounded],
+  ["/phase7b-ops", "Hệ thống & Telegram", PowerSettingsNewRounded],
   ["/phase7c-control-center", "AUTO & Recovery", TuneRounded],
-  ["/performance", "Hiệu suất", InsightsRounded],
-  ["/system", "Trạng thái hệ thống", DnsRounded],
+  ["/performance", "Hiệu suất chiến lược", InsightsRounded],
 ] as const;
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
@@ -92,23 +90,20 @@ export function DashboardLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
 
-  let headerTitle = "Theo dõi giao dịch DEMO";
-  let headerSubtitle = "XAUUSD · MT5 DEMO · tín hiệu / vị thế / quản lý lệnh";
+  let headerTitle = "Tổng quan giao dịch DEMO";
+  let headerSubtitle = "XAUUSD · MT5 DEMO · vị thế / quản lý lệnh / sự kiện gần nhất";
   if (location.pathname.startsWith("/phase7b-pattern-check")) {
-    headerTitle = "Điều kiện vào lệnh";
+    headerTitle = "Điều kiện tín hiệu";
     headerSubtitle = "3 mô hình nến → Supertrend M15 10/3 → Supertrend M5 10/3 → SL cấu trúc · MA20/50 = độ tin cậy · runner: cấu trúc M15 + MA50 · MA200 = khung lớn";
   } else if (location.pathname.startsWith("/phase7b-ops")) {
-    headerTitle = "Điều khiển Bot & Telegram";
-    headerSubtitle = "Bật / dừng Bot DEMO · bật / tắt / kiểm tra thông báo Telegram";
+    headerTitle = "Hệ thống & Telegram";
+    headerSubtitle = "Bot DEMO · Telegram · MT5 Bridge · trạng thái vận hành";
   } else if (location.pathname.startsWith("/phase7c-control-center")) {
     headerTitle = "AUTO Regime & Daily Recovery";
     headerSubtitle = "AUTO Trend / Sideway / Pause · P/L đã chốt · kế hoạch Recovery TP cho lệnh hợp lệ kế tiếp";
   } else if (location.pathname.startsWith("/performance")) {
-    headerTitle = "Hiệu suất giao dịch DEMO";
+    headerTitle = "Hiệu suất chiến lược";
     headerSubtitle = "Kết quả giao dịch XAUUSD do hệ thống thực hiện";
-  } else if (location.pathname.startsWith("/system")) {
-    headerTitle = "Trạng thái hệ thống";
-    headerSubtitle = "MT5 · Bridge · API · tiến trình DEMO";
   }
 
   return (

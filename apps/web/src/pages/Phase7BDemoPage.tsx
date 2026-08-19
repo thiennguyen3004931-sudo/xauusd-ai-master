@@ -223,8 +223,8 @@ export function Phase7BDemoPage() {
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1.5} alignItems={{ md: "center" }}>
         <Box>
           <Typography variant="overline" color="primary" fontWeight={900}>XAUUSD · CHẠY THỬ DEMO</Typography>
-          <Typography variant="h4" fontWeight={950}>Theo dõi giao dịch</Typography>
-          <Typography variant="body2" color="text.secondary" mt={0.5}>Theo dõi Bot DEMO, lý do vào lệnh, lý do tiếp tục giữ và quá trình quản lý lệnh.</Typography>
+          <Typography variant="h4" fontWeight={950}>Tổng quan giao dịch</Typography>
+          <Typography variant="body2" color="text.secondary" mt={0.5}>Tập trung vào trạng thái Bot, vị thế đang quản lý và lịch sử sự kiện. Điều kiện entry chi tiết được gom về trang Điều kiện tín hiệu.</Typography>
         </Box>
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
           <StatusChip value={botAlive ? tenTrangThaiBot(data.botStatus) : "BOT ĐANG DỪNG"} />
@@ -250,40 +250,8 @@ export function Phase7BDemoPage() {
       </Grid>
 
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, xl: 6 }}>
-          <Card variant="outlined" sx={{ height: "100%" }}>
-            <CardContent>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
-                <Typography variant="h6" fontWeight={900}>Điều kiện vào lệnh hiện tại</Typography>
-                <Chip label={diagnostics?.entry.eligible ? `${tenHuong(diagnostics.entry.side)} · ĐỦ ĐIỀU KIỆN` : "CHƯA ĐỦ ĐIỀU KIỆN"} color={diagnostics?.entry.eligible ? "success" : "default"} variant="outlined" />
-              </Stack>
 
-              {!diagnostics ? (
-                <Alert severity="warning" sx={{ mt: 2 }}>{data.entryDiagnosticsError ?? "Dữ liệu điều kiện vào lệnh chưa sẵn sàng."}</Alert>
-              ) : (
-                <>
-                  <Grid container spacing={2} mt={0.3}>
-                    <Grid size={6}><Info label="Mô hình nến" value={tenMoHinh(diagnostics.pattern.name)} /></Grid>
-                    <Grid size={6}><Info label="Hướng mô hình" value={tenHuong(diagnostics.pattern.side)} /></Grid>
-                    <Grid size={6}><Info label="Supertrend M15" value={tenHuong(diagnostics.trend.m15Supertrend)} /></Grid>
-                    <Grid size={6}><Info label="Supertrend M5" value={tenHuong(diagnostics.trend.m5Supertrend)} /></Grid>
-                    <Grid size={6}><Info label="Fresh flip M5" value={diagnostics.trend.m5FlipAgeBars === null || diagnostics.trend.m5FlipAgeBars === undefined ? "Chưa có" : `${diagnostics.trend.m5FlipAgeBars} nến đóng`} /></Grid>
-                    <Grid size={6}><Info label="Bối cảnh FVG" value={diagnostics.fvg.sameDirectionConfirmed ? "Có cùng hướng" : "Không có / không bắt buộc"} /></Grid>
-                    <Grid size={6}><Info label="Giá vào tham chiếu" value={price(diagnostics.entry.referenceEntry)} /></Grid>
-                    <Grid size={6}><Info label="SL dự kiến" value={diagnostics.entry.stopDistance === null ? "—" : `${diagnostics.entry.stopDistance.toFixed(2)} giá`} /></Grid>
-                  </Grid>
-                  <Alert severity={diagnostics.entry.eligible ? "success" : "info"} sx={{ mt: 2 }}>
-                    {diagnostics.entry.eligible
-                      ? `Được phép vào ${tenHuong(diagnostics.entry.side)} vì 2 mô hình nến + Supertrend M15 cùng hướng + M5 fresh flip ≤ 2 đều đạt. FVG chỉ là bối cảnh.`
-                      : "Chưa gửi lệnh vì ít nhất một điều kiện bắt buộc chưa đạt. Bot tiếp tục chờ nến đóng tiếp theo."}
-                  </Alert>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid size={{ xs: 12, xl: 6 }}>
+        <Grid size={{ xs: 12 }}>
           <Card variant="outlined" sx={{ height: "100%" }}>
             <CardContent>
               <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>

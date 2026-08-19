@@ -236,6 +236,7 @@ export interface Mt5PerformanceTrade {
   symbol: string;
   side: "BUY" | "SELL";
   ownership: "SYSTEM" | "VALIDATION" | "OTHER";
+  strategy: "TREND" | "SIDEWAY" | "OTHER";
   openedAt: number;
   closedAt: number;
   durationMinutes: number;
@@ -295,6 +296,7 @@ export interface Mt5PerformanceSnapshot {
   };
   trades: Mt5PerformanceTrade[];
   breakdown: {
+    strategy: Mt5PerformanceBucket[];
     side: Mt5PerformanceBucket[];
     session: Mt5PerformanceBucket[];
     weekday: Mt5PerformanceBucket[];
