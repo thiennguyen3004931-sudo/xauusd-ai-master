@@ -124,6 +124,54 @@ for (const file of Object.values(files)) {
   });
 }
 
+const patternRuleV2AlreadyApplied = [
+  states.get(files.service)?.source.includes(
+    "Pattern Rule V2 priority: THREE -> TWO -> ENGULFING.",
+  ),
+  states.get(files.service)?.source.includes(
+    "PHASE7B_THREE_CANDLE_RULE=A_OPPOSITE_BCD_SAME_COLOR_AND_BODY_B_PLUS_C_LT_BODY_A_AND_BODY_B_PLUS_C_PLUS_D_GT_BODY_A",
+  ),
+  states.get(files.controller)?.source.includes(
+    "Pattern Rule V2 priority: THREE -> TWO -> ENGULFING.",
+  ),
+  states.get(files.controller)?.source.includes(
+    "THREE_CANDLE_BODY_DOMINANCE",
+  ),
+  states.get(files.test)?.source.includes(
+    "THREE_CANDLE_BODY_DOMINANCE",
+  ),
+  states.get(files.api)?.source.includes(
+    "THREE_CANDLE_BODY_DOMINANCE",
+  ),
+  states.get(files.web)?.source.includes(
+    "THREE_CANDLE_BODY_DOMINANCE",
+  ),
+].every(Boolean);
+
+if (patternRuleV2AlreadyApplied) {
+  console.log(
+    "PHASE7B_THREE_CANDLE_SUPERSEDED=PATTERN_RULE_V2",
+  );
+  console.log(
+    "PHASE7B_THREE_CANDLE_CHANGES_NEEDED=0",
+  );
+
+  if (apply) {
+    console.log(
+      "PHASE7B_THREE_CANDLE_APPLY=PASS",
+    );
+  } else {
+    console.log(
+      "PHASE7B_THREE_CANDLE_ORIGINAL_MUTATION=False",
+    );
+    console.log(
+      "PHASE7B_THREE_CANDLE_CHECK=PASS",
+    );
+  }
+
+  process.exit(0);
+}
+
 let changesNeeded = 0;
 for (const p of patches) {
   const state = states.get(p.file);
