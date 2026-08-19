@@ -37,6 +37,14 @@ const maxM5AgeMs = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_MAX_M5_AGE_MS, 1
 const maxM15AgeMs = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_MAX_M15_AGE_MS, 30 * 60_000, 5 * 60_000, 2 * 60 * 60_000);
 const autoLotMaxAgeMs = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_AUTO_LOT_MAX_AGE_MS, 10_000, 1_000, 60_000);
 const magicNumber = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER, 270714, 1, 2147483647);
+const trendMagicNumber = clampInteger(process.env.MT5_MAGIC_NUMBER, 270713, 1, 2147483647);
+const dailyBotMagicNumbers = new Set([
+  trendMagicNumber,
+  magicNumber,
+]);
+const DAILY_RECOVERY_MIN_TP_DISTANCE = 6;
+const DAILY_RECOVERY_MAX_TP_DISTANCE = 10;
+const DAILY_RECOVERY_TARGET_NET_USD = 1;
 const deviationPoints = clampInteger(process.env.MT5_DEVIATION_POINTS, 50, 1, 10000);
 const allowReal = truthy(process.env.MT5_ALLOW_REAL_ACCOUNT);
 const allowedLogins = new Set(
@@ -74,6 +82,10 @@ console.log("PHASE7C_SIDEWAY_ENTRY=M15_RANGING_PLUS_SUPPLY_DEMAND_EDGE_PLUS_M5_C
 console.log("PHASE7C_SIDEWAY_TP1=VOLUME_POC_OR_RANGE_MID_FALLBACK");
 console.log("PHASE7C_SIDEWAY_TP2=OPPOSITE_RANGE_BOUNDARY");
 console.log("PHASE7C_SIDEWAY_MANAGEMENT=ONE_THIRD_PARTIAL_THEN_BREAK_EVEN_NO_TRAILING");
+console.log("PHASE7C_SIDEWAY_DAILY_RECOVERY=REALIZED_NET_PNL_ALL_BOT_MAGICS");
+console.log(`PHASE7C_SIDEWAY_DAILY_RECOVERY_MAGICS=${[...dailyBotMagicNumbers].join(",")}`);
+console.log("PHASE7C_SIDEWAY_DAILY_RECOVERY_TP=FULL_POSITION_ADAPTIVE_6_TO_10");
+console.log("PHASE7C_SIDEWAY_DAILY_RECOVERY_LOT_ESCALATION=OFF");
 console.log("PHASE7C_SIDEWAY_CRASH_RECOVERY=PENDING_ENTRY_PLUS_PARTIAL_PLUS_BREAK_EVEN");
 console.log("PHASE7C_SIDEWAY_FINAL_GATE=FRESH_MODE_REGIME_QUOTE_PLUS_FINAL_AUTO_LOT");
 console.log("PHASE7C_SIDEWAY_FAIL_CLOSED=TRUE");
@@ -448,6 +460,30 @@ async function cycle() {
   const volume = Number(autoLotValidation.recommendedLot);
   validateVolume(volume, spec);
 
+  const dailyRecovery = await resolveDailyRecoveryPlan(
+    freshQuote,
+    spec,
+    volume,
+  );
+
+  const recoveryTakeProfit =
+    dailyRecovery.mode === "RECOVERY_TP"
+      ? roundRecoveryPrice(
+          side === "BUY"
+            ? Number(finalPlan.entry) + dailyRecovery.tpDistance
+            : Number(finalPlan.entry) - dailyRecovery.tpDistance,
+          Number(spec.digits ?? 2),
+        )
+      : Number(finalPlan.takeProfit);
+
+  const executionPlan =
+    dailyRecovery.mode === "RECOVERY_TP"
+      ? {
+          ...finalPlan,
+          takeProfit: recoveryTakeProfit,
+        }
+      : finalPlan;
+
   const orderId = `p7c-sideway-${closeTime}-${side}`;
   journal("ENTRY_SUBMIT", {
     orderId,
@@ -457,13 +493,27 @@ async function cycle() {
     volume,
     riskPercent,
     estimatedRiskUsd: autoLotValidation.estimatedRiskUsd,
-    plan: finalPlan,
+    plan: executionPlan,
     regimeConfidence: freshRegime?.confidence,
     finalQuoteTimestamp: freshQuote.timestamp,
+    dailyMode: dailyRecovery.mode,
+    dailyNetPnl: dailyRecovery.dailyNetPnl,
+    recoveryTargetNetPnl: dailyRecovery.targetNetPnl,
+    recoveryTpDistance: dailyRecovery.tpDistance,
+    recoveryTakeProfit,
+    recoveryCanRecoverInOneTrade: dailyRecovery.canRecoverInOneTrade,
   });
 
   if (!armed) {
-    journal("ENTRY_SHADOW_READY", { orderId, side, volume, plan: finalPlan });
+    journal("ENTRY_SHADOW_READY", {
+      orderId,
+      side,
+      volume,
+      plan: executionPlan,
+      dailyMode: dailyRecovery.mode,
+      dailyNetPnl: dailyRecovery.dailyNetPnl,
+      recoveryTpDistance: dailyRecovery.tpDistance,
+    });
     return;
   }
 
@@ -472,16 +522,31 @@ async function cycle() {
     side,
     signalM5CloseTime: closeTime,
     volume,
-    stopLoss: finalPlan.stopLoss,
-    stopDistance: finalPlan.stopDistance,
-    tp1: finalPlan.tp1,
-    tp1Kind: finalPlan.tp1Kind,
-    tp2: finalPlan.takeProfit,
+    stopLoss: executionPlan.stopLoss,
+    stopDistance: executionPlan.stopDistance,
+    tp1: executionPlan.tp1,
+    tp1Kind: executionPlan.tp1Kind,
+    tp2: executionPlan.takeProfit,
+    dailyMode: dailyRecovery.mode,
+    dailyNetPnlAtEntry: dailyRecovery.dailyNetPnl,
+    recoveryTargetNetPnl: dailyRecovery.targetNetPnl,
+    recoveryTpDistance: dailyRecovery.tpDistance,
+    recoveryTakeProfit,
+    recoveryDayStartTime: dailyRecovery.dayStartTime,
     lastRegimeCloseChecked: Number(freshRegime?.lastCandleCloseTime ?? 0),
     createdAt: Date.now(),
   };
   saveState();
-  journal("ENTRY_PENDING_DURABLE", { orderId, side, volume, stopLoss: finalPlan.stopLoss, tp2: finalPlan.takeProfit });
+  journal("ENTRY_PENDING_DURABLE", {
+    orderId,
+    side,
+    volume,
+    stopLoss: executionPlan.stopLoss,
+    tp2: executionPlan.takeProfit,
+    dailyMode: dailyRecovery.mode,
+    dailyNetPnl: dailyRecovery.dailyNetPnl,
+    recoveryTpDistance: dailyRecovery.tpDistance,
+  });
 
   const order = await bridgeRequest("POST", "/v1/orders", {
     symbol,
@@ -489,9 +554,9 @@ async function cycle() {
     orderType: "MARKET",
     timeInForce: "GTC",
     volume,
-    requestedPrice: finalPlan.entry,
-    stopLoss: finalPlan.stopLoss,
-    takeProfit: finalPlan.takeProfit,
+    requestedPrice: executionPlan.entry,
+    stopLoss: executionPlan.stopLoss,
+    takeProfit: executionPlan.takeProfit,
     deviationPoints,
     magicNumber,
     comment: "phase7c-sideway",
@@ -522,6 +587,130 @@ async function cycle() {
   journal("ENTRY_FILLED", { orderId, position: opened, management: state.managed });
 }
 
+async function resolveDailyRecoveryPlan(
+  quote,
+  spec,
+  volume,
+) {
+  const boundary = await bridgeGet(
+    `/v1/session/day-boundary/${encodeURIComponent(symbol)}`,
+  );
+
+  const dayStartTime = Number(boundary?.currentStartTime);
+  const historyEndTime = Number(quote?.timestamp);
+
+  if (
+    !Number.isFinite(dayStartTime) ||
+    dayStartTime <= 0 ||
+    !Number.isFinite(historyEndTime) ||
+    historyEndTime <= dayStartTime
+  ) {
+    throw new Error(
+      "Sideway daily recovery broker day boundary is invalid.",
+    );
+  }
+
+  const deals = await bridgeGet(
+    `/v1/history/deals?fromMs=${dayStartTime}&toMs=${historyEndTime}&symbol=${encodeURIComponent(symbol)}`,
+  );
+
+  if (!Array.isArray(deals)) {
+    throw new Error(
+      "Sideway daily recovery deal history is invalid.",
+    );
+  }
+
+  const botDeals = deals.filter(
+    (deal) =>
+      deal?.isTradingDeal === true &&
+      dailyBotMagicNumbers.has(Number(deal?.magic)),
+  );
+
+  const dailyNetPnl = botDeals.reduce(
+    (sum, deal) =>
+      sum + Number(deal?.netPnl || 0),
+    0,
+  );
+
+  if (dailyNetPnl >= 0) {
+    return {
+      mode: "SIDEWAY_NATIVE",
+      dayStartTime,
+      dailyNetPnl,
+      targetNetPnl: DAILY_RECOVERY_TARGET_NET_USD,
+      requiredUsd: 0,
+      rawTpDistance: 0,
+      tpDistance: 0,
+      canRecoverInOneTrade: true,
+      dealCount: botDeals.length,
+    };
+  }
+
+  const cashPerPriceUnitPerLot =
+    Number(spec?.cashPerPriceUnitPerLot) > 0
+      ? Number(spec.cashPerPriceUnitPerLot)
+      : Number(spec?.tickSize) > 0 &&
+          Number(spec?.effectiveTickValuePerLot) > 0
+        ? Number(spec.effectiveTickValuePerLot) /
+          Number(spec.tickSize)
+        : 0;
+
+  if (!(cashPerPriceUnitPerLot > 0)) {
+    throw new Error(
+      "Sideway daily recovery cannot determine cash per price unit.",
+    );
+  }
+
+  const cashPerPriceUnit =
+    cashPerPriceUnitPerLot * Number(volume);
+
+  if (!(cashPerPriceUnit > 0)) {
+    throw new Error(
+      "Sideway daily recovery volume cash value is invalid.",
+    );
+  }
+
+  const requiredUsd =
+    Math.abs(dailyNetPnl) +
+    DAILY_RECOVERY_TARGET_NET_USD;
+
+  const rawTpDistance =
+    requiredUsd /
+    cashPerPriceUnit;
+
+  const tpDistance = Math.min(
+    DAILY_RECOVERY_MAX_TP_DISTANCE,
+    Math.max(
+      DAILY_RECOVERY_MIN_TP_DISTANCE,
+      rawTpDistance,
+    ),
+  );
+
+  return {
+    mode: "RECOVERY_TP",
+    dayStartTime,
+    dailyNetPnl,
+    targetNetPnl: DAILY_RECOVERY_TARGET_NET_USD,
+    requiredUsd,
+    rawTpDistance,
+    tpDistance,
+    canRecoverInOneTrade:
+      rawTpDistance <= DAILY_RECOVERY_MAX_TP_DISTANCE + 1e-9,
+    dealCount: botDeals.length,
+  };
+}
+
+function roundRecoveryPrice(value, digits) {
+  const safeDigits = Math.max(
+    0,
+    Math.min(10, Math.trunc(Number(digits) || 0)),
+  );
+
+  return Number(
+    Number(value).toFixed(safeDigits),
+  );
+}
+
 function buildManagedState(opened, pending, brokerClockOffsetMs = 0) {
   if (!pending) throw new Error("Cannot build Sideway management state without durable pending entry metadata.");
   const brokerOpenedAt = Number(opened.openedAt);
@@ -539,6 +728,12 @@ function buildManagedState(opened, pending, brokerClockOffsetMs = 0) {
     tp1: Number(pending.tp1),
     tp1Kind: pending.tp1Kind,
     tp2: Number(pending.tp2),
+    dailyMode: pending.dailyMode ?? "SIDEWAY_NATIVE",
+    dailyNetPnlAtEntry: Number(pending.dailyNetPnlAtEntry ?? 0),
+    recoveryTargetNetPnl: Number(pending.recoveryTargetNetPnl ?? 0),
+    recoveryTpDistance: Number(pending.recoveryTpDistance ?? 0),
+    recoveryTakeProfit: Number(pending.recoveryTakeProfit ?? 0),
+    recoveryDayStartTime: Number(pending.recoveryDayStartTime ?? 0),
     partialApplied: false,
     breakEvenApplied: false,
     lastRegimeCloseChecked: Number(pending.lastRegimeCloseChecked ?? 0),
@@ -602,6 +797,11 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
   }
 
   const marketPrice = managed.side === "BUY" ? Number(quote.bid) : Number(quote.ask);
+
+  if (managed.dailyMode === "RECOVERY_TP") {
+    return;
+  }
+
   if (!managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {
     const closeVolume = oneThirdPartialVolume(
       managed.initialVolume,

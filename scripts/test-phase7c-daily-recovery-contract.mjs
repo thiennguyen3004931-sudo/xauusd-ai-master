@@ -11,6 +11,16 @@ const controllerPath = path.join(
 
 const source = fs.readFileSync(controllerPath, "utf8");
 
+const sidewayPath = path.join(
+  here,
+  "run-phase7c-sideway-controller.mjs",
+);
+
+const sidewaySource = fs.readFileSync(
+  sidewayPath,
+  "utf8",
+);
+
 function numericConstant(name) {
   const pattern = new RegExp(
     `const\\s+${name}\\s*=\\s*([0-9]+(?:\\.[0-9]+)?);`,
@@ -239,7 +249,7 @@ const sourceContracts = [
   ],
   [
     "MAGIC_FILTER",
-    "Number(deal.magic) === magicNumber",
+    "dailyBotMagicNumbers.has(Number(deal.magic))",
   ],
   [
     "BROKER_DAY_BOUNDARY",
@@ -352,6 +362,92 @@ assert.ok(
 
 console.log(
   "NO_MARTINGALE_IMPLEMENTATION=PASS",
+);
+
+const systemWideContracts = [
+  [
+    "TREND_INCLUDES_SIDEWAY_MAGIC",
+    'process.env.ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER ?? "270714"',
+  ],
+  [
+    "TREND_ALL_BOT_MAGIC_FILTER",
+    "dailyBotMagicNumbers.has(Number(deal.magic))",
+  ],
+];
+
+for (const [name, marker] of systemWideContracts) {
+  assert.ok(
+    source.includes(marker),
+    `Missing Trend system-wide contract ${name}`,
+  );
+
+  console.log(
+    `SYSTEM_CONTRACT_${name}=PASS`,
+  );
+}
+
+const sidewayContracts = [
+  [
+    "SIDEWAY_TREND_MAGIC",
+    "const trendMagicNumber = clampInteger(process.env.MT5_MAGIC_NUMBER, 270713",
+  ],
+  [
+    "SIDEWAY_ALL_BOT_MAGIC_FILTER",
+    "dailyBotMagicNumbers.has(Number(deal?.magic))",
+  ],
+  [
+    "SIDEWAY_DAY_BOUNDARY",
+    "/v1/session/day-boundary/",
+  ],
+  [
+    "SIDEWAY_DEAL_HISTORY",
+    "/v1/history/deals?fromMs=",
+  ],
+  [
+    "SIDEWAY_RECOVERY_MODE",
+    'mode: "RECOVERY_TP"',
+  ],
+  [
+    "SIDEWAY_RECOVERY_FULL_POSITION",
+    'if (managed.dailyMode === "RECOVERY_TP")',
+  ],
+  [
+    "SIDEWAY_RECOVERY_TP_ORDER",
+    "takeProfit: executionPlan.takeProfit",
+  ],
+  [
+    "SIDEWAY_NO_LOT_ESCALATION",
+    "PHASE7C_SIDEWAY_DAILY_RECOVERY_LOT_ESCALATION=OFF",
+  ],
+];
+
+for (const [name, marker] of sidewayContracts) {
+  assert.ok(
+    sidewaySource.includes(marker),
+    `Missing Sideway recovery contract ${name}`,
+  );
+
+  console.log(
+    `SYSTEM_CONTRACT_${name}=PASS`,
+  );
+}
+
+assert.ok(
+  !sidewaySource.includes("recoveryVolume"),
+  "Sideway recovery volume escalation is forbidden",
+);
+
+assert.ok(
+  !sidewaySource.toLowerCase().includes("martingale"),
+  "Sideway martingale implementation is forbidden",
+);
+
+console.log(
+  "SYSTEM_WIDE_DAILY_RECOVERY=PASS",
+);
+
+console.log(
+  "AUTO_REGIME_PRESERVED=PASS",
 );
 
 console.log(

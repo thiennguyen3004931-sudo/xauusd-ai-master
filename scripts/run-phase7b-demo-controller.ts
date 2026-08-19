@@ -165,6 +165,13 @@ const bridgePort = process.env.MT5_BRIDGE_PORT ?? "8765";
 const apiKey = requiredEnv("MT5_API_KEY");
 const bridgeBase = `http://${bridgeHost}:${bridgePort}`;
 const magicNumber = Number(process.env.MT5_MAGIC_NUMBER ?? "270713");
+const sidewayMagicNumber = Number(
+  process.env.ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER ?? "270714",
+);
+const dailyBotMagicNumbers = new Set([
+  magicNumber,
+  sidewayMagicNumber,
+]);
 const deviationPoints = Number(process.env.MT5_DEVIATION_POINTS ?? "50");
 const allowedLogins = new Set(
   (process.env.MT5_ALLOWED_LOGINS ?? "")
@@ -175,7 +182,7 @@ const allowedLogins = new Set(
 );
 const allowReal = /^(1|true|yes|on)$/i.test(process.env.MT5_ALLOW_REAL_ACCOUNT ?? "false");
 
-if (![fixedVolume, intervalSeconds, magicNumber, deviationPoints].every((value) => Number.isFinite(value) && value > 0)) {
+if (![fixedVolume, intervalSeconds, magicNumber, sidewayMagicNumber, deviationPoints].every((value) => Number.isFinite(value) && value > 0)) {
   throw new Error("Phase 7B DEMO numeric configuration is invalid.");
 }
 
@@ -206,7 +213,8 @@ console.log("PHASE7B_DEMO_PLUS10=PARTIAL_ONE_THIRD");
 console.log("PHASE7B_DEMO_POST_PLUS10_SL=M15_CONFIRMED_SWING_STRUCTURE_ONLY_TIGHTEN");
 console.log("PHASE7B_DEMO_REVERSAL_EXIT=OPPOSING_M15_FVG_PLUS_REJECTION_CLOSE_AFTER_PLUS10");
 console.log("PHASE7B_DEMO_FIXED_TP=OFF_IN_TREND");
-console.log("PHASE7B_DEMO_DAILY_RECOVERY=REALIZED_NET_PNL_MAGIC_FILTERED");
+console.log("PHASE7B_DEMO_DAILY_RECOVERY=REALIZED_NET_PNL_ALL_BOT_MAGICS");
+console.log(`PHASE7B_DEMO_DAILY_RECOVERY_MAGICS=${[...dailyBotMagicNumbers].join(",")}`);
 console.log("PHASE7B_DEMO_DAILY_RECOVERY_DAY=MT5_D1_CURRENT_BAR");
 console.log("PHASE7B_DEMO_DAILY_RECOVERY_TP=ADAPTIVE_6_TO_10");
 console.log("PHASE7B_DEMO_DAILY_RECOVERY_TARGET_NET_USD=1");
@@ -526,7 +534,7 @@ async function resolveDailyRecoveryPlan(
   const botDeals = deals.filter(
     (deal) =>
       deal.isTradingDeal === true &&
-      Number(deal.magic) === magicNumber,
+      dailyBotMagicNumbers.has(Number(deal.magic)),
   );
 
   const dailyNetPnl = botDeals.reduce(
