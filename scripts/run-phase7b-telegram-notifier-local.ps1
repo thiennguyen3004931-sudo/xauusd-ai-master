@@ -29,6 +29,9 @@ $demoDir = if ((Split-Path -Leaf $WorkDir) -eq "phase7b-demo-forward") {
 New-Item -ItemType Directory -Path $demoDir -Force | Out-Null
 
 $journal = Join-Path $demoDir "phase7b-demo-events.jsonl"
+$runtimeRoot = Split-Path -Parent $demoDir
+$sidewayDir = Join-Path $runtimeRoot "phase7c-sideway-forward"
+$sidewayJournal = Join-Path $sidewayDir "phase7c-sideway-events.jsonl"
 $state = Join-Path $demoDir "phase7b-telegram-state.json"
 $runtime = Join-Path $demoDir "phase7b-telegram-runtime.json"
 if (-not (Test-Path $journal)) {
@@ -103,6 +106,13 @@ if ([string]::IsNullOrWhiteSpace($env:ZIQ_TELEGRAM_CHAT_ID)) {
 }
 
 $env:ZIQ_TELEGRAM_JOURNAL_PATH = $journal
+
+if (Test-Path -LiteralPath $sidewayJournal) {
+  $env:ZIQ_TELEGRAM_SIDEWAY_JOURNAL_PATH = $sidewayJournal
+} else {
+  Remove-Item Env:ZIQ_TELEGRAM_SIDEWAY_JOURNAL_PATH -ErrorAction SilentlyContinue
+}
+
 $env:ZIQ_TELEGRAM_STATE_PATH = $state
 $env:ZIQ_TELEGRAM_INTERVAL_MS = [string]([math]::Max(1, $IntervalSeconds) * 1000)
 $env:ZIQ_TELEGRAM_SEND_TEST = if ($SendTest) { "true" } else { "false" }
@@ -110,6 +120,8 @@ $env:ZIQ_TELEGRAM_ONCE = if ($Once) { "true" } else { "false" }
 
 Write-Host "PHASE7B_TELEGRAM_ENV=$EnvFile"
 Write-Host "PHASE7B_TELEGRAM_JOURNAL=$journal"
+Write-Host "PHASE7B_TELEGRAM_SIDEWAY_JOURNAL=$sidewayJournal"
+Write-Host "PHASE7B_TELEGRAM_SIDEWAY_JOURNAL_EXISTS=$(Test-Path -LiteralPath $sidewayJournal)"
 Write-Host "PHASE7B_TELEGRAM_STATE=$state"
 Write-Host "PHASE7B_TELEGRAM_RUNTIME=$runtime"
 Write-Host "PHASE7B_TELEGRAM_INTERVAL_SECONDS=$IntervalSeconds"

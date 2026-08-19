@@ -177,16 +177,21 @@ export function Phase7CControlCenterPage() {
           ? `sau ${secondsText(remainingMs - 10_000)}`
           : "đang chuyển nến";
 
-  const readiness = !diag
-    ? { label: "NO DIAGNOSTICS", color: "warning" as const }
-    : diag.entry.eligible
-      ? { label: `${diag.entry.side} READY`, color: "success" as const }
-      : diag.trend.sellAligned
-        ? { label: "SELL TREND · WAIT PATTERN", color: "warning" as const }
-        : diag.trend.buyAligned
-          ? { label: "BUY TREND · WAIT PATTERN", color: "warning" as const }
-          : { label: "WAIT TREND", color: "default" as const };
-
+  const readiness = !effectiveRegime
+    ? { label: "REGIME...", color: "default" as const }
+    : effectiveRegime === "PAUSE"
+      ? { label: "PAUSE · WAIT REGIME", color: "warning" as const }
+      : effectiveRegime === "SIDEWAY"
+        ? { label: "SIDEWAY · WAIT RANGE/M5", color: "info" as const }
+        : !diag
+          ? { label: "NO DIAGNOSTICS", color: "warning" as const }
+          : diag.entry.eligible
+            ? { label: `${diag.entry.side} READY`, color: "success" as const }
+            : diag.trend.sellAligned
+              ? { label: "SELL TREND · WAIT PATTERN", color: "warning" as const }
+              : diag.trend.buyAligned
+                ? { label: "BUY TREND · WAIT PATTERN", color: "warning" as const }
+                : { label: "WAIT TREND", color: "default" as const };
   const runtimePass = Boolean(d.runtime?.armed && d.runtime?.alive);
   const demoPass = a.account.accountMode === "demo";
   const permissionPass = Boolean(
@@ -196,7 +201,6 @@ export function Phase7CControlCenterPage() {
   );
   const spreadPass = a.quote.spread <= a.spec.maxSpread;
   const patternPass = Boolean(diag?.pattern.matched);
-  const maPass = Boolean(diag?.trend.matchedPatternSide);
   const structurePass = Boolean(
     diag?.entry.structuralStopDistance !== null &&
       Number(diag?.entry.structuralStopDistance) > 0,
@@ -511,7 +515,7 @@ export function Phase7CControlCenterPage() {
             <Box>
               <Typography fontWeight={900}>Checklist trước khi bot có thể vào lệnh</Typography>
               <Typography variant="caption" color="text.secondary">
-                Entry cần runtime + DEMO + permission + spread + Pattern + MA + structure. FVG hiện chỉ xác nhận thêm, không chặn entry.
+                Trend entry bắt buộc: runtime + DEMO + permission + spread + Pattern + Supertrend M15/M5 + Structural SL. MA20/50 và FVG là context/xác nhận, không chặn entry.
               </Typography>
             </Box>
             <Chip color={readiness.color} label={readiness.label} />
@@ -521,8 +525,8 @@ export function Phase7CControlCenterPage() {
             <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Gate label="DEMO account" pass={demoPass} detail={`${a.account.server ?? "—"} · ${a.account.accountLogin ?? "—"}`} /></Grid>
             <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Gate label="Algo / Expert Trading" pass={permissionPass} detail={`Bridge ${a.account.tradingEnabled ? "ON" : "OFF"} · Algo ${a.account.terminalTradeAllowed ? "ON" : "OFF"} · Expert ${a.account.expertTradeAllowed ? "ON" : "OFF"}`} /></Grid>
             <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Gate label="Spread guard" pass={spreadPass} detail={`${a.quote.spread.toFixed(2)} / max ${a.spec.maxSpread.toFixed(2)} giá`} /></Grid>
-            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Gate label="Pattern" pass={patternPass} detail={diag?.pattern.matched ? `${diag.pattern.side} · ${diag.pattern.name}` : "Engulfing / Two-candle chưa đạt"} /></Grid>
-            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Gate label="MA cùng hướng Pattern" pass={maPass} detail={diag ? `MA20 ${diag.trend.ma20.toFixed(2)} · MA50 ${diag.trend.ma50.toFixed(2)} · MA200 ${diag.trend.ma200.toFixed(2)}` : "—"} /></Grid>
+            <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Gate label="Pattern" pass={patternPass} detail={diag?.pattern.matched ? `${diag.pattern.side} · ${diag.pattern.name}` : "Three-candle / Two-candle / Engulfing chưa đạt"} /></Grid>
+
             <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Gate label="Structural SL" pass={structurePass} detail={diag?.entry.stopDistance !== null && diag?.entry.stopDistance !== undefined ? `${diag.entry.stopDistance.toFixed(2)} giá canonical` : "Chưa có pattern extreme hợp lệ"} /></Grid>
             <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
               <Card variant="outlined" sx={{ height: "100%" }}>
@@ -550,12 +554,12 @@ export function Phase7CControlCenterPage() {
               gap={2}
             >
               <Box>
-                <Typography fontWeight={900}>M15 Entry Gate hiện tại</Typography>
+                <Typography fontWeight={900}>M15 kỹ thuật hiện tại</Typography>
                 <Typography variant="caption" color="text.secondary">
                   Cây đóng {dateTime(diag.closeTime)} · next {dateTime(diag.nextCloseTime)}
                 </Typography>
               </Box>
-              <Chip color={readiness.color} label={readiness.label} />
+
             </Stack>
             <LinearProgress
               variant="determinate"
@@ -596,7 +600,11 @@ export function Phase7CControlCenterPage() {
               <Typography fontWeight={900}>Managed Position</Typography>
               {!managed ? (
                 <Alert severity="info" sx={{ mt: 2 }}>
-                  Không có position hệ thống. Bot đang chờ Pattern + MA.
+                  {effectiveRegime === "PAUSE"
+                    ? "Không có position hệ thống. AUTO đang PAUSE; chờ regime cho phép entry mới."
+                    : effectiveRegime === "SIDEWAY"
+                      ? "Không có position hệ thống. Sideway đang chờ vùng Supply/Demand + xác nhận M5."
+                      : "Không có position hệ thống. Trend đang chờ Pattern + Supertrend M15/M5 + Structural SL."}
                 </Alert>
               ) : (
                 <Stack spacing={1.2} sx={{ mt: 2 }}>
@@ -630,7 +638,7 @@ export function Phase7CControlCenterPage() {
               </Stack>
               {currentStopDistance === null ? (
                 <Alert severity="info" sx={{ mt: 2 }}>
-                  Chưa có Pattern tạo structural SL nên chưa tính exact Auto Lot. Matrix 6/8/10 giá vẫn có ở Risk & Auto Lot.
+                  Chưa có Structural SL. Xem Checklist phía trên; Auto Lot exact chỉ hiển thị khi có stop distance hợp lệ.
                 </Alert>
               ) : autoLot.isLoading ? (
                 <LinearProgress sx={{ mt: 2 }} />

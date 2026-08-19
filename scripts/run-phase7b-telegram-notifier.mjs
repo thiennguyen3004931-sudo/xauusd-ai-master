@@ -13,7 +13,10 @@ const controlToken =
   process.env.ZIQ_TELEGRAM_CONTROL_BOT_TOKEN?.trim() || fallbackToken;
 const controlChatId =
   process.env.ZIQ_TELEGRAM_CONTROL_CHAT_ID?.trim() || fallbackChatId;
-const journalPath = requiredEnv("ZIQ_TELEGRAM_JOURNAL_PATH");
+const trendJournalPath = requiredEnv("ZIQ_TELEGRAM_JOURNAL_PATH");
+const journalPath = trendJournalPath;
+const sidewayJournalPath =
+  process.env.ZIQ_TELEGRAM_SIDEWAY_JOURNAL_PATH?.trim() || "";
 const statePath = requiredEnv("ZIQ_TELEGRAM_STATE_PATH");
 const symbol = process.env.ZIQ_TELEGRAM_SYMBOL ?? "XAUUSD";
 const intervalMs = Math.max(1000, Number(process.env.ZIQ_TELEGRAM_INTERVAL_MS ?? "2000"));
@@ -51,8 +54,27 @@ const interestingEvents = new Set([
   "UNMANAGED_POSITION_PRESENT",
   "UNEXPECTED_ADDITIONAL_POSITION",
   "CYCLE_ERROR",
-]);
 
+  "TP1_PARTIAL_FILLED",
+  "TP1_PARTIAL_REJECTED",
+  "TP1_BREAK_EVEN_APPLIED",
+  "TP1_BREAK_EVEN_REJECTED",
+  "POSITION_CLOSED",
+  "POSITION_CLOSE_REJECTED",]);
+
+const sidewayLifecycleEvents = new Set([
+  "ENTRY_SUBMIT",
+  "ENTRY_FILLED",
+  "ENTRY_REJECTED",
+  "ENTRY_ACCEPTED_POSITION_NOT_RESOLVED",
+  "MANAGED_POSITION_CLOSED",
+
+  "TP1_PARTIAL_FILLED",
+  "TP1_PARTIAL_REJECTED",
+  "TP1_BREAK_EVEN_APPLIED",
+  "TP1_BREAK_EVEN_REJECTED",
+  "POSITION_CLOSED",
+  "POSITION_CLOSE_REJECTED",]);
 const systemAlertTypes = new Set([
   "DEMO_GUARD_BLOCK",
   "UNMANAGED_POSITION_PRESENT",
@@ -71,7 +93,32 @@ const systemRecoveryQuietMs = Math.max(
 let nextSystemHealthCheckAt = 0;
 
 fs.mkdirSync(path.dirname(statePath), { recursive: true });
-if (!fs.existsSync(journalPath)) fs.writeFileSync(journalPath, "", "utf8");
+if (!fs.existsSync(trendJournalPath)) {
+  fs.writeFileSync(trendJournalPath, "", "utf8");
+}
+
+const journalFeeds = [
+  {
+    key: "trend",
+    source: "TREND",
+    path: trendJournalPath,
+  },
+];
+
+if (sidewayJournalPath) {
+  if (fs.existsSync(sidewayJournalPath)) {
+    journalFeeds.push({
+      key: "sideway",
+      source: "SIDEWAY",
+      path: sidewayJournalPath,
+    });
+  } else {
+    console.warn(
+      `PHASE7B_TELEGRAM_SIDEWAY_JOURNAL_MISSING=${sidewayJournalPath}`,
+    );
+  }
+}
+
 let state = loadState();
 
 if (sendTest) {
@@ -94,6 +141,7 @@ if (!state.initialized) {
     sent: 0,
     lastEventAt: null,
     trade: null,
+    hold: null,
     systemAlerts: {},
   };
   saveState();
@@ -102,15 +150,47 @@ if (!state.initialized) {
       "🤖 <b>XAUUSD AI MASTER · TELEGRAM ONLINE</b>",
       "",
       `📊 <b>${esc(symbol)}</b> · Phase 7B DEMO`,
-      "🟢 Đang chờ tín hiệu Pattern + MA trên M15",
+      "🟢 Theo dõi Trade: Trend + Sideway · chờ entry hợp lệ",
       "🧩 FVG: xác nhận bổ sung, không bắt buộc entry",
       "🔒 Read-only notifier · không điều khiển MT5",
     ].join("\n"));
   }
 }
 
+state.offsets ??= {};
+state.hold ??= null;
+
+if (!Number.isFinite(Number(state.offsets.trend))) {
+  state.offsets.trend = Number.isFinite(Number(state.offset))
+    ? Number(state.offset)
+    : replayExisting
+      ? 0
+      : fs.statSync(trendJournalPath).size;
+}
+
+for (const feed of journalFeeds) {
+  if (!Number.isFinite(Number(state.offsets[feed.key]))) {
+    state.offsets[feed.key] = replayExisting
+      ? 0
+      : fs.statSync(feed.path).size;
+  }
+}
+
+state.offset = Number(state.offsets.trend ?? 0);
+state.version = 3;
+saveState();
 console.log("PHASE7B_TELEGRAM_NOTIFIER=RUNNING");
-console.log(`PHASE7B_TELEGRAM_JOURNAL=${journalPath}`);
+console.log(`PHASE7B_TELEGRAM_JOURNAL=${trendJournalPath}`);
+console.log(
+  `PHASE7B_TELEGRAM_SIDEWAY_JOURNAL=${
+    sidewayJournalPath || "DISABLED"
+  }`,
+);
+console.log(
+  `PHASE7B_TELEGRAM_ACTIVE_FEEDS=${journalFeeds
+    .map((feed) => feed.source)
+    .join(",")}`,
+);
 console.log(`PHASE7B_TELEGRAM_STATE=${statePath}`);
 console.log(`PHASE7B_TELEGRAM_INTERVAL_MS=${intervalMs}`);
 console.log(`PHASE7B_TELEGRAM_MONITOR_API=${monitorApiBase}`);
@@ -128,41 +208,132 @@ while (true) {
 }
 
 async function poll() {
-  const stat = fs.statSync(journalPath);
-  if (stat.size < state.offset) {
-    state.offset = 0;
-    saveState();
+  for (const feed of journalFeeds) {
+    await pollJournalFeed(feed);
   }
-  if (stat.size === state.offset) return;
+}
 
-  const fd = fs.openSync(journalPath, "r");
+async function pollJournalFeed(feed) {
+  const stat = fs.statSync(feed.path);
+
+  state.offsets ??= {};
+
+  let offset =
+    Number(state.offsets[feed.key] ?? 0);
+
+  if (!Number.isFinite(offset) || offset < 0) {
+    offset = replayExisting
+      ? 0
+      : stat.size;
+  }
+
+  if (stat.size < offset) {
+    offset = 0;
+  }
+
+  if (stat.size === offset) {
+    state.offsets[feed.key] = offset;
+
+    if (feed.key === "trend") {
+      state.offset = offset;
+    }
+
+    return;
+  }
+
+  const fd = fs.openSync(feed.path, "r");
+
   try {
-    const length = stat.size - state.offset;
+    const length = stat.size - offset;
     const buffer = Buffer.alloc(length);
-    fs.readSync(fd, buffer, 0, length, state.offset);
-    const lastNewline = buffer.lastIndexOf(0x0a);
+
+    fs.readSync(
+      fd,
+      buffer,
+      0,
+      length,
+      offset,
+    );
+
+    const lastNewline =
+      buffer.lastIndexOf(0x0a);
+
     if (lastNewline < 0) return;
 
-    const complete = buffer.subarray(0, lastNewline + 1);
-    const lines = complete.toString("utf8").split(/\r?\n/).filter(Boolean);
+    const complete =
+      buffer.subarray(
+        0,
+        lastNewline + 1,
+      );
+
+    const lines =
+      complete
+        .toString("utf8")
+        .split(/\r?\n/)
+        .filter(Boolean);
+
     for (const rawLine of lines) {
-      let event;
+      let rawEvent;
+
       try {
-        event = JSON.parse(rawLine);
+        rawEvent = JSON.parse(rawLine);
       } catch {
         continue;
       }
-      const type = String(event.type ?? "");
-      if (!interestingEvents.has(type)) continue;
 
-      const route = notificationRoute(type);
+      const event =
+        normalizeJournalEvent(
+          rawEvent,
+          feed,
+        );
 
-      if (route === "control" && shouldSuppressSystemAlert(event)) {
+      const type =
+        String(event.type ?? "");
+
+      if (
+        feed.source === "SIDEWAY" &&
+        !sidewayLifecycleEvents.has(type)
+      ) {
         continue;
       }
 
-      const enrichment = await buildEnrichment(event);
-      const html = await formatEvent(event, enrichment);
+      if (!interestingEvents.has(type)) {
+        continue;
+      }
+
+      const route =
+        notificationRoute(type);
+
+      if (
+        route === "control" &&
+        shouldSuppressSystemAlert(event)
+      ) {
+        continue;
+      }
+
+      if (
+        type === "FVG_HOLD_CONFIRMED" &&
+        shouldSuppressHold(event)
+      ) {
+        continue;
+      }
+
+      if (
+        type === "FVG_ADDON_SIGNAL_SHADOW" &&
+        shouldSuppressHoldAddon(event)
+      ) {
+        continue;
+      }
+
+      const enrichment =
+        await buildEnrichment(event);
+
+      const html =
+        await formatEvent(
+          event,
+          enrichment,
+        );
+
       if (!html) continue;
 
       await sendHtml(html, route);
@@ -171,159 +342,1025 @@ async function poll() {
         markSystemAlert(event);
       }
 
-      applyEventState(event, enrichment);
+      // HOLD becomes active only AFTER the Telegram send succeeded.
+      if (type === "FVG_HOLD_CONFIRMED") {
+        markHold(event);
+      }
+
+      applyEventState(
+        event,
+        enrichment,
+      );
+
       state.sent += 1;
-      state.lastEventAt = String(event.timestamp ?? new Date().toISOString());
+
+      state.lastEventAt =
+        String(
+          event.timestamp ??
+          new Date().toISOString(),
+        );
+
       saveState();
     }
-    state.offset += lastNewline + 1;
+
+    offset += lastNewline + 1;
+
+    state.offsets[feed.key] =
+      offset;
+
+    if (feed.key === "trend") {
+      state.offset = offset;
+    }
+
     saveState();
   } finally {
     fs.closeSync(fd);
   }
 }
+function normalizeJournalEvent(rawEvent, feed) {
+  const canonicalType = String(
+    rawEvent?.type ??
+    rawEvent?.event ??
+    "",
+  );
 
+  return {
+    ...rawEvent,
+    type: canonicalType,
+    journalSource: feed.source,
+  };
+}
 async function buildEnrichment(event) {
-  const type = String(event.type ?? "");
+  const type =
+    String(event.type ?? "");
+
   const needsLive = [
     "PLUS6_SL_TO_ENTRY",
     "PLUS10_PARTIAL_ONE_THIRD",
     "STRUCTURAL_SL_TIGHTEN",
     "FVG_HOLD_CONFIRMED",
     "FVG_ADDON_SIGNAL_SHADOW",
+    "TP1_PARTIAL_FILLED",
+    "TP1_BREAK_EVEN_APPLIED",
   ].includes(type);
 
-  const live = needsLive ? await getDemoSnapshot() : null;
-  const metrics = live ? liveMetrics(live, event) : fallbackMetrics(event);
+  const live =
+    needsLive
+      ? await getDemoSnapshot()
+      : null;
+
+  const metrics =
+    live
+      ? liveMetrics(live, event)
+      : fallbackMetrics(event);
 
   let closedTrade = null;
-  if (type === "EXIT_EXECUTED" || type === "MANAGED_POSITION_CLOSED") {
-    closedTrade = await findClosedTradeWithRetry(event);
+  let dailyRecoveryAfterClose = null;
+
+  const isCloseEvent = [
+    "EXIT_EXECUTED",
+    "MANAGED_POSITION_CLOSED",
+    "POSITION_CLOSED",
+  ].includes(type);
+
+  if (isCloseEvent) {
+    closedTrade =
+      await findClosedTradeWithRetry(event);
+
+    if (isRecoveryContext(event)) {
+      const previewVolume =
+        numberOrNull(
+          state.trade?.initialVolume,
+        ) ??
+        numberOrNull(
+          event?.lastKnownState?.initialVolume,
+        ) ??
+        numberOrNull(
+          event?.management?.initialVolume,
+        ) ??
+        0.03;
+
+      dailyRecoveryAfterClose =
+        await getDailyRecoverySnapshotWithRetry(
+          previewVolume,
+        );
+    }
   }
 
   let partialPnlEstimate = null;
-  if (type === "PLUS10_PARTIAL_ONE_THIRD") {
-    partialPnlEstimate = estimatePnlFromPriceMove(
-      numberOrNull(event.favorable),
-      numberOrNull(event.closedVolume),
-      live?.mt5?.spec,
+
+  if (
+    type === "PLUS10_PARTIAL_ONE_THIRD"
+  ) {
+    partialPnlEstimate =
+      estimatePnlFromPriceMove(
+        numberOrNull(event.favorable),
+        numberOrNull(event.closedVolume),
+        live?.mt5?.spec,
+      );
+  }
+
+  return {
+    live,
+    metrics,
+    closedTrade,
+    partialPnlEstimate,
+    dailyRecoveryAfterClose,
+  };
+}
+async function formatEvent(event, enrichment) {
+  const type =
+    String(event.type ?? "");
+
+  const time =
+    telegramTime(event.timestamp);
+
+  if (type === "ENTRY_SUBMIT") {
+    const side =
+      normalizeSide(event.side);
+
+    const recovery =
+      recoveryMetadata(event);
+
+    const isSideway =
+      event.journalSource === "SIDEWAY";
+
+    const entry =
+      event.marketEntry ??
+      event.signalEntry ??
+      event.plan?.entry;
+
+    const stopLoss =
+      event.stopLoss ??
+      event.plan?.stopLoss;
+
+    const stopDistance =
+      event.stopDistance ??
+      event.plan?.stopDistance;
+
+    if (recovery.active) {
+      return fullCard(
+        "🛟",
+        `DAILY RECOVERY ${side} SIGNAL · ${symbol}`,
+        [
+          line(
+            "⏱",
+            isSideway ? "M5" : "M15",
+            time,
+          ),
+          line(
+            "🤖",
+            "Regime",
+            isSideway
+              ? "SIDEWAY"
+              : "TREND",
+          ),
+          line(
+            "🧠",
+            isSideway
+              ? "Confirmation"
+              : "Pattern",
+            event.confirmation ??
+              event.pattern,
+          ),
+          line("🎯", "Entry", entry),
+          line(
+            "🛡",
+            "SL",
+            `${fmtPrice(stopLoss)} · ${fmtSignedPrice(
+              -Math.abs(
+                Number(stopDistance ?? 0),
+              ),
+            )} giá`,
+          ),
+          line(
+            "📦",
+            "Volume",
+            `${value(event.volume)} lot`,
+          ),
+          line(
+            "💵",
+            "Daily P/L",
+            fmtMoney(
+              recovery.dailyNetPnl,
+              true,
+            ),
+          ),
+          line(
+            "🎯",
+            "Recovery TP",
+            `${fmtPrice(
+              recovery.takeProfit,
+            )} · ${fmtSignedPrice(
+              recovery.tpDistance,
+            )} giá`,
+          ),
+          line(
+            "📈",
+            "Target ngày",
+            `+${value(
+              recovery.targetNetPnl ?? 1,
+            )} USD net`,
+          ),
+          "",
+          "🔒 <b>Lot escalation OFF</b> · martingale OFF · không force entry.",
+        ],
+      );
+    }
+
+    if (isSideway) {
+      return fullCard(
+        sideIcon(side),
+        `${side} SIDEWAY SIGNAL · ${symbol}`,
+        [
+          line("⏱", "M5", time),
+          line(
+            "🧠",
+            "Confirmation",
+            event.confirmation,
+          ),
+          line("🎯", "Entry", entry),
+          line(
+            "🛡",
+            "SL",
+            fmtPrice(stopLoss),
+          ),
+          line(
+            "📦",
+            "Volume",
+            `${value(event.volume)} lot`,
+          ),
+          line(
+            "1️⃣",
+            "TP1",
+            event.plan?.tp1,
+          ),
+          line(
+            "2️⃣",
+            "TP2",
+            event.plan?.takeProfit,
+          ),
+        ],
+      );
+    }
+
+    return fullCard(
+      sideIcon(side),
+      `${side} SIGNAL · ${symbol}`,
+      [
+        line("⏱", "M15", time),
+        line(
+          "🧠",
+          "Pattern",
+          event.pattern,
+        ),
+        line("🎯", "Entry", entry),
+        line(
+          "🛡",
+          "SL",
+          `${fmtPrice(stopLoss)} · ${fmtSignedPrice(
+            -Math.abs(
+              Number(stopDistance ?? 0),
+            ),
+          )} giá`,
+        ),
+        line(
+          "📦",
+          "Volume",
+          `${value(event.volume)} lot`,
+        ),
+        line(
+          "🧩",
+          "FVG",
+          event.fvgConfirmedAtEntry
+            ? "CONFIRMED"
+            : "OPTIONAL",
+        ),
+      ],
     );
   }
 
-  return { live, metrics, closedTrade, partialPnlEstimate };
-}
-
-async function formatEvent(event, enrichment) {
-  const type = String(event.type ?? "");
-  const time = telegramTime(event.timestamp);
-
-  if (type === "ENTRY_SUBMIT") {
-    const side = normalizeSide(event.side);
-    return fullCard(sideIcon(side), `${side} SIGNAL · ${symbol}`, [
-      line("⏱", "M15", time),
-      line("🧠", "Pattern", event.pattern),
-      line("🎯", "Entry", event.marketEntry ?? event.signalEntry),
-      line("🛡", "SL", `${fmtPrice(event.stopLoss)} · ${fmtSignedPrice(-Math.abs(Number(event.stopDistance ?? 0)))} giá`),
-      line("📦", "Volume", `${value(event.volume)} lot`),
-      line("🧩", "FVG", event.fvgConfirmedAtEntry ? "CONFIRMED" : "OPTIONAL"),
-    ]);
-  }
-
   if (type === "ENTRY_FILLED") {
-    const position = event.position ?? {};
-    const side = position.side === "LONG" ? "BUY" : position.side === "SHORT" ? "SELL" : normalizeSide(event.side);
-    const entry = numberOrNull(position.entry ?? event.fillPrice);
-    const sl = numberOrNull(position.stopLoss);
-    const slDistance = entry !== null && sl !== null ? sidePriceMove(side, entry, sl) : null;
-    return fullCard(side === "BUY" ? "✅🟢" : "✅🔴", `${side} FILLED · ${symbol}`, [
-      line("💵", "Entry", fmtPrice(entry)),
-      line("📦", "Volume", `${value(position.volume)} lot`),
-      line("🛡", "SL", `${fmtPrice(sl)} · ${fmtSignedPrice(slDistance)} giá`),
-      line("🧩", "FVG", event.fvgConfirmedAtEntry ? "YES" : "NO · vẫn hợp lệ"),
-      "",
-      "<b>Rule:</b> +6 → BE · +10 → chốt 1/3 · runner swing M15",
-    ]);
+    const position =
+      event.position ?? {};
+
+    const side =
+      position.side === "LONG"
+        ? "BUY"
+        : position.side === "SHORT"
+          ? "SELL"
+          : normalizeSide(event.side);
+
+    const entry =
+      numberOrNull(
+        position.entry ??
+        event.fillPrice,
+      );
+
+    const sl =
+      numberOrNull(
+        position.stopLoss,
+      );
+
+    const slDistance =
+      entry !== null &&
+      sl !== null
+        ? sidePriceMove(
+            side,
+            entry,
+            sl,
+          )
+        : null;
+
+    const recovery =
+      recoveryMetadata(event);
+
+    const isSideway =
+      event.journalSource === "SIDEWAY";
+
+    if (recovery.active) {
+      return fullCard(
+        side === "BUY"
+          ? "✅🛟🟢"
+          : "✅🛟🔴",
+        `DAILY RECOVERY ${side} FILLED · ${symbol}`,
+        [
+          line(
+            "🤖",
+            "Regime",
+            isSideway
+              ? "SIDEWAY"
+              : "TREND",
+          ),
+          line(
+            "💵",
+            "Entry",
+            fmtPrice(entry),
+          ),
+          line(
+            "📦",
+            "Volume",
+            `${value(
+              position.volume,
+            )} lot`,
+          ),
+          line(
+            "🛡",
+            "SL",
+            `${fmtPrice(sl)} · ${fmtSignedPrice(
+              slDistance,
+            )} giá`,
+          ),
+          line(
+            "💵",
+            "Daily P/L lúc vào",
+            fmtMoney(
+              recovery.dailyNetPnl,
+              true,
+            ),
+          ),
+          line(
+            "🎯",
+            "Recovery TP",
+            `${fmtPrice(
+              recovery.takeProfit,
+            )} · ${fmtSignedPrice(
+              recovery.tpDistance,
+            )} giá`,
+          ),
+          "",
+          isSideway
+            ? "<b>Rule:</b> full-position Recovery TP · bỏ native TP1 partial/BE."
+            : "<b>Rule:</b> +6 → BE · full-position Recovery TP · không +10 partial/runner.",
+          "🔒 <b>Lot escalation OFF</b> · martingale OFF.",
+        ],
+      );
+    }
+
+    if (isSideway) {
+      return fullCard(
+        side === "BUY"
+          ? "✅🟢"
+          : "✅🔴",
+        `${side} SIDEWAY FILLED · ${symbol}`,
+        [
+          line(
+            "💵",
+            "Entry",
+            fmtPrice(entry),
+          ),
+          line(
+            "📦",
+            "Volume",
+            `${value(
+              position.volume,
+            )} lot`,
+          ),
+          line(
+            "🛡",
+            "SL",
+            fmtPrice(sl),
+          ),
+          line(
+            "1️⃣",
+            "TP1",
+            event.management?.tp1,
+          ),
+          line(
+            "2️⃣",
+            "TP2",
+            event.management?.tp2,
+          ),
+          "",
+          "<b>Rule:</b> TP1 → chốt 1/3 → BE · TP2 biên đối diện.",
+        ],
+      );
+    }
+
+    return fullCard(
+      side === "BUY"
+        ? "✅🟢"
+        : "✅🔴",
+      `${side} FILLED · ${symbol}`,
+      [
+        line(
+          "💵",
+          "Entry",
+          fmtPrice(entry),
+        ),
+        line(
+          "📦",
+          "Volume",
+          `${value(
+            position.volume,
+          )} lot`,
+        ),
+        line(
+          "🛡",
+          "SL",
+          `${fmtPrice(sl)} · ${fmtSignedPrice(
+            slDistance,
+          )} giá`,
+        ),
+        line(
+          "🧩",
+          "FVG",
+          event.fvgConfirmedAtEntry
+            ? "YES"
+            : "NO · vẫn hợp lệ",
+        ),
+        "",
+        "<b>Rule:</b> +6 → BE · +10 → chốt 1/3 · runner swing M15",
+      ],
+    );
   }
 
   if (type === "PLUS6_SL_TO_ENTRY") {
-    const side = currentSide(event, enrichment);
+    const side =
+      currentSide(
+        event,
+        enrichment,
+      );
+
     const m = enrichment.metrics;
-    return compactTradeCard("🛡", side, "+6 → BE", [
-      compactStats(m),
-      `🔒 <b>SL:</b> <code>${fmtPrice(m.stopLoss)}</code> · khóa <code>${fmtSignedPrice(m.slPriceMove)} giá</code> · <code>${fmtMoney(m.lockedPnlUsd, true)}</code>`,
-    ]);
+
+    return compactTradeCard(
+      "🛡",
+      side,
+      "+6 → BE",
+      [
+        compactStats(m),
+        `🔒 <b>SL:</b> <code>${fmtPrice(
+          m.stopLoss,
+        )}</code> · khóa <code>${fmtSignedPrice(
+          m.slPriceMove,
+        )} giá</code> · <code>${fmtMoney(
+          m.lockedPnlUsd,
+          true,
+        )}</code>`,
+      ],
+    );
   }
 
   if (type === "PLUS10_PARTIAL_ONE_THIRD") {
-    const side = currentSide(event, enrichment);
+    const side =
+      currentSide(
+        event,
+        enrichment,
+      );
+
     const m = enrichment.metrics;
-    const partial = enrichment.partialPnlEstimate;
-    return compactTradeCard("💰", side, "CHỐT 1/3", [
-      `📈 <b>Chốt tại:</b> <code>${fmtSignedPrice(numberOrNull(event.favorable))} giá</code> · <b>Lãi:</b> <code>${fmtMoney(partial, true, true)}</code>`,
-      `📤 <b>Đóng:</b> <code>${value(event.closedVolume)} lot</code> · còn <code>${value(event.remainingVolume)} lot</code>`,
-      `🛡 <b>SL:</b> <code>${fmtPrice(m.stopLoss)}</code> · khóa <code>${fmtSignedPrice(m.slPriceMove)} giá</code> · <code>${fmtMoney(m.lockedPnlUsd, true)}</code>`,
-      m.profitUsd === null ? "" : `💵 <b>P&L runner:</b> <code>${fmtMoney(m.profitUsd, true)}</code>`,
-    ].filter(Boolean));
+    const partial =
+      enrichment.partialPnlEstimate;
+
+    return compactTradeCard(
+      "💰",
+      side,
+      "CHỐT 1/3",
+      [
+        `📈 <b>Chốt tại:</b> <code>${fmtSignedPrice(
+          numberOrNull(event.favorable),
+        )} giá</code> · <b>Lãi:</b> <code>${fmtMoney(
+          partial,
+          true,
+          true,
+        )}</code>`,
+        `📤 <b>Đóng:</b> <code>${value(
+          event.closedVolume,
+        )} lot</code> · còn <code>${value(
+          event.remainingVolume,
+        )} lot</code>`,
+        `🛡 <b>SL:</b> <code>${fmtPrice(
+          m.stopLoss,
+        )}</code> · khóa <code>${fmtSignedPrice(
+          m.slPriceMove,
+        )} giá</code> · <code>${fmtMoney(
+          m.lockedPnlUsd,
+          true,
+        )}</code>`,
+        m.profitUsd === null
+          ? ""
+          : `💵 <b>P&L runner:</b> <code>${fmtMoney(
+              m.profitUsd,
+              true,
+            )}</code>`,
+      ].filter(Boolean),
+    );
+  }
+
+  if (type === "TP1_PARTIAL_FILLED") {
+    const side =
+      currentSide(
+        event,
+        enrichment,
+      );
+
+    return compactTradeCard(
+      "💰",
+      side,
+      "SIDEWAY TP1 · CHỐT 1/3",
+      [
+        `🎯 <b>TP1:</b> <code>${fmtPrice(
+          event.tp1,
+        )}</code> · ${esc(
+          String(
+            event.tp1Kind ?? "TARGET",
+          ),
+        )}`,
+        `📤 <b>Đóng:</b> <code>${value(
+          event.closedVolume,
+        )} lot</code> · còn <code>${value(
+          event.remainingVolume,
+        )} lot</code>`,
+        `💵 <b>Giá:</b> <code>${fmtPrice(
+          event.marketPrice,
+        )}</code>`,
+      ],
+    );
+  }
+
+  if (type === "TP1_BREAK_EVEN_APPLIED") {
+    const side =
+      currentSide(
+        event,
+        enrichment,
+      );
+
+    return compactTradeCard(
+      "🛡",
+      side,
+      "SIDEWAY · BREAK EVEN",
+      [
+        `🔒 <b>SL:</b> <code>${fmtPrice(
+          event.stopLoss,
+        )}</code> · đã đưa về Entry.`,
+      ],
+    );
   }
 
   if (type === "FVG_HOLD_CONFIRMED") {
-    const side = currentSide(event, enrichment);
+    const side =
+      currentSide(
+        event,
+        enrichment,
+      );
+
     const m = enrichment.metrics;
-    return compactTradeCard("🧩", side, "HOLD", [
-      compactStats(m),
-      `🛡 <b>SL khóa:</b> <code>${fmtSignedPrice(m.slPriceMove)} giá</code> · <code>${fmtMoney(m.lockedPnlUsd, true)}</code>`,
-      "✅ FVG cùng hướng · tiếp tục giữ.",
-    ]);
+
+    return compactTradeCard(
+      "🧩",
+      side,
+      "HOLD CONFIRMED",
+      [
+        compactStats(m),
+        `🛡 <b>SL khóa:</b> <code>${fmtSignedPrice(
+          m.slPriceMove,
+        )} giá</code> · <code>${fmtMoney(
+          m.lockedPnlUsd,
+          true,
+        )}</code>`,
+        "✅ FVG cùng hướng · tiếp tục giữ.",
+      ],
+    );
   }
 
   if (type === "STRUCTURAL_SL_TIGHTEN") {
-    const side = currentSide(event, enrichment);
+    const side =
+      currentSide(
+        event,
+        enrichment,
+      );
+
     const m = enrichment.metrics;
-    return compactTradeCard("🔒", side, "TRAIL SL", [
-      `🛡 <b>SL mới:</b> <code>${fmtPrice(m.stopLoss)}</code> · khóa <code>${fmtSignedPrice(m.slPriceMove)} giá</code> · <code>${fmtMoney(m.lockedPnlUsd, true)}</code>`,
-      compactStats(m),
-    ]);
+
+    return compactTradeCard(
+      "🔒",
+      side,
+      "TRAIL SL",
+      [
+        `🛡 <b>SL mới:</b> <code>${fmtPrice(
+          m.stopLoss,
+        )}</code> · khóa <code>${fmtSignedPrice(
+          m.slPriceMove,
+        )} giá</code> · <code>${fmtMoney(
+          m.lockedPnlUsd,
+          true,
+        )}</code>`,
+        compactStats(m),
+      ],
+    );
   }
 
   if (type === "FVG_ADDON_SIGNAL_SHADOW") {
-    const side = currentSide(event, enrichment);
+    const side =
+      currentSide(
+        event,
+        enrichment,
+      );
+
     const m = enrichment.metrics;
-    return compactTradeCard("👀", side, "ADD-ON SHADOW", [
-      compactStats(m),
-      "⚠️ Chỉ ghi nhận tín hiệu · <b>không mở thêm lot</b>.",
-    ]);
+
+    return compactTradeCard(
+      "👀",
+      side,
+      "ADD-ON SHADOW",
+      [
+        compactStats(m),
+        "⚠️ Chỉ ghi nhận tín hiệu · <b>không mở thêm lot</b>.",
+      ],
+    );
   }
 
-  if (type === "EXIT_EXECUTED" || type === "MANAGED_POSITION_CLOSED") {
-    const closed = enrichment.closedTrade;
-    const side = normalizeSide(closed?.side ?? state.trade?.side ?? event.side);
-    const pnl = numberOrNull(closed?.netPnl);
-    const averageMove = closed ? sidePriceMove(side, Number(closed.entry), Number(closed.exit)) : null;
-    const reason = type === "EXIT_EXECUTED" ? event.reason : "MT5 / SL đóng position";
-    const icon = pnl !== null && pnl < 0 ? "🛑" : "🏁";
-    return compactTradeCard(icon, side, pnl !== null && pnl < 0 ? "CLOSED / STOP" : "CHỐT LỆNH", [
-      closed ? `💵 <b>P&L tổng:</b> <code>${fmtMoney(pnl, true)}</code>` : "💵 <b>P&L:</b> <code>đang đồng bộ MT5</code>",
-      closed ? `📈 <b>Biến động TB:</b> <code>${fmtSignedPrice(averageMove)} giá</code>` : "",
-      closed ? `🎯 <b>Exit TB:</b> <code>${fmtPrice(closed.exit)}</code>` : "",
-      `🧠 <b>Lý do:</b> ${esc(reasonLabel(reason))}`,
-    ].filter(Boolean));
+  if (
+    [
+      "EXIT_EXECUTED",
+      "MANAGED_POSITION_CLOSED",
+      "POSITION_CLOSED",
+    ].includes(type)
+  ) {
+    const closed =
+      enrichment.closedTrade;
+
+    const side =
+      normalizeSide(
+        closed?.side ??
+        state.trade?.side ??
+        event.side,
+      );
+
+    const pnl =
+      numberOrNull(
+        closed?.netPnl,
+      );
+
+    const averageMove =
+      closed
+        ? sidePriceMove(
+            side,
+            Number(closed.entry),
+            Number(closed.exit),
+          )
+        : null;
+
+    const reason =
+      type === "EXIT_EXECUTED" ||
+      type === "POSITION_CLOSED"
+        ? event.reason
+        : "MT5 / SL đóng position";
+
+    const wasRecovery =
+      isRecoveryContext(event);
+
+    if (wasRecovery) {
+      const daily =
+        enrichment.dailyRecoveryAfterClose;
+
+      const dailyPnl =
+        numberOrNull(
+          daily?.dailyNetPnl,
+        );
+
+      const completed =
+        dailyPnl !== null
+          ? dailyPnl >= 0
+          : daily?.dailyMode === "NORMAL";
+
+      return compactTradeCard(
+        completed
+          ? "✅🛟"
+          : "🛟",
+        side,
+        completed
+          ? "DAILY RECOVERY COMPLETED"
+          : "RECOVERY TRADE CLOSED",
+        [
+          closed
+            ? `💵 <b>P&L lệnh:</b> <code>${fmtMoney(
+                pnl,
+                true,
+              )}</code>`
+            : "💵 <b>P&L lệnh:</b> <code>đang đồng bộ MT5</code>",
+          dailyPnl === null
+            ? "📅 <b>Daily P/L sau đóng:</b> <code>chưa đọc được</code>"
+            : `📅 <b>Daily P/L sau đóng:</b> <code>${fmtMoney(
+                dailyPnl,
+                true,
+              )}</code>`,
+          closed
+            ? `🎯 <b>Exit TB:</b> <code>${fmtPrice(
+                closed.exit,
+              )}</code>`
+            : "",
+          `🧠 <b>Lý do:</b> ${esc(
+            reasonLabel(reason),
+          )}`,
+          "",
+          completed
+            ? "✅ Daily Recovery kết thúc · lệnh kế tiếp trở về native theo regime."
+            : "🟠 Daily Recovery vẫn còn hiệu lực cho lệnh hợp lệ kế tiếp · không tăng lot.",
+        ].filter(Boolean),
+      );
+    }
+
+    const icon =
+      pnl !== null &&
+      pnl < 0
+        ? "🛑"
+        : "🏁";
+
+    return compactTradeCard(
+      icon,
+      side,
+      pnl !== null &&
+      pnl < 0
+        ? "CLOSED / STOP"
+        : "CHỐT LỆNH",
+      [
+        closed
+          ? `💵 <b>P&L tổng:</b> <code>${fmtMoney(
+              pnl,
+              true,
+            )}</code>`
+          : "💵 <b>P&L:</b> <code>đang đồng bộ MT5</code>",
+        closed
+          ? `📈 <b>Biến động TB:</b> <code>${fmtSignedPrice(
+              averageMove,
+            )} giá</code>`
+          : "",
+        closed
+          ? `🎯 <b>Exit TB:</b> <code>${fmtPrice(
+              closed.exit,
+            )}</code>`
+          : "",
+        `🧠 <b>Lý do:</b> ${esc(
+          reasonLabel(reason),
+        )}`,
+      ].filter(Boolean),
+    );
   }
 
-  if (type === "ENTRY_REJECTED" || type === "ENTRY_ACCEPTED_POSITION_NOT_RESOLVED") {
-    return warningCard("⚠️ ENTRY", event.message ?? "Position chưa resolve", event.retcode);
+  if (
+    type === "ENTRY_REJECTED" ||
+    type === "ENTRY_ACCEPTED_POSITION_NOT_RESOLVED"
+  ) {
+    return warningCard(
+      "⚠️ ENTRY",
+      event.message ??
+        "Position chưa resolve",
+      event.retcode,
+    );
   }
 
   if (type.endsWith("_REJECTED")) {
-    return warningCard("⚠️ ACTION REJECTED", event.message ?? event.response?.message ?? type, event.response?.retcode ?? event.retcode);
+    return warningCard(
+      "⚠️ ACTION REJECTED",
+      event.message ??
+        event.response?.message ??
+        type,
+      event.response?.retcode ??
+        event.retcode,
+    );
   }
 
-  if (["DEMO_GUARD_BLOCK", "UNMANAGED_POSITION_PRESENT", "UNEXPECTED_ADDITIONAL_POSITION", "CYCLE_ERROR"].includes(type)) {
-    return warningCard("🚨 SYSTEM", event.message ?? event.reason ?? type, null);
+  if (
+    [
+      "DEMO_GUARD_BLOCK",
+      "UNMANAGED_POSITION_PRESENT",
+      "UNEXPECTED_ADDITIONAL_POSITION",
+      "CYCLE_ERROR",
+    ].includes(type)
+  ) {
+    return warningCard(
+      "🚨 SYSTEM",
+      event.message ??
+        event.reason ??
+        type,
+      null,
+    );
   }
 
   return null;
 }
+function recoveryMetadata(event) {
+  const management =
+    event?.management ??
+    event?.lastKnownState ??
+    {};
 
+  const dailyMode =
+    String(
+      event?.dailyMode ??
+      management?.dailyMode ??
+      state.trade?.dailyMode ??
+      "",
+    ).toUpperCase();
+
+  return {
+    active:
+      dailyMode === "RECOVERY_TP",
+
+    dailyMode,
+
+    dailyNetPnl:
+      numberOrNull(
+        event?.dailyNetPnlAtEntry ??
+        event?.dailyNetPnl ??
+        management?.dailyNetPnlAtEntry ??
+        state.trade?.dailyNetPnlAtEntry,
+      ),
+
+    targetNetPnl:
+      numberOrNull(
+        event?.recoveryTargetNetPnl ??
+        management?.recoveryTargetNetPnl ??
+        state.trade?.recoveryTargetNetPnl,
+      ),
+
+    tpDistance:
+      numberOrNull(
+        event?.recoveryTpDistance ??
+        management?.recoveryTpDistance ??
+        state.trade?.recoveryTpDistance,
+      ),
+
+    takeProfit:
+      numberOrNull(
+        event?.recoveryTakeProfit ??
+        management?.recoveryTakeProfit ??
+        event?.plan?.takeProfit ??
+        state.trade?.recoveryTakeProfit,
+      ),
+  };
+}
+
+function isRecoveryContext(event) {
+  return recoveryMetadata(event).active;
+}
+
+function holdKey(event) {
+  const ticket =
+    String(
+      event?.ticket ??
+      state.trade?.ticket ??
+      "",
+    );
+
+  const side =
+    normalizeSide(
+      event?.side ??
+      state.trade?.side,
+    );
+
+  return `${ticket}|${side}|FVG_MA50_HOLD`;
+}
+
+function shouldSuppressHold(event) {
+  const key =
+    holdKey(event);
+
+  if (
+    state.hold?.active === true &&
+    state.hold?.key === key
+  ) {
+    state.hold.lastSeenAt =
+      String(
+        event?.timestamp ??
+        new Date().toISOString(),
+      );
+
+    state.hold.lastM15CloseTime =
+      event?.m15CloseTime ??
+      state.hold.lastM15CloseTime ??
+      null;
+
+    saveState();
+    return true;
+  }
+
+  return false;
+}
+
+function shouldSuppressHoldAddon(event) {
+  if (
+    state.hold?.active !== true
+  ) {
+    return false;
+  }
+
+  const ticket =
+    String(
+      event?.ticket ??
+      state.trade?.ticket ??
+      "",
+    );
+
+  return (
+    ticket !== "" &&
+    ticket ===
+      String(
+        state.hold?.ticket ?? "",
+      )
+  );
+}
+
+function markHold(event) {
+  state.hold = {
+    active: true,
+
+    key:
+      holdKey(event),
+
+    ticket:
+      String(
+        event?.ticket ??
+        state.trade?.ticket ??
+        "",
+      ),
+
+    side:
+      normalizeSide(
+        event?.side ??
+        state.trade?.side,
+      ),
+
+    confirmedAt:
+      String(
+        event?.timestamp ??
+        new Date().toISOString(),
+      ),
+
+    lastSeenAt:
+      String(
+        event?.timestamp ??
+        new Date().toISOString(),
+      ),
+
+    lastM15CloseTime:
+      event?.m15CloseTime ??
+      null,
+  };
+}
+
+function releaseHold(reason) {
+  if (
+    !state.hold ||
+    state.hold.active !== true
+  ) {
+    return;
+  }
+
+  state.hold = {
+    ...state.hold,
+    active: false,
+    releasedAt:
+      new Date().toISOString(),
+    releaseReason:
+      String(
+        reason ??
+        "STATE_TRANSITION",
+      ),
+  };
+}
 function notificationRoute(type) {
   return systemAlertTypes.has(String(type ?? ""))
     ? "control"
@@ -500,42 +1537,171 @@ async function reconcileSystemAlerts() {
 }
 
 function applyEventState(event, enrichment) {
-  const type = String(event.type ?? "");
+  const type =
+    String(event.type ?? "");
+
   if (type === "ENTRY_FILLED") {
-    const position = event.position ?? {};
-    const side = position.side === "LONG" ? "BUY" : position.side === "SHORT" ? "SELL" : normalizeSide(event.side);
+    const position =
+      event.position ?? {};
+
+    const side =
+      position.side === "LONG"
+        ? "BUY"
+        : position.side === "SHORT"
+          ? "SELL"
+          : normalizeSide(
+              event.side,
+            );
+
+    const recovery =
+      recoveryMetadata(event);
+
     state.trade = {
-      ticket: String(position.ticket ?? event.ticket ?? ""),
+      ticket:
+        String(
+          position.ticket ??
+          event.ticket ??
+          "",
+        ),
+
+      source:
+        String(
+          event.journalSource ??
+          "TREND",
+        ),
+
       side,
-      entry: numberOrNull(position.entry ?? event.fillPrice),
-      initialVolume: numberOrNull(position.volume),
-      remainingVolume: numberOrNull(position.volume),
-      stopLoss: numberOrNull(position.stopLoss),
-      openedAt: Date.parse(String(event.timestamp ?? new Date().toISOString())),
+
+      entry:
+        numberOrNull(
+          position.entry ??
+          event.fillPrice,
+        ),
+
+      initialVolume:
+        numberOrNull(
+          position.volume,
+        ),
+
+      remainingVolume:
+        numberOrNull(
+          position.volume,
+        ),
+
+      stopLoss:
+        numberOrNull(
+          position.stopLoss,
+        ),
+
+      openedAt:
+        Date.parse(
+          String(
+            event.timestamp ??
+            new Date().toISOString(),
+          ),
+        ),
+
       realizedPnlEstimate: 0,
+
+      dailyMode:
+        recovery.dailyMode ||
+        null,
+
+      dailyNetPnlAtEntry:
+        recovery.dailyNetPnl,
+
+      recoveryTargetNetPnl:
+        recovery.targetNetPnl,
+
+      recoveryTpDistance:
+        recovery.tpDistance,
+
+      recoveryTakeProfit:
+        recovery.takeProfit,
     };
+
+    releaseHold(
+      "NEW_POSITION_FILLED",
+    );
+
     return;
   }
 
-  if (!state.trade) return;
-
-  if (type === "PLUS6_SL_TO_ENTRY" || type === "STRUCTURAL_SL_TIGHTEN") {
-    const stop = numberOrNull(event.stopLoss ?? enrichment.metrics?.stopLoss);
-    if (stop !== null) state.trade.stopLoss = stop;
+  if (
+    [
+      "PLUS6_SL_TO_ENTRY",
+      "PLUS10_PARTIAL_ONE_THIRD",
+      "STRUCTURAL_SL_TIGHTEN",
+      "TP1_PARTIAL_FILLED",
+      "TP1_BREAK_EVEN_APPLIED",
+    ].includes(type)
+  ) {
+    releaseHold(type);
   }
 
-  if (type === "PLUS10_PARTIAL_ONE_THIRD") {
-    state.trade.remainingVolume = numberOrNull(event.remainingVolume) ?? state.trade.remainingVolume;
-    if (enrichment.partialPnlEstimate !== null) {
-      state.trade.realizedPnlEstimate = Number(state.trade.realizedPnlEstimate ?? 0) + enrichment.partialPnlEstimate;
+  if (!state.trade) {
+    return;
+  }
+
+  if (
+    type === "PLUS6_SL_TO_ENTRY" ||
+    type === "STRUCTURAL_SL_TIGHTEN" ||
+    type === "TP1_BREAK_EVEN_APPLIED"
+  ) {
+    const stop =
+      numberOrNull(
+        event.stopLoss ??
+        enrichment.metrics?.stopLoss,
+      );
+
+    if (stop !== null) {
+      state.trade.stopLoss =
+        stop;
     }
   }
 
-  if (type === "EXIT_EXECUTED" || type === "MANAGED_POSITION_CLOSED") {
+  if (
+    type === "PLUS10_PARTIAL_ONE_THIRD"
+  ) {
+    state.trade.remainingVolume =
+      numberOrNull(
+        event.remainingVolume,
+      ) ??
+      state.trade.remainingVolume;
+
+    if (
+      enrichment.partialPnlEstimate !==
+      null
+    ) {
+      state.trade.realizedPnlEstimate =
+        Number(
+          state.trade
+            .realizedPnlEstimate ??
+          0,
+        ) +
+        enrichment.partialPnlEstimate;
+    }
+  }
+
+  if (type === "TP1_PARTIAL_FILLED") {
+    state.trade.remainingVolume =
+      numberOrNull(
+        event.remainingVolume,
+      ) ??
+      state.trade.remainingVolume;
+  }
+
+  if (
+    [
+      "EXIT_EXECUTED",
+      "MANAGED_POSITION_CLOSED",
+      "POSITION_CLOSED",
+    ].includes(type)
+  ) {
+    releaseHold(type);
     state.trade = null;
   }
 }
-
 function currentSide(event, enrichment) {
   return normalizeSide(
     enrichment.live?.state?.managed?.side ??
@@ -587,9 +1753,63 @@ function fallbackMetrics(event) {
 }
 
 async function getDemoSnapshot() {
-  return fetchJson(`${monitorApiBase}/api/v1/phase7b-demo`, 1800).catch(() => null);
+  return fetchJson(
+    `${monitorApiBase}/api/v1/phase7b-demo`,
+    1800,
+  ).catch(() => null);
 }
 
+async function getDailyRecoverySnapshot(volume) {
+  const safeVolume =
+    numberOrNull(volume) ??
+    0.03;
+
+  const query =
+    new URLSearchParams({
+      symbol,
+      volume:
+        String(safeVolume),
+    });
+
+  return fetchJson(
+    `${monitorApiBase}/api/v1/phase7c/daily-recovery?${query.toString()}`,
+    3000,
+  ).catch(() => null);
+}
+
+async function getDailyRecoverySnapshotWithRetry(volume) {
+  let lastSnapshot = null;
+
+  for (
+    let attempt = 0;
+    attempt < 4;
+    attempt += 1
+  ) {
+    const snapshot =
+      await getDailyRecoverySnapshot(
+        volume,
+      );
+
+    if (snapshot) {
+      lastSnapshot = snapshot;
+
+      // When MT5 history has synchronized enough to move
+      // the day back to NORMAL, return immediately.
+      if (
+        snapshot.dailyMode === "NORMAL" ||
+        Number(snapshot.dailyNetPnl) >= 0
+      ) {
+        return snapshot;
+      }
+    }
+
+    if (attempt < 3) {
+      await sleep(650);
+    }
+  }
+
+  return lastSnapshot;
+}
 async function findClosedTradeWithRetry(event) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const performance = await fetchJson(`${monitorApiBase}/api/v1/mt5/performance?symbol=${encodeURIComponent(symbol)}&days=7`, 3000).catch(() => null);
@@ -752,24 +1972,86 @@ async function sendHtml(text, route = "trade") {
 }
 function loadState() {
   const blank = {
-    version: 2,
+    version: 3,
     initialized: false,
     offset: 0,
+    offsets: {},
     sent: 0,
     lastEventAt: null,
     trade: null,
+    hold: null,
     systemAlerts: {},
   };
-  if (!fs.existsSync(statePath)) return blank;
+
+  if (!fs.existsSync(statePath)) {
+    return blank;
+  }
+
   try {
-    const parsed = JSON.parse(fs.readFileSync(statePath, "utf8").replace(/^\uFEFF/, ""));
+    const parsed =
+      JSON.parse(
+        fs.readFileSync(
+          statePath,
+          "utf8",
+        ).replace(/^\uFEFF/, ""),
+      );
+
+    const offsets =
+      parsed.offsets &&
+      typeof parsed.offsets === "object"
+        ? { ...parsed.offsets }
+        : {};
+
+    const legacyTrendOffset =
+      Number.isFinite(
+        Number(offsets.trend),
+      )
+        ? Number(offsets.trend)
+        : Number.isFinite(
+              Number(parsed.offset),
+            )
+          ? Number(parsed.offset)
+          : 0;
+
+    offsets.trend =
+      legacyTrendOffset;
+
     return {
-      version: 2,
-      initialized: Boolean(parsed.initialized),
-      offset: Number.isFinite(parsed.offset) ? parsed.offset : 0,
-      sent: Number.isFinite(parsed.sent) ? parsed.sent : 0,
-      lastEventAt: parsed.lastEventAt ?? null,
-      trade: parsed.trade && typeof parsed.trade === "object" ? parsed.trade : null,
+      version: 3,
+
+      initialized:
+        Boolean(
+          parsed.initialized,
+        ),
+
+      offset:
+        legacyTrendOffset,
+
+      offsets,
+
+      sent:
+        Number.isFinite(
+          parsed.sent,
+        )
+          ? parsed.sent
+          : 0,
+
+      lastEventAt:
+        parsed.lastEventAt ??
+        null,
+
+      trade:
+        parsed.trade &&
+        typeof parsed.trade === "object"
+          ? parsed.trade
+          : null,
+
+      hold:
+        parsed.hold &&
+        typeof parsed.hold === "object"
+          ? parsed.hold
+          : null,
+
       systemAlerts:
         parsed.systemAlerts &&
         typeof parsed.systemAlerts === "object"
@@ -780,7 +2062,6 @@ function loadState() {
     return blank;
   }
 }
-
 function saveState() {
   const temp = `${statePath}.tmp`;
   fs.writeFileSync(temp, `${JSON.stringify(state, null, 2)}\n`, "utf8");
