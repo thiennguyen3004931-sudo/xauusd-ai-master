@@ -101,5 +101,6 @@ jobs:
           grep -q 'pattern: "ENGULFING"' scripts/run-phase7b-demo-controller.ts
           grep -q 'pattern: "TWO_CANDLE_BODY_DOMINANCE"' scripts/run-phase7b-demo-controller.ts
           grep -q 'pattern: "THREE_CANDLE_BODY_DOMINANCE"' scripts/run-phase7b-demo-controller.ts
-          grep -q 'threeBodyTotal > anchorBody' scripts/run-phase7b-demo-controller.ts
+          grep -q 'bcBodyTotal < anchorBody' scripts/run-phase7b-demo-controller.ts
+          grep -q 'bcdBodyTotal > anchorBody' scripts/run-phase7b-demo-controller.ts
           grep -q 'Body(B)+Body(C)+Body(D)' packages/risk-engine/tests/Phase7BDualPatternTrendRiderService.test.ts
