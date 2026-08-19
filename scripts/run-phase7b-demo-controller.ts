@@ -29,6 +29,7 @@ type SymbolSpec = {
   tickSize: number;
   point: number;
   effectiveTickValuePerLot: number;
+  cashPerPriceUnitPerLot?: number;
   digits: number;
   minVolume: number;
   maxVolume: number;
@@ -48,6 +49,48 @@ type Position = {
   takeProfit: number;
   profit: number;
   openedAt: number;
+};
+
+type TradingDayBoundary = {
+  symbol: string;
+  brokerSymbol: string;
+  currentStartTime: number;
+  previousStartTime: number | null;
+  source: string;
+};
+
+type DealHistoryRow = {
+  ticket: string;
+  orderId: string;
+  positionId: string;
+  symbol: string;
+  side: "BUY" | "SELL" | null;
+  entry: string;
+  volume: number;
+  price: number;
+  profit: number;
+  commission: number;
+  swap: number;
+  fee: number;
+  netPnl: number;
+  magic: number;
+  comment: string;
+  timestamp: number;
+  isTradingDeal: boolean;
+};
+
+type DailyMode = "TREND" | "RECOVERY_TP";
+
+type DailyRecoveryPlan = {
+  mode: DailyMode;
+  dayStartTime: number;
+  dailyNetPnl: number;
+  targetNetPnl: number;
+  requiredUsd: number;
+  rawTpDistance: number;
+  tpDistance: number;
+  canRecoverInOneTrade: boolean;
+  dealCount: number;
 };
 
 type OrderResponse = {
@@ -88,6 +131,12 @@ type ManagedState = {
   partialAttempt: number;
   exitAttempt: number;
   structureAttempt: number;
+  dailyMode?: DailyMode;
+  dailyNetPnlAtEntry?: number;
+  recoveryTargetNetPnl?: number;
+  recoveryTpDistance?: number;
+  recoveryTakeProfit?: number;
+  recoveryDayStartTime?: number;
 };
 
 type BotState = {
@@ -105,6 +154,9 @@ const once = /^(1|true|yes|on)$/i.test(process.env.ZIQ_DEMO_ONCE ?? "false");
 const workDir = requiredEnv("ZIQ_DEMO_WORK_DIR");
 const bridgeEnvPath = process.env.ZIQ_BRIDGE_ENV ?? path.resolve("packages/mt5-broker/bridge/.env.phase7b-demo");
 const ENGULF_BODY_TOLERANCE_PRICE = 0.1;
+const DAILY_RECOVERY_MIN_TP_DISTANCE = 6;
+const DAILY_RECOVERY_MAX_TP_DISTANCE = 10;
+const DAILY_RECOVERY_TARGET_NET_USD = 1;
 
 loadEnvFile(bridgeEnvPath);
 
@@ -153,7 +205,12 @@ console.log("PHASE7B_DEMO_PLUS6=SL_TO_ENTRY");
 console.log("PHASE7B_DEMO_PLUS10=PARTIAL_ONE_THIRD");
 console.log("PHASE7B_DEMO_POST_PLUS10_SL=M15_CONFIRMED_SWING_STRUCTURE_ONLY_TIGHTEN");
 console.log("PHASE7B_DEMO_REVERSAL_EXIT=OPPOSING_M15_FVG_PLUS_REJECTION_CLOSE_AFTER_PLUS10");
-console.log("PHASE7B_DEMO_FIXED_TP=OFF");
+console.log("PHASE7B_DEMO_FIXED_TP=OFF_IN_TREND");
+console.log("PHASE7B_DEMO_DAILY_RECOVERY=REALIZED_NET_PNL_MAGIC_FILTERED");
+console.log("PHASE7B_DEMO_DAILY_RECOVERY_DAY=MT5_D1_CURRENT_BAR");
+console.log("PHASE7B_DEMO_DAILY_RECOVERY_TP=ADAPTIVE_6_TO_10");
+console.log("PHASE7B_DEMO_DAILY_RECOVERY_TARGET_NET_USD=1");
+console.log("PHASE7B_DEMO_DAILY_RECOVERY_LOT_ESCALATION=OFF");
 console.log("PHASE7B_DEMO_MAX_MANAGED_POSITIONS=1");
 console.log(`PHASE7B_DEMO_STATE=${statePath}`);
 console.log(`PHASE7B_DEMO_JOURNAL=${journalPath}`);
@@ -333,6 +390,17 @@ async function cycle(): Promise<void> {
     return;
   }
 
+  const dailyRecovery = await resolveDailyRecoveryPlan(quote, spec);
+
+  const takeProfit = dailyRecovery.mode === "RECOVERY_TP"
+    ? roundPrice(
+        signal.side === "BUY"
+          ? marketEntry + dailyRecovery.tpDistance
+          : marketEntry - dailyRecovery.tpDistance,
+        spec.digits,
+      )
+    : 0;
+
   const fvgConfirmedAtEntry = hasRelevantFvg(m15, m15.length - 1, signal.side, 12);
   const orderId = `p7b-${signal.signalTimestamp}-${signal.side}`;
   journal("ENTRY_SUBMIT", {
@@ -349,6 +417,13 @@ async function cycle(): Promise<void> {
     engulfBodyTolerancePrice: ENGULF_BODY_TOLERANCE_PRICE,
     fvgConfirmedAtEntry,
     fvgRequiredForEntry: false,
+    dailyMode: dailyRecovery.mode,
+    dailyNetPnl: dailyRecovery.dailyNetPnl,
+    recoveryTargetNetPnl: dailyRecovery.targetNetPnl,
+    recoveryTpDistance: dailyRecovery.tpDistance,
+    recoveryTakeProfit: takeProfit,
+    recoveryCanRecoverInOneTrade: dailyRecovery.canRecoverInOneTrade,
+    recoveryDealCount: dailyRecovery.dealCount,
   });
 
   const order = await post<OrderResponse>("/v1/orders", {
@@ -359,7 +434,7 @@ async function cycle(): Promise<void> {
     volume: fixedVolume,
     requestedPrice: marketEntry,
     stopLoss,
-    takeProfit: 0,
+    takeProfit,
     deviationPoints,
     magicNumber,
     comment: "phase7b-demo",
@@ -402,6 +477,12 @@ async function cycle(): Promise<void> {
     partialAttempt: 0,
     exitAttempt: 0,
     structureAttempt: 0,
+    dailyMode: dailyRecovery.mode,
+    dailyNetPnlAtEntry: dailyRecovery.dailyNetPnl,
+    recoveryTargetNetPnl: dailyRecovery.targetNetPnl,
+    recoveryTpDistance: dailyRecovery.tpDistance,
+    recoveryTakeProfit: takeProfit,
+    recoveryDayStartTime: dailyRecovery.dayStartTime,
   };
   saveState();
   journal("ENTRY_FILLED", {
@@ -409,7 +490,111 @@ async function cycle(): Promise<void> {
     position: opened,
     fillPrice: order.fillPrice,
     fvgConfirmedAtEntry,
+    dailyMode: dailyRecovery.mode,
+    dailyNetPnlAtEntry: dailyRecovery.dailyNetPnl,
+    recoveryTargetNetPnl: dailyRecovery.targetNetPnl,
+    recoveryTpDistance: dailyRecovery.tpDistance,
+    recoveryTakeProfit: takeProfit,
+    recoveryCanRecoverInOneTrade: dailyRecovery.canRecoverInOneTrade,
   });
+}
+
+async function resolveDailyRecoveryPlan(
+  quote: Quote,
+  spec: SymbolSpec,
+): Promise<DailyRecoveryPlan> {
+  const boundary = await get<TradingDayBoundary>(
+    `/v1/session/day-boundary/${encodeURIComponent(symbol)}`,
+  );
+
+  const dayStartTime = Number(boundary.currentStartTime);
+  const historyEndTime = Number(quote.timestamp);
+
+  if (
+    !Number.isFinite(dayStartTime) ||
+    dayStartTime <= 0 ||
+    !Number.isFinite(historyEndTime) ||
+    historyEndTime <= dayStartTime
+  ) {
+    throw new Error("Daily recovery broker day boundary is invalid.");
+  }
+
+  const deals = await get<DealHistoryRow[]>(
+    `/v1/history/deals?fromMs=${dayStartTime}&toMs=${historyEndTime}&symbol=${encodeURIComponent(symbol)}`,
+  );
+
+  const botDeals = deals.filter(
+    (deal) =>
+      deal.isTradingDeal === true &&
+      Number(deal.magic) === magicNumber,
+  );
+
+  const dailyNetPnl = botDeals.reduce(
+    (sum, deal) => sum + Number(deal.netPnl || 0),
+    0,
+  );
+
+  if (dailyNetPnl >= 0) {
+    return {
+      mode: "TREND",
+      dayStartTime,
+      dailyNetPnl: roundValue(dailyNetPnl, 4),
+      targetNetPnl: DAILY_RECOVERY_TARGET_NET_USD,
+      requiredUsd: 0,
+      rawTpDistance: 0,
+      tpDistance: 0,
+      canRecoverInOneTrade: true,
+      dealCount: botDeals.length,
+    };
+  }
+
+  const cashPerPriceUnitPerLot =
+    Number(spec.cashPerPriceUnitPerLot) > 0
+      ? Number(spec.cashPerPriceUnitPerLot)
+      : spec.tickSize > 0 && spec.effectiveTickValuePerLot > 0
+        ? spec.effectiveTickValuePerLot / spec.tickSize
+        : 0;
+
+  if (!(cashPerPriceUnitPerLot > 0)) {
+    throw new Error(
+      "Daily recovery cannot determine cash per price unit per lot.",
+    );
+  }
+
+  const cashPerPriceUnit = cashPerPriceUnitPerLot * fixedVolume;
+
+  if (!(cashPerPriceUnit > 0)) {
+    throw new Error("Daily recovery cash value is invalid.");
+  }
+
+  const requiredUsd =
+    Math.abs(dailyNetPnl) +
+    DAILY_RECOVERY_TARGET_NET_USD;
+
+  const rawTpDistance =
+    requiredUsd /
+    cashPerPriceUnit;
+
+  const tpDistance = Math.min(
+    DAILY_RECOVERY_MAX_TP_DISTANCE,
+    Math.max(
+      DAILY_RECOVERY_MIN_TP_DISTANCE,
+      rawTpDistance,
+    ),
+  );
+
+  return {
+    mode: "RECOVERY_TP",
+    dayStartTime,
+    dailyNetPnl: roundValue(dailyNetPnl, 4),
+    targetNetPnl: DAILY_RECOVERY_TARGET_NET_USD,
+    requiredUsd: roundValue(requiredUsd, 4),
+    rawTpDistance: roundValue(rawTpDistance, 5),
+    tpDistance: roundValue(tpDistance, 5),
+    canRecoverInOneTrade:
+      rawTpDistance <= DAILY_RECOVERY_MAX_TP_DISTANCE + 1e-9,
+    dealCount: botDeals.length,
+  };
 }
 
 function latestSignal(m15: Phase7Bar[], m5: Phase7Bar[], spec: SymbolSpec): Phase7BSignal | null {
@@ -557,6 +742,10 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
     } else {
       journal("PLUS6_SL_REJECTED", { ticket: managed.ticket, favorable, response });
     }
+  }
+
+  if (managed.dailyMode === "RECOVERY_TP") {
+    return;
   }
 
   if (!managed.partialApplied && favorable >= 10) {
