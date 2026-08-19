@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import ts from "typescript";
 import { acquireExecutionLock } from "./phase7c-execution-lock.mjs";
 
@@ -6,6 +7,18 @@ const nativeFetch = globalThis.fetch.bind(globalThis);
 const controlApiBase = (process.env.ZIQ_PHASE7C_CONTROL_API_URL?.trim() || "http://127.0.0.1:3711").replace(/\/$/, "");
 const regimeSymbol = process.env.ZIQ_PHASE7C_REGIME_SYMBOL?.trim().toUpperCase() || process.env.ZIQ_DEMO_SYMBOL?.trim().toUpperCase() || "XAUUSD";
 const regimeCandleCount = clampInt(process.env.ZIQ_PHASE7C_REGIME_CANDLE_COUNT, 320, 220, 1000);
+const trendRuntimeArmed = /^(1|true|yes|on)$/i.test(
+  process.env.ZIQ_DEMO_ARMED ?? "false",
+);
+const trendRuntimeIntervalSeconds = clampInt(
+  process.env.ZIQ_DEMO_INTERVAL_SECONDS,
+  5,
+  1,
+  60,
+);
+const trendRuntimeStartedAt = Date.now();
+
+startTrendRuntimeHeartbeat();
 
 console.log("PHASE7C_TREND_ENTRY_GATE=ENABLED");
 console.log(`PHASE7C_CONTROL_API=${controlApiBase}`);
@@ -173,6 +186,151 @@ async function importLegacyTrendController() {
   }
 }
 
+function trendRuntimeFilePath() {
+  const workDir =
+    process.env.ZIQ_DEMO_WORK_DIR?.trim() ?? "";
+
+  return workDir
+    ? path.join(workDir, "phase7b-demo-runtime.json")
+    : null;
+}
+
+function writeTrendRuntimeState(
+  status,
+  armed,
+  requireOwnership = false,
+) {
+  const runtimePath = trendRuntimeFilePath();
+  if (!runtimePath) return;
+
+  if (
+    requireOwnership &&
+    fs.existsSync(runtimePath)
+  ) {
+    try {
+      const current = JSON.parse(
+        fs.readFileSync(runtimePath, "utf8")
+          .replace(/^\uFEFF/, ""),
+      );
+
+      if (Number(current?.pid) !== process.pid) {
+        return;
+      }
+    } catch {
+      return;
+    }
+  }
+
+  const payload = {
+    version: 1,
+    status,
+    armed,
+    pid: process.pid,
+    heartbeatAt: Date.now(),
+    startedAt: trendRuntimeStartedAt,
+    intervalSeconds: trendRuntimeIntervalSeconds,
+  };
+
+  fs.mkdirSync(
+    path.dirname(runtimePath),
+    { recursive: true },
+  );
+
+  const tempPath =
+    runtimePath +
+    "." +
+    process.pid +
+    ".tmp";
+
+  fs.writeFileSync(
+    tempPath,
+    JSON.stringify(payload, null, 2),
+    "utf8",
+  );
+
+  fs.renameSync(
+    tempPath,
+    runtimePath,
+  );
+}
+
+function startTrendRuntimeHeartbeat() {
+  if (!trendRuntimeArmed) {
+    console.log(
+      "PHASE7C_TREND_RUNTIME_HEARTBEAT=OFF_NOT_ARMED",
+    );
+    return;
+  }
+
+  const runtimePath = trendRuntimeFilePath();
+
+  if (!runtimePath) {
+    throw new Error(
+      "Phase 7C Trend runtime heartbeat requires ZIQ_DEMO_WORK_DIR.",
+    );
+  }
+
+  writeTrendRuntimeState(
+    "RUNNING",
+    true,
+  );
+
+  const heartbeatMs =
+    Math.max(
+      1000,
+      Math.min(
+        trendRuntimeIntervalSeconds,
+        5,
+      ) * 1000,
+    );
+
+  const heartbeatTimer = setInterval(
+    () => {
+      try {
+        writeTrendRuntimeState(
+          "RUNNING",
+          true,
+        );
+      } catch (error) {
+        console.error(
+          "PHASE7C_TREND_RUNTIME_HEARTBEAT_ERROR=" +
+            errorMessage(error),
+        );
+      }
+    },
+    heartbeatMs,
+  );
+
+  heartbeatTimer.unref();
+
+  process.once(
+    "exit",
+    () => {
+      try {
+        writeTrendRuntimeState(
+          "STOPPED",
+          false,
+          true,
+        );
+      } catch {
+        // Best-effort only.
+      }
+    },
+  );
+
+  console.log(
+    "PHASE7C_TREND_RUNTIME_STATE=" +
+      runtimePath,
+  );
+
+  console.log(
+    "PHASE7C_TREND_RUNTIME_HEARTBEAT=ON" +
+      "|PID=" +
+      process.pid +
+      "|INTERVAL_MS=" +
+      heartbeatMs,
+  );
+}
 async function evaluateTrendEntryPermission() {
   const modePayload = await controlRequest("/api/v1/phase7c/bot-mode");
   const activeMode = String(modePayload?.state?.mode ?? "PAUSE").toUpperCase();
