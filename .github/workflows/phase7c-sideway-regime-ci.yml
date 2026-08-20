@@ -197,3 +197,12 @@ jobs:
             }
             Write-Host "PHASE7C_POWERSHELL_PARSE_PASS=$file"
           }
+
+      - name: Validate unarmed activation contract
+        shell: bash
+        run: |
+          grep -q '\$preflightArgs += "-Once"' scripts/activate-phase7c-local.ps1
+          grep -q 'PHASE7C_EXECUTORS_SHADOW=PASS' scripts/activate-phase7c-local.ps1
+          grep -q 'PHASE7C_EXECUTOR_SUPERVISOR_MODE=TELEGRAM_ONLY' scripts/activate-phase7c-local.ps1
+          grep -q "pnpm --filter '@xauusd/api...' build" scripts/activate-phase7c-local.ps1
+          grep -q "pnpm --filter '@xauusd/web...' build" scripts/activate-phase7c-local.ps1
