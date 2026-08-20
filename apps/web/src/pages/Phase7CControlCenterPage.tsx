@@ -8,14 +8,11 @@ import {
   CardContent,
   Chip,
   Grid,
-  LinearProgress,
   Stack,
   Typography,
 } from "@mui/material";
 import {
-  getPhase7BDemo,
   getPhase7CAccountRisk,
-  getPhase7CAutoLotPreview,
   getPhase7CDailyRecovery,
   getPhase7CLiveRegime,
 } from "../api";
@@ -39,26 +36,9 @@ function dateTime(value: number | string | null | undefined) {
 
 export function Phase7CControlCenterPage() {
 
-  const demo = useQuery({
-    queryKey: ["phase7b-demo-control-center"],
-    queryFn: getPhase7BDemo,
-    refetchInterval: 3000,
-    retry: false,
-  });
   const account = useQuery({
     queryKey: ["phase7c-account-control-center"],
     queryFn: () => getPhase7CAccountRisk(0.25, 0.03),
-    refetchInterval: 5000,
-    retry: false,
-  });
-
-  const currentStopDistance =
-    demo.data?.entryDiagnostics?.entry.stopDistance ?? null;
-  const autoLot = useQuery({
-    queryKey: ["phase7c-current-auto-lot", currentStopDistance],
-    queryFn: () =>
-      getPhase7CAutoLotPreview(currentStopDistance ?? 0, 0.25, 0.03),
-    enabled: currentStopDistance !== null,
     refetchInterval: 5000,
     retry: false,
   });
@@ -70,16 +50,10 @@ export function Phase7CControlCenterPage() {
     retry: false,
   });
 
-  const sidewayPreviewVolume =
-    autoLot.data?.preview?.approved
-      ? autoLot.data.preview.recommendedLot
-      : null;
-
-  const recoveryPreviewVolume =
-    liveRegime.data?.recommendedMode === "SIDEWAY" &&
-    sidewayPreviewVolume !== null
-      ? sidewayPreviewVolume
-      : 0.03;
+  // The exact Sideway stop only exists after the executor has Supply/Demand,
+  // ATR, the final quote and M5 confirmation. Use the configured cap for this
+  // read-only recovery illustration instead of reusing Trend diagnostics.
+  const recoveryPreviewVolume = 0.03;
 
   const dailyRecovery = useQuery({
     queryKey: [
@@ -94,9 +68,9 @@ export function Phase7CControlCenterPage() {
     retry: false,
   });
 
-  if (demo.isLoading || account.isLoading) return <LoadingState />;
-  if (!demo.data || !account.data) {
-    const error = demo.error ?? account.error;
+  if (account.isLoading) return <LoadingState />;
+  if (!account.data) {
+    const error = account.error;
     return (
       <ErrorState
         message={
@@ -129,9 +103,7 @@ export function Phase7CControlCenterPage() {
 
   const previewVolumeBasis =
     liveRegime.data?.recommendedMode === "SIDEWAY"
-      ? sidewayPreviewVolume !== null
-        ? "Sideway Auto Lot hiện tại"
-        : "Sideway chưa có Structural SL · tạm preview 0.03"
+      ? "mức cap 0.03 để minh họa; lot Sideway tính khi có setup"
       : "Trend fixed 0.03 lot";
 
   const recoveryReadError =
@@ -391,6 +363,41 @@ export function Phase7CControlCenterPage() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardContent>
+          <Typography fontWeight={900}>SL, dời SL và chốt lời đang áp dụng</Typography>
+          <Typography variant="caption" color="text.secondary">
+            Đây là rule execution hiện hành, không phải kết quả nghiên cứu cũ.
+          </Typography>
+          <Grid container spacing={2} sx={{ mt: 0.5 }}>
+            <Grid size={{ xs: 12, lg: 4 }}>
+              <Box sx={{ p: 2, height: "100%", border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
+                <Typography fontWeight={900}>TREND · NORMAL</Typography>
+                <Typography variant="body2" color="text.secondary" mt={0.8}>
+                  SL theo cực trị mô hình; vận hành tối thiểu 6 và tối đa 10 giá. Nếu SL cấu trúc &gt;10, không vào đuổi mà chờ hồi trong M15 kế tiếp. +6 dời về BE; +10 chốt 1/3. Runner siết SL theo cấu trúc M15 và thoát theo MA50 hoặc FVG đảo chiều kèm nến từ chối.
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid size={{ xs: 12, lg: 4 }}>
+              <Box sx={{ p: 2, height: "100%", border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
+                <Typography fontWeight={900}>SIDEWAY · NORMAL</Typography>
+                <Typography variant="body2" color="text.secondary" mt={0.8}>
+                  SL nằm ngoài vùng Demand/Supply, cộng buffer ATR và khoảng cách broker. +6 dời về BE; +10 chốt 1/3. Phần còn lại chốt tại biên đối diện; đóng sớm nếu thị trường rời trạng thái range hoặc hết thời gian giữ tối đa.
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid size={{ xs: 12, lg: 4 }}>
+              <Box sx={{ p: 2, height: "100%", border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
+                <Typography fontWeight={900}>DAILY RECOVERY_TP</Typography>
+                <Typography variant="body2" color="text.secondary" mt={0.8}>
+                  Khi P/L đã chốt trong ngày âm, lệnh hợp lệ kế tiếp dùng TP toàn vị thế thích ứng 6–10 giá để hướng tới hòa phần lỗ + 1 USD. Không tăng lot, không ép entry và không nới SL.
+                </Typography>
+              </Box>
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
+
 
             <Card>
         <CardContent>
@@ -401,14 +408,13 @@ export function Phase7CControlCenterPage() {
           >
             <Box>
               <Typography fontWeight={900}>
-                Risk & Auto Lot · SHADOW
+                Chính sách Risk & Lot
               </Typography>
               <Typography
                 variant="caption"
                 color="text.secondary"
               >
-                Trend fixed 0.03 lot · Sideway risk 0.25% balance · cap 0.03 lot.
-                Chỉ preview; không tăng risk, không martingale và không nới SL.
+                Trend fixed 0.03 lot. Sideway tính Auto Lot sau khi có đúng SL từ Supply/Demand + ATR + quote cuối; risk 0.25% balance, cap 0.03 lot. Không martingale và không nới SL.
               </Typography>
             </Box>
 
@@ -445,65 +451,24 @@ export function Phase7CControlCenterPage() {
 
             <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
               <MetricCard
-                label="Structural SL hiện tại"
-                value={
-                  currentStopDistance !== null
-                    ? currentStopDistance.toFixed(2) + " giá"
-                    : "—"
-                }
-                detail="Không nới SL để tăng risk"
+                label="SL Sideway"
+                value="THEO SETUP"
+                detail="Supply/Demand + ATR + broker gap"
               />
             </Grid>
 
             <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
               <MetricCard
                 label="Sideway Auto Lot"
-                value={
-                  sidewayPreviewVolume !== null
-                    ? sidewayPreviewVolume.toFixed(2) + " lot"
-                    : "—"
-                }
-                detail={
-                  autoLot.data?.preview?.approved
-                    ? "Theo Structural SL"
-                    : "Chờ Structural SL hợp lệ"
-                }
+                value="TÍNH TRƯỚC LỆNH"
+                detail="0.25% balance · cap 0.03"
               />
             </Grid>
           </Grid>
 
-          {currentStopDistance === null ? (
-            <Alert severity="info" sx={{ mt: 2 }}>
-              Chưa có Structural SL hợp lệ nên Sideway Auto Lot chưa thể tính exact.
-            </Alert>
-          ) : autoLot.isLoading ? (
-            <LinearProgress sx={{ mt: 2 }} />
-          ) : autoLot.data ? (
-            <Alert
-              severity={
-                autoLot.data.preview.approved
-                  ? "success"
-                  : "warning"
-              }
-              sx={{ mt: 2 }}
-            >
-              {autoLot.data.preview.reason}
-              {" · "}Risk preview{" "}
-              {money(
-                autoLot.data.preview.estimatedRiskUsd,
-                currency,
-              )}
-              {" · "}
-              {autoLot.data.preview.estimatedRiskPercent.toFixed(3)}
-              %
-            </Alert>
-          ) : (
-            <Alert severity="warning" sx={{ mt: 2 }}>
-              {autoLot.error instanceof Error
-                ? autoLot.error.message
-                : "Không tính được Auto Lot preview."}
-            </Alert>
-          )}
+          <Alert severity="info" sx={{ mt: 2 }}>
+            Không dùng SL Trend để giả lập lot Sideway. Executor chỉ tính lot Sideway khi setup cuối đã qua xác nhận M5 và có SL thực tế; nếu snapshot Auto Lot sai tài khoản, symbol, stop distance hoặc quá cũ thì chặn lệnh.
+          </Alert>
 
           <Typography
             variant="caption"
@@ -526,7 +491,7 @@ export function Phase7CControlCenterPage() {
 
 
       <Alert severity="warning">
-        Phase 7C chỉ quan sát và nghiên cứu. Không thay đổi Pattern, MA, FVG, SL, volume 0.03 hoặc quyền giao dịch của Phase 7B đang forward-test.
+        AUTO chọn TREND / SIDEWAY / PAUSE. Trend dùng fixed 0.03 lot; Sideway dùng risk 0.25% với cap 0.03. Telegram chỉ đổi mode điều phối, không có quyền trực tiếp đặt/sửa/đóng lệnh MT5.
       </Alert>
     </Stack>
   );

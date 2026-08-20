@@ -214,7 +214,7 @@ export function Phase7BOpsPage() {
             <CardContent>
               <Typography variant="h6" fontWeight={900}>Bot giao dịch DEMO</Typography>
               <Typography variant="body2" color="text.secondary" mt={0.5}>
-                Điều kiện vào lệnh: 2 mô hình nến + Supertrend M15 cùng hướng + M5 cùng hướng và fresh flip ≤ 2 nến đóng. FVG chỉ là bối cảnh. Khối lượng mặc định 0.03 lot.
+                Trend entry: 3 mô hình nến + Supertrend M15/M5 cùng hướng + SL cấu trúc. SL vận hành 6–10 giá; nếu cấu trúc vượt 10 thì chờ hồi trong cửa sổ M15 kế tiếp. Flip age và FVG chỉ là bối cảnh. Khối lượng mặc định 0.03 lot.
               </Typography>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} mt={2.5}>
                 <Button
@@ -295,7 +295,7 @@ export function Phase7BOpsPage() {
         <CardContent>
           <Typography variant="h6" fontWeight={900}>Nội dung Telegram sẽ giải thích gì?</Typography>
           <Grid container spacing={1.5} mt={0.4}>
-            <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Vì sao vào lệnh:</b> mô hình nến, hướng M15, M5 fresh flip, giá vào, SL và bối cảnh FVG.</Typography></Grid>
+            <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Vì sao vào/chờ:</b> mô hình nến, ST M15/M5, SL cấu trúc, trạng thái vào ngay hoặc chờ hồi và bối cảnh FVG.</Typography></Grid>
             <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Vì sao HOLD:</b> trạng thái +6 hòa vốn, +10 chốt 1/3, runner còn lại và lý do chưa thoát.</Typography></Grid>
             <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Khi quản lý:</b> dời SL, khối lượng còn lại, lãi/lỗ runner.</Typography></Grid>
             <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Khi đóng:</b> P&amp;L, giá thoát và lý do đóng.</Typography></Grid>
@@ -304,7 +304,7 @@ export function Phase7BOpsPage() {
       </Card>
 
       <Alert severity="info">
-        Quản lý hiện hành: +6 giá → dời SL về hòa vốn · +10 giá → chốt 1/3 · phần còn lại tiếp tục runner canonical. H1/H4 và FVG chỉ là bối cảnh, không phải TP cứng.
+        NORMAL: cả Trend và Sideway đều +6 giá → dời SL về hòa vốn, +10 giá → chốt 1/3. Trend runner siết SL theo cấu trúc M15 và thoát theo MA50/FVG đảo chiều; Sideway chốt phần còn lại ở biên đối diện. RECOVERY_TP chốt toàn bộ tại TP thích ứng 6–10 giá, không tăng lot.
       </Alert>
     </Stack>
   );

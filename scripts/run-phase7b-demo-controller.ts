@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { phase7BSupertrend, type Phase7Bar, type Phase7BSignal } from "@xauusd/risk-engine";
+import {
+  Phase7BPullbackEntryService,
+  phase7BSupertrend,
+  type Phase7Bar,
+  type Phase7BPendingPullback,
+  type Phase7BSignal,
+} from "@xauusd/risk-engine";
 
 type Health = {
   status: "ok" | "degraded";
@@ -139,11 +145,27 @@ type ManagedState = {
   recoveryDayStartTime?: number;
 };
 
+type RuntimeEntrySignal = Pick<
+  Phase7BSignal,
+  "id" | "side" | "pattern" | "signalTimestamp" | "entry" | "patternExtreme"
+>;
+
 type BotState = {
-  version: 1;
+  version: 2;
   accountLogin: number | null;
   lastEvaluatedM15Close: number;
+  lastEvaluatedM5Close: number;
+  pendingPullback: Phase7BPendingPullback | null;
   managed: ManagedState | null;
+};
+
+type PersistedBotState = {
+  version?: number;
+  accountLogin?: number | null;
+  lastEvaluatedM15Close?: number;
+  lastEvaluatedM5Close?: number;
+  pendingPullback?: Phase7BPendingPullback | null;
+  managed?: ManagedState | null;
 };
 
 const symbol = process.env.ZIQ_DEMO_SYMBOL ?? "XAUUSD";
@@ -154,6 +176,10 @@ const once = /^(1|true|yes|on)$/i.test(process.env.ZIQ_DEMO_ONCE ?? "false");
 const workDir = requiredEnv("ZIQ_DEMO_WORK_DIR");
 const bridgeEnvPath = process.env.ZIQ_BRIDGE_ENV ?? path.resolve("packages/mt5-broker/bridge/.env.phase7b-demo");
 const ENGULF_BODY_TOLERANCE_PRICE = 0.1;
+const MIN_INITIAL_SL_PRICE = 6;
+const MAX_INITIAL_SL_PRICE = 10;
+const pullbackWaitMinutes = Math.max(1, Number(process.env.ZIQ_PHASE7B_PULLBACK_WAIT_MINUTES ?? "15"));
+const pullbackEntryService = new Phase7BPullbackEntryService();
 const DAILY_RECOVERY_MIN_TP_DISTANCE = 6;
 const DAILY_RECOVERY_MAX_TP_DISTANCE = 10;
 const DAILY_RECOVERY_TARGET_NET_USD = 1;
@@ -182,7 +208,7 @@ const allowedLogins = new Set(
 );
 const allowReal = /^(1|true|yes|on)$/i.test(process.env.MT5_ALLOW_REAL_ACCOUNT ?? "false");
 
-if (![fixedVolume, intervalSeconds, magicNumber, sidewayMagicNumber, deviationPoints].every((value) => Number.isFinite(value) && value > 0)) {
+if (![fixedVolume, intervalSeconds, magicNumber, sidewayMagicNumber, deviationPoints, pullbackWaitMinutes].every((value) => Number.isFinite(value) && value > 0)) {
   throw new Error("Phase 7B DEMO numeric configuration is invalid.");
 }
 
@@ -207,7 +233,10 @@ console.log(`PHASE7B_DEMO_ENGULF_BODY_TOLERANCE_PRICE=${ENGULF_BODY_TOLERANCE_PR
 console.log("PHASE7B_DEMO_FVG_ENTRY_GATE=OFF");
 console.log("PHASE7B_DEMO_FVG_ROLE=HOLD_CONFIRMATION_PLUS_ADDON_SHADOW");
 console.log("PHASE7B_DEMO_FVG_ADDON_EXECUTION=SHADOW_ONLY_NO_ORDER");
-console.log("PHASE7B_DEMO_INITIAL_SL=PRICE_DISTANCE_CLAMPED_6_TO_10");
+console.log("PHASE7B_DEMO_INITIAL_SL=STRUCTURE_DERIVED_MIN_6_MAX_10");
+console.log("PHASE7B_DEMO_STRUCTURAL_SL_GT_10=WAIT_PULLBACK_NEXT_M15_WINDOW");
+console.log(`PHASE7B_DEMO_PULLBACK_WAIT_MINUTES=${pullbackWaitMinutes}`);
+console.log("PHASE7B_DEMO_PULLBACK_INVALIDATE=STRUCTURE_BREAK_OR_M15_ST_FLIP_OR_M5_ST_FLIP_OR_EXPIRY");
 console.log("PHASE7B_DEMO_PLUS6=SL_TO_ENTRY");
 console.log("PHASE7B_DEMO_PLUS10=PARTIAL_ONE_THIRD");
 console.log("PHASE7B_DEMO_POST_PLUS10_SL=M15_CONFIRMED_SWING_STRUCTURE_ONLY_TIGHTEN");
@@ -277,10 +306,11 @@ async function preflight(): Promise<void> {
 }
 
 async function previewLatestSignal(): Promise<void> {
-  const [m15, m5, spec] = await Promise.all([
+  const [m15, m5, spec, quote] = await Promise.all([
     get<Phase7Bar[]>(`/v1/candles/${encodeURIComponent(symbol)}?timeframe=M15&count=320`),
     get<Phase7Bar[]>(`/v1/candles/${encodeURIComponent(symbol)}?timeframe=M5&count=420`),
     get<SymbolSpec>(`/v1/symbols/${encodeURIComponent(symbol)}/spec`),
+    get<Quote>(`/v1/quotes/${encodeURIComponent(symbol)}`),
   ]);
   const signal = latestSignal(m15, m5, spec);
   const latest = m15.at(-1);
@@ -289,8 +319,19 @@ async function previewLatestSignal(): Promise<void> {
     console.log("PHASE7B_DEMO_LATEST_SIGNAL=NONE");
     return;
   }
+  const marketEntry = signal.side === "BUY" ? quote.ask : quote.bid;
+  const decision = pullbackEntryService.decideInitial({
+    signalId: signal.id,
+    side: signal.side,
+    pattern: signal.pattern,
+    signalTimestamp: signal.signalTimestamp,
+    referenceEntryPrice: marketEntry,
+    structuralStopPrice: signal.patternExtreme,
+    maxStopDistancePrice: MAX_INITIAL_SL_PRICE,
+    waitMinutes: pullbackWaitMinutes,
+  });
   const fvgConfirmed = hasRelevantFvg(m15, m15.length - 1, signal.side, 12);
-  console.log(`PHASE7B_DEMO_LATEST_SIGNAL=${signal.side}|PATTERN=${signal.pattern}|ENTRY=${signal.entry}|SL_DISTANCE=${signal.stopDistance}|FVG_CONFIRM=${fvgConfirmed ? "YES" : "NO"}`);
+  console.log(`PHASE7B_DEMO_LATEST_SIGNAL=${signal.side}|PATTERN=${signal.pattern}|ENTRY=${marketEntry}|STRUCTURAL_STOP=${signal.patternExtreme}|SL_DISTANCE=${decision.structuralStopDistance}|ENTRY_STATE=${decision.state}|FVG_CONFIRM=${fvgConfirmed ? "YES" : "NO"}`);
 }
 
 async function cycle(): Promise<void> {
@@ -358,19 +399,82 @@ async function cycle(): Promise<void> {
     return;
   }
 
-  const latest = m15.at(-1);
-  if (!latest) return;
-  if (latest.closeTime <= state.lastEvaluatedM15Close) return;
+  const latestM15 = m15.at(-1);
+  const latestM5 = m5.at(-1);
+  if (!latestM15 || !latestM5) return;
 
-  state.lastEvaluatedM15Close = latest.closeTime;
+  if (state.pendingPullback) {
+    const pending = state.pendingPullback;
+    if (latestM5.closeTime <= state.lastEvaluatedM5Close) return;
+    state.lastEvaluatedM5Close = latestM5.closeTime;
+    saveState();
+
+    const m15Index = latestClosedIndex(m15, latestM5.closeTime);
+    const m15Direction = m15Index >= 0
+      ? phase7BSupertrend(m15.slice(0, m15Index + 1), 10, 3).direction[m15Index] ?? null
+      : null;
+    const m5Direction = phase7BSupertrend(m5, 10, 3).direction[m5.length - 1] ?? null;
+    const marketEntry = pending.side === "BUY" ? quote.ask : quote.bid;
+    const evaluation = pullbackEntryService.evaluatePullback({
+      pending,
+      timestamp: latestM5.closeTime,
+      candidateEntryPrice: marketEntry,
+      barLow: latestM5.low,
+      barHigh: latestM5.high,
+      setupStillValid: true,
+      m15SupertrendAligned: m15Direction === pending.side,
+      m5SupertrendAligned: m5Direction === pending.side,
+    });
+
+    journal(evaluation.state, {
+      signalId: pending.signalId,
+      side: pending.side,
+      pattern: pending.pattern,
+      structuralStopPrice: pending.structuralStopPrice,
+      structuralStopDistanceAtSignal: pending.structuralStopDistanceAtSignal,
+      structuralStopDistanceNow: evaluation.structuralStopDistance,
+      marketEntry,
+      m15Direction,
+      m5Direction,
+      m5CloseTime: latestM5.closeTime,
+      expiresAt: pending.expiresAt,
+    });
+
+    if (evaluation.state === "PULLBACK_STILL_TOO_WIDE") return;
+    if (evaluation.state !== "PULLBACK_ENTRY") {
+      state.pendingPullback = null;
+      saveState();
+      return;
+    }
+
+    const signal: RuntimeEntrySignal = {
+      id: pending.signalId,
+      side: pending.side,
+      pattern: pending.pattern as Phase7BSignal["pattern"],
+      signalTimestamp: pending.signalTimestamp,
+      entry: pending.side === "BUY"
+        ? pending.structuralStopPrice + pending.structuralStopDistanceAtSignal
+        : pending.structuralStopPrice - pending.structuralStopDistanceAtSignal,
+      patternExtreme: pending.structuralStopPrice,
+    };
+    const submitted = await submitTrendEntry(signal, marketEntry, quote, spec, m15, "PULLBACK_ENTRY");
+    if (submitted !== "BROKER_GAP_WAIT" && submitted !== "TOO_WIDE_WAIT") {
+      state.pendingPullback = null;
+      saveState();
+    }
+    return;
+  }
+
+  if (latestM15.closeTime <= state.lastEvaluatedM15Close) return;
+  state.lastEvaluatedM15Close = latestM15.closeTime;
   saveState();
 
   const signal = latestSignal(m15, m5, spec);
-  if (!signal || signal.signalTimestamp !== latest.closeTime) {
+  if (!signal || signal.signalTimestamp !== latestM15.closeTime) {
     journal("M15_NO_ENTRY_SIGNAL", {
-      closeTime: latest.closeTime,
-      close: latest.close,
-      entryRule: "PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE",
+      closeTime: latestM15.closeTime,
+      close: latestM15.close,
+      entryRule: "THREE_PATTERNS_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE",
       supertrend: "M15_10_3_AND_M5_10_3",
       engulfBodyTolerancePrice: ENGULF_BODY_TOLERANCE_PRICE,
     });
@@ -382,24 +486,92 @@ async function cycle(): Promise<void> {
     journal("QUOTE_TIMESTAMP_INVALID", { quoteTimestamp: quote.timestamp });
     return;
   }
-  if (now > signal.signalTimestamp + 15 * 60_000) {
+  if (now > signal.signalTimestamp + pullbackWaitMinutes * 60_000) {
     journal("SIGNAL_EXPIRED", { id: signal.id, signalTimestamp: signal.signalTimestamp, now });
     return;
   }
 
   const marketEntry = signal.side === "BUY" ? quote.ask : quote.bid;
-  const stopLoss = roundPrice(
-    signal.side === "BUY" ? marketEntry - signal.stopDistance : marketEntry + signal.stopDistance,
-    spec.digits,
-  );
-  const minimumStopGap = Math.max(0, spec.stopsLevelTicks * spec.point);
-  if (signal.stopDistance + 1e-9 < minimumStopGap) {
-    journal("INITIAL_SL_BROKER_DISTANCE_BLOCK", { stopDistance: signal.stopDistance, minimumStopGap });
+  const structuralStopDistance = structuralDistance(signal.side, marketEntry, signal.patternExtreme);
+  if (!(structuralStopDistance > 0)) {
+    journal("ENTRY_SETUP_INVALIDATED_BEFORE_DECISION", {
+      signalId: signal.id,
+      marketEntry,
+      structuralStopPrice: signal.patternExtreme,
+    });
     return;
   }
 
-  const dailyRecovery = await resolveDailyRecoveryPlan(quote, spec);
+  const decision = pullbackEntryService.decideInitial({
+    signalId: signal.id,
+    side: signal.side,
+    pattern: signal.pattern,
+    signalTimestamp: signal.signalTimestamp,
+    referenceEntryPrice: marketEntry,
+    structuralStopPrice: signal.patternExtreme,
+    maxStopDistancePrice: MAX_INITIAL_SL_PRICE,
+    waitMinutes: pullbackWaitMinutes,
+  });
 
+  if (decision.state === "WAIT_PULLBACK") {
+    state.pendingPullback = decision.pending;
+    state.lastEvaluatedM5Close = signal.signalTimestamp;
+    saveState();
+    journal("WAIT_PULLBACK", {
+      signalId: signal.id,
+      side: signal.side,
+      pattern: signal.pattern,
+      signalEntry: signal.entry,
+      marketEntry,
+      structuralStopPrice: signal.patternExtreme,
+      structuralStopDistance,
+      expiresAt: decision.pending!.expiresAt,
+    });
+    return;
+  }
+
+  journal("ENTRY_IMMEDIATE", {
+    signalId: signal.id,
+    side: signal.side,
+    pattern: signal.pattern,
+    signalEntry: signal.entry,
+    marketEntry,
+    structuralStopPrice: signal.patternExtreme,
+    structuralStopDistance,
+  });
+  await submitTrendEntry(signal, marketEntry, quote, spec, m15, "ENTRY_IMMEDIATE");
+}
+
+async function submitTrendEntry(
+  signal: RuntimeEntrySignal,
+  marketEntry: number,
+  quote: Quote,
+  spec: SymbolSpec,
+  m15: Phase7Bar[],
+  entryState: "ENTRY_IMMEDIATE" | "PULLBACK_ENTRY",
+): Promise<"FILLED" | "BROKER_GAP_WAIT" | "TOO_WIDE_WAIT" | "REJECTED" | "UNRESOLVED"> {
+  const structuralStopDistance = structuralDistance(signal.side, marketEntry, signal.patternExtreme);
+  if (!(structuralStopDistance > 0)) {
+    journal("ENTRY_SETUP_INVALIDATED_BEFORE_SUBMIT", { signalId: signal.id, marketEntry, structuralStopPrice: signal.patternExtreme });
+    return "REJECTED";
+  }
+  if (structuralStopDistance > MAX_INITIAL_SL_PRICE + 1e-9) {
+    journal("ENTRY_DISTANCE_REGRESSION_WAIT", { signalId: signal.id, marketEntry, structuralStopPrice: signal.patternExtreme, structuralStopDistance });
+    return "TOO_WIDE_WAIT";
+  }
+
+  const stopDistance = Math.max(MIN_INITIAL_SL_PRICE, structuralStopDistance);
+  const stopLoss = roundPrice(
+    signal.side === "BUY" ? marketEntry - stopDistance : marketEntry + stopDistance,
+    spec.digits,
+  );
+  const minimumStopGap = Math.max(0, spec.stopsLevelTicks * spec.point);
+  if (stopDistance + 1e-9 < minimumStopGap) {
+    journal("INITIAL_SL_BROKER_DISTANCE_BLOCK", { signalId: signal.id, stopDistance, minimumStopGap, entryState });
+    return entryState === "PULLBACK_ENTRY" ? "BROKER_GAP_WAIT" : "REJECTED";
+  }
+
+  const dailyRecovery = await resolveDailyRecoveryPlan(quote, spec);
   const takeProfit = dailyRecovery.mode === "RECOVERY_TP"
     ? roundPrice(
         signal.side === "BUY"
@@ -410,17 +582,20 @@ async function cycle(): Promise<void> {
     : 0;
 
   const fvgConfirmedAtEntry = hasRelevantFvg(m15, m15.length - 1, signal.side, 12);
-  const orderId = `p7b-${signal.signalTimestamp}-${signal.side}`;
+  const orderId = `p7b-${entryState === "PULLBACK_ENTRY" ? "pb" : "im"}-${signal.signalTimestamp}-${signal.side}`;
   journal("ENTRY_SUBMIT", {
     signalId: signal.id,
     side: signal.side,
     pattern: signal.pattern,
     signalEntry: signal.entry,
     marketEntry,
-    stopDistance: signal.stopDistance,
+    entryState,
+    structuralStopPrice: signal.patternExtreme,
+    structuralStopDistance,
+    stopDistance,
     stopLoss,
     volume: fixedVolume,
-    entryRule: "PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE",
+    entryRule: "THREE_PATTERNS_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE",
     supertrend: "M15_10_3_AND_M5_10_3",
     engulfBodyTolerancePrice: ENGULF_BODY_TOLERANCE_PRICE,
     fvgConfirmedAtEntry,
@@ -445,14 +620,14 @@ async function cycle(): Promise<void> {
     takeProfit,
     deviationPoints,
     magicNumber,
-    comment: "phase7b-demo",
+    comment: entryState === "PULLBACK_ENTRY" ? "phase7b-demo-pb" : "phase7b-demo-im",
     clientOrderId: orderId,
     idempotencyKey: orderId,
   });
 
   if (!order.accepted) {
-    journal("ENTRY_REJECTED", { signalId: signal.id, message: order.message, retcode: order.retcode });
-    return;
+    journal("ENTRY_REJECTED", { signalId: signal.id, entryState, message: order.message, retcode: order.retcode });
+    return "REJECTED";
   }
 
   let opened = order.position ?? null;
@@ -461,8 +636,8 @@ async function cycle(): Promise<void> {
     if (after.length === 1) opened = after[0]!;
   }
   if (!opened) {
-    journal("ENTRY_ACCEPTED_POSITION_NOT_RESOLVED", { signalId: signal.id, ticket: order.ticket, fillPrice: order.fillPrice });
-    return;
+    journal("ENTRY_ACCEPTED_POSITION_NOT_RESOLVED", { signalId: signal.id, entryState, ticket: order.ticket, fillPrice: order.fillPrice });
+    return "UNRESOLVED";
   }
 
   state.managed = {
@@ -474,7 +649,7 @@ async function cycle(): Promise<void> {
     entry: opened.entry,
     initialVolume: opened.volume,
     expectedRemainingVolume: opened.volume,
-    stopDistance: signal.stopDistance,
+    stopDistance,
     breakEvenApplied: false,
     partialApplied: false,
     partialActivatedAt: null,
@@ -495,6 +670,9 @@ async function cycle(): Promise<void> {
   saveState();
   journal("ENTRY_FILLED", {
     signalId: signal.id,
+    entryState,
+    structuralStopPrice: signal.patternExtreme,
+    stopLoss,
     position: opened,
     fillPrice: order.fillPrice,
     fvgConfirmedAtEntry,
@@ -505,6 +683,7 @@ async function cycle(): Promise<void> {
     recoveryTakeProfit: takeProfit,
     recoveryCanRecoverInOneTrade: dailyRecovery.canRecoverInOneTrade,
   });
+  return "FILLED";
 }
 
 async function resolveDailyRecoveryPlan(
@@ -632,7 +811,9 @@ function latestSignal(m15: Phase7Bar[], m5: Phase7Bar[], spec: SymbolSpec): Phas
     : trigger.patternExtreme - entry;
   if (!(structuralStopDistance > 0)) return null;
 
-  const stopDistance = Math.min(10, Math.max(6, structuralStopDistance));
+  const stopDistance = structuralStopDistance > MAX_INITIAL_SL_PRICE
+    ? structuralStopDistance
+    : Math.max(MIN_INITIAL_SL_PRICE, structuralStopDistance);
   const stopLoss = trigger.side === "BUY" ? entry - stopDistance : entry + stopDistance;
   const initialRiskUsd = spec.tickSize > 0
     ? Math.abs(entry - stopLoss) / spec.tickSize * spec.effectiveTickValuePerLot * fixedVolume
@@ -954,6 +1135,19 @@ function opposingFvgRejectionAt(
   return false;
 }
 
+function latestClosedIndex(bars: Phase7Bar[], timestamp: number): number {
+  let result = -1;
+  for (let index = 0; index < bars.length; index += 1) {
+    if (bars[index]!.closeTime <= timestamp) result = index;
+    else break;
+  }
+  return result;
+}
+
+function structuralDistance(side: "BUY" | "SELL", entry: number, stop: number): number {
+  return side === "BUY" ? entry - stop : stop - entry;
+}
+
 function trendMatches(side: "BUY" | "SELL", close: number, ma20: number, ma50: number, ma200: number): boolean {
   return side === "BUY"
     ? ma20 > ma50 && ma50 > ma200 && close > ma20
@@ -1022,11 +1216,35 @@ function smaPeriod(values: number[], period: number): number {
 
 function loadState(file: string): BotState {
   if (!fs.existsSync(file)) {
-    return { version: 1, accountLogin: null, lastEvaluatedM15Close: 0, managed: null };
+    return {
+      version: 2,
+      accountLogin: null,
+      lastEvaluatedM15Close: 0,
+      lastEvaluatedM5Close: 0,
+      pendingPullback: null,
+      managed: null,
+    };
   }
-  const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as BotState;
-  if (parsed.version !== 1) throw new Error("Unsupported Phase 7B demo state version.");
-  return parsed;
+  const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as PersistedBotState;
+  if (parsed.version === 1) {
+    return {
+      version: 2,
+      accountLogin: parsed.accountLogin ?? null,
+      lastEvaluatedM15Close: parsed.lastEvaluatedM15Close ?? 0,
+      lastEvaluatedM5Close: 0,
+      pendingPullback: null,
+      managed: parsed.managed ?? null,
+    };
+  }
+  if (parsed.version !== 2) throw new Error("Unsupported Phase 7B demo state version.");
+  return {
+    version: 2,
+    accountLogin: parsed.accountLogin ?? null,
+    lastEvaluatedM15Close: parsed.lastEvaluatedM15Close ?? 0,
+    lastEvaluatedM5Close: parsed.lastEvaluatedM5Close ?? 0,
+    pendingPullback: parsed.pendingPullback ?? null,
+    managed: parsed.managed ?? null,
+  };
 }
 
 function saveState(): void {

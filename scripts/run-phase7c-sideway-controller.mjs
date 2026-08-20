@@ -79,9 +79,10 @@ console.log(`PHASE7C_SIDEWAY_MAX_M5_AGE_MS=${maxM5AgeMs}`);
 console.log(`PHASE7C_SIDEWAY_MAX_M15_AGE_MS=${maxM15AgeMs}`);
 console.log(`PHASE7C_SIDEWAY_AUTO_LOT_MAX_AGE_MS=${autoLotMaxAgeMs}`);
 console.log("PHASE7C_SIDEWAY_ENTRY=M15_RANGING_PLUS_SUPPLY_DEMAND_EDGE_PLUS_M5_CONFIRMATION");
-console.log("PHASE7C_SIDEWAY_TP1=VOLUME_POC_OR_RANGE_MID_FALLBACK");
+console.log("PHASE7C_SIDEWAY_PLUS6=SL_TO_ENTRY");
+console.log("PHASE7C_SIDEWAY_PLUS10=PARTIAL_ONE_THIRD");
 console.log("PHASE7C_SIDEWAY_TP2=OPPOSITE_RANGE_BOUNDARY");
-console.log("PHASE7C_SIDEWAY_MANAGEMENT=ONE_THIRD_PARTIAL_THEN_BREAK_EVEN_NO_TRAILING");
+console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_NO_TRAILING");
 console.log("PHASE7C_SIDEWAY_DAILY_RECOVERY=REALIZED_NET_PNL_ALL_BOT_MAGICS");
 console.log(`PHASE7C_SIDEWAY_DAILY_RECOVERY_MAGICS=${[...dailyBotMagicNumbers].join(",")}`);
 console.log("PHASE7C_SIDEWAY_DAILY_RECOVERY_TP=FULL_POSITION_ADAPTIVE_6_TO_10");
@@ -797,9 +798,30 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
   }
 
   const marketPrice = managed.side === "BUY" ? Number(quote.bid) : Number(quote.ask);
+  const favorable = managed.side === "BUY"
+    ? marketPrice - managed.entry
+    : managed.entry - marketPrice;
 
-  if (managed.dailyMode === "RECOVERY_TP") {
-    return;
+  if (!managed.breakEvenApplied && favorable >= 6) {
+    const minimumGap = Math.max(Number(spec.stopsLevelTicks ?? 0), Number(spec.freezeLevelTicks ?? 0)) * Number(spec.point);
+    const valid = managed.side === "BUY"
+      ? managed.entry < Number(quote.bid) - minimumGap
+      : managed.entry > Number(quote.ask) + minimumGap;
+    if (valid) {
+      managed.breakEvenAttempt += 1;
+      saveState();
+      const response = await bridgeRequest("PATCH", `/v1/positions/${encodeURIComponent(managed.ticket)}`, {
+        stopLoss: roundPrice(managed.entry, Number(spec.digits ?? 2)),
+        commandId: `p7c-sideway-plus6-be-${managed.ticket}-${managed.breakEvenAttempt}`,
+      });
+      if (response.success) {
+        managed.breakEvenApplied = true;
+        saveState();
+        journal("PLUS6_BREAK_EVEN_APPLIED", { ticket: managed.ticket, favorable, stopLoss: managed.entry });
+      } else {
+        journal("PLUS6_BREAK_EVEN_REJECTED", { ticket: managed.ticket, favorable, response });
+      }
+    }
   }
 
   if (!managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {
@@ -810,7 +832,7 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
       Number(spec.volumeStep),
     );
     if (!(closeVolume > 0)) {
-      journal("TP1_PARTIAL_NOT_FEASIBLE", {
+      journal("PLUS10_PARTIAL_NOT_FEASIBLE", {
         ticket: managed.ticket,
         initialVolume: managed.initialVolume,
         currentVolume: position.volume,
@@ -820,44 +842,23 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
       saveState();
       const response = await bridgeRequest("POST", `/v1/positions/${encodeURIComponent(managed.ticket)}/close`, {
         volume: closeVolume,
-        commandId: `p7c-sideway-tp1-${managed.ticket}-${managed.partialAttempt}`,
+        commandId: `p7c-sideway-plus10-${managed.ticket}-${managed.partialAttempt}`,
       });
       if (response.success) {
         managed.partialApplied = true;
         managed.expectedRemainingVolume = normalizeVolume(Number(position.volume) - closeVolume, Number(spec.volumeStep));
         saveState();
-        journal("TP1_PARTIAL_FILLED", {
+        journal("PLUS10_PARTIAL_ONE_THIRD", {
           ticket: managed.ticket,
           tp1: managed.tp1,
           tp1Kind: managed.tp1Kind,
           marketPrice,
           closedVolume: closeVolume,
           remainingVolume: managed.expectedRemainingVolume,
+          favorable,
         });
       } else {
-        journal("TP1_PARTIAL_REJECTED", { ticket: managed.ticket, response });
-      }
-    }
-  }
-
-  if (managed.partialApplied && !managed.breakEvenApplied) {
-    const minimumGap = Math.max(Number(spec.stopsLevelTicks ?? 0), Number(spec.freezeLevelTicks ?? 0)) * Number(spec.point);
-    const valid = managed.side === "BUY"
-      ? managed.entry < Number(quote.bid) - minimumGap
-      : managed.entry > Number(quote.ask) + minimumGap;
-    if (valid) {
-      managed.breakEvenAttempt += 1;
-      saveState();
-      const response = await bridgeRequest("PATCH", `/v1/positions/${encodeURIComponent(managed.ticket)}`, {
-        stopLoss: roundPrice(managed.entry, Number(spec.digits ?? 2)),
-        commandId: `p7c-sideway-be-${managed.ticket}-${managed.breakEvenAttempt}`,
-      });
-      if (response.success) {
-        managed.breakEvenApplied = true;
-        saveState();
-        journal("TP1_BREAK_EVEN_APPLIED", { ticket: managed.ticket, stopLoss: managed.entry });
-      } else {
-        journal("TP1_BREAK_EVEN_REJECTED", { ticket: managed.ticket, response });
+        journal("PLUS10_PARTIAL_REJECTED", { ticket: managed.ticket, favorable, response });
       }
     }
   }

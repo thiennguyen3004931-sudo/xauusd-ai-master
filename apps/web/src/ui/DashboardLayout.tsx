@@ -79,7 +79,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
           <Typography variant="caption" fontWeight={900}>CHỈ TÀI KHOẢN DEMO</Typography>
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, lineHeight: 1.5 }}>
-          Tài khoản thật luôn bị khóa. Entry: 3 mô hình nến + Supertrend M15 10/3 + Supertrend M5 10/3 + SL cấu trúc. MA20/50 chỉ tăng độ tin cậy. Sau +10 chốt 1/3, runner dời SL theo cấu trúc M15 và chỉ chốt khi M15 đóng phá MA50 ngược hướng. MA200 chỉ xác nhận bối cảnh khung lớn.
+          Tài khoản thật luôn bị khóa. Trend: 3 mô hình nến + ST M15/M5 + SL cấu trúc 6–10; vượt 10 thì chờ hồi trong M15 kế tiếp. NORMAL: +6 BE, +10 chốt 1/3. Trend runner theo cấu trúc/MA50/FVG đảo chiều; Sideway runner về biên đối diện.
         </Typography>
       </Box>
     </Box>
@@ -94,7 +94,7 @@ export function DashboardLayout() {
   let headerSubtitle = "XAUUSD · MT5 DEMO · vị thế / quản lý lệnh / sự kiện gần nhất";
   if (location.pathname.startsWith("/phase7b-pattern-check")) {
     headerTitle = "Điều kiện tín hiệu";
-    headerSubtitle = "3 mô hình nến → Supertrend M15 10/3 → Supertrend M5 10/3 → SL cấu trúc · MA20/50 = độ tin cậy · runner: cấu trúc M15 + MA50 · MA200 = khung lớn";
+    headerSubtitle = "3 mô hình → ST M15/M5 → SL cấu trúc 6–10; >10 chờ hồi · điểm tin cậy 0–100 · quản lý Trend/Sideway/Recovery";
   } else if (location.pathname.startsWith("/phase7b-ops")) {
     headerTitle = "Hệ thống & Telegram";
     headerSubtitle = "Bot DEMO · Telegram · MT5 Bridge · trạng thái vận hành";

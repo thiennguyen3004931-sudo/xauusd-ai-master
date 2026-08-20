@@ -16,7 +16,7 @@ export interface Phase7BDemoSnapshot {
     bar: { open: number; high: number; low: number; close: number };
     pattern: {
       matched: boolean;
-      name: "ENGULFING" | "TWO_CANDLE_BODY_DOMINANCE" | null;
+      name: "ENGULFING" | "TWO_CANDLE_BODY_DOMINANCE" | "THREE_CANDLE_BODY_DOMINANCE" | null;
       side: Phase7BSide | null;
       extreme: number | null;
     };
@@ -27,6 +27,19 @@ export interface Phase7BDemoSnapshot {
       buyAligned: boolean;
       sellAligned: boolean;
       matchedPatternSide: boolean;
+      m15Supertrend: Phase7BSide | null;
+      m5Supertrend: Phase7BSide | null;
+      m5FlipAgeBars: number | null;
+      m15SupertrendLine: number | null;
+      m5SupertrendLine: number | null;
+      m15TrendlineDistance: number | null;
+      m5TrendlineDistance: number | null;
+      m15TrendlineReaction: boolean;
+      m5TrendlineReaction: boolean;
+      confidenceSide: Phase7BSide | null;
+      confidenceM5Supertrend: Phase7BSide | null;
+      confidenceScore: number | null;
+      confidenceLevel: "CHƯA_ĐÁNH_GIÁ" | "TIÊU_CHUẨN" | "CAO" | "RẤT_CAO";
     };
     fvg: {
       buyConfirmed: boolean;
@@ -40,12 +53,24 @@ export interface Phase7BDemoSnapshot {
       referenceEntry: number;
       structuralStopDistance: number | null;
       stopDistance: number | null;
+      action: "WAIT_SIGNAL" | "ENTRY_IMMEDIATE" | "WAIT_PULLBACK";
       reason: string;
     };
   } | null;
   state: {
     accountLogin: number | null;
     lastEvaluatedM15Close: number;
+    lastEvaluatedM5Close?: number;
+    pendingPullback?: {
+      signalId: string;
+      side: Phase7BSide;
+      pattern: string;
+      signalTimestamp: number;
+      expiresAt: number;
+      structuralStopPrice: number;
+      structuralStopDistanceAtSignal: number;
+      maxStopDistancePrice: number;
+    } | null;
     managed: {
       ticket: string;
       side: Phase7BSide;
