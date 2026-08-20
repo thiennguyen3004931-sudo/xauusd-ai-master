@@ -205,6 +205,60 @@ export type Phase7CBotExecutionMode =
   | "SIDEWAY"
   | "PAUSE";
 
+export interface Phase7CLifecycleSnapshot {
+  controlEnabled: boolean;
+  running: boolean;
+  ready: boolean;
+  actionInProgress: boolean;
+  telegramConfigured: boolean;
+  telegramReady: boolean;
+  telegramStatus: string;
+  telegramHeartbeatAgeMs: number | null;
+  mode: {
+    mode: Phase7CBotExecutionMode;
+    updatedAt: string;
+    updatedBy: string;
+  };
+  processes: Record<"supervisor" | "trend" | "sideway" | "telegram" | "regimeNotifier", {
+    pid: number | null;
+    alive: boolean;
+  }>;
+  lotSettings: {
+    configured: Phase7CLotSettingsState;
+    active: (Phase7CLotSettingsState & {
+      armed: boolean;
+      supervisorPid: number;
+      appliedAt: string;
+    }) | null;
+    activeAlive: boolean;
+    restartRequired: boolean;
+  };
+  bridge: {
+    reachable: boolean;
+    accountMode: string | null;
+    server: string | null;
+    tradingEnabled: boolean | null;
+    terminalTradeAllowed: boolean | null;
+    expertTradeAllowed: boolean | null;
+    openXauusdPositions: number;
+  };
+  safety: {
+    localhostOnly: true;
+    demoOnly: true;
+    realAccountAllowed: false;
+    startMode: "PAUSE_THEN_AUTO_AFTER_READY";
+    stopBlockedWithOpenPosition: true;
+    mt5PanelOrderPermission: "NONE";
+  };
+}
+
+export interface Phase7CLifecycleActionResponse {
+  action: "STARTED" | "ALREADY_RUNNING" | "STOPPED";
+  message: string;
+  mode: Phase7CLifecycleSnapshot["mode"];
+  lifecycle: Omit<Phase7CLifecycleSnapshot, "bridge" | "actionInProgress">;
+}
+
 export interface Phase7CLiveRegimeSnapshot {
   symbol: string;
   timeframe: string;
@@ -454,6 +508,29 @@ export interface Phase7CDecisionMonitorSnapshot {
     balance: number | null;
     equity: number | null;
     openXauusdPositions: number;
+  };
+  position: {
+    state: "FLAT" | "MANAGING" | "UNMANAGED";
+    count: number;
+    strategy: "TREND" | "SIDEWAY" | null;
+    ticket: string | null;
+    side: string | null;
+    setup: string | null;
+    volume: number | null;
+    entry: number | null;
+    currentPrice: number | null;
+    stopLoss: number | null;
+    takeProfit: number | null;
+    tp1: number | null;
+    tp2: number | null;
+    floatingPnlUsd: number | null;
+    floatingPnlPercent: number | null;
+    favorableDistance: number | null;
+    breakEvenApplied: boolean;
+    partialApplied: boolean;
+    openedAt: number | null;
+    entryReason: string;
+    holdReason: string;
   };
   lotSettings: Phase7CLotSettingsSnapshot;
   preTrade: {

@@ -77,6 +77,26 @@ interface DecisionAuditRecord {
   raw?: unknown;
 }
 
+interface ManagedRuntimePosition {
+  ticket?: string | number | null;
+  side?: "BUY" | "SELL" | null;
+  pattern?: string | null;
+  entry?: number | null;
+  initialVolume?: number | null;
+  stopLoss?: number | null;
+  tp1?: number | null;
+  tp2?: number | null;
+  dailyMode?: string | null;
+  breakEvenApplied?: boolean;
+  partialApplied?: boolean;
+  openedAt?: number | null;
+}
+
+interface ManagedRuntimeStates {
+  TREND: ManagedRuntimePosition | null;
+  SIDEWAY: ManagedRuntimePosition | null;
+}
+
 export interface Phase7CPreTradeDecision {
   strategy: Strategy;
   stage: string;
@@ -160,6 +180,23 @@ function loadAudit(): DecisionAuditRecord[] {
     ...readJsonlTail(resolve(root, "sideway-decisions.jsonl"), 160),
   ];
   return rows.sort((a, b) => b.timestamp - a.timestamp).slice(0, 160);
+}
+
+function readManagedState(file: string): ManagedRuntimePosition | null {
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as { managed?: ManagedRuntimePosition | null };
+    return parsed?.managed && typeof parsed.managed === "object" ? parsed.managed : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadManagedStates(): ManagedRuntimeStates {
+  const root = runtimeRoot();
+  return {
+    TREND: readManagedState(resolve(root, "phase7b-demo-forward", "phase7b-demo-state.json")),
+    SIDEWAY: readManagedState(resolve(root, "phase7c-sideway-forward", "phase7c-sideway-state.json")),
+  };
 }
 
 function localApiBase(): string {
@@ -378,12 +415,180 @@ function pauseDecision(
   };
 }
 
+function cleanReason(value: string | null | undefined, fallback: string): string {
+  const text = String(value ?? "").replace(/[\r\n]+/g, " ").trim();
+  return text || fallback;
+}
+
+function entryReason(
+  strategy: Strategy | null,
+  managed: ManagedRuntimePosition | null,
+  audit: DecisionAuditRecord | null,
+): string {
+  if (strategy === "TREND") {
+    const setup = audit?.setup?.pattern ?? managed?.pattern;
+    return cleanReason(
+      setup
+        ? `${setup} · Supertrend M15/M5 cùng hướng · SL cấu trúc hợp lệ.`
+        : null,
+      "Trend entry đã được executor xác nhận từ journal canonical.",
+    );
+  }
+  if (strategy === "SIDEWAY") {
+    const setup = audit?.setup?.pattern ?? managed?.pattern;
+    return cleanReason(
+      setup
+        ? `${setup} · Supply/Demand + ATR + xác nhận M5 final gate.`
+        : null,
+      "Sideway entry đã qua Supply/Demand, ATR và M5 final gate.",
+    );
+  }
+  return "Vị thế không khớp state của Trend/Sideway executor; panel không suy đoán lý do vào lệnh.";
+}
+
+function journalHoldReason(event: string): string | null {
+  if (event === "FVG_HOLD_CONFIRMED") {
+    return "Giữ runner: FVG cùng hướng và MA50 vẫn xác nhận xu hướng.";
+  }
+  if (event === "STRUCTURAL_SL_TIGHTEN") {
+    return "Giữ runner: SL đã được siết theo cấu trúc M15 mới nhất.";
+  }
+  if (/^PLUS10_PARTIAL_ONE_THIRD/.test(event)) {
+    return "Đã chốt 1/3 tại +10; tiếp tục giữ phần runner theo quy tắc chiến lược.";
+  }
+  if (/^PLUS6_(?:SL_TO_ENTRY|BREAK_EVEN_APPLIED)/.test(event)) {
+    return "Đã dời SL về hòa vốn tại +6; giữ để chờ mục tiêu +10.";
+  }
+  if (event === "MANAGEMENT_REGIME_FRESHNESS_SKIP") {
+    return "Giữ vị thế: regime chưa đủ mới; broker SL/TP vẫn bảo vệ lệnh.";
+  }
+  if (event === "MANAGEMENT_QUOTE_FRESHNESS_SKIP") {
+    return "Giữ vị thế: quote tạm cũ; bỏ qua quản lý động, broker SL/TP vẫn hoạt động.";
+  }
+  if (event === "MANAGEMENT_REGIME_CHECK_ERROR") {
+    return "Giữ vị thế: API regime tạm lỗi; không đóng mù, broker SL/TP vẫn bảo vệ.";
+  }
+  return null;
+}
+
+function holdReason(
+  strategy: Strategy | null,
+  managed: ManagedRuntimePosition | null,
+  latestManagement: DecisionAuditRecord | null,
+): string {
+  const exact = latestManagement ? journalHoldReason(latestManagement.event) : null;
+  if (exact) return exact;
+  if (!strategy || !managed) {
+    return "Vị thế không thuộc state executor; cần kiểm tra thủ công, không suy đoán lý do giữ.";
+  }
+  if (managed.partialApplied) {
+    return strategy === "TREND"
+      ? "Giữ runner sau khi chốt 1/3; thoát theo cấu trúc M15, MA50 hoặc FVG đảo chiều."
+      : "Giữ phần còn lại sau khi chốt 1/3; chờ TP2 ở biên đối diện hoặc regime rời range.";
+  }
+  if (managed.breakEvenApplied) {
+    return "SL đã ở hòa vốn; giữ vị thế để chờ +10 và chốt đúng 1/3.";
+  }
+  return "Broker SL đang bảo vệ; giữ vị thế để chờ +6 rồi dời SL về hòa vốn.";
+}
+
+function positionMonitor(input: {
+  telemetry: Mt5TelemetrySnapshot;
+  audit: DecisionAuditRecord[];
+  managedStates?: ManagedRuntimeStates;
+}) {
+  const positions = input.telemetry.positions;
+  const position = positions[0] ?? null;
+  if (!position) {
+    return {
+      state: "FLAT" as const,
+      count: 0,
+      strategy: null,
+      ticket: null,
+      side: null,
+      setup: null,
+      volume: null,
+      entry: null,
+      currentPrice: null,
+      stopLoss: null,
+      takeProfit: null,
+      tp1: null,
+      tp2: null,
+      floatingPnlUsd: null,
+      floatingPnlPercent: null,
+      favorableDistance: null,
+      breakEvenApplied: false,
+      partialApplied: false,
+      openedAt: null,
+      entryReason: "Chưa có vị thế XAUUSD đang mở.",
+      holdReason: "Chờ setup hợp lệ; panel không có quyền gửi lệnh.",
+    };
+  }
+
+  const states = input.managedStates ?? { TREND: null, SIDEWAY: null };
+  const ticket = String(position.ticket);
+  const trendManaged = String(states.TREND?.ticket ?? "") === ticket ? states.TREND : null;
+  const sidewayManaged = String(states.SIDEWAY?.ticket ?? "") === ticket ? states.SIDEWAY : null;
+  const strategy: Strategy | null = trendManaged ? "TREND" : sidewayManaged ? "SIDEWAY" : null;
+  const managed = trendManaged ?? sidewayManaged;
+  const ticketAudit = input.audit.filter((row) => String(row.management?.ticket ?? "") === ticket);
+  const entryAudit = ticketAudit.find((row) =>
+    row.event === "ENTRY_FILLED" || row.event === "PENDING_ENTRY_RECOVERED") ?? null;
+  const latestManagement = ticketAudit.find((row) =>
+    row.stage === "MANAGING" ||
+    /^(?:PLUS6|PLUS10|STRUCTURAL|MANAGEMENT|FVG_HOLD)/.test(row.event)) ?? null;
+  const side = position.side === "LONG" ? "BUY" : "SELL";
+  const currentPrice = side === "BUY"
+    ? finite(input.telemetry.quote?.bid)
+    : finite(input.telemetry.quote?.ask);
+  const favorableDistance = currentPrice === null
+    ? null
+    : side === "BUY" ? currentPrice - position.entry : position.entry - currentPrice;
+  const floatingPnlUsd = Number(position.profit ?? 0) +
+    Number(position.swap ?? 0) + Number(position.commission ?? 0);
+  const balance = finite(input.telemetry.health?.accountBalance);
+  const floatingPnlPercent = balance !== null && balance > 0
+    ? floatingPnlUsd / balance * 100
+    : null;
+  const entryPlan = entryAudit?.plan;
+  const inferredTp1 = side === "BUY" ? position.entry + 10 : position.entry - 10;
+  const tp1 = finite(managed?.tp1) ?? finite(entryPlan?.tp1) ?? inferredTp1;
+  const brokerTp = finite(position.takeProfit);
+  const tp2 = (brokerTp !== null && brokerTp > 0 ? brokerTp : null) ??
+    finite(managed?.tp2) ?? finite(entryPlan?.tp2);
+
+  return {
+    state: strategy ? "MANAGING" as const : "UNMANAGED" as const,
+    count: positions.length,
+    strategy,
+    ticket,
+    side,
+    setup: entryAudit?.setup?.pattern ?? managed?.pattern ?? null,
+    volume: round(finite(position.volume), 2),
+    entry: round(finite(position.entry), 5),
+    currentPrice: round(currentPrice, 5),
+    stopLoss: round(finite(position.stopLoss), 5),
+    takeProfit: round(brokerTp !== null && brokerTp > 0 ? brokerTp : null, 5),
+    tp1: round(tp1, 5),
+    tp2: round(tp2, 5),
+    floatingPnlUsd: round(floatingPnlUsd, 2),
+    floatingPnlPercent: round(floatingPnlPercent, 4),
+    favorableDistance: round(favorableDistance, 5),
+    breakEvenApplied: Boolean(managed?.breakEvenApplied),
+    partialApplied: Boolean(managed?.partialApplied),
+    openedAt: finite(position.openedAt) ?? finite(managed?.openedAt),
+    entryReason: entryReason(strategy, managed, entryAudit),
+    holdReason: holdReason(strategy, managed, latestManagement),
+  };
+}
+
 export function buildPhase7CDecisionMonitor(input: {
   regime: Awaited<ReturnType<typeof getPhase7CLiveRegime>>;
   demo: Phase7BDemoStatus | null;
   telemetry: Mt5TelemetrySnapshot;
   lots: ReturnType<typeof phase7CLotSettingsService.get>;
   audit: DecisionAuditRecord[];
+  managedStates?: ManagedRuntimeStates;
   now?: number;
 }) {
   const now = input.now ?? Date.now();
@@ -420,6 +625,7 @@ export function buildPhase7CDecisionMonitor(input: {
       matchesRecommendation: input.regime.modeMatchesRecommendation,
     },
     account: safeAccount(input.telemetry),
+    position: positionMonitor(input),
     lotSettings: input.lots,
     preTrade,
     recentDecisions: input.audit.slice(0, 40).map(({ raw: _raw, ...row }) => row),
@@ -457,6 +663,7 @@ export async function getPhase7CDecisionMonitor(symbol = "XAUUSD") {
       telemetry,
       lots: phase7CLotSettingsService.get(),
       audit: loadAudit(),
+      managedStates: loadManagedStates(),
       now: Date.now(),
     });
     cached = { at: Date.now(), value };
@@ -479,6 +686,7 @@ export function formatPhase7CDecisionMonitorForMt5(
   snapshot: ReturnType<typeof buildPhase7CDecisionMonitor>,
 ): string {
   const p = snapshot.preTrade;
+  const position = snapshot.position;
   const lines: Array<[string, unknown]> = [
     ["version", snapshot.version],
     ["generatedAt", snapshot.generatedAt],
@@ -510,6 +718,27 @@ export function formatPhase7CDecisionMonitorForMt5(
     ["limitReason", p.limitReason],
     ["decisionReason", p.decisionReason],
     ["engineReasons", snapshot.engine.reasons.join(" | ")],
+    ["positionState", position.state],
+    ["positionCount", position.count],
+    ["positionStrategy", position.strategy],
+    ["ticket", position.ticket],
+    ["positionSide", position.side],
+    ["positionSetup", position.setup],
+    ["positionVolume", position.volume],
+    ["positionEntry", position.entry],
+    ["currentPrice", position.currentPrice],
+    ["positionStopLoss", position.stopLoss],
+    ["positionTakeProfit", position.takeProfit],
+    ["positionTp1", position.tp1],
+    ["positionTp2", position.tp2],
+    ["floatingPnlUsd", position.floatingPnlUsd],
+    ["floatingPnlPercent", position.floatingPnlPercent],
+    ["favorableDistance", position.favorableDistance],
+    ["breakEvenApplied", position.breakEvenApplied],
+    ["partialApplied", position.partialApplied],
+    ["openedAt", position.openedAt],
+    ["entryReason", position.state === "FLAT" ? p.decisionReason : position.entryReason],
+    ["holdReason", position.holdReason],
     ["source", p.source],
     ["mt5OrderPermission", snapshot.safety.mt5PanelOrderPermission],
   ];

@@ -21,6 +21,8 @@ on:
       - "scripts/phase7c-decision-audit*.mjs"
       - "scripts/phase7c-decision-monitor.test.mjs"
       - "scripts/install-phase7c-mt5-decision-panel-local.ps1"
+      - "scripts/install-phase7c-desktop-control-local.ps1"
+      - "scripts/open-phase7c-control-center-local.ps1"
       - "mt5/**"
       - "scripts/run-phase7b-web-autostart.ps1"
       - "scripts/run-phase7b-demo-web-local.ps1"
@@ -55,6 +57,8 @@ on:
       - "scripts/phase7c-decision-audit*.mjs"
       - "scripts/phase7c-decision-monitor.test.mjs"
       - "scripts/install-phase7c-mt5-decision-panel-local.ps1"
+      - "scripts/install-phase7c-desktop-control-local.ps1"
+      - "scripts/open-phase7c-control-center-local.ps1"
       - "mt5/**"
       - "scripts/run-phase7b-web-autostart.ps1"
       - "scripts/run-phase7b-demo-web-local.ps1"
@@ -215,7 +219,9 @@ jobs:
             "scripts/verify-phase7c-executor-startup-task-local.ps1",
             "scripts/install-phase7c-forward-dashboard-task-local.ps1",
             "scripts/verify-phase7c-forward-dashboard-task-local.ps1",
-            "scripts/install-phase7c-mt5-decision-panel-local.ps1"
+            "scripts/install-phase7c-mt5-decision-panel-local.ps1",
+            "scripts/open-phase7c-control-center-local.ps1",
+            "scripts/install-phase7c-desktop-control-local.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null
