@@ -258,6 +258,9 @@ jobs:
           grep -q '\$activeProbe.restartRequired -eq \$false' scripts/activate-phase7c-local.ps1
           grep -q '\$activeProbe.restartRequired -eq \$true' scripts/activate-phase7c-local.ps1
           grep -q 'SHADOW_BOUND_UNARMED' scripts/activate-phase7c-local.ps1
+          grep -q 'PHASE7C_ACTIVATE_ENTRY_FREEZE_MODE=PAUSE' scripts/activate-phase7c-local.ps1
+          grep -q 'PHASE7C_ACTIVATE_BOT_STALE_RECOVERY=SAFE_COLD_START_PENDING_LOCAL_AND_BROKER_CHECKS' scripts/activate-phase7c-local.ps1
+          grep -q 'PHASE7C_EXECUTOR_STOP=FAIL|REMAINING=' scripts/stop-phase7c-executors-local.ps1
           grep -q 'PHASE7C_LOT_SETTINGS_FILE' scripts/run-phase7b-api-runtime-local.ps1
           grep -q 'PHASE7C_ACTIVE_LOT_SETTINGS_FILE' scripts/run-phase7b-api-runtime-local.ps1
           grep -q 'PHASE7C_RUNTIME_ROOT' scripts/run-phase7b-api-runtime-local.ps1

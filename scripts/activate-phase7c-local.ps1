@@ -207,6 +207,22 @@ $WebTask = Resolve-ExistingTaskName @("XAUUSD-Phase7B-Web") "WEB"
 # Freeze every entry-capable executor before validating state. This makes a
 # cold-start preflight safe even when the Phase 7C API is currently offline.
 Write-Host "PHASE7C_ACTIVATE_ENTRY_FREEZE=START"
+try {
+  $pauseResult = Invoke-RestMethod `
+    -Uri "$apiUrl/api/v1/phase7c/bot-mode" `
+    -Method Post `
+    -ContentType "application/json" `
+    -Body (@{ mode = "PAUSE"; source = "activation-entry-freeze" } | ConvertTo-Json) `
+    -TimeoutSec 5
+  if ([string]$pauseResult.state.mode -ne "PAUSE") {
+    throw "Control API did not confirm PAUSE."
+  }
+  Write-Host "PHASE7C_ACTIVATE_ENTRY_FREEZE_MODE=PAUSE"
+} catch {
+  # A cold start may have no API yet. Process/task freeze below remains the
+  # authoritative first gate and the broker is checked before any relaunch.
+  Write-Host "PHASE7C_ACTIVATE_ENTRY_FREEZE_MODE=API_UNAVAILABLE_COLD_START"
+}
 Stop-TaskSafe $LegacyBotTask
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ExecutorStopper -WorkDir $WorkDir
 if ($LASTEXITCODE -ne 0) { throw "Could not stop existing Phase 7C executors safely." }
@@ -219,16 +235,27 @@ try {
   Write-Host "PHASE7C_ACTIVATE_PREFLIGHT_API=AVAILABLE"
   Write-Host "PHASE7C_ACTIVATE_CURRENT_BOT_STATUS=$($current.botStatus)"
   $acceptedIdleStatuses = @("WAITING_SIGNAL", "READY_NOT_ARMED")
-  if ($acceptedIdleStatuses -notcontains [string]$current.botStatus) {
+  if ([string]$current.botStatus -eq "BOT_STALE") {
+    if ($current.runtime.alive -eq $true) {
+      throw "BOT_STALE response is inconsistent because runtime.alive=true. Activation remains blocked."
+    }
+    $preflightSource = "STALE_RUNTIME_PLUS_LOCAL_STATE_PLUS_BRIDGE"
+    Write-Host "PHASE7C_ACTIVATE_BOT_STALE_RECOVERY=SAFE_COLD_START_PENDING_LOCAL_AND_BROKER_CHECKS"
+  } elseif ($acceptedIdleStatuses -notcontains [string]$current.botStatus) {
     throw "Phase 7C activation requires an idle botStatus in [WAITING_SIGNAL, READY_NOT_ARMED]. Current=$($current.botStatus)"
+  } else {
+    Write-Host "PHASE7C_ACTIVATE_PREFLIGHT_BOT_STATUS=SAFE_IDLE"
   }
-  Write-Host "PHASE7C_ACTIVATE_PREFLIGHT_BOT_STATUS=SAFE_IDLE"
   if ($null -ne $current.mt5.managedPosition) {
     throw "Managed XAUUSD position is present. Activation is blocked until the trade is closed."
   }
 } catch {
   $message = $_.Exception.Message
-  if ($message -like "*requires an idle botStatus*" -or $message -like "*Managed XAUUSD*") { throw }
+  if (
+    $message -like "*requires an idle botStatus*" -or
+    $message -like "*Managed XAUUSD*" -or
+    $message -like "*BOT_STALE response is inconsistent*"
+  ) { throw }
   $preflightSource = "COLD_START_LOCAL_STATE_PLUS_BRIDGE"
   Write-Host "PHASE7C_ACTIVATE_PREFLIGHT_API=UNAVAILABLE_COLD_START"
   Write-Host "PHASE7C_ACTIVATE_PREFLIGHT_API_DETAIL=$message"
