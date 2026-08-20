@@ -8,6 +8,8 @@ param(
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $WorkDir = (Resolve-Path $WorkDir).Path
+$ApiRunner = Join-Path $PSScriptRoot "run-phase7b-api-runtime-local.ps1"
+if (-not (Test-Path -LiteralPath $ApiRunner)) { throw "Phase 7B API runtime launcher not found: $ApiRunner" }
 
 if ([string]::IsNullOrWhiteSpace($BridgeEnv)) {
   $BridgeEnv = Join-Path $ProjectRoot "packages\mt5-broker\bridge\.env.phase7b-demo"
@@ -70,33 +72,15 @@ New-Item -ItemType Directory -Path $demoDir -Force | Out-Null
 $apiUrl = "http://127.0.0.1:${ApiPort}"
 $webUrl = "http://127.0.0.1:${WebPort}"
 
-$env:MT5_BRIDGE_ENABLED = "true"
-$env:MT5_BRIDGE_BASE_URL = $bridgeBase
-$env:MT5_BRIDGE_API_KEY = $apiKey
-$env:MT5_BRIDGE_REQUEST_TIMEOUT_MS = "3000"
-$env:MT5_BRIDGE_HEALTH_TIMEOUT_MS = "1500"
-$env:MT5_MAGIC_NUMBER = [string]$systemMagicNumber
-$env:PHASE7B_DEMO_WORK_DIR = $demoDir
-$env:PHASE7C_LOT_SETTINGS_FILE = Join-Path $WorkDir "phase7c-lot-settings.json"
-$env:PHASE7C_ACTIVE_LOT_SETTINGS_FILE = Join-Path $WorkDir "phase7c-executors\active-lot-settings.json"
-$env:PHASE7C_RUNTIME_ROOT = $WorkDir
-$env:PHASE7B_LOCAL_CONTROL_ENABLED = "true"
-$env:HOST = "127.0.0.1"
-$env:PORT = [string]$ApiPort
-$env:WEB_ORIGIN = $webUrl
-
-$apiCommand = "Set-Location '$ProjectRoot'; pnpm --filter @xauusd/api dev"
 $apiProcess = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @(
   "-NoProfile",
   "-ExecutionPolicy", "Bypass",
-  "-Command", $apiCommand
+  "-File", ('"{0}"' -f $ApiRunner),
+  "-WorkDir", ('"{0}"' -f $WorkDir),
+  "-BridgeEnv", ('"{0}"' -f $BridgeEnv),
+  "-ApiPort", [string]$ApiPort,
+  "-WebOrigin", ('"{0}"' -f $webUrl)
 )
-
-Remove-Item Env:MT5_BRIDGE_API_KEY -ErrorAction SilentlyContinue
-Remove-Item Env:MT5_MAGIC_NUMBER -ErrorAction SilentlyContinue
-Remove-Item Env:PHASE7C_LOT_SETTINGS_FILE -ErrorAction SilentlyContinue
-Remove-Item Env:PHASE7C_ACTIVE_LOT_SETTINGS_FILE -ErrorAction SilentlyContinue
-Remove-Item Env:PHASE7C_RUNTIME_ROOT -ErrorAction SilentlyContinue
 $env:VITE_API_BASE_URL = $apiUrl
 $webCommand = "Set-Location '$ProjectRoot'; pnpm --filter @xauusd/web dev -- --host 127.0.0.1 --port $WebPort --strictPort"
 $webProcess = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @(
