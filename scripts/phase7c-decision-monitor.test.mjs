@@ -89,6 +89,19 @@ test("MT5 payload remains read-only and carries the canonical decision", () => {
   assert.match(payload, /^holdReason=Chờ setup hợp lệ; panel không có quyền gửi lệnh\./m);
 });
 
+test("MT5 payload explains PAUSE in Vietnamese instead of leaking a long engine reason", () => {
+  const input = fixture();
+  input.regime = {
+    ...input.regime,
+    activeMode: "PAUSE",
+    modeMatchesRecommendation: false,
+  };
+  input.demo.entryDiagnostics.entry.reason = "Sideway is suspected by structure/ADX but no qualified Supply/Demand confirmation exists.";
+  const payload = formatPhase7CDecisionMonitorForMt5(buildPhase7CDecisionMonitor(input));
+  assert.match(payload, /^entryReason=Bot đang PAUSE; không mở lệnh mới\./m);
+  assert.doesNotMatch(payload, /^entryReason=Sideway is suspected/m);
+});
+
 test("open managed position exposes broker P/L, actual protection and hold reason", () => {
   const input = fixture();
   input.telemetry.quote = { bid: 2511, ask: 2511.2, spread: 0.2, timestamp: input.now };

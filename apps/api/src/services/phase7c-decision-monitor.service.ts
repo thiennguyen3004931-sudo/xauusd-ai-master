@@ -682,6 +682,25 @@ function lineValue(value: unknown): string {
   return String(value).replace(/[\r\n]+/g, " ").slice(0, 600);
 }
 
+function mt5FlatEntryReason(snapshot: ReturnType<typeof buildPhase7CDecisionMonitor>): string {
+  const p = snapshot.preTrade;
+  if (snapshot.mode.active === "PAUSE") {
+    return "Bot đang PAUSE; không mở lệnh mới. Mở Control Center và nhấn BẬT BOT sau khi hoàn tất kiểm tra an toàn.";
+  }
+  if (snapshot.lotSettings.restartRequired) {
+    return "Cấu hình lot chưa active; hãy khởi động Bot an toàn từ Control Center.";
+  }
+  if (p.approved) {
+    const setup = p.setup ? ` ${p.setup}` : "";
+    return `Setup${setup} đã hợp lệ; executor đang xử lý qua các cổng an toàn.`;
+  }
+  const canonical = cleanReason(p.decisionReason, "Chưa có setup hợp lệ; tiếp tục chờ tín hiệu.");
+  if (/sideway is suspected|no qualified supply\/demand/i.test(canonical)) {
+    return "Thị trường có dấu hiệu Sideway nhưng chưa có vùng Supply/Demand đạt chuẩn; tiếp tục chờ.";
+  }
+  return canonical;
+}
+
 export function formatPhase7CDecisionMonitorForMt5(
   snapshot: ReturnType<typeof buildPhase7CDecisionMonitor>,
 ): string {
@@ -737,7 +756,7 @@ export function formatPhase7CDecisionMonitorForMt5(
     ["breakEvenApplied", position.breakEvenApplied],
     ["partialApplied", position.partialApplied],
     ["openedAt", position.openedAt],
-    ["entryReason", position.state === "FLAT" ? p.decisionReason : position.entryReason],
+    ["entryReason", position.state === "FLAT" ? mt5FlatEntryReason(snapshot) : position.entryReason],
     ["holdReason", position.holdReason],
     ["source", p.source],
     ["mt5OrderPermission", snapshot.safety.mt5PanelOrderPermission],
