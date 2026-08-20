@@ -1,5 +1,5 @@
 #property copyright "XAUUSD AI MASTER"
-#property version   "1.11"
+#property version   "1.12"
 #property description "Read-only Phase 7C position, decision, lot and risk panel EA"
 
 input string InpApiUrl = "http://127.0.0.1:3711/api/v1/phase7c/decision-monitor/mt5?symbol=XAUUSD";
@@ -11,7 +11,7 @@ input int InpFontSize = 9;
 
 const string PREFIX = "XAU_AI_P7C_";
 const int PANEL_WIDTH = 720;
-const int PANEL_HEIGHT = 588;
+const int PANEL_HEIGHT = 598;
 
 string Field(const string payload, const string wanted)
 {
@@ -137,7 +137,7 @@ void DrawChrome()
    Rectangle("RIGHT", 360, 139, 348, 117, C'23,29,39', C'53,67,86');
    Rectangle("ENTRY_REASON", 12, 288, 696, 102, C'23,29,39', C'53,67,86');
    Rectangle("HOLD_REASON", 12, 420, 696, 102, C'23,29,39', C'53,67,86');
-   Rectangle("FOOT", 12, 534, 696, 42, C'19,24,33', C'45,58,75');
+   Rectangle("FOOT", 12, 534, 696, 52, C'19,24,33', C'45,58,75');
 }
 
 void RenderError(const string message)
@@ -145,7 +145,7 @@ void RenderError(const string message)
    DrawChrome();
    Rectangle("STATUS", 12, 55, 696, 48, C'55,30,30', C'210,70,70');
    Label("TITLE", 16, 13, "XAUUSD AI MASTER", clrDeepSkyBlue, InpFontSize + 3, "Arial");
-   Label("SUBTITLE", 16, 36, "PHASE 7C · READ-ONLY POSITION MONITOR", clrSilver, InpFontSize);
+   Label("SUBTITLE", 16, 36, "PHASE 7C · READ-ONLY MONITOR", clrSilver, InpFontSize);
    Label("STATUS_TITLE", 26, 65, "MAT KET NOI API", clrTomato, InpFontSize + 2, "Arial");
    Label("STATUS_NOTE", 26, 88, message, clrWhite);
    Label("ERR_HELP1", 28, 310, "Cho phep WebRequest: http://127.0.0.1:3711", clrGold);
@@ -175,8 +175,10 @@ void Render(const string payload)
    string ticket = managing ? Field(payload, "ticket") : "CHUA CO";
    string distance = managing ? Field(payload, "favorableDistance") : Field(payload, "stopDistance");
    string entryLine1, entryLine2, entryLine3, holdLine1, holdLine2, holdLine3;
-   WrapThree(Field(payload, "entryReason"), 70, entryLine1, entryLine2, entryLine3);
-   WrapThree(Field(payload, "holdReason"), 70, holdLine1, holdLine2, holdLine3);
+   // Conservative wrapping remains readable on Windows DPI scaling where the
+   // chart font can occupy more pixels than MT5 object coordinates suggest.
+   WrapThree(Field(payload, "entryReason"), 52, entryLine1, entryLine2, entryLine3);
+   WrapThree(Field(payload, "holdReason"), 52, holdLine1, holdLine2, holdLine3);
 
    string statusTitle;
    string statusNote;
@@ -199,9 +201,9 @@ void Render(const string payload)
    DrawChrome();
    Rectangle("STATUS", 12, 55, 696, 48, C'25,38,49', stateColor);
    Label("TITLE", 16, 13, "XAUUSD AI MASTER", clrDeepSkyBlue, InpFontSize + 3, "Arial");
-   Label("SUBTITLE", 16, 36, "PHASE 7C · READ-ONLY POSITION MONITOR", clrSilver, InpFontSize);
-   Label("MODE", 550, 17, "MODE " + Field(payload, "activeMode"), clrWhite, InpFontSize + 1);
-   Label("REGIME", 550, 37, Field(payload, "regime") + " · CONF " + Field(payload, "confidence"), clrSilver);
+   Label("SUBTITLE", 16, 36, "PHASE 7C · READ-ONLY MONITOR", clrSilver, InpFontSize);
+   Label("MODE", 515, 17, "MODE " + Field(payload, "activeMode"), clrWhite, InpFontSize + 1);
+   Label("REGIME", 515, 37, Field(payload, "regime") + " · CONF " + Field(payload, "confidence"), clrSilver);
    Label("STATUS_TITLE", 26, 64, statusTitle, stateColor, InpFontSize + 2, "Arial");
    Label("STATUS_NOTE", 26, 87, statusNote, clrWhite);
 
@@ -224,9 +226,9 @@ void Render(const string payload)
    Label("R3", 376, 203, "SETUP", clrSilver);
    Label("R3V", 450, 203, setup, clrWhite);
    Label("R4", 376, 229, "BE / 1/3", clrSilver);
-   Label("R4V", 450, 229, Field(payload, "breakEvenApplied") + " / " + Field(payload, "partialApplied"), clrAqua);
-   Label("RSIDE", 590, 151, side, stateColor, InpFontSize + 1);
-   Label("RDIST", 590, 177, (managing ? "MOVE " : "RISK ") + distance, clrSilver);
+   Label("R4V", 480, 229, Field(payload, "breakEvenApplied") + " / " + Field(payload, "partialApplied"), clrAqua);
+   Label("RSIDE", 590, 151, managing ? side : "", stateColor, InpFontSize + 1);
+   Label("RDIST", 590, 177, managing ? "MOVE " + distance : "", clrSilver);
 
    Label("ENTRY_HEAD", 24, 270, "LY DO VAO LENH / CHO LENH", clrDeepSkyBlue, InpFontSize + 1, "Arial");
    Label("ENTRY_1", 26, 302, entryLine1, clrWhite);
@@ -238,7 +240,7 @@ void Render(const string payload)
    Label("HOLD_3", 26, 486, holdLine3, clrSilver);
 
    Label("SAFETY", 26, 544, "READ-ONLY · ORDER PERMISSION = " + Field(payload, "mt5OrderPermission") + " · DEMO ONLY", clrSilver);
-   Label("FOOTMODE", 390, 544, "BE +" + Field(payload, "breakEvenTriggerDistance") + " · PARTIAL " + Field(payload, "partial"), clrDimGray);
+   Label("FOOTMODE", 26, 564, "BE +" + Field(payload, "breakEvenTriggerDistance") + " · PARTIAL " + Field(payload, "partial"), clrDimGray);
    ChartRedraw();
 }
 
