@@ -108,6 +108,7 @@ const patches = [
     label: "TREND_SIGNAL_EXPIRY_BROKER_CLOCK",
     before: `  const now = Date.now();\n  if (now > signal.signalTimestamp + 15 * 60_000) {`,
     after: `  const now = Number(quote.timestamp);\n  if (!Number.isFinite(now)) {\n    journal("QUOTE_TIMESTAMP_INVALID", { quoteTimestamp: quote.timestamp });\n    return;\n  }\n  if (now > signal.signalTimestamp + 15 * 60_000) {`,
+    acceptedAfter: `  const now = Number(quote.timestamp);\n  if (!Number.isFinite(now)) {\n    journal("QUOTE_TIMESTAMP_INVALID", { quoteTimestamp: quote.timestamp });\n    return;\n  }\n  if (now > signal.signalTimestamp + pullbackWaitMinutes * 60_000) {`,
   },
   {
     file: trendPath,
@@ -140,7 +141,7 @@ for (const [file, filePatches] of byFile) {
   }
 
   for (const patch of filePatches) {
-    if (source.includes(patch.after)) {
+    if (source.includes(patch.after) || (patch.acceptedAfter && source.includes(patch.acceptedAfter))) {
       console.log(`PHASE7C_BROKER_CLOCK_PATCH=${patch.label}|ALREADY_APPLIED`);
       continue;
     }
