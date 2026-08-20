@@ -3,6 +3,7 @@ param(
   [string]$TaskName = "XAUUSD-Phase7B-Bot",
   [string]$ControlApiUrl = "http://127.0.0.1:3711",
   [string]$EnvFile = "packages/mt5-broker/bridge/.env.phase7b-demo",
+  [double]$TrendFixedVolume = 0.03,
   [double]$SidewayRiskPercent = 0.25,
   [double]$SidewayMaxLot = 0.03,
   [switch]$StartTask,
@@ -16,8 +17,13 @@ $Stopper = Join-Path $PSScriptRoot "stop-phase7c-executors-local.ps1"
 
 if (-not (Test-Path $Supervisor)) { throw "Phase 7C supervisor not found: $Supervisor" }
 if (-not (Test-Path $Stopper)) { throw "Phase 7C stopper not found: $Stopper" }
-if ($SidewayRiskPercent -le 0 -or $SidewayRiskPercent -gt 5) { throw "SidewayRiskPercent must be > 0 and <= 5." }
-if ($SidewayMaxLot -le 0) { throw "SidewayMaxLot must be positive." }
+if ($TrendFixedVolume -lt 0.03 -or $TrendFixedVolume -gt 0.30) { throw "TrendFixedVolume must be between 0.03 and 0.30." }
+if ($SidewayRiskPercent -lt 0.01 -or $SidewayRiskPercent -gt 1) { throw "SidewayRiskPercent must be between 0.01 and 1.00." }
+if ($SidewayMaxLot -lt 0.03 -or $SidewayMaxLot -gt 0.30) { throw "SidewayMaxLot must be between 0.03 and 0.30." }
+foreach ($managedLot in @($TrendFixedVolume, $SidewayMaxLot)) {
+  $units = $managedLot / 0.03
+  if ([math]::Abs($units - [math]::Round($units)) -gt 1e-8) { throw "Managed lot values must use 0.03 increments." }
+}
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
@@ -109,6 +115,7 @@ $arguments = @(
   ('-WorkDir "{0}"' -f $WorkDir),
   ('-ControlApiUrl "{0}"' -f $ControlApiUrl),
   ('-EnvFile "{0}"' -f $EnvFile),
+  ('-TrendFixedVolume {0}' -f $TrendFixedVolume.ToString([System.Globalization.CultureInfo]::InvariantCulture)),
   ('-SidewayRiskPercent {0}' -f $SidewayRiskPercent.ToString([System.Globalization.CultureInfo]::InvariantCulture)),
   ('-SidewayMaxLot {0}' -f $SidewayMaxLot.ToString([System.Globalization.CultureInfo]::InvariantCulture)),
   "-Armed"

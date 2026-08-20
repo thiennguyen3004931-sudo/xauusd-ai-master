@@ -2,6 +2,7 @@ param(
   [string]$ControlApiUrl = "http://127.0.0.1:3711",
   [string]$EnvFile = "packages/mt5-broker/bridge/.env.phase7b-demo",
   [string]$WorkDir = "",
+  [double]$FixedVolume = 0.03,
   [switch]$Armed,
   [switch]$Once
 )
@@ -12,6 +13,11 @@ $Controller = Join-Path $PSScriptRoot "run-phase7c-trend-controller.mjs"
 
 if (-not (Test-Path $Controller)) {
   throw "Phase 7C Trend controller not found: $Controller"
+}
+if ($FixedVolume -lt 0.03 -or $FixedVolume -gt 0.30) { throw "FixedVolume must be between 0.03 and 0.30." }
+$fixedUnits = $FixedVolume / 0.03
+if ([math]::Abs($fixedUnits - [math]::Round($fixedUnits)) -gt 1e-8) {
+  throw "FixedVolume must use 0.03 increments so +10 can close exactly one-third."
 }
 
 if (-not [string]::IsNullOrWhiteSpace($EnvFile)) {
@@ -45,12 +51,14 @@ if ([string]::IsNullOrWhiteSpace($env:ZIQ_DEMO_WORK_DIR)) {
 }
 
 $env:ZIQ_PHASE7C_CONTROL_API_URL = $ControlApiUrl.TrimEnd('/')
+$env:ZIQ_FIXED_VOLUME = $FixedVolume.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 $env:ZIQ_DEMO_ARMED = if ($Armed) { "true" } else { "false" }
 $env:ZIQ_DEMO_ONCE = if ($Once) { "true" } else { "false" }
 
 Write-Host "PHASE7C_TREND_CONTROLLER=STARTING"
 Write-Host "PHASE7C_CONTROL_API=$($env:ZIQ_PHASE7C_CONTROL_API_URL)"
 Write-Host "PHASE7C_TREND_ARMED=$($env:ZIQ_DEMO_ARMED)"
+Write-Host "PHASE7C_TREND_FIXED_LOT=$($env:ZIQ_FIXED_VOLUME)"
 Write-Host "PHASE7C_TREND_DEMO_WORK_DIR=$($env:ZIQ_DEMO_WORK_DIR)"
 Write-Host "PHASE7C_GATE_SCOPE=NEW_TREND_ENTRIES_ONLY"
 Write-Host "PHASE7C_POSITION_MANAGEMENT=PASS_THROUGH"

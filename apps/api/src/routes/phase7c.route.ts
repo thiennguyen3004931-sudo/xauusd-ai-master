@@ -17,6 +17,11 @@ import {
 } from "../services/phase7c-bot-mode.service";
 import { getPhase7CLiveRegime } from "../services/phase7c-live-regime.service";
 import { getPhase7CDailyRecoveryView } from "../services/phase7c-daily-recovery-view.service";
+import {
+  phase7CLotSettingsService,
+  validatePhase7CLotSettings,
+} from "../services/phase7c-lot-settings.service";
+import { getMt5Telemetry } from "../services/mt5.service";
 
 const router = Router();
 
@@ -69,6 +74,73 @@ router.post("/bot-mode", (req: Request, res: Response) => {
     state: phase7CBotModeService.set(requestedMode, source),
     options: getPhase7CBotModeOptions(),
   });
+});
+
+router.get("/lot-settings", (_req: Request, res: Response) => {
+  res.json(phase7CLotSettingsService.get());
+});
+
+router.post("/lot-settings", async (req: Request, res: Response) => {
+  if (!canChangeBotMode(req)) {
+    res.status(403).json({
+      error: "Lot setting changes are restricted to localhost unless PHASE7C_BOT_MODE_TOKEN is configured.",
+    });
+    return;
+  }
+
+  try {
+    const currentMode = phase7CBotModeService.get();
+    if (currentMode.mode !== "PAUSE") {
+      res.status(409).json({
+        error: `Lot settings can only change while bot mode is PAUSE. Current=${currentMode.mode}.`,
+      });
+      return;
+    }
+
+    const telemetry = await getMt5Telemetry("XAUUSD");
+    if (!telemetry.reachable || telemetry.health?.accountMode !== "demo" || !telemetry.spec) {
+      res.status(409).json({
+        error: "Lot settings require a healthy MT5 DEMO bridge and an available XAUUSD broker specification.",
+      });
+      return;
+    }
+    if (telemetry.positions.length > 0) {
+      res.status(409).json({
+        error: `Lot settings require zero open XAUUSD positions. Current=${telemetry.positions.length}.`,
+      });
+      return;
+    }
+
+    const input = validatePhase7CLotSettings({
+      trendFixedLot: Number(req.body?.trendFixedLot),
+      sidewayRiskPercent: Number(req.body?.sidewayRiskPercent),
+      sidewayMaxLot: Number(req.body?.sidewayMaxLot),
+    });
+    const step = Number(telemetry.spec.volumeStep);
+    const minVolume = Number(telemetry.spec.minVolume);
+    const maxVolume = Number(telemetry.spec.maxVolume);
+    for (const [label, lot] of [
+      ["Trend fixed lot", input.trendFixedLot],
+      ["Sideway max lot", input.sidewayMaxLot],
+    ] as const) {
+      if (lot < minVolume - 1e-9 || lot > maxVolume + 1e-9) {
+        throw new Error(`${label} ${lot} is outside broker range ${minVolume}-${maxVolume}.`);
+      }
+      const units = lot / step;
+      if (Math.abs(units - Math.round(units)) > 1e-8 || Math.round(units) % 3 !== 0) {
+        throw new Error(`${label} ${lot} is not compatible with broker step ${step} and exact one-third partial close.`);
+      }
+    }
+
+    const source = typeof req.body?.source === "string" && req.body.source.trim()
+      ? req.body.source.trim().slice(0, 80)
+      : "operator";
+    res.json(phase7CLotSettingsService.set(input, source));
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Phase 7C lot settings update failed.",
+    });
+  }
 });
 
 router.get("/live-regime", async (req: Request, res: Response) => {

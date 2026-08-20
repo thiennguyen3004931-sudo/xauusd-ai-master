@@ -17,11 +17,15 @@ if (-not (Test-Path $Controller)) {
   throw "Phase 7C Sideway locked controller not found: $Controller"
 }
 
-if ($RiskPercent -le 0 -or $RiskPercent -gt 5) {
-  throw "RiskPercent must be > 0 and <= 5."
+if ($RiskPercent -lt 0.01 -or $RiskPercent -gt 1) {
+  throw "RiskPercent must be between 0.01 and 1.00 for DEMO."
 }
-if ($MaxLot -le 0) {
-  throw "MaxLot must be positive."
+if ($MaxLot -lt 0.03 -or $MaxLot -gt 0.30) {
+  throw "MaxLot must be between 0.03 and 0.30 for DEMO."
+}
+$maxLotUnits = $MaxLot / 0.03
+if ([math]::Abs($maxLotUnits - [math]::Round($maxLotUnits)) -gt 1e-8) {
+  throw "MaxLot must use 0.03 increments so +10 can close exactly one-third."
 }
 if ($IntervalSeconds -lt 1) {
   throw "IntervalSeconds must be >= 1."

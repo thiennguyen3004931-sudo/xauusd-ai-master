@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link as RouterLink } from "react-router-dom";
 import {
   Alert,
@@ -9,12 +10,15 @@ import {
   Chip,
   Grid,
   Stack,
+  TextField,
   Typography,
 } from "@mui/material";
 import {
   getPhase7CAccountRisk,
   getPhase7CDailyRecovery,
   getPhase7CLiveRegime,
+  getPhase7CLotSettings,
+  setPhase7CLotSettings,
 } from "../api";
 import { MetricCard } from "../ui/MetricCard";
 import { ErrorState, LoadingState } from "../ui/PageState";
@@ -36,9 +40,37 @@ function dateTime(value: number | string | null | undefined) {
 
 export function Phase7CControlCenterPage() {
 
+  const queryClient = useQueryClient();
+  const lotSettings = useQuery({
+    queryKey: ["phase7c-lot-settings"],
+    queryFn: getPhase7CLotSettings,
+    refetchInterval: 5000,
+    retry: false,
+  });
+  const configuredTrendLot = lotSettings.data?.state.trendFixedLot ?? 0.03;
+  const configuredSidewayRisk = lotSettings.data?.state.sidewayRiskPercent ?? 0.25;
+  const configuredSidewayMaxLot = lotSettings.data?.state.sidewayMaxLot ?? 0.03;
+
+  const [lotDraft, setLotDraft] = useState<{
+    trendFixedLot: number;
+    sidewayRiskPercent: number;
+    sidewayMaxLot: number;
+  } | null>(null);
+  const trendFixedLot = lotDraft?.trendFixedLot ?? configuredTrendLot;
+  const sidewayRiskPercent = lotDraft?.sidewayRiskPercent ?? configuredSidewayRisk;
+  const sidewayMaxLot = lotDraft?.sidewayMaxLot ?? configuredSidewayMaxLot;
+  const updateLotDraft = (patch: Partial<NonNullable<typeof lotDraft>>) => {
+    setLotDraft((current) => ({
+      trendFixedLot: current?.trendFixedLot ?? configuredTrendLot,
+      sidewayRiskPercent: current?.sidewayRiskPercent ?? configuredSidewayRisk,
+      sidewayMaxLot: current?.sidewayMaxLot ?? configuredSidewayMaxLot,
+      ...patch,
+    }));
+  };
+
   const account = useQuery({
-    queryKey: ["phase7c-account-control-center"],
-    queryFn: () => getPhase7CAccountRisk(0.25, 0.03),
+    queryKey: ["phase7c-account-control-center", configuredSidewayRisk, configuredSidewayMaxLot],
+    queryFn: () => getPhase7CAccountRisk(configuredSidewayRisk, configuredSidewayMaxLot),
     refetchInterval: 5000,
     retry: false,
   });
@@ -53,7 +85,9 @@ export function Phase7CControlCenterPage() {
   // The exact Sideway stop only exists after the executor has Supply/Demand,
   // ATR, the final quote and M5 confirmation. Use the configured cap for this
   // read-only recovery illustration instead of reusing Trend diagnostics.
-  const recoveryPreviewVolume = 0.03;
+  const recoveryPreviewVolume = liveRegime.data?.recommendedMode === "SIDEWAY"
+    ? configuredSidewayMaxLot
+    : configuredTrendLot;
 
   const dailyRecovery = useQuery({
     queryKey: [
@@ -66,6 +100,15 @@ export function Phase7CControlCenterPage() {
       ),
     refetchInterval: 5000,
     retry: false,
+  });
+
+  const saveLotSettings = useMutation({
+    mutationFn: setPhase7CLotSettings,
+    onSuccess: async () => {
+      setLotDraft(null);
+      await queryClient.invalidateQueries({ queryKey: ["phase7c-lot-settings"] });
+      await queryClient.invalidateQueries({ queryKey: ["phase7c-account-control-center"] });
+    },
   });
 
   if (account.isLoading) return <LoadingState />;
@@ -103,14 +146,13 @@ export function Phase7CControlCenterPage() {
 
   const previewVolumeBasis =
     liveRegime.data?.recommendedMode === "SIDEWAY"
-      ? "mức cap 0.03 để minh họa; lot Sideway tính khi có setup"
-      : "Trend fixed 0.03 lot";
+      ? `mức cap ${configuredSidewayMaxLot.toFixed(2)} để minh họa; lot Sideway tính khi có setup`
+      : `Trend fixed ${configuredTrendLot.toFixed(2)} lot`;
 
   const recoveryReadError =
     liveRegime.error ??
     dailyRecovery.error ??
     null;
-
 
   return (
     <Stack spacing={2}>
@@ -414,7 +456,7 @@ export function Phase7CControlCenterPage() {
                 variant="caption"
                 color="text.secondary"
               >
-                Trend fixed 0.03 lot. Sideway tính Auto Lot sau khi có đúng SL từ Supply/Demand + ATR + quote cuối; risk 0.25% balance, cap 0.03 lot. Không martingale và không nới SL.
+                Trend fixed {configuredTrendLot.toFixed(2)} lot. Sideway tính Auto Lot sau khi có đúng SL từ Supply/Demand + ATR + quote cuối; risk {configuredSidewayRisk.toFixed(2)}% balance, cap {configuredSidewayMaxLot.toFixed(2)} lot. Không martingale và không nới SL.
               </Typography>
             </Box>
 
@@ -436,7 +478,7 @@ export function Phase7CControlCenterPage() {
             <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
               <MetricCard
                 label="Trend lot"
-                value="0.03 lot"
+                value={`${configuredTrendLot.toFixed(2)} lot`}
                 detail="Fixed · không escalation"
               />
             </Grid>
@@ -444,8 +486,8 @@ export function Phase7CControlCenterPage() {
             <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
               <MetricCard
                 label="Sideway risk"
-                value="0.25%"
-                detail="Max lot 0.03"
+                value={`${configuredSidewayRisk.toFixed(2)}%`}
+                detail={`Max lot ${configuredSidewayMaxLot.toFixed(2)}`}
               />
             </Grid>
 
@@ -461,10 +503,88 @@ export function Phase7CControlCenterPage() {
               <MetricCard
                 label="Sideway Auto Lot"
                 value="TÍNH TRƯỚC LỆNH"
-                detail="0.25% balance · cap 0.03"
+                detail={`${configuredSidewayRisk.toFixed(2)}% balance · cap ${configuredSidewayMaxLot.toFixed(2)}`}
               />
             </Grid>
           </Grid>
+
+          <Box sx={{ mt: 2, p: 2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
+            <Typography fontWeight={900}>Điều chỉnh lot cho lệnh mới</Typography>
+            <Typography variant="caption" color="text.secondary">
+              Chỉ lưu khi BOT MODE = PAUSE, MT5 là DEMO và không có vị thế XAUUSD. Lot dùng bước 0.03 để chốt đúng 1/3 tại +10; thay đổi không tác động vị thế đang quản lý.
+            </Typography>
+
+            <Grid container spacing={2} sx={{ mt: 0.5 }}>
+              <Grid size={{ xs: 12, sm: 4 }}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  type="number"
+                  label="Trend fixed lot"
+                  value={trendFixedLot}
+                  onChange={(event) => updateLotDraft({ trendFixedLot: Number(event.target.value) })}
+                  slotProps={{ htmlInput: { min: 0.03, max: 0.3, step: 0.03 } }}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 4 }}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  type="number"
+                  label="Sideway risk / lệnh (%)"
+                  value={sidewayRiskPercent}
+                  onChange={(event) => updateLotDraft({ sidewayRiskPercent: Number(event.target.value) })}
+                  slotProps={{ htmlInput: { min: 0.01, max: 1, step: 0.01 } }}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 4 }}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  type="number"
+                  label="Sideway max lot"
+                  value={sidewayMaxLot}
+                  onChange={(event) => updateLotDraft({ sidewayMaxLot: Number(event.target.value) })}
+                  slotProps={{ htmlInput: { min: 0.03, max: 0.3, step: 0.03 } }}
+                />
+              </Grid>
+            </Grid>
+
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }} sx={{ mt: 2 }}>
+              <Button
+                variant="contained"
+                disabled={liveRegime.data?.activeMode !== "PAUSE" || saveLotSettings.isPending || !lotSettings.data}
+                onClick={() => saveLotSettings.mutate({ trendFixedLot, sidewayRiskPercent, sidewayMaxLot })}
+              >
+                {saveLotSettings.isPending ? "Đang lưu..." : "Lưu cấu hình lot"}
+              </Button>
+              <Typography variant="caption" color="text.secondary">
+                Mode hiện tại: <b>{liveRegime.data?.activeMode ?? "ĐANG ĐỌC"}</b> · Giới hạn DEMO tối đa 0.30 lot / 1.00%.
+              </Typography>
+            </Stack>
+
+            {saveLotSettings.error ? (
+              <Alert severity="error" sx={{ mt: 1.5 }}>
+                {saveLotSettings.error instanceof Error ? saveLotSettings.error.message : String(saveLotSettings.error)}
+              </Alert>
+            ) : null}
+
+            {lotSettings.error ? (
+              <Alert severity="error" sx={{ mt: 1.5 }}>
+                Không đọc được cấu hình lot: {lotSettings.error instanceof Error ? lotSettings.error.message : String(lotSettings.error)}
+              </Alert>
+            ) : !lotSettings.data ? (
+              <Alert severity="info" sx={{ mt: 1.5 }}>Đang đọc cấu hình lot.</Alert>
+            ) : lotSettings.data.restartRequired ? (
+              <Alert severity="warning" sx={{ mt: 1.5 }}>
+                Cấu hình đã lưu nhưng chưa áp dụng cho executor. Giữ PAUSE và chạy lại activate-phase7c-local.ps1 với -ArmExecutors; sau khi PASS mới chuyển AUTO.
+              </Alert>
+            ) : (
+              <Alert severity="success" sx={{ mt: 1.5 }}>
+                Executor đang dùng đúng cấu hình lot đã lưu.
+              </Alert>
+            )}
+          </Box>
 
           <Alert severity="info" sx={{ mt: 2 }}>
             Không dùng SL Trend để giả lập lot Sideway. Executor chỉ tính lot Sideway khi setup cuối đã qua xác nhận M5 và có SL thực tế; nếu snapshot Auto Lot sai tài khoản, symbol, stop distance hoặc quá cũ thì chặn lệnh.
@@ -483,7 +603,7 @@ export function Phase7CControlCenterPage() {
               a.configuration.targetRiskUsd,
               currency,
             )}
-            {" · "}DEMO ONLY · Read-only preview.
+            {" · "}DEMO ONLY · Cấu hình chỉ áp dụng cho lệnh mới.
           </Typography>
         </CardContent>
       </Card>
@@ -491,7 +611,7 @@ export function Phase7CControlCenterPage() {
 
 
       <Alert severity="warning">
-        AUTO chọn TREND / SIDEWAY / PAUSE. Trend dùng fixed 0.03 lot; Sideway dùng risk 0.25% với cap 0.03. Telegram chỉ đổi mode điều phối, không có quyền trực tiếp đặt/sửa/đóng lệnh MT5.
+        AUTO chọn TREND / SIDEWAY / PAUSE. Trend dùng fixed {configuredTrendLot.toFixed(2)} lot; Sideway dùng risk {configuredSidewayRisk.toFixed(2)}% với cap {configuredSidewayMaxLot.toFixed(2)}. Telegram chỉ đổi mode điều phối, không có quyền trực tiếp đặt/sửa/đóng lệnh MT5.
       </Alert>
     </Stack>
   );

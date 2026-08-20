@@ -346,3 +346,45 @@ export interface Phase7CBacktestResult {
   }>;
   notes: string[];
 }
+export interface Phase7CLotSettingsState {
+  version: 1;
+  trendFixedLot: number;
+  sidewayRiskPercent: number;
+  sidewayMaxLot: number;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface Phase7CActiveLotSettings {
+  version: 1;
+  trendFixedLot: number;
+  sidewayRiskPercent: number;
+  sidewayMaxLot: number;
+  armed: boolean;
+  supervisorPid: number;
+  appliedAt: string;
+}
+
+export interface Phase7CLotSettingsSnapshot {
+  state: Phase7CLotSettingsState;
+  active: Phase7CActiveLotSettings | null;
+  activeAlive: boolean;
+  restartRequired: boolean;
+  appliesTo: "NEW_POSITIONS_ONLY";
+  safety: {
+    demoOnly: true;
+    requiresPause: true;
+    requiresZeroXauusdPositions: true;
+    existingPositionMutation: false;
+    martingale: false;
+    recoveryLotEscalation: false;
+  };
+  limits: {
+    minManagedLot: number;
+    maxDemoLot: number;
+    lotStep: number;
+    managedLotIncrement: number;
+    minRiskPercent: number;
+    maxRiskPercent: number;
+  };
+}

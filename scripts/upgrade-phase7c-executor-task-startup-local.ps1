@@ -4,6 +4,7 @@ param(
   [string]$ControlApiUrl = "http://127.0.0.1:3711",
   [string]$EnvFile = "packages/mt5-broker/bridge/.env.phase7b-demo",
   [string]$TelegramEnvFile = ".env.phase7b-telegram",
+  [double]$TrendFixedVolume = 0.03,
   [double]$SidewayRiskPercent = 0.25,
   [double]$SidewayMaxLot = 0.03,
   [switch]$KeepStopped
@@ -18,8 +19,13 @@ $BackupPath = Join-Path $ProjectRoot ".runtime\phase7c-executors\scheduled-task-
 
 if (-not (Test-Path $TaskRunner)) { throw "Phase 7C executor task runner not found: $TaskRunner" }
 if (-not (Test-Path $Stopper)) { throw "Phase 7C executor stopper not found: $Stopper" }
-if ($SidewayRiskPercent -le 0 -or $SidewayRiskPercent -gt 5) { throw "SidewayRiskPercent must be > 0 and <= 5." }
-if ($SidewayMaxLot -le 0) { throw "SidewayMaxLot must be positive." }
+if ($TrendFixedVolume -lt 0.03 -or $TrendFixedVolume -gt 0.30) { throw "TrendFixedVolume must be between 0.03 and 0.30." }
+if ($SidewayRiskPercent -lt 0.01 -or $SidewayRiskPercent -gt 1) { throw "SidewayRiskPercent must be between 0.01 and 1.00." }
+if ($SidewayMaxLot -lt 0.03 -or $SidewayMaxLot -gt 0.30) { throw "SidewayMaxLot must be between 0.03 and 0.30." }
+foreach ($managedLot in @($TrendFixedVolume, $SidewayMaxLot)) {
+  $units = $managedLot / 0.03
+  if ([math]::Abs($units - [math]::Round($units)) -gt 1e-8) { throw "Managed lot values must use 0.03 increments." }
+}
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $adminPrincipal = New-Object Security.Principal.WindowsPrincipal($identity)
@@ -30,6 +36,25 @@ if (-not $adminPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Admin
 if (-not [System.IO.Path]::IsPathRooted($WorkDir)) { $WorkDir = Join-Path $ProjectRoot $WorkDir }
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 $WorkDir = (Resolve-Path $WorkDir).Path
+$LotSettingsPath = Join-Path $WorkDir "phase7c-lot-settings.json"
+if (Test-Path $LotSettingsPath) {
+  try {
+    $lotSettings = Get-Content -LiteralPath $LotSettingsPath -Raw | ConvertFrom-Json
+    if ([int]$lotSettings.version -ne 1) { throw "Unsupported version $($lotSettings.version)." }
+    $TrendFixedVolume = [double]$lotSettings.trendFixedLot
+    $SidewayRiskPercent = [double]$lotSettings.sidewayRiskPercent
+    $SidewayMaxLot = [double]$lotSettings.sidewayMaxLot
+  } catch {
+    throw "Phase 7C lot settings are invalid at $LotSettingsPath. $($_.Exception.Message)"
+  }
+}
+if ($TrendFixedVolume -lt 0.03 -or $TrendFixedVolume -gt 0.30) { throw "Configured TrendFixedVolume is invalid: $TrendFixedVolume" }
+if ($SidewayRiskPercent -lt 0.01 -or $SidewayRiskPercent -gt 1) { throw "Configured SidewayRiskPercent is invalid: $SidewayRiskPercent" }
+if ($SidewayMaxLot -lt 0.03 -or $SidewayMaxLot -gt 0.30) { throw "Configured SidewayMaxLot is invalid: $SidewayMaxLot" }
+foreach ($managedLot in @($TrendFixedVolume, $SidewayMaxLot)) {
+  $units = $managedLot / 0.03
+  if ([math]::Abs($units - [math]::Round($units)) -gt 1e-8) { throw "Configured managed lot values must use 0.03 increments." }
+}
 
 if (-not [System.IO.Path]::IsPathRooted($EnvFile)) { $EnvFile = Join-Path $ProjectRoot $EnvFile }
 if (-not (Test-Path $EnvFile)) { throw "Environment file not found: $EnvFile" }
@@ -118,6 +143,7 @@ $config = [pscustomobject]@{
   telegramEnvFile = $TelegramEnvFile
   nodePath = $NodePath
   pnpmPath = $PnpmPath
+  trendFixedVolume = $TrendFixedVolume
   sidewayRiskPercent = $SidewayRiskPercent
   sidewayMaxLot = $SidewayMaxLot
   armed = $true

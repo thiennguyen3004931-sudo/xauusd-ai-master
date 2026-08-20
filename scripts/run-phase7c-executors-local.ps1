@@ -3,6 +3,7 @@ param(
   [string]$ControlApiUrl = "http://127.0.0.1:3711",
   [string]$EnvFile = "packages/mt5-broker/bridge/.env.phase7b-demo",
   [string]$TelegramEnvFile = ".env.phase7b-telegram",
+  [double]$TrendFixedVolume = 0.03,
   [double]$SidewayRiskPercent = 0.25,
   [double]$SidewayMaxLot = 0.03,
   [int]$DependencyWaitSeconds = 120,
@@ -23,12 +24,38 @@ if (-not (Test-Path $SidewayLauncher)) { throw "Sideway launcher not found: $Sid
 if (-not (Test-Path $TelegramModeLauncher)) { throw "Telegram mode launcher not found: $TelegramModeLauncher" }
 if (-not (Test-Path $RegimeNotifierLauncher)) { throw "Regime notifier launcher not found: $RegimeNotifierLauncher" }
 if ($DependencyWaitSeconds -lt 10) { throw "DependencyWaitSeconds must be >= 10." }
+if ($TrendFixedVolume -lt 0.03 -or $TrendFixedVolume -gt 0.30) { throw "TrendFixedVolume must be between 0.03 and 0.30." }
+if ($SidewayRiskPercent -lt 0.01 -or $SidewayRiskPercent -gt 1) { throw "SidewayRiskPercent must be between 0.01 and 1.00." }
+if ($SidewayMaxLot -lt 0.03 -or $SidewayMaxLot -gt 0.30) { throw "SidewayMaxLot must be between 0.03 and 0.30." }
+foreach ($managedLot in @($TrendFixedVolume, $SidewayMaxLot)) {
+  $units = $managedLot / 0.03
+  if ([math]::Abs($units - [math]::Round($units)) -gt 1e-8) { throw "Managed lot values must use 0.03 increments." }
+}
 
 if (-not [System.IO.Path]::IsPathRooted($WorkDir)) {
   $WorkDir = Join-Path $ProjectRoot $WorkDir
 }
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 $WorkDir = (Resolve-Path $WorkDir).Path
+$LotSettingsPath = Join-Path $WorkDir "phase7c-lot-settings.json"
+if (Test-Path $LotSettingsPath) {
+  try {
+    $lotSettings = Get-Content -LiteralPath $LotSettingsPath -Raw | ConvertFrom-Json
+    if ([int]$lotSettings.version -ne 1) { throw "Unsupported version $($lotSettings.version)." }
+    $TrendFixedVolume = [double]$lotSettings.trendFixedLot
+    $SidewayRiskPercent = [double]$lotSettings.sidewayRiskPercent
+    $SidewayMaxLot = [double]$lotSettings.sidewayMaxLot
+  } catch {
+    throw "Phase 7C lot settings are invalid at $LotSettingsPath. $($_.Exception.Message)"
+  }
+  if ($TrendFixedVolume -lt 0.03 -or $TrendFixedVolume -gt 0.30) { throw "Configured TrendFixedVolume is invalid: $TrendFixedVolume" }
+  if ($SidewayRiskPercent -lt 0.01 -or $SidewayRiskPercent -gt 1) { throw "Configured SidewayRiskPercent is invalid: $SidewayRiskPercent" }
+  if ($SidewayMaxLot -lt 0.03 -or $SidewayMaxLot -gt 0.30) { throw "Configured SidewayMaxLot is invalid: $SidewayMaxLot" }
+  foreach ($managedLot in @($TrendFixedVolume, $SidewayMaxLot)) {
+    $units = $managedLot / 0.03
+    if ([math]::Abs($units - [math]::Round($units)) -gt 1e-8) { throw "Configured managed lot values must use 0.03 increments." }
+  }
+}
 
 if (-not [System.IO.Path]::IsPathRooted($EnvFile)) {
   $EnvFile = Join-Path $ProjectRoot $EnvFile
@@ -65,6 +92,7 @@ $TelegramModeOut = Join-Path $RuntimeDir "telegram-mode.out.log"
 $TelegramModeErr = Join-Path $RuntimeDir "telegram-mode.err.log"
 $RegimeNotifierOut = Join-Path $RuntimeDir "regime-notifier.out.log"
 $RegimeNotifierErr = Join-Path $RuntimeDir "regime-notifier.err.log"
+$ActiveLotSettingsPath = Join-Path $RuntimeDir "active-lot-settings.json"
 
 function Read-EnvValueFromFile([string]$Path, [string]$Name) {
   if (-not (Test-Path $Path)) { return "" }
@@ -277,7 +305,8 @@ $trendArgs = @(
   "-File", ('"{0}"' -f $TrendLauncher),
   "-ControlApiUrl", ('"{0}"' -f $ControlApiUrl),
   "-EnvFile", ('"{0}"' -f $EnvFile),
-  "-WorkDir", ('"{0}"' -f $TrendWorkDir)
+  "-WorkDir", ('"{0}"' -f $TrendWorkDir),
+  "-FixedVolume", $TrendFixedVolume.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 )
 $sidewayArgs = @(
   "-File", ('"{0}"' -f $SidewayLauncher),
@@ -318,6 +347,25 @@ Write-Host "PHASE7C_SIDEWAY_RUNTIME=$SidewayWorkDir"
 Write-Host "PHASE7C_DEPENDENCY_WAIT_SECONDS=$DependencyWaitSeconds"
 Write-Host "PHASE7C_TELEGRAM_CONFIGURED=$TelegramConfigured"
 Write-Host "PHASE7C_TELEGRAM_MT5_ORDER_PERMISSION=NONE"
+Write-Host "PHASE7C_TREND_FIXED_LOT=$TrendFixedVolume"
+Write-Host "PHASE7C_SIDEWAY_RISK_PERCENT=$SidewayRiskPercent"
+Write-Host "PHASE7C_SIDEWAY_MAX_LOT=$SidewayMaxLot"
+
+function Write-ActiveLotSettings {
+  $activeLotSettings = [pscustomobject]@{
+    version = 1
+    trendFixedLot = $TrendFixedVolume
+    sidewayRiskPercent = $SidewayRiskPercent
+    sidewayMaxLot = $SidewayMaxLot
+    armed = $Armed.IsPresent
+    supervisorPid = $PID
+    appliedAt = [DateTimeOffset]::UtcNow.ToString("o")
+  }
+  $activeLotJson = $activeLotSettings | ConvertTo-Json -Depth 4
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($ActiveLotSettingsPath, "$activeLotJson`n", $utf8NoBom)
+  Write-Host "PHASE7C_ACTIVE_LOT_SETTINGS=$ActiveLotSettingsPath"
+}
 
 function Start-TelegramModeChild {
   $process = Start-Process -FilePath "powershell.exe" -ArgumentList ($common + $telegramModeArgs) -WorkingDirectory $ProjectRoot -RedirectStandardOutput $TelegramModeOut -RedirectStandardError $TelegramModeErr -PassThru
@@ -355,6 +403,7 @@ try {
     Assert-ShadowProcessSuccess $sideway "SIDEWAY" $SidewayOut $SidewayErr "PHASE7C_SIDEWAY_PREFLIGHT_STATUS=PASS"
     Write-Host "PHASE7C_TELEGRAM_ONCE=SKIPPED"
     Write-Host "PHASE7C_EXECUTOR_SHADOW_STATUS=PASS"
+    Write-ActiveLotSettings
     return
   }
 
@@ -367,6 +416,7 @@ try {
     $sideway = $null
     Write-Host "PHASE7C_EXECUTOR_SHADOW_STATUS=PASS"
     Write-Host "PHASE7C_EXECUTOR_UNARMED_SUPERVISOR=TELEGRAM_MODE_ONLY"
+    Write-ActiveLotSettings
   } else {
     Start-Sleep -Seconds 3
     $trend.Refresh()
@@ -374,6 +424,7 @@ try {
     if ($trend.HasExited) { throw "Trend executor exited during startup with code $($trend.ExitCode). Check $TrendErr" }
     if ($sideway.HasExited) { throw "Sideway executor exited during startup with code $($sideway.ExitCode). Check $SidewayErr" }
     Write-Host "PHASE7C_EXECUTOR_ARMED_STATUS=RUNNING"
+    Write-ActiveLotSettings
   }
 
   if ($TelegramConfigured) {
