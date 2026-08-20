@@ -3,6 +3,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$script:StopFailures = @()
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 if (-not [System.IO.Path]::IsPathRooted($WorkDir)) {
   $WorkDir = Join-Path $ProjectRoot $WorkDir
@@ -21,7 +22,9 @@ if (-not (Test-Path $RuntimeDir)) {
 function Stop-ProcessTree([int]$ProcessId, [string]$Label) {
   if ($ProcessId -le 0) { return $false }
   $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
-  if ($null -eq $process) { return $false }
+  # A parent taskkill may already have removed a descendant captured in an
+  # earlier CIM snapshot. That is a successful stopped state, not a warning.
+  if ($null -eq $process) { return $true }
 
   try {
     $taskkill = Join-Path $env:SystemRoot "System32\taskkill.exe"
@@ -43,6 +46,7 @@ function Stop-PidFile([string]$Path, [string]$Label) {
     Write-Host "PHASE7C_${Label}_STOP=NO_PID_FILE"
     return
   }
+  $removePidFile = $true
   try {
     $pidValue = [int](Get-Content -LiteralPath $Path -Raw).Trim()
     if ($pidValue -gt 0) {
@@ -53,6 +57,8 @@ function Stop-PidFile([string]$Path, [string]$Label) {
           Write-Host "PHASE7C_${Label}_STOP=PASS_TREE|PID=$pidValue"
         } else {
           Write-Warning "Process tree for $Label PID $pidValue may still be alive."
+          $script:StopFailures += "${Label}:$pidValue"
+          $removePidFile = $false
         }
       } else {
         Write-Host "PHASE7C_${Label}_STOP=ALREADY_EXITED|PID=$pidValue"
@@ -60,8 +66,12 @@ function Stop-PidFile([string]$Path, [string]$Label) {
     }
   } catch {
     Write-Warning "Could not stop $Label from PID file $Path. $($_.Exception.Message)"
+    $script:StopFailures += "${Label}:PID_FILE_ERROR"
+    $removePidFile = $false
   }
-  Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+  if ($removePidFile) {
+    Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+  }
 }
 
 function Stop-OrphanNodeProcess([string]$ScriptName, [string]$Label) {
@@ -78,10 +88,12 @@ function Stop-OrphanNodeProcess([string]$ScriptName, [string]$Label) {
         Write-Host "PHASE7C_${Label}_ORPHAN_STOP=PASS|PID=$pidValue"
       } else {
         Write-Warning "Could not fully stop orphan $Label Node process PID $pidValue."
+        $script:StopFailures += "${Label}_ORPHAN:$pidValue"
       }
     }
   } catch {
     Write-Warning "Could not inspect orphan $Label Node processes. $($_.Exception.Message)"
+    $script:StopFailures += "${Label}_ORPHAN:INSPECTION_ERROR"
   }
 }
 
@@ -101,6 +113,12 @@ Stop-OrphanNodeProcess "run-phase7c-regime-notifier.mjs" "REGIME_NOTIFIER"
 Stop-OrphanNodeProcess "run-phase7c-trend-controller.mjs" "TREND"
 Stop-OrphanNodeProcess "run-phase7c-sideway-locked.mjs" "SIDEWAY"
 Stop-OrphanNodeProcess "run-phase7c-sideway-controller.mjs" "SIDEWAY"
+
+if ($script:StopFailures.Count -gt 0) {
+  Write-Host "PHASE7C_EXECUTOR_STOP=FAIL|REMAINING=$($script:StopFailures -join ',')"
+  Write-Error "Phase 7C executor stop is incomplete. Re-run from PowerShell Administrator; activation must remain PAUSE."
+  exit 1
+}
 
 Remove-Item -LiteralPath (Join-Path $RuntimeDir "phase7c-execution.lock") -Force -ErrorAction SilentlyContinue
 Write-Host "PHASE7C_EXECUTOR_STOP=PASS"
