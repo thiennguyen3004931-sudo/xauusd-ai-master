@@ -254,6 +254,10 @@ jobs:
           grep -q "pnpm --filter '@xauusd/api...' build" scripts/activate-phase7c-local.ps1
           grep -q "pnpm --filter '@xauusd/web...' build" scripts/activate-phase7c-local.ps1
           grep -q 'PHASE7C_ACTIVATE_LOT_ACTIVE=PASS' scripts/activate-phase7c-local.ps1
+          grep -q '\$expectedActiveArmed = \$ArmExecutors.IsPresent' scripts/activate-phase7c-local.ps1
+          grep -q '\$activeProbe.restartRequired -eq \$false' scripts/activate-phase7c-local.ps1
+          grep -q '\$activeProbe.restartRequired -eq \$true' scripts/activate-phase7c-local.ps1
+          grep -q 'SHADOW_BOUND_UNARMED' scripts/activate-phase7c-local.ps1
           grep -q 'PHASE7C_LOT_SETTINGS_FILE' scripts/run-phase7b-api-runtime-local.ps1
           grep -q 'PHASE7C_ACTIVE_LOT_SETTINGS_FILE' scripts/run-phase7b-api-runtime-local.ps1
           grep -q 'PHASE7C_RUNTIME_ROOT' scripts/run-phase7b-api-runtime-local.ps1
