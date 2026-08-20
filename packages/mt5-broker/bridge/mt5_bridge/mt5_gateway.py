@@ -13,12 +13,17 @@ from .models import CloseRequest, ModifyRequest, OrderRequest
 
 
 class Mt5Gateway:
+    _RECONNECT_BACKOFF_SECONDS = 2.0
+
     def __init__(self, settings: Settings, ledger: IdempotencyLedger, module: Any | None = None) -> None:
         self.settings = settings
         self.ledger = ledger
         self.mt5 = module
         self._lock = threading.RLock()
         self.last_error: str | None = None
+        self.reconnect_count = 0
+        self.last_reconnect_at: int | None = None
+        self._last_reconnect_attempt = 0.0
 
     def start(self) -> bool:
         with self._lock:
@@ -29,24 +34,7 @@ class Mt5Gateway:
                     self.last_error = "MetaTrader5 package is unavailable. Run the bridge on Windows."
                     return False
 
-            kwargs: dict[str, Any] = {
-                "timeout": self.settings.initialize_timeout_ms,
-                "portable": self.settings.portable,
-            }
-            if self.settings.terminal_path:
-                kwargs["path"] = self.settings.terminal_path
-            if self.settings.login is not None:
-                kwargs["login"] = self.settings.login
-            if self.settings.password:
-                kwargs["password"] = self.settings.password
-            if self.settings.server:
-                kwargs["server"] = self.settings.server
-
-            if not self.mt5.initialize(**kwargs):
-                self.last_error = f"initialize failed: {self.mt5.last_error()}"
-                return False
-            self.last_error = None
-            return True
+            return self._initialize_locked(reconnect=False)
 
     def stop(self) -> None:
         with self._lock:
@@ -57,8 +45,7 @@ class Mt5Gateway:
     def health(self) -> dict[str, Any]:
         now = int(time.time() * 1000)
         with self._lock:
-            terminal = self.mt5.terminal_info() if self.mt5 else None
-            account = self.mt5.account_info() if self.mt5 else None
+            terminal, account = self._connection_snapshot_locked(reconnect=True)
         connected = terminal is not None and account is not None
         mode = self._account_mode(getattr(account, "trade_mode", None)) if account else None
         return {
@@ -79,13 +66,16 @@ class Mt5Gateway:
             "server": str(account.server) if account else None,
             "terminalVersion": self._terminal_version(),
             "lastError": self.last_error,
+            "reconnectCount": self.reconnect_count,
+            "lastReconnectAt": self.last_reconnect_at,
+            "reconnecting": not connected,
             "timestamp": now,
         }
 
     def quote(self, canonical_symbol: str) -> dict[str, Any]:
         broker_symbol = self._ensure_symbol(canonical_symbol)
         with self._lock:
-            tick = self.mt5.symbol_info_tick(broker_symbol)
+            tick = self._read_with_reconnect_locked("symbol_info_tick", broker_symbol)
         if tick is None:
             raise BridgeError(f"No quote for {broker_symbol}", 503, "QUOTE_UNAVAILABLE")
         timestamp = int(getattr(tick, "time_msc", int(tick.time) * 1000))
@@ -116,7 +106,8 @@ class Mt5Gateway:
             )
 
         with self._lock:
-            rows = self.mt5.copy_rates_from_pos(
+            rows = self._read_with_reconnect_locked(
+                "copy_rates_from_pos",
                 broker_symbol,
                 d1,
                 0,
@@ -200,7 +191,7 @@ class Mt5Gateway:
             )
 
         with self._lock:
-            info = self.mt5.symbol_info(broker_symbol)
+            info = self._read_with_reconnect_locked("symbol_info", broker_symbol)
             if info is None:
                 raise BridgeError(
                     f"No symbol specification for {broker_symbol}",
@@ -209,7 +200,8 @@ class Mt5Gateway:
                 )
 
             # start_pos=1 intentionally excludes the still-forming current candle.
-            rows = self.mt5.copy_rates_from_pos(
+            rows = self._read_with_reconnect_locked(
+                "copy_rates_from_pos",
                 broker_symbol,
                 mt5_timeframe,
                 1,
@@ -254,7 +246,7 @@ class Mt5Gateway:
     def symbol_spec(self, canonical_symbol: str) -> dict[str, Any]:
         broker_symbol = self._ensure_symbol(canonical_symbol)
         with self._lock:
-            info = self.mt5.symbol_info(broker_symbol)
+            info = self._read_with_reconnect_locked("symbol_info", broker_symbol)
         if info is None:
             raise BridgeError(f"No symbol specification for {broker_symbol}", 404, "SYMBOL_NOT_FOUND")
         tick_size = float(getattr(info, "trade_tick_size", 0.0) or getattr(info, "point", 0.0))
@@ -322,7 +314,7 @@ class Mt5Gateway:
         end = datetime.fromtimestamp(end_ms / 1000.0, tz=timezone.utc)
 
         with self._lock:
-            rows = self.mt5.history_deals_get(start, end)
+            rows = self._read_with_reconnect_locked("history_deals_get", start, end)
 
         if rows is None:
             raise BridgeError(
@@ -401,7 +393,11 @@ class Mt5Gateway:
     def positions(self, canonical_symbol: str | None = None) -> list[dict[str, Any]]:
         broker_symbol = self.settings.broker_symbol(canonical_symbol) if canonical_symbol else None
         with self._lock:
-            rows = self.mt5.positions_get(symbol=broker_symbol) if broker_symbol else self.mt5.positions_get()
+            rows = (
+                self._read_with_reconnect_locked("positions_get", symbol=broker_symbol)
+                if broker_symbol
+                else self._read_with_reconnect_locked("positions_get")
+            )
         if rows is None:
             raise BridgeError(f"positions_get failed: {self.mt5.last_error()}", 503, "POSITIONS_UNAVAILABLE")
         return [self._position_dict(row) for row in rows]
@@ -543,8 +539,8 @@ class Mt5Gateway:
     def _require_trading(self) -> None:
         if not self.settings.trading_enabled:
             raise BridgeError("MT5 bridge trading is disabled", 423, "TRADING_DISABLED")
-        account = self.mt5.account_info()
-        terminal = self.mt5.terminal_info()
+        with self._lock:
+            terminal, account = self._connection_snapshot_locked(reconnect=True)
         if account is None or terminal is None:
             raise BridgeError("MT5 terminal is disconnected", 503, "TERMINAL_DISCONNECTED")
         if self.settings.allowed_logins and int(account.login) not in self.settings.allowed_logins:
@@ -559,12 +555,145 @@ class Mt5Gateway:
     def _ensure_symbol(self, canonical: str) -> str:
         broker = self.settings.broker_symbol(canonical)
         with self._lock:
-            info = self.mt5.symbol_info(broker)
+            info = self._read_with_reconnect_locked("symbol_info", broker)
             if info is None:
                 raise BridgeError(f"Broker symbol {broker} was not found", 404, "SYMBOL_NOT_FOUND")
             if not bool(getattr(info, "visible", False)) and not self.mt5.symbol_select(broker, True):
                 raise BridgeError(f"Could not select {broker} in MarketWatch", 503, "SYMBOL_SELECT_FAILED")
         return broker
+
+    def _initialize_kwargs(self, reconnect: bool) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            # Initial service startup may wait for MT5, but a health/read
+            # recovery must return before the local API health timeout. Short
+            # attempts repeat with backoff until the reopened terminal is ready.
+            "timeout": min(self.settings.initialize_timeout_ms, 1_000)
+            if reconnect
+            else self.settings.initialize_timeout_ms,
+            "portable": self.settings.portable,
+        }
+        if self.settings.terminal_path:
+            kwargs["path"] = self.settings.terminal_path
+        if self.settings.login is not None:
+            kwargs["login"] = self.settings.login
+        if self.settings.password:
+            kwargs["password"] = self.settings.password
+        if self.settings.server:
+            kwargs["server"] = self.settings.server
+        return kwargs
+
+    def _initialize_locked(self, reconnect: bool) -> bool:
+        if self.mt5 is None:
+            self.last_error = "MetaTrader5 package is unavailable. Run the bridge on Windows."
+            return False
+        if reconnect:
+            try:
+                self.mt5.shutdown()
+            except Exception:
+                # A broken IPC channel may also make shutdown fail. initialize()
+                # remains the authoritative recovery operation.
+                pass
+        try:
+            initialized = bool(self.mt5.initialize(**self._initialize_kwargs(reconnect)))
+        except Exception as exc:
+            self.last_error = f"initialize raised: {exc}"
+            return False
+        if not initialized:
+            self.last_error = f"initialize failed: {self._last_mt5_error_locked()}"
+            return False
+        self.last_error = None
+        if reconnect:
+            self.reconnect_count += 1
+            self.last_reconnect_at = int(time.time() * 1000)
+        return True
+
+    def _last_mt5_error_locked(self) -> Any:
+        try:
+            return self.mt5.last_error() if self.mt5 is not None else None
+        except Exception as exc:
+            return (None, str(exc))
+
+    @staticmethod
+    def _is_recoverable_connection_error(error: Any) -> bool:
+        code = None
+        message = str(error).lower()
+        if isinstance(error, (tuple, list)) and error:
+            try:
+                code = int(error[0])
+            except (TypeError, ValueError):
+                code = None
+        return bool(
+            (code is not None and -10100 < code <= -10000)
+            or "ipc" in message
+            or "not initialized" in message
+            or "terminal closed" in message
+            or "connection failed" in message
+        )
+
+    def _reconnect_locked(self, force: bool = False) -> bool:
+        now = time.monotonic()
+        if not force and now - self._last_reconnect_attempt < self._RECONNECT_BACKOFF_SECONDS:
+            return False
+        self._last_reconnect_attempt = now
+        return self._initialize_locked(reconnect=True)
+
+    def _connection_snapshot_locked(self, reconnect: bool) -> tuple[Any | None, Any | None]:
+        if self.mt5 is None:
+            return None, None
+        try:
+            terminal = self.mt5.terminal_info()
+            account = self.mt5.account_info()
+        except Exception as exc:
+            terminal = None
+            account = None
+            self.last_error = f"MT5 connection probe failed: {exc}"
+        if terminal is not None and account is not None:
+            self.last_error = None
+            return terminal, account
+
+        error = self._last_mt5_error_locked()
+        self.last_error = f"MT5 terminal disconnected: {error}"
+        if reconnect and self._reconnect_locked():
+            try:
+                terminal = self.mt5.terminal_info()
+                account = self.mt5.account_info()
+            except Exception as exc:
+                self.last_error = f"MT5 reconnect probe failed: {exc}"
+                return None, None
+            if terminal is not None and account is not None:
+                self.last_error = None
+                return terminal, account
+            self.last_error = f"MT5 reconnect incomplete: {self._last_mt5_error_locked()}"
+        return None, None
+
+    def _ensure_connected_locked(self) -> None:
+        terminal, account = self._connection_snapshot_locked(reconnect=True)
+        if terminal is None or account is None:
+            raise BridgeError(
+                self.last_error or "MT5 terminal is disconnected",
+                503,
+                "TERMINAL_DISCONNECTED",
+            )
+
+    def _read_with_reconnect_locked(self, method_name: str, *args: Any, **kwargs: Any) -> Any:
+        """Run an idempotent MT5 read and retry once after an IPC reconnect.
+
+        This helper is deliberately not used for order_send. A lost response to
+        a mutating request must never be retried blindly because the broker may
+        already have accepted the original command.
+        """
+        self._ensure_connected_locked()
+        method = getattr(self.mt5, method_name)
+        result = method(*args, **kwargs)
+        if result is not None:
+            return result
+        error = self._last_mt5_error_locked()
+        if not self._is_recoverable_connection_error(error):
+            return None
+        self.last_error = f"{method_name} lost MT5 IPC: {error}"
+        if not self._reconnect_locked(force=True):
+            return None
+        return getattr(self.mt5, method_name)(*args, **kwargs)
 
     def _enforce_spread(self, canonical_symbol: str, info: Any, tick: Any) -> None:
         point = float(getattr(info, "point", 0.0) or 0.0)
@@ -749,7 +878,8 @@ class Mt5Gateway:
                 "RISK_TICK_SIZE_INVALID",
             )
 
-        tick = self.mt5.symbol_info_tick(broker_symbol)
+        with self._lock:
+            tick = self._read_with_reconnect_locked("symbol_info_tick", broker_symbol)
         if tick is None:
             raise BridgeError(
                 f"symbol_info_tick failed: {self.mt5.last_error()}",
@@ -767,20 +897,23 @@ class Mt5Gateway:
                 "RISK_QUOTE_INVALID",
             )
 
-        buy_value = self.mt5.order_calc_profit(
-            getattr(self.mt5, "ORDER_TYPE_BUY", 0),
-            broker_symbol,
-            1.0,
-            ask,
-            ask - tick_size,
-        )
-        sell_value = self.mt5.order_calc_profit(
-            getattr(self.mt5, "ORDER_TYPE_SELL", 1),
-            broker_symbol,
-            1.0,
-            bid,
-            bid + tick_size,
-        )
+        with self._lock:
+            buy_value = self._read_with_reconnect_locked(
+                "order_calc_profit",
+                getattr(self.mt5, "ORDER_TYPE_BUY", 0),
+                broker_symbol,
+                1.0,
+                ask,
+                ask - tick_size,
+            )
+            sell_value = self._read_with_reconnect_locked(
+                "order_calc_profit",
+                getattr(self.mt5, "ORDER_TYPE_SELL", 1),
+                broker_symbol,
+                1.0,
+                bid,
+                bid + tick_size,
+            )
 
         if buy_value is None or sell_value is None:
             raise BridgeError(

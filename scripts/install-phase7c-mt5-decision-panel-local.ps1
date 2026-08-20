@@ -10,6 +10,15 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Source = Join-Path $ProjectRoot "mt5\XAUUSD_AI_Master_Decision_Panel.mq5"
 if (-not (Test-Path -LiteralPath $Source)) { throw "MT5 decision panel source not found: $Source" }
+$SourceText = Get-Content -LiteralPath $Source -Raw
+foreach ($forbidden in @("OrderSend", "CTrade", "PositionClose", "PositionModify")) {
+  if ($SourceText -match [regex]::Escape($forbidden)) {
+    throw "MT5 decision panel must remain read-only; forbidden token detected: $forbidden"
+  }
+}
+if ($SourceText -notmatch 'ORDER PERMISSION = NONE') {
+  throw "MT5 decision panel read-only safety marker is missing."
+}
 
 if (-not [System.IO.Path]::IsPathRooted($BridgeEnv)) {
   $BridgeEnv = Join-Path $ProjectRoot $BridgeEnv

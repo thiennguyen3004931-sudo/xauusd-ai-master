@@ -69,8 +69,9 @@ def historical_candles(
     end = datetime.fromtimestamp(end_ms / 1000.0, tz=timezone.utc)
 
     with gateway._lock:
-        info = gateway.mt5.symbol_info(broker_symbol)
-        rows = gateway.mt5.copy_rates_range(
+        info = gateway._read_with_reconnect_locked("symbol_info", broker_symbol)
+        rows = gateway._read_with_reconnect_locked(
+            "copy_rates_range",
             broker_symbol,
             mt5_timeframe,
             start,
