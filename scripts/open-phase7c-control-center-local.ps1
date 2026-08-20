@@ -27,6 +27,14 @@ function Test-Url([string]$Url) {
   }
 }
 
+function Read-Lifecycle {
+  try {
+    return Invoke-RestMethod -Uri $LifecycleUrl -Method Get -TimeoutSec 5
+  } catch {
+    return $null
+  }
+}
+
 function Restart-Elevated {
   $arguments = @(
     "-NoProfile",
@@ -61,29 +69,49 @@ function Start-TaskIfNeeded([string]$TaskName) {
 
 try {
   Write-DesktopLog "Desktop Control Center open requested."
-  if (-not (Test-Url $LifecycleUrl)) {
-    Start-TaskIfNeeded $BridgeTask
-    Start-Sleep -Seconds 2
-    Start-TaskIfNeeded $WebTask
+  # Always inspect both tasks. The API may still answer while the Bridge task
+  # is stopped, which previously opened a blank/offline Control Center.
+  Start-TaskIfNeeded $BridgeTask
+  Start-Sleep -Seconds 2
+  Start-TaskIfNeeded $WebTask
 
-    $ready = $false
-    $deadline = (Get-Date).AddSeconds(120)
-    while ((Get-Date) -lt $deadline) {
-      if ((Test-Url $LifecycleUrl) -and (Test-Url $ControlCenterUrl)) {
-        $ready = $true
-        break
-      }
-      Start-Sleep -Seconds 2
+  $webReady = $false
+  $bridgeReady = $false
+  $webDeadline = (Get-Date).AddSeconds(120)
+  while ((Get-Date) -lt $webDeadline) {
+    $lifecycle = Read-Lifecycle
+    if ($null -ne $lifecycle -and (Test-Url $ControlCenterUrl)) {
+      $webReady = $true
+      $bridgeReady = $lifecycle.bridge.reachable -eq $true
+      break
     }
-    if (-not $ready) {
-      throw "Bridge/Web did not become ready within 120 seconds. Check Scheduled Tasks and $LogPath"
-    }
+    Start-Sleep -Seconds 2
+  }
+  if (-not $webReady) {
+    throw "Web Control Center did not become ready within 120 seconds. Check Scheduled Tasks and $LogPath"
+  }
+  # Give an open/restarting MT5 a short recovery window, but never hide the
+  # Control Center for minutes merely because the operator intentionally kept
+  # MT5 closed. The page remains useful and displays reconnecting state.
+  $bridgeDeadline = (Get-Date).AddSeconds(20)
+  while (-not $bridgeReady -and (Get-Date) -lt $bridgeDeadline) {
+    Start-Sleep -Seconds 2
+    $lifecycle = Read-Lifecycle
+    $bridgeReady = $null -ne $lifecycle -and $lifecycle.bridge.reachable -eq $true
+  }
+  if ($bridgeReady) {
+    Write-DesktopLog "MT5 Bridge is connected and Control Center is synchronized."
+  } else {
+    # Keep the UI usable while MT5 is closed. The Bridge health endpoint now
+    # retries MetaTrader5.initialize automatically and the page keeps polling.
+    Write-DesktopLog "MT5 Bridge is offline/reconnecting; Control Center will remain available."
   }
 
   Start-Process $ControlCenterUrl
   Write-DesktopLog "Control Center opened: $ControlCenterUrl"
   Write-Host "PHASE7C_DESKTOP_OPEN=PASS"
   Write-Host "PHASE7C_DESKTOP_CONTROL_CENTER=$ControlCenterUrl"
+  Write-Host "PHASE7C_DESKTOP_BRIDGE_READY=$bridgeReady"
   Write-Host "PHASE7C_DESKTOP_BOT_AUTOSTART=FALSE"
   Write-Host "PHASE7C_DESKTOP_NEXT=CLICK_BAT_BOT"
 } catch {

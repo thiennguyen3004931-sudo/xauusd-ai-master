@@ -28,27 +28,46 @@ type LinkRow = readonly [string, string, typeof SmartToyRounded];
 
 const links: readonly LinkRow[] = [
   ["/", "Tổng quan", SmartToyRounded],
-  ["/phase7b-pattern-check", "Điều kiện tín hiệu", CandlestickChartRounded],
+  ["/phase7b-pattern-check", "Tín hiệu & quyết định", CandlestickChartRounded],
   ["/phase7b-ops", "Hệ thống & Telegram", PowerSettingsNewRounded],
-  ["/phase7c-control-center", "AUTO & Recovery", TuneRounded],
+  ["/phase7c-control-center", "Control Center", TuneRounded],
   ["/performance", "Hiệu suất chiến lược", InsightsRounded],
 ] as const;
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   return (
-    <Box sx={{ height: "100%", display: "flex", flexDirection: "column", p: 2 }}>
-      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ px: 1, py: 1.5 }}>
+    <Box
+      sx={{ height: "100%", display: "flex", flexDirection: "column", p: 2 }}
+    >
+      <Stack
+        direction="row"
+        spacing={1.5}
+        alignItems="center"
+        sx={{ px: 1, py: 1.5 }}
+      >
         <Box className="brand-mark">AU</Box>
         <Box>
-          <Typography variant="caption" color="primary" sx={{ letterSpacing: ".18em" }}>XAUUSD</Typography>
-          <Typography variant="subtitle2" fontWeight={900}>AI MASTER</Typography>
+          <Typography
+            variant="caption"
+            color="primary"
+            sx={{ letterSpacing: ".18em" }}
+          >
+            XAUUSD
+          </Typography>
+          <Typography variant="subtitle2" fontWeight={900}>
+            AI MASTER
+          </Typography>
         </Box>
       </Stack>
 
-      <Typography variant="caption" color="text.disabled" sx={{ px: 1.5, mt: 1.5, letterSpacing: ".12em", fontWeight: 800 }}>
+      <Typography
+        variant="caption"
+        color="text.disabled"
+        sx={{ px: 1.5, mt: 1.5, letterSpacing: ".12em", fontWeight: 800 }}
+      >
         VẬN HÀNH DEMO
       </Typography>
-      <List dense sx={{ pt: .7 }}>
+      <List dense sx={{ pt: 0.7 }}>
         {links.map(([href, label, Icon]) => (
           <ListItemButton
             key={href}
@@ -57,7 +76,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
             end={href === "/"}
             onClick={onNavigate}
             sx={{
-              my: .4,
+              my: 0.4,
               borderRadius: 2,
               color: "text.secondary",
               "&.active": {
@@ -67,19 +86,39 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
               },
             }}
           >
-            <ListItemIcon sx={{ minWidth: 38, color: "inherit" }}><Icon fontSize="small" /></ListItemIcon>
-            <ListItemText primary={label} primaryTypographyProps={{ fontSize: 14, fontWeight: 700 }} />
+            <ListItemIcon sx={{ minWidth: 38, color: "inherit" }}>
+              <Icon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText
+              primary={label}
+              primaryTypographyProps={{ fontSize: 14, fontWeight: 700 }}
+            />
           </ListItemButton>
         ))}
       </List>
 
-      <Box sx={{ mt: "auto", p: 2, borderRadius: 3, border: "1px solid rgba(148,163,184,.12)", bgcolor: "rgba(255,255,255,.02)" }}>
+      <Box
+        sx={{
+          mt: "auto",
+          p: 2,
+          borderRadius: 3,
+          border: "1px solid rgba(148,163,184,.12)",
+          bgcolor: "rgba(255,255,255,.02)",
+        }}
+      >
         <Stack direction="row" spacing={1} alignItems="center">
           <LockRounded fontSize="small" color="primary" />
-          <Typography variant="caption" fontWeight={900}>CHỈ TÀI KHOẢN DEMO</Typography>
+          <Typography variant="caption" fontWeight={900}>
+            CHỈ TÀI KHOẢN DEMO
+          </Typography>
         </Stack>
-        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, lineHeight: 1.5 }}>
-          Tài khoản thật luôn bị khóa. Trend: 3 mô hình nến + ST M15/M5 + SL cấu trúc 6–10; vượt 10 thì chờ hồi trong M15 kế tiếp. NORMAL: +6 BE, +10 chốt 1/3. Trend runner theo cấu trúc/MA50/FVG đảo chiều; Sideway runner về biên đối diện.
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: "block", mt: 1, lineHeight: 1.5 }}
+        >
+          Tài khoản thật luôn bị khóa. Bot chỉ chạy sau khi nhấn BẬT BOT; panel
+          MT5 chỉ đọc và không có quyền gửi lệnh.
         </Typography>
       </Box>
     </Box>
@@ -91,16 +130,19 @@ export function DashboardLayout() {
   const location = useLocation();
 
   let headerTitle = "Tổng quan giao dịch DEMO";
-  let headerSubtitle = "XAUUSD · MT5 DEMO · vị thế / quản lý lệnh / sự kiện gần nhất";
+  let headerSubtitle =
+    "XAUUSD · MT5 DEMO · vị thế / quản lý lệnh / sự kiện gần nhất";
   if (location.pathname.startsWith("/phase7b-pattern-check")) {
     headerTitle = "Điều kiện tín hiệu";
-    headerSubtitle = "3 mô hình → ST M15/M5 → SL cấu trúc 6–10; >10 chờ hồi · điểm tin cậy 0–100 · quản lý Trend/Sideway/Recovery";
+    headerSubtitle =
+      "3 mô hình → ST M15/M5 → SL cấu trúc 6–10; >10 chờ hồi · điểm tin cậy 0–100 · quản lý Trend/Sideway/Recovery";
   } else if (location.pathname.startsWith("/phase7b-ops")) {
     headerTitle = "Hệ thống & Telegram";
     headerSubtitle = "Bot DEMO · Telegram · MT5 Bridge · trạng thái vận hành";
   } else if (location.pathname.startsWith("/phase7c-control-center")) {
-    headerTitle = "AUTO Regime & Daily Recovery";
-    headerSubtitle = "AUTO Trend / Sideway / Pause · P/L đã chốt · kế hoạch Recovery TP cho lệnh hợp lệ kế tiếp";
+    headerTitle = "Control Center";
+    headerSubtitle =
+      "MT5 · Bot · Telegram · quyết định giao dịch và Risk/Lot đồng bộ";
   } else if (location.pathname.startsWith("/performance")) {
     headerTitle = "Hiệu suất chiến lược";
     headerSubtitle = "Kết quả giao dịch XAUUSD do hệ thống thực hiện";
@@ -110,30 +152,63 @@ export function DashboardLayout() {
     <Box sx={{ display: "flex", minHeight: "100vh" }}>
       <Drawer
         variant="permanent"
-        sx={{ width: drawerWidth, display: { xs: "none", lg: "block" }, "& .MuiDrawer-paper": { width: drawerWidth, bgcolor: "#08111f", borderRightColor: "rgba(148,163,184,.12)" } }}
+        sx={{
+          width: drawerWidth,
+          display: { xs: "none", lg: "block" },
+          "& .MuiDrawer-paper": {
+            width: drawerWidth,
+            bgcolor: "#08111f",
+            borderRightColor: "rgba(148,163,184,.12)",
+          },
+        }}
       >
         <Navigation />
       </Drawer>
       <Drawer
         open={mobileOpen}
         onClose={() => setMobileOpen(false)}
-        sx={{ display: { xs: "block", lg: "none" }, "& .MuiDrawer-paper": { width: drawerWidth, bgcolor: "#08111f" } }}
+        sx={{
+          display: { xs: "block", lg: "none" },
+          "& .MuiDrawer-paper": { width: drawerWidth, bgcolor: "#08111f" },
+        }}
       >
         <Navigation onNavigate={() => setMobileOpen(false)} />
       </Drawer>
 
       <Box sx={{ flex: 1, minWidth: 0 }}>
-        <AppBar position="sticky" elevation={0} sx={{ bgcolor: "rgba(6,11,20,.88)", backdropFilter: "blur(14px)", borderBottom: "1px solid rgba(148,163,184,.10)" }}>
+        <AppBar
+          position="sticky"
+          elevation={0}
+          sx={{
+            bgcolor: "rgba(6,11,20,.88)",
+            backdropFilter: "blur(14px)",
+            borderBottom: "1px solid rgba(148,163,184,.10)",
+          }}
+        >
           <Toolbar>
-            <IconButton onClick={() => setMobileOpen(true)} sx={{ display: { lg: "none" }, mr: 1 }}><MenuRounded /></IconButton>
+            <IconButton
+              onClick={() => setMobileOpen(true)}
+              sx={{ display: { lg: "none" }, mr: 1 }}
+            >
+              <MenuRounded />
+            </IconButton>
             <Box sx={{ flex: 1 }}>
-              <Typography variant="subtitle2" fontWeight={900}>{headerTitle}</Typography>
-              <Typography variant="caption" color="text.secondary">{headerSubtitle}</Typography>
+              <Typography variant="subtitle2" fontWeight={900}>
+                {headerTitle}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {headerSubtitle}
+              </Typography>
             </Box>
             <StatusChip value="CHỈ DEMO" />
           </Toolbar>
         </AppBar>
-        <Box component="main" sx={{ p: { xs: 2, md: 3 }, maxWidth: 1500, mx: "auto" }}><Outlet /></Box>
+        <Box
+          component="main"
+          sx={{ p: { xs: 2, md: 3 }, maxWidth: 1500, mx: "auto" }}
+        >
+          <Outlet />
+        </Box>
       </Box>
     </Box>
   );

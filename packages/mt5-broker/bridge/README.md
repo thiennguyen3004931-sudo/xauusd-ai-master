@@ -11,6 +11,11 @@ The official MetaTrader5 Python module connects to a locally installed MT5 termi
 - SQLite idempotency ledger for orders and management commands.
 - `order_check()` before `order_send()`.
 - Canonical-to-broker symbol mapping.
+- Automatic read-only IPC recovery after MT5 is closed, restarted or replaced.
+
+The health endpoint retries `MetaTrader5.initialize()` with a short backoff when
+the terminal IPC channel disappears. Idempotent reads retry once after recovery;
+mutating `order_send()` calls are never retried blindly.
 
 ## Windows setup
 

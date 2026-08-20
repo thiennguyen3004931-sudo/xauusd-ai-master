@@ -16,5 +16,8 @@ export interface Mt5BridgeHealth {
   server?: string;
   terminalVersion?: string;
   lastError?: string;
+  reconnectCount?: number;
+  lastReconnectAt?: number;
+  reconnecting?: boolean;
   timestamp: number;
 }

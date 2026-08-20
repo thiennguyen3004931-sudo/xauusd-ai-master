@@ -93,6 +93,51 @@ class FakeMt5:
         return (self.position,)
 
 
+class RecoveringFakeMt5(FakeMt5):
+    def __init__(self):
+        super().__init__()
+        self.connected = True
+        self.initialize_calls = 0
+        self.fail_next_positions = False
+
+    def initialize(self, **_):
+        self.initialize_calls += 1
+        self.connected = True
+        return True
+
+    def shutdown(self):
+        self.connected = False
+
+    def last_error(self):
+        return (0, "ok") if self.connected else (-10001, "IPC send failed")
+
+    def terminal_info(self):
+        return SimpleNamespace(trade_allowed=True) if self.connected else None
+
+    def account_info(self):
+        if not self.connected:
+            return None
+        return super().account_info()
+
+    def positions_get(self, symbol=None, ticket=None):
+        if self.fail_next_positions:
+            self.fail_next_positions = False
+            self.connected = False
+            return None
+        if not self.connected:
+            return None
+        return super().positions_get(symbol=symbol, ticket=ticket)
+
+
+class LostOrderResponseFake(FakeMt5):
+    def last_error(self):
+        return (-10001, "IPC send failed")
+
+    def order_send(self, _request):
+        self.send_calls += 1
+        return None
+
+
 def settings(path: Path):
     return Settings(
         host="127.0.0.1", port=8765, api_key="0123456789abcdef", trading_enabled=True,
@@ -104,6 +149,69 @@ def settings(path: Path):
 
 
 class GatewayTests(unittest.TestCase):
+    def test_health_reconnects_after_terminal_ipc_is_replaced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = RecoveringFakeMt5()
+            ledger = IdempotencyLedger(Path(directory) / "ledger.sqlite3")
+            gateway = Mt5Gateway(settings(Path(directory) / "ledger.sqlite3"), ledger, fake)
+            self.assertTrue(gateway.start())
+            fake.connected = False
+
+            health = gateway.health()
+
+            self.assertTrue(health["connected"])
+            self.assertEqual(health["status"], "ok")
+            self.assertEqual(health["reconnectCount"], 1)
+            self.assertIsNotNone(health["lastReconnectAt"])
+            self.assertFalse(health["reconnecting"])
+            self.assertEqual(fake.initialize_calls, 2)
+            ledger.close()
+
+    def test_read_retries_once_after_ipc_send_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = RecoveringFakeMt5()
+            ledger = IdempotencyLedger(Path(directory) / "ledger.sqlite3")
+            gateway = Mt5Gateway(settings(Path(directory) / "ledger.sqlite3"), ledger, fake)
+            self.assertTrue(gateway.start())
+            fake.fail_next_positions = True
+
+            positions = gateway.positions()
+
+            self.assertEqual(positions, [])
+            self.assertEqual(gateway.reconnect_count, 1)
+            self.assertEqual(fake.initialize_calls, 2)
+            ledger.close()
+
+    def test_order_send_is_never_retried_after_lost_ipc_response(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = LostOrderResponseFake()
+            ledger_path = Path(directory) / "ledger.sqlite3"
+            ledger = IdempotencyLedger(ledger_path)
+            gateway = Mt5Gateway(settings(ledger_path), ledger, fake)
+            self.assertTrue(gateway.start())
+            request = OrderRequest(
+                symbol="XAUUSD",
+                side="BUY",
+                orderType="MARKET",
+                timeInForce="IOC",
+                volume=0.2,
+                requestedPrice=2400,
+                stopLoss=2395,
+                takeProfit=2411,
+                deviationPoints=50,
+                magicNumber=260806,
+                comment="lost-response-test",
+                clientOrderId="lost-response-client",
+                idempotencyKey="lost-response-key",
+            )
+
+            with self.assertRaisesRegex(Exception, "order_send failed"):
+                gateway.place_order(request)
+
+            self.assertEqual(fake.send_calls, 1)
+            self.assertEqual(gateway.reconnect_count, 0)
+            ledger.close()
+
     def test_symbol_spec_exposes_broker_risk_values(self):
         with tempfile.TemporaryDirectory() as directory:
             fake = FakeMt5()

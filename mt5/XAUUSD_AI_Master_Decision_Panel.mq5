@@ -1,17 +1,18 @@
 #property copyright "XAUUSD AI MASTER"
-#property version   "1.12"
-#property description "Read-only Phase 7C position, decision, lot and risk panel EA"
+#property version   "1.20"
+#property description "Read-only Phase 7C synchronized position and decision panel"
 
 input string InpApiUrl = "http://127.0.0.1:3711/api/v1/phase7c/decision-monitor/mt5?symbol=XAUUSD";
 input int InpRefreshSeconds = 3;
 input ENUM_BASE_CORNER InpCorner = CORNER_LEFT_UPPER;
 input int InpX = 12;
 input int InpY = 28;
-input int InpFontSize = 9;
+input int InpFontSize = 10;
 
 const string PREFIX = "XAU_AI_P7C_";
-const int PANEL_WIDTH = 720;
-const int PANEL_HEIGHT = 598;
+const int PANEL_WIDTH = 700;
+const int PANEL_HEIGHT = 568;
+bool g_error_mode = false;
 
 string Field(const string payload, const string wanted)
 {
@@ -71,9 +72,6 @@ void Label(const string suffix, const int x, const int y, const string text, con
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
    ObjectSetString(0, name, OBJPROP_FONT, font);
-   // MT5 shows the object's default word "Label" when an OBJ_LABEL receives
-   // an empty string on some terminal builds. A single space keeps empty wrap
-   // rows visually empty and prevents that distracting placeholder.
    ObjectSetString(0, name, OBJPROP_TEXT, StringLen(text) > 0 ? text : " ");
 }
 
@@ -129,28 +127,53 @@ color ProfitColor(const string value)
    return clrSilver;
 }
 
-void DrawChrome()
+void BeginLayout(const bool errorMode)
 {
-   Rectangle("BG", 0, 0, PANEL_WIDTH, PANEL_HEIGHT, C'16,20,28', C'62,76,96');
+   if(g_error_mode != errorMode)
+      DeletePanel();
+   g_error_mode = errorMode;
+   Rectangle("BG", 0, 0, PANEL_WIDTH, errorMode ? 372 : PANEL_HEIGHT, C'14,18,25', C'71,86,106');
    Rectangle("TOP", 0, 0, PANEL_WIDTH, 5, C'36,184,224', C'36,184,224');
-   Rectangle("LEFT", 12, 139, 340, 117, C'23,29,39', C'53,67,86');
-   Rectangle("RIGHT", 360, 139, 348, 117, C'23,29,39', C'53,67,86');
-   Rectangle("ENTRY_REASON", 12, 288, 696, 102, C'23,29,39', C'53,67,86');
-   Rectangle("HOLD_REASON", 12, 420, 696, 102, C'23,29,39', C'53,67,86');
-   Rectangle("FOOT", 12, 534, 696, 52, C'19,24,33', C'45,58,75');
 }
 
-void RenderError(const string message)
+void DrawNormalChrome()
 {
-   DrawChrome();
-   Rectangle("STATUS", 12, 55, 696, 48, C'55,30,30', C'210,70,70');
-   Label("TITLE", 16, 13, "XAUUSD AI MASTER", clrDeepSkyBlue, InpFontSize + 3, "Arial");
-   Label("SUBTITLE", 16, 36, "PHASE 7C · READ-ONLY MONITOR", clrSilver, InpFontSize);
-   Label("STATUS_TITLE", 26, 65, "MAT KET NOI API", clrTomato, InpFontSize + 2, "Arial");
-   Label("STATUS_NOTE", 26, 88, message, clrWhite);
-   Label("ERR_HELP1", 28, 310, "Cho phep WebRequest: http://127.0.0.1:3711", clrGold);
-   Label("ERR_HELP2", 28, 338, "Tools > Options > Expert Advisors > Allow WebRequest", clrSilver);
-   Label("SAFETY", 26, 546, "ORDER PERMISSION = NONE · Panel khong dat/sua/dong lenh", clrSilver);
+   BeginLayout(false);
+   Rectangle("STATUS", 12, 58, 676, 55, C'24,33,43', C'58,73,92');
+   Rectangle("LEFT", 12, 148, 328, 148, C'22,27,36', C'50,63,80');
+   Rectangle("RIGHT", 348, 148, 340, 148, C'22,27,36', C'50,63,80');
+   Rectangle("ENTRY_REASON", 12, 330, 676, 82, C'22,27,36', C'50,63,80');
+   Rectangle("HOLD_REASON", 12, 446, 676, 82, C'22,27,36', C'50,63,80');
+   Rectangle("FOOT", 12, 538, 676, 20, C'18,23,31', C'42,54,69');
+}
+
+void RenderError(const string title, const string message, const bool showWebRequestHelp)
+{
+   BeginLayout(true);
+   Rectangle("STATUS", 12, 58, 676, 64, C'55,30,30', C'210,70,70');
+   Rectangle("RECOVERY", 12, 138, 676, 164, C'22,27,36', C'50,63,80');
+   Rectangle("FOOT", 12, 318, 676, 42, C'18,23,31', C'42,54,69');
+
+   Label("TITLE", 18, 15, "XAUUSD AI MASTER", clrDeepSkyBlue, InpFontSize + 4, "Arial");
+   Label("SUBTITLE", 18, 39, "PHASE 7C | READ-ONLY | SYNCHRONIZED", clrSilver);
+   Label("STATUS_TITLE", 26, 70, title, clrTomato, InpFontSize + 2, "Arial");
+   Label("STATUS_NOTE", 26, 96, message, clrWhite);
+
+   Label("RECOVERY_HEAD", 26, 153, "TU DONG PHUC HOI KET NOI", clrDeepSkyBlue, InpFontSize + 1, "Arial");
+   if(showWebRequestHelp)
+   {
+      Label("HELP1", 28, 187, "1. Tools > Options > Expert Advisors", clrWhite);
+      Label("HELP2", 28, 215, "2. Allow WebRequest: http://127.0.0.1:3711", clrGold);
+      Label("HELP3", 28, 243, "3. Mo lai Control Center neu API chua chay", clrSilver);
+   }
+   else
+   {
+      Label("HELP1", 28, 187, "Bridge dang khoi tao lai phien MetaTrader5 IPC.", clrWhite);
+      Label("HELP2", 28, 215, "Giu MT5 mo, dung tai khoan DEMO va cho gia cap nhat.", clrGold);
+      Label("HELP3", 28, 243, "Panel tu dong tai lai moi " + IntegerToString(InpRefreshSeconds) + " giay.", clrSilver);
+   }
+   Label("HELP4", 28, 271, "Khong bam gui lenh; panel khong co quyen giao dich.", clrSilver);
+   Label("SAFETY", 26, 330, "READ ONLY | DEMO ONLY | ORDER PERMISSION = NONE", clrSilver);
    ChartRedraw();
 }
 
@@ -168,79 +191,78 @@ void Render(const string payload)
    string tp1 = managing ? Field(payload, "positionTp1") : Field(payload, "tp1");
    string tp2 = managing ? Field(payload, "positionTp2") : Field(payload, "tp2");
    string volume = managing ? Field(payload, "positionVolume") : Field(payload, "finalLot");
-   string pnl = managing ? Field(payload, "floatingPnlUsd") : "n/a";
+   string pnl = managing ? Field(payload, "floatingPnlUsd") : Field(payload, "estimatedRiskUsd");
    string strategy = managing ? Field(payload, "positionStrategy") : Field(payload, "effectiveStrategy");
    string side = managing ? Field(payload, "positionSide") : Field(payload, "side");
    string setup = managing ? Field(payload, "positionSetup") : Field(payload, "setup");
-   string ticket = managing ? Field(payload, "ticket") : "CHUA CO";
+   string ticket = managing ? Field(payload, "ticket") : "n/a";
    string distance = managing ? Field(payload, "favorableDistance") : Field(payload, "stopDistance");
    string entryLine1, entryLine2, entryLine3, holdLine1, holdLine2, holdLine3;
-   // Conservative wrapping remains readable on Windows DPI scaling where the
-   // chart font can occupy more pixels than MT5 object coordinates suggest.
-   WrapThree(Field(payload, "entryReason"), 52, entryLine1, entryLine2, entryLine3);
-   WrapThree(Field(payload, "holdReason"), 52, holdLine1, holdLine2, holdLine3);
+   WrapThree(Field(payload, "entryReason"), 62, entryLine1, entryLine2, entryLine3);
+   WrapThree(Field(payload, "holdReason"), 62, holdLine1, holdLine2, holdLine3);
 
    string statusTitle;
    string statusNote;
    if(positionState == "MANAGING")
    {
-      statusTitle = "DANG GIU VI THE " + side + " · " + strategy;
-      statusNote = "Ticket " + ticket + " · " + volume + " lot · P/L " + pnl + " USD";
+      statusTitle = "DANG GIU VI THE " + side + " | " + strategy;
+      statusNote = "Ticket " + ticket + " | " + volume + " lot | P/L " + pnl + " USD";
    }
    else if(positionState == "UNMANAGED")
    {
       statusTitle = "CAN KIEM TRA VI THE KHONG THUOC EXECUTOR";
-      statusNote = "Ticket " + ticket + " · panel chi doc, khong tu quan ly lenh nay";
+      statusNote = "Ticket " + ticket + " | panel chi doc, khong tu quan ly";
    }
    else
    {
-      statusTitle = approved == "true" ? "SETUP HOP LE · CHO EXECUTOR" : "DANG CHO SETUP";
-      statusNote = "Stage " + stage + " · Mode " + Field(payload, "activeMode") + " → " + strategy;
+      statusTitle = approved == "true" ? "SETUP HOP LE | CHO EXECUTOR" : "DANG CHO SETUP";
+      statusNote = "Stage " + stage + " | Mode " + Field(payload, "activeMode") + " -> " + strategy;
    }
 
-   DrawChrome();
-   Rectangle("STATUS", 12, 55, 696, 48, C'25,38,49', stateColor);
-   Label("TITLE", 16, 13, "XAUUSD AI MASTER", clrDeepSkyBlue, InpFontSize + 3, "Arial");
-   Label("SUBTITLE", 16, 36, "PHASE 7C · READ-ONLY MONITOR", clrSilver, InpFontSize);
-   Label("MODE", 515, 17, "MODE " + Field(payload, "activeMode"), clrWhite, InpFontSize + 1);
-   Label("REGIME", 515, 37, Field(payload, "regime") + " · CONF " + Field(payload, "confidence"), clrSilver);
-   Label("STATUS_TITLE", 26, 64, statusTitle, stateColor, InpFontSize + 2, "Arial");
-   Label("STATUS_NOTE", 26, 87, statusNote, clrWhite);
+   DrawNormalChrome();
+   Rectangle("STATUS", 12, 58, 676, 55, C'24,33,43', stateColor);
+   Label("TITLE", 18, 15, "XAUUSD AI MASTER", clrDeepSkyBlue, InpFontSize + 4, "Arial");
+   Label("SUBTITLE", 18, 39, "PHASE 7C | POSITION & DECISION MONITOR", clrSilver);
+   Label("MODE", 500, 16, "MODE " + Field(payload, "activeMode"), clrWhite, InpFontSize + 1);
+   Label("REGIME", 500, 39, Field(payload, "regime") + " | CONF " + Field(payload, "confidence"), clrSilver);
+   Label("STATUS_TITLE", 26, 70, statusTitle, stateColor, InpFontSize + 2, "Arial");
+   Label("STATUS_NOTE", 26, 94, statusNote, clrWhite);
 
-   Label("SECTION", 16, 116, managing ? "VI THE DANG MO" : "KE HOACH LENH KE TIEP", clrDeepSkyBlue, InpFontSize + 1, "Arial");
-   Label("L1", 28, 151, "ENTRY", clrSilver);
-   Label("L1V", 112, 151, entry, clrWhite, InpFontSize + 1);
-   Label("L2", 28, 177, managing ? "PRICE" : "SL DIST", clrSilver);
-   Label("L2V", 112, 177, managing ? current : distance, clrWhite, InpFontSize + 1);
-   Label("L3", 28, 203, "SL", clrSilver);
-   Label("L3V", 112, 203, stopLoss, clrTomato, InpFontSize + 1);
-   Label("L4", 28, 229, "LOT", clrSilver);
-   Label("L4V", 112, 229, volume, clrAqua, InpFontSize + 1);
-   Label("LPNL", 210, 229, "P/L", clrSilver);
-   Label("LPNLV", 250, 229, pnl, ProfitColor(pnl), InpFontSize + 1);
+   Label("SECTION", 18, 124, managing ? "VI THE DANG MO" : "KE HOACH LENH KE TIEP", clrDeepSkyBlue, InpFontSize + 1, "Arial");
 
-   Label("R1", 376, 151, "TP1", clrSilver);
-   Label("R1V", 450, 151, tp1, clrLimeGreen, InpFontSize + 1);
-   Label("R2", 376, 177, "TP2", clrSilver);
-   Label("R2V", 450, 177, tp2, clrLimeGreen, InpFontSize + 1);
-   Label("R3", 376, 203, "SETUP", clrSilver);
-   Label("R3V", 450, 203, setup, clrWhite);
-   Label("R4", 376, 229, "BE / 1/3", clrSilver);
-   Label("R4V", 480, 229, Field(payload, "breakEvenApplied") + " / " + Field(payload, "partialApplied"), clrAqua);
-   Label("RSIDE", 590, 151, managing ? side : "", stateColor, InpFontSize + 1);
-   Label("RDIST", 590, 177, managing ? "MOVE " + distance : "", clrSilver);
+   Label("L1", 28, 159, "ENTRY", clrSilver);
+   Label("L1V", 128, 159, entry, clrWhite, InpFontSize + 1);
+   Label("L2", 28, 186, managing ? "CURRENT" : "SL DIST", clrSilver);
+   Label("L2V", 128, 186, managing ? current : distance, clrWhite, InpFontSize + 1);
+   Label("L3", 28, 213, "STOP LOSS", clrSilver);
+   Label("L3V", 128, 213, stopLoss, clrTomato, InpFontSize + 1);
+   Label("L4", 28, 240, "LOT", clrSilver);
+   Label("L4V", 128, 240, volume, clrAqua, InpFontSize + 1);
+   Label("L5", 28, 267, managing ? "P/L USD" : "RISK USD", clrSilver);
+   Label("L5V", 128, 267, pnl, ProfitColor(pnl), InpFontSize + 1);
 
-   Label("ENTRY_HEAD", 24, 270, "LY DO VAO LENH / CHO LENH", clrDeepSkyBlue, InpFontSize + 1, "Arial");
-   Label("ENTRY_1", 26, 302, entryLine1, clrWhite);
-   Label("ENTRY_2", 26, 328, entryLine2, clrSilver);
-   Label("ENTRY_3", 26, 354, entryLine3, clrSilver);
-   Label("HOLD_HEAD", 24, 402, "LY DO VAN GIU", clrDeepSkyBlue, InpFontSize + 1, "Arial");
-   Label("HOLD_1", 26, 434, holdLine1, managing ? clrWhite : clrSilver);
-   Label("HOLD_2", 26, 460, holdLine2, clrSilver);
-   Label("HOLD_3", 26, 486, holdLine3, clrSilver);
+   Label("R1", 364, 159, "TP1", clrSilver);
+   Label("R1V", 472, 159, tp1, clrLimeGreen, InpFontSize + 1);
+   Label("R2", 364, 186, "TP2", clrSilver);
+   Label("R2V", 472, 186, tp2, clrLimeGreen, InpFontSize + 1);
+   Label("R3", 364, 213, "SIDE", clrSilver);
+   Label("R3V", 472, 213, side, stateColor, InpFontSize + 1);
+   Label("R4", 364, 240, "SETUP", clrSilver);
+   Label("R4V", 472, 240, setup, clrWhite);
+   Label("R5", 364, 267, "BE / PARTIAL", clrSilver);
+   Label("R5V", 472, 267, Field(payload, "breakEvenApplied") + " / " + Field(payload, "partialApplied"), clrAqua);
 
-   Label("SAFETY", 26, 544, "READ-ONLY · ORDER PERMISSION = " + Field(payload, "mt5OrderPermission") + " · DEMO ONLY", clrSilver);
-   Label("FOOTMODE", 26, 564, "BE +" + Field(payload, "breakEvenTriggerDistance") + " · PARTIAL " + Field(payload, "partial"), clrDimGray);
+   Label("ENTRY_HEAD", 20, 307, "LY DO VAO LENH / CHO LENH", clrDeepSkyBlue, InpFontSize + 1, "Arial");
+   Label("ENTRY_1", 28, 342, entryLine1, clrWhite);
+   Label("ENTRY_2", 28, 365, entryLine2, clrSilver);
+   Label("ENTRY_3", 28, 388, entryLine3, clrSilver);
+
+   Label("HOLD_HEAD", 20, 423, "LY DO VAN GIU", clrDeepSkyBlue, InpFontSize + 1, "Arial");
+   Label("HOLD_1", 28, 458, holdLine1, managing ? clrWhite : clrSilver);
+   Label("HOLD_2", 28, 481, holdLine2, clrSilver);
+   Label("HOLD_3", 28, 504, holdLine3, clrSilver);
+
+   Label("SAFETY", 26, 540, "READ ONLY | DEMO | ORDER NONE | BE +6 | PARTIAL 1/3@+10", clrSilver);
    ChartRedraw();
 }
 
@@ -251,21 +273,24 @@ void RefreshPanel()
    string responseHeaders;
    string headers = "Accept: text/plain\r\nCache-Control: no-store\r\n";
    ResetLastError();
-   int status = WebRequest("GET", InpApiUrl, headers, 4000, request, response, responseHeaders);
+   int status = WebRequest("GET", InpApiUrl, headers, 5000, request, response, responseHeaders);
    if(status == -1)
    {
-      RenderError("API/WebRequest error " + IntegerToString(GetLastError()));
+      RenderError("KHONG GOI DUOC CONTROL API", "WebRequest error " + IntegerToString(GetLastError()), true);
       return;
    }
    if(status != 200)
    {
-      RenderError("Decision API returned HTTP " + IntegerToString(status));
+      if(status == 503)
+         RenderError("DANG KET NOI LAI MT5", "Decision API returned HTTP 503", false);
+      else
+         RenderError("CONTROL API TAM THOI CHUA SAN SANG", "Decision API returned HTTP " + IntegerToString(status), false);
       return;
    }
    string payload = CharArrayToString(response, 0, -1, CP_UTF8);
    if(Field(payload, "version") != "1")
    {
-      RenderError("Decision API payload version is invalid");
+      RenderError("DU LIEU PANEL KHONG HOP LE", "Decision API payload version is invalid", false);
       return;
    }
    Render(payload);

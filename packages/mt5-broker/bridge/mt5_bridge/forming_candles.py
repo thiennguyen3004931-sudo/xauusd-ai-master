@@ -64,14 +64,15 @@ def candles_with_forming(
         )
 
     with gateway._lock:
-        info = gateway.mt5.symbol_info(broker_symbol)
+        info = gateway._read_with_reconnect_locked("symbol_info", broker_symbol)
         if info is None:
             raise BridgeError(
                 f"No symbol specification for {broker_symbol}",
                 404,
                 "SYMBOL_NOT_FOUND",
             )
-        rows = gateway.mt5.copy_rates_from_pos(
+        rows = gateway._read_with_reconnect_locked(
+            "copy_rates_from_pos",
             broker_symbol,
             mt5_timeframe,
             0,
