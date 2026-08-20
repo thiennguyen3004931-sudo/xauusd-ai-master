@@ -86,6 +86,8 @@ $env:MT5_BRIDGE_REQUEST_TIMEOUT_MS = "3000"
 $env:MT5_BRIDGE_HEALTH_TIMEOUT_MS = "1500"
 $env:MT5_MAGIC_NUMBER = [string]$systemMagicNumber
 $env:PHASE7B_DEMO_WORK_DIR = $demoDir
+$env:PHASE7C_LOT_SETTINGS_FILE = Join-Path $WorkDir "phase7c-lot-settings.json"
+$env:PHASE7C_ACTIVE_LOT_SETTINGS_FILE = Join-Path $WorkDir "phase7c-executors\active-lot-settings.json"
 $env:HOST = "127.0.0.1"
 $env:PORT = [string]$ApiPort
 $env:WEB_ORIGIN = $webUrl
@@ -99,6 +101,8 @@ $apiProcess = Start-Process powershell.exe -PassThru -ArgumentList @(
 
 Remove-Item Env:MT5_BRIDGE_API_KEY -ErrorAction SilentlyContinue
 Remove-Item Env:MT5_MAGIC_NUMBER -ErrorAction SilentlyContinue
+Remove-Item Env:PHASE7C_LOT_SETTINGS_FILE -ErrorAction SilentlyContinue
+Remove-Item Env:PHASE7C_ACTIVE_LOT_SETTINGS_FILE -ErrorAction SilentlyContinue
 
 # Browser requests remain same-origin. Vite proxies /api to the dedicated API,
 # eliminating cross-origin/CORS dependency for local DEMO monitoring.

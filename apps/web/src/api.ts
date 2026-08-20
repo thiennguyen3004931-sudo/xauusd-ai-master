@@ -13,6 +13,7 @@ import type {
   Phase7CBacktestResult,
   Phase7CDailyRecoverySnapshot,
   Phase7CLiveRegimeSnapshot,
+  Phase7CLotSettingsSnapshot,
 } from "./phase7c-types";
 import type { Phase7CForwardRangeResult } from "./phase7c-forward-types";
 import type { Phase7CAutoLotPreview } from "./phase7c-autolot-types";
@@ -150,6 +151,26 @@ export async function getPhase7CAccountRisk(
       `${API_BASE}/api/v1/phase7c/account-risk?riskPercent=${encodeURIComponent(riskPercent)}&maxLot=${encodeURIComponent(maxLot)}`,
       { cache: "no-store" },
     ),
+  );
+}
+
+export async function getPhase7CLotSettings(): Promise<Phase7CLotSettingsSnapshot> {
+  return read<Phase7CLotSettingsSnapshot>(
+    await fetch(`${API_BASE}/api/v1/phase7c/lot-settings`, { cache: "no-store" }),
+  );
+}
+
+export async function setPhase7CLotSettings(input: {
+  trendFixedLot: number;
+  sidewayRiskPercent: number;
+  sidewayMaxLot: number;
+}): Promise<Phase7CLotSettingsSnapshot> {
+  return read<Phase7CLotSettingsSnapshot>(
+    await fetch(`${API_BASE}/api/v1/phase7c/lot-settings`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...input, source: "web-control-center" }),
+    }),
   );
 }
 

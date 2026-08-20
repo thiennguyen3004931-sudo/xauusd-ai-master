@@ -22,16 +22,34 @@ $envFile = [string]$config.envFile
 $telegramEnvFile = [string]$config.telegramEnvFile
 $nodePath = [string]$config.nodePath
 $pnpmPath = [string]$config.pnpmPath
+$trendFixedVolume = if ($null -ne $config.trendFixedVolume) { [double]$config.trendFixedVolume } else { 0.03 }
 $sidewayRiskPercent = [double]$config.sidewayRiskPercent
 $sidewayMaxLot = [double]$config.sidewayMaxLot
+$lotSettingsPath = Join-Path $workDir "phase7c-lot-settings.json"
+if (Test-Path $lotSettingsPath) {
+  try {
+    $lotSettings = Get-Content -LiteralPath $lotSettingsPath -Raw | ConvertFrom-Json
+    if ([int]$lotSettings.version -ne 1) { throw "Unsupported version $($lotSettings.version)." }
+    $trendFixedVolume = [double]$lotSettings.trendFixedLot
+    $sidewayRiskPercent = [double]$lotSettings.sidewayRiskPercent
+    $sidewayMaxLot = [double]$lotSettings.sidewayMaxLot
+  } catch {
+    throw "Executor task lot settings are invalid at $lotSettingsPath. $($_.Exception.Message)"
+  }
+}
 
 if (-not (Test-Path $workDir)) { throw "Executor task WorkDir not found: $workDir" }
 if (-not (Test-Path $envFile)) { throw "Executor task EnvFile not found: $envFile" }
 if (-not (Test-Path $telegramEnvFile)) { throw "Executor task TelegramEnvFile not found: $telegramEnvFile" }
 if ([string]::IsNullOrWhiteSpace($nodePath) -or -not (Test-Path $nodePath -PathType Leaf)) { throw "Executor task nodePath is missing/invalid: $nodePath" }
 if ([string]::IsNullOrWhiteSpace($pnpmPath) -or -not (Test-Path $pnpmPath -PathType Leaf)) { throw "Executor task pnpmPath is missing/invalid: $pnpmPath" }
-if ($sidewayRiskPercent -le 0 -or $sidewayRiskPercent -gt 5) { throw "Executor task sidewayRiskPercent is invalid: $sidewayRiskPercent" }
-if ($sidewayMaxLot -le 0) { throw "Executor task sidewayMaxLot is invalid: $sidewayMaxLot" }
+if ($trendFixedVolume -lt 0.03 -or $trendFixedVolume -gt 0.30) { throw "Executor task trendFixedVolume is invalid: $trendFixedVolume" }
+if ($sidewayRiskPercent -lt 0.01 -or $sidewayRiskPercent -gt 1) { throw "Executor task sidewayRiskPercent is invalid: $sidewayRiskPercent" }
+if ($sidewayMaxLot -lt 0.03 -or $sidewayMaxLot -gt 0.30) { throw "Executor task sidewayMaxLot is invalid: $sidewayMaxLot" }
+foreach ($managedLot in @($trendFixedVolume, $sidewayMaxLot)) {
+  $units = $managedLot / 0.03
+  if ([math]::Abs($units - [math]::Round($units)) -gt 1e-8) { throw "Executor task lot values must use 0.03 increments." }
+}
 
 $nodeDir = Split-Path -Parent $nodePath
 $pnpmDir = Split-Path -Parent $pnpmPath
@@ -83,6 +101,9 @@ Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_ARMED=TRUE"
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_CONTROL_API=$controlApiUrl"
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_NODE_PATH=$nodePath"
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_PNPM_PATH=$pnpmPath"
+Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_TREND_FIXED_LOT=$trendFixedVolume"
+Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_SIDEWAY_RISK_PERCENT=$sidewayRiskPercent"
+Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_SIDEWAY_MAX_LOT=$sidewayMaxLot"
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_STATUS=$runnerStatusPath"
 
 $attempt = 0
@@ -98,6 +119,7 @@ while ($true) {
       "-ControlApiUrl", ('"{0}"' -f $controlApiUrl),
       "-EnvFile", ('"{0}"' -f $envFile),
       "-TelegramEnvFile", ('"{0}"' -f $telegramEnvFile),
+      "-TrendFixedVolume", $trendFixedVolume.ToString([System.Globalization.CultureInfo]::InvariantCulture),
       "-SidewayRiskPercent", $sidewayRiskPercent.ToString([System.Globalization.CultureInfo]::InvariantCulture),
       "-SidewayMaxLot", $sidewayMaxLot.ToString([System.Globalization.CultureInfo]::InvariantCulture),
       "-Armed"

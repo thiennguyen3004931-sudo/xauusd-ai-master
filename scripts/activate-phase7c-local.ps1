@@ -2,6 +2,7 @@ param(
   [Parameter(Mandatory = $true)] [string]$WorkDir,
   [switch]$SkipBuild,
   [switch]$ArmExecutors,
+  [double]$TrendFixedVolume = 0.03,
   [double]$SidewayRiskPercent = 0.25,
   [double]$SidewayMaxLot = 0.03,
   [int]$ApiPort = 3711,
@@ -13,6 +14,7 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $WorkDir = (Resolve-Path $WorkDir).Path
 $DemoDir = Join-Path $WorkDir "phase7b-demo-forward"
+$LotSettingsPath = Join-Path $WorkDir "phase7c-lot-settings.json"
 $BridgeEnv = Join-Path $ProjectRoot "packages\mt5-broker\bridge\.env.phase7b-demo"
 $LegacyBotTask = "XAUUSD-Phase7B-Bot"
 $ExecutorSupervisor = Join-Path $PSScriptRoot "run-phase7c-executors-local.ps1"
@@ -22,8 +24,48 @@ $ExecutorRuntime = Join-Path $WorkDir "phase7c-executors"
 if (-not (Test-Path $BridgeEnv)) { throw "Bridge env not found: $BridgeEnv" }
 if (-not (Test-Path $ExecutorSupervisor)) { throw "Phase 7C executor supervisor not found: $ExecutorSupervisor" }
 if (-not (Test-Path $ExecutorStopper)) { throw "Phase 7C executor stopper not found: $ExecutorStopper" }
-if ($SidewayRiskPercent -le 0 -or $SidewayRiskPercent -gt 5) { throw "SidewayRiskPercent must be > 0 and <= 5." }
-if ($SidewayMaxLot -le 0) { throw "SidewayMaxLot must be positive." }
+$lotSettingsExists = Test-Path $LotSettingsPath
+if ($lotSettingsExists) {
+  try {
+    $lotSettings = Get-Content -LiteralPath $LotSettingsPath -Raw | ConvertFrom-Json
+    if ([int]$lotSettings.version -ne 1) { throw "Unsupported version $($lotSettings.version)." }
+    if (-not $PSBoundParameters.ContainsKey("TrendFixedVolume")) { $TrendFixedVolume = [double]$lotSettings.trendFixedLot }
+    if (-not $PSBoundParameters.ContainsKey("SidewayRiskPercent")) { $SidewayRiskPercent = [double]$lotSettings.sidewayRiskPercent }
+    if (-not $PSBoundParameters.ContainsKey("SidewayMaxLot")) { $SidewayMaxLot = [double]$lotSettings.sidewayMaxLot }
+  } catch {
+    throw "Phase 7C lot settings are invalid at $LotSettingsPath. $($_.Exception.Message)"
+  }
+}
+
+function Assert-ManagedLot([double]$Value, [string]$Label) {
+  if ($Value -lt 0.03 -or $Value -gt 0.30) { throw "$Label must be between 0.03 and 0.30 lot for DEMO." }
+  $units = $Value / 0.03
+  if ([math]::Abs($units - [math]::Round($units)) -gt 1e-8) {
+    throw "$Label must use 0.03 increments so +10 can close exactly one-third."
+  }
+}
+
+Assert-ManagedLot $TrendFixedVolume "TrendFixedVolume"
+Assert-ManagedLot $SidewayMaxLot "SidewayMaxLot"
+if ($SidewayRiskPercent -lt 0.01 -or $SidewayRiskPercent -gt 1) { throw "SidewayRiskPercent must be between 0.01 and 1.00 for DEMO." }
+
+$lotSettingsExplicit =
+  $PSBoundParameters.ContainsKey("TrendFixedVolume") -or
+  $PSBoundParameters.ContainsKey("SidewayRiskPercent") -or
+  $PSBoundParameters.ContainsKey("SidewayMaxLot")
+if (-not $lotSettingsExists -or $lotSettingsExplicit) {
+  $lotSettingsToWrite = [pscustomobject]@{
+    version = 1
+    trendFixedLot = $TrendFixedVolume
+    sidewayRiskPercent = $SidewayRiskPercent
+    sidewayMaxLot = $SidewayMaxLot
+    updatedAt = [DateTimeOffset]::UtcNow.ToString("o")
+    updatedBy = "activation"
+  }
+  $lotJson = $lotSettingsToWrite | ConvertTo-Json -Depth 4
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($LotSettingsPath, "$lotJson`n", $utf8NoBom)
+}
 
 function Stop-TaskSafe([string]$Name) {
   try { Stop-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue } catch {}
@@ -115,6 +157,7 @@ function Start-Phase7CExecutors {
     "-WorkDir", ('"{0}"' -f $WorkDir),
     "-ControlApiUrl", ('"{0}"' -f $apiUrl),
     "-EnvFile", ('"{0}"' -f $BridgeEnv),
+    "-TrendFixedVolume", $TrendFixedVolume.ToString([System.Globalization.CultureInfo]::InvariantCulture),
     "-SidewayRiskPercent", $SidewayRiskPercent.ToString([System.Globalization.CultureInfo]::InvariantCulture),
     "-SidewayMaxLot", $SidewayMaxLot.ToString([System.Globalization.CultureInfo]::InvariantCulture)
   )
@@ -275,13 +318,16 @@ $demo = $null
 $risk = $null
 $mode = $null
 $uiReady = $false
+$sidewayRiskParam = $SidewayRiskPercent.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+$sidewayMaxLotParam = $SidewayMaxLot.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 while ((Get-Date) -lt $webDeadline) {
   try {
     $demoProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7b-demo" -Method Get -TimeoutSec 4
-    $riskProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7c/account-risk?riskPercent=$SidewayRiskPercent&maxLot=$SidewayMaxLot" -Method Get -TimeoutSec 4
+    $riskProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7c/account-risk?riskPercent=$sidewayRiskParam&maxLot=$sidewayMaxLotParam" -Method Get -TimeoutSec 4
+    $lotProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7c/lot-settings" -Method Get -TimeoutSec 4
     $modeProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 4
     $uiProbe = Invoke-WebRequest -Uri "$webUrl/" -Method Get -UseBasicParsing -TimeoutSec 4
-    if ($demoProbe -and $riskProbe -and $modeProbe -and $uiProbe.StatusCode -ge 200 -and $uiProbe.StatusCode -lt 400) {
+    if ($demoProbe -and $riskProbe -and $lotProbe -and $modeProbe -and $uiProbe.StatusCode -ge 200 -and $uiProbe.StatusCode -lt 400) {
       $demo = $demoProbe
       $risk = $riskProbe
       $mode = $modeProbe
@@ -304,6 +350,10 @@ Write-Host "PHASE7C_ACTIVATE_MODE=$($mode.state.mode)"
 Write-Host "PHASE7C_ACTIVATE_AUTO_LOT_MODE=$($risk.safety.mode)"
 Write-Host "PHASE7C_ACTIVATE_AUTO_LOT_EXECUTION_MUTATION=$($risk.safety.executionMutation)"
 Write-Host "PHASE7C_ACTIVATE_PHASE7B_FIXED_VOLUME_UNCHANGED=$($risk.safety.phase7bFixedVolumeUnchanged)"
+Write-Host "PHASE7C_ACTIVATE_TREND_FIXED_LOT=$TrendFixedVolume"
+Write-Host "PHASE7C_ACTIVATE_SIDEWAY_RISK_PERCENT=$SidewayRiskPercent"
+Write-Host "PHASE7C_ACTIVATE_SIDEWAY_MAX_LOT=$SidewayMaxLot"
+Write-Host "PHASE7C_ACTIVATE_LOT_APPLIES_TO=NEW_POSITIONS_ONLY"
 
 Start-Phase7CExecutors
 

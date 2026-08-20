@@ -27,6 +27,9 @@ if ([string]::IsNullOrWhiteSpace([string]$config.nodePath) -or -not (Test-Path (
 if ([string]::IsNullOrWhiteSpace([string]$config.pnpmPath) -or -not (Test-Path ([string]$config.pnpmPath) -PathType Leaf)) {
   throw "Executor task config pnpmPath is missing/invalid: $($config.pnpmPath)"
 }
+if ($null -eq $config.trendFixedVolume -or [double]$config.trendFixedVolume -lt 0.03 -or [double]$config.trendFixedVolume -gt 0.30) {
+  throw "Executor task config trendFixedVolume is missing/invalid."
+}
 
 $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 $actions = @($task.Actions)
@@ -77,4 +80,7 @@ Write-Host "PHASE7C_EXECUTOR_STARTUP_VERIFY_EXECUTION_TIME_LIMIT=UNLIMITED"
 Write-Host "PHASE7C_EXECUTOR_STARTUP_VERIFY_SECRETS_IN_ARGUMENTS=False"
 Write-Host "PHASE7C_EXECUTOR_STARTUP_VERIFY_CONFIG_DEMO_ONLY=$([bool]$config.demoOnly)"
 Write-Host "PHASE7C_EXECUTOR_STARTUP_VERIFY_CONFIG_ARMED=$([bool]$config.armed)"
+Write-Host "PHASE7C_EXECUTOR_STARTUP_VERIFY_TREND_FIXED_LOT=$([double]$config.trendFixedVolume)"
+Write-Host "PHASE7C_EXECUTOR_STARTUP_VERIFY_SIDEWAY_RISK_PERCENT=$([double]$config.sidewayRiskPercent)"
+Write-Host "PHASE7C_EXECUTOR_STARTUP_VERIFY_SIDEWAY_MAX_LOT=$([double]$config.sidewayMaxLot)"
 Write-Host "PHASE7C_EXECUTOR_STARTUP_TASK_VERIFY=PASS"

@@ -166,15 +166,26 @@ if ($RequireTelegram -and -not $telegramModeReady) {
 
 $apiBase = $ControlApiUrl.TrimEnd('/')
 $mode = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 5
+$lotSettings = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/lot-settings" -Method Get -TimeoutSec 5
 $regime = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/live-regime?symbol=XAUUSD&count=320" -Method Get -TimeoutSec 10
-$autoLot = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/auto-lot-preview?stopDistance=5&riskPercent=0.25&maxLot=0.03" -Method Get -TimeoutSec 10
+$verifyRiskPercent = ([double]$lotSettings.state.sidewayRiskPercent).ToString([System.Globalization.CultureInfo]::InvariantCulture)
+$verifyMaxLot = ([double]$lotSettings.state.sidewayMaxLot).ToString([System.Globalization.CultureInfo]::InvariantCulture)
+$autoLot = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/auto-lot-preview?stopDistance=5&riskPercent=$verifyRiskPercent&maxLot=$verifyMaxLot" -Method Get -TimeoutSec 10
 Write-Host "PHASE7C_VERIFY_ACTIVE_MODE=$($mode.state.mode)"
+Write-Host "PHASE7C_VERIFY_TREND_FIXED_LOT=$($lotSettings.state.trendFixedLot)"
+Write-Host "PHASE7C_VERIFY_SIDEWAY_RISK_PERCENT=$($lotSettings.state.sidewayRiskPercent)"
+Write-Host "PHASE7C_VERIFY_SIDEWAY_MAX_LOT=$($lotSettings.state.sidewayMaxLot)"
+Write-Host "PHASE7C_VERIFY_LOT_ACTIVE_ALIVE=$($lotSettings.activeAlive)"
+Write-Host "PHASE7C_VERIFY_LOT_RESTART_REQUIRED=$($lotSettings.restartRequired)"
 Write-Host "PHASE7C_VERIFY_REGIME=$($regime.regime)"
 Write-Host "PHASE7C_VERIFY_RECOMMENDED_MODE=$($regime.recommendedMode)"
 Write-Host "PHASE7C_VERIFY_REGIME_CONFIDENCE=$($regime.confidence)"
 Write-Host "PHASE7C_VERIFY_HAS_SUPPLY_DEMAND_RANGE=$($null -ne $regime.supplyDemandRange)"
 Write-Host "PHASE7C_VERIFY_AUTO_LOT_APPROVED=$($autoLot.preview.approved)"
 Write-Host "PHASE7C_VERIFY_AUTO_LOT_RECOMMENDED=$($autoLot.preview.recommendedLot)"
+if ($pidStatuses["supervisor"].alive -and $lotSettings.restartRequired) {
+  throw "Supervisor is alive but its active lot settings do not match the saved configuration. PAUSE and reactivate Phase 7C."
+}
 
 $apiKey = Read-EnvValue "MT5_API_KEY"
 $bridgeHost = Read-EnvValue "MT5_BRIDGE_HOST"

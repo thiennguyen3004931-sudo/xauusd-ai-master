@@ -1189,6 +1189,9 @@ function validateVolume(spec: SymbolSpec): void {
   if (Math.abs(units - Math.round(units)) > 1e-8) {
     throw new Error(`Fixed volume ${fixedVolume} does not align with broker step ${spec.volumeStep}.`);
   }
+  if (Math.round(units) % 3 !== 0 || fixedVolume / 3 < spec.minVolume - 1e-9) {
+    throw new Error(`Fixed volume ${fixedVolume} cannot preserve exact one-third partial management at broker step ${spec.volumeStep}.`);
+  }
 }
 
 function normalizeVolume(value: number, step: number): number {
