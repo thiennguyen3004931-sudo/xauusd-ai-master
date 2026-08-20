@@ -103,7 +103,7 @@ jobs:
           node scripts/apply-phase7b-wait-pullback-demo-controller-hook.mjs .phase7b-controller-ci.ts
 
           grep -q 'PHASE7B_DEMO_STRUCTURAL_SL_GT_10=WAIT_PULLBACK' .phase7b-controller-ci.ts
-          grep -q '3_PATTERNS_PLUS_SUPERTREND_M15_M5_10_3' .phase7b-controller-ci.ts
+          grep -q 'PHASE7B_DEMO_ENTRY_GATE=PATTERN_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE' .phase7b-controller-ci.ts
           grep -q 'THREE_CANDLE_BODY_DOMINANCE' .phase7b-controller-ci.ts
           grep -q 'pendingPullback' .phase7b-controller-ci.ts
           grep -q 'if (allowReal) throw new Error' .phase7b-controller-ci.ts

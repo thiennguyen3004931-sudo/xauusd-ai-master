@@ -48,8 +48,8 @@ type EntryDiagnostics = {
   trend: {
     m15Supertrend?: Side | null;
     m5Supertrend?: Side | null;
+    confidenceM5Supertrend?: Side | null;
     m5FlipAgeBars?: number | null;
-    m5FreshAligned?: boolean;
     matchedPatternSide: boolean;
   };
   fvg: { sameDirectionConfirmed: boolean; requiredForEntry: false };
@@ -58,7 +58,9 @@ type EntryDiagnostics = {
     side: Side | null;
     rule: string;
     referenceEntry: number;
+    structuralStopDistance: number | null;
     stopDistance: number | null;
+    action: "WAIT_SIGNAL" | "ENTRY_IMMEDIATE" | "WAIT_PULLBACK";
     reason: string;
   };
 };
@@ -90,6 +92,13 @@ type Snapshot = {
   entryDiagnosticsError?: string | null;
   state: {
     accountLogin: number | null;
+    pendingPullback?: {
+      side: Side;
+      pattern: string;
+      signalTimestamp: number;
+      expiresAt: number;
+      structuralStopDistanceAtSignal: number;
+    } | null;
     managed: ManagedState | null;
   } | null;
   recentEvents: DemoEvent[];
@@ -141,6 +150,7 @@ function tenMoHinh(name: string | null | undefined) {
 function tenTrangThaiBot(status: string) {
   const map: Record<string, string> = {
     WAITING_SIGNAL: "ĐANG CHỜ TÍN HIỆU",
+    WAITING_PULLBACK: "ĐANG CHỜ GIÁ HỒI",
     MANAGING: "ĐANG QUẢN LÝ LỆNH",
     READY_NOT_ARMED: "SẴN SÀNG · CHƯA BẬT BOT",
     BOT_STALE: "BOT MẤT HEARTBEAT",
@@ -164,6 +174,13 @@ function eventLabel(type?: string) {
     DEMO_GUARD_BLOCK: "Bộ bảo vệ DEMO chặn",
     CYCLE_ERROR: "Lỗi chu kỳ Bot",
     FVG_HOLD_CONFIRMED: "Bối cảnh FVG cùng hướng",
+    WAIT_PULLBACK: "SL > 10 · bắt đầu chờ hồi",
+    PULLBACK_STILL_TOO_WIDE: "Giá hồi chưa đủ để SL ≤ 10",
+    PULLBACK_ENTRY: "Giá hồi đạt · gửi lệnh",
+    PULLBACK_SETUP_INVALIDATED: "Hủy setup chờ hồi",
+    PULLBACK_M15_ST_INVALIDATED: "Hủy chờ hồi · M15 đổi hướng",
+    PULLBACK_M5_ST_INVALIDATED: "Hủy chờ hồi · M5 đổi hướng",
+    PULLBACK_EXPIRED: "Setup chờ hồi hết hạn",
   };
   return labels[type ?? ""] ?? String(type ?? "—").replaceAll("_", " ");
 }
@@ -201,6 +218,7 @@ export function Phase7BDemoPage() {
   const data = query.data;
   const health = data.mt5.health;
   const managed = data.state?.managed ?? null;
+  const pendingPullback = data.state?.pendingPullback ?? null;
   const position = data.mt5.managedPosition;
   const diagnostics = data.entryDiagnostics;
   const currency = health?.accountCurrency ?? "USD";
@@ -216,7 +234,7 @@ export function Phase7BDemoPage() {
   const recent = data.recentEvents.slice(0, 12);
   const latestExit = data.recentEvents.find((event) => event.type === "EXIT_EXECUTED" || event.type === "MANAGED_POSITION_CLOSED");
   const currentM15Aligned = Boolean(managed && diagnostics?.trend.m15Supertrend === managed.side);
-  const currentM5Aligned = Boolean(managed && diagnostics?.trend.m5Supertrend === managed.side && diagnostics?.trend.m5FreshAligned);
+  const currentM5Aligned = Boolean(managed && diagnostics?.trend.confidenceM5Supertrend === managed.side);
 
   return (
     <Stack spacing={2.2}>
@@ -260,7 +278,13 @@ export function Phase7BDemoPage() {
               </Stack>
 
               {!managed ? (
-                <Typography variant="body2" color="text.secondary" mt={2}>Chưa có lệnh. Bot chỉ vào khi toàn bộ điều kiện bắt buộc cùng đạt trên nến đã đóng.</Typography>
+                pendingPullback ? (
+                  <Alert severity="warning" sx={{ mt: 2 }}>
+                    Setup {tenHuong(pendingPullback.side)} bằng {tenMoHinh(pendingPullback.pattern)} có SL cấu trúc {pendingPullback.structuralStopDistanceAtSignal.toFixed(2)} giá. Bot không vào đuổi; đang chờ giá hồi để SL còn tối đa 10 giá, hết hạn lúc {dateTime(pendingPullback.expiresAt)}.
+                  </Alert>
+                ) : (
+                  <Typography variant="body2" color="text.secondary" mt={2}>Chưa có lệnh. Bot chỉ vào khi toàn bộ điều kiện bắt buộc cùng đạt trên nến đã đóng; nếu SL cấu trúc vượt 10 giá thì chuyển sang chờ hồi trong M15 kế tiếp.</Typography>
+                )
               ) : (
                 <>
                   <Grid container spacing={2} mt={0.3}>
@@ -280,7 +304,8 @@ export function Phase7BDemoPage() {
                   <Stack spacing={0.8} mt={1.2}>
                     <ReasonLine ok>Mô hình {tenMoHinh(managed.pattern)} đã kích hoạt hướng {tenHuong(managed.side)}.</ReasonLine>
                     <ReasonLine ok>Rule bắt buộc Supertrend M15 cùng hướng tại thời điểm kích hoạt.</ReasonLine>
-                    <ReasonLine ok>Rule bắt buộc M5 cùng hướng và fresh flip không quá 2 nến đóng.</ReasonLine>
+                    <ReasonLine ok>Rule bắt buộc Supertrend M5 cùng hướng; tuổi flip chỉ là thông tin, không chặn entry.</ReasonLine>
+                    <ReasonLine ok>SL cấu trúc hợp lệ; SL vận hành tối thiểu 6 và tối đa 10 giá. Setup rộng hơn 10 chỉ được vào sau khi hồi đủ.</ReasonLine>
                     <Typography variant="body2" color="text.secondary">ℹ FVG chỉ ghi nhận bối cảnh; không có FVG vẫn được phép vào nếu các gate bắt buộc đạt.</Typography>
                   </Stack>
                 </>
@@ -312,7 +337,7 @@ export function Phase7BDemoPage() {
               <Grid size={{ xs: 12, md: 6 }}>
                 <Stack spacing={1}>
                   <ReasonLine ok={currentM15Aligned}>Supertrend M15 hiện tại {currentM15Aligned ? `vẫn cùng hướng ${tenHuong(managed.side)}` : "không còn cùng hướng hoàn toàn"}.</ReasonLine>
-                  <ReasonLine ok={currentM5Aligned}>M5 hiện tại {currentM5Aligned ? `vẫn cùng hướng ${tenHuong(managed.side)} và fresh` : "không còn đồng thuận fresh với hướng lệnh"}.</ReasonLine>
+                  <ReasonLine ok={currentM5Aligned}>M5 live {currentM5Aligned ? `vẫn cùng hướng ${tenHuong(managed.side)}` : "không còn đồng thuận với hướng lệnh"}.</ReasonLine>
                   <Typography variant="body2" color="text.secondary" fontWeight={700}>ℹ M15/M5 hiện tại là bối cảnh theo dõi. Bot chỉ thoát khi management canonical thực sự phát điều kiện thoát/SL.</Typography>
                   <Typography variant="body2" color="text.secondary">Sự kiện đóng gần nhất: {latestExit?.timestamp ? `${eventLabel(latestExit.type)} lúc ${dateTime(Date.parse(latestExit.timestamp))}` : "chưa có trong journal gần đây"}.</Typography>
                 </Stack>
@@ -324,7 +349,7 @@ export function Phase7BDemoPage() {
 
       <Alert severity={guardPass ? "success" : "warning"}>
         {guardPass
-          ? "DEMO sẵn sàng · Entry: 2 mô hình nến + Supertrend M15 + M5 fresh flip ≤ 2 · FVG chỉ là bối cảnh · +6 → hòa vốn · +10 → chốt 1/3."
+          ? "DEMO sẵn sàng · Trend: 3 mô hình nến + ST M15/M5 · SL cấu trúc 6–10; vượt 10 thì chờ hồi trong M15 kế tiếp · NORMAL: +6 BE, +10 chốt 1/3."
           : "DEMO chưa đủ điều kiện. Kiểm tra MT5 Bridge / Algo Trading / quyền Expert Trading."}
       </Alert>
 

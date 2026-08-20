@@ -60,7 +60,7 @@ test("volume POC stays inside the range", () => {
   assert.ok(poc !== null && poc >= 2392 && poc <= 2408);
 });
 
-test("BUY sideway plan uses zone+ATR stop, POC TP1 and opposite range TP2", () => {
+test("BUY sideway plan uses zone+ATR stop, fixed +10 partial and opposite range TP2", () => {
   const plan = buildSidewayPlan({
     side: "BUY",
     bid: 2392.2,
@@ -73,11 +73,50 @@ test("BUY sideway plan uses zone+ATR stop, POC TP1 and opposite range TP2", () =
     digits: 2,
   });
   assert.equal(plan.accepted, true);
-  assert.equal(plan.tp1Kind, "VOLUME_POC");
-  assert.equal(plan.tp1, 2399);
+  assert.equal(plan.tp1Kind, "FIXED_PLUS_10");
+  assert.equal(plan.tp1, 2402.3);
   assert.equal(plan.takeProfit, 2408);
   assert.ok(plan.stopLoss < 2390);
   assert.ok(plan.rewardRisk >= 1.2);
+});
+
+test("SELL sideway plan applies the same fixed +10 partial symmetrically", () => {
+  const plan = buildSidewayPlan({
+    side: "SELL",
+    bid: 2407.8,
+    ask: 2407.9,
+    range,
+    atr: 4,
+    poc: 2401,
+    point: 0.01,
+    stopsLevelTicks: 0,
+    digits: 2,
+  });
+  assert.equal(plan.accepted, true);
+  assert.equal(plan.tp1Kind, "FIXED_PLUS_10");
+  assert.equal(plan.tp1, 2397.8);
+  assert.equal(plan.takeProfit, 2392);
+  assert.ok(plan.stopLoss > 2410);
+});
+
+test("sideway plan rejects a range whose opposite boundary is reached before +10", () => {
+  const narrowRange = {
+    demand: { low: 2390, high: 2392 },
+    supply: { low: 2400, high: 2402 },
+  };
+  const plan = buildSidewayPlan({
+    side: "BUY",
+    bid: 2392.2,
+    ask: 2392.3,
+    range: narrowRange,
+    atr: 4,
+    poc: 2396,
+    point: 0.01,
+    stopsLevelTicks: 0,
+    digits: 2,
+  });
+  assert.equal(plan.accepted, false);
+  assert.equal(plan.reason, "FINAL_TARGET_BEFORE_PLUS_10");
 });
 
 test("one-third partial preserves a broker-minimum runner", () => {
@@ -171,7 +210,7 @@ test("managed state recovers a completed one-third partial after a crash", () =>
   assert.equal(result.accepted, true);
   assert.equal(result.managed.partialApplied, true);
   assert.equal(result.managed.expectedRemainingVolume, 0.02);
-  assert.equal(result.events[0]?.type, "TP1_PARTIAL_RECOVERED_FROM_BROKER_VOLUME");
+  assert.equal(result.events[0]?.type, "PLUS10_PARTIAL_RECOVERED_FROM_BROKER_VOLUME");
 });
 
 test("managed state recovers break-even from broker stop and rejects unknown volume mutation", () => {

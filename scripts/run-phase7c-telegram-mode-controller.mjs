@@ -1,5 +1,10 @@
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import {
+  isExpiredTelegramCallbackError,
+  nextTelegramUpdateOffset,
+  persistedTelegramUpdateOffset,
+} from "./phase7c-telegram-mode-logic.mjs";
 
 const fallbackToken = requiredEnv("ZIQ_TELEGRAM_BOT_TOKEN");
 const fallbackChatId = requiredEnv("ZIQ_TELEGRAM_CHAT_ID");
@@ -19,7 +24,7 @@ const statusFile = resolve(
 );
 const telegramBase = `https://api.telegram.org/bot${token}`;
 const validModes = new Set(["AUTO", "TREND", "SIDEWAY", "PAUSE"]);
-let updateOffset = 0;
+let updateOffset = await loadUpdateOffset();
 let ready = false;
 let initialPanelSent = false;
 let lastMode = "UNKNOWN";
@@ -50,6 +55,9 @@ while (true) {
       lastMode = initial.mode;
       await telegramRequest("getMe");
       lastTelegramSuccessAt = Date.now();
+      if (updateOffset === 0) {
+        await discardPendingUpdates();
+      }
       if (!initialPanelSent) {
         await sendPanel(initial.mode, "Bảng điều khiển bot đã sẵn sàng.");
         lastTelegramSuccessAt = Date.now();
@@ -85,31 +93,33 @@ while (true) {
     }
   }
 
-  try {
-    await pollTelegram();
-    lastTelegramSuccessAt = Date.now();
-    await writeStatus({
-      ready,
-      status: ready ? "READY" : "WAITING_STARTUP",
-      pid: process.pid,
-      mode: lastMode,
-      lastApiSuccessAt: lastApiSuccessAt || null,
-      lastTelegramSuccessAt,
-      updatedAt: lastTelegramSuccessAt,
-    });
-  } catch (error) {
-    const message = errorMessage(error);
-    await writeStatus({
-      ready,
-      status: ready ? "DEGRADED_RETRYING" : "WAITING_STARTUP",
-      pid: process.pid,
-      mode: lastMode,
-      lastApiSuccessAt: lastApiSuccessAt || null,
-      lastTelegramSuccessAt: lastTelegramSuccessAt || null,
-      lastError: message,
-      updatedAt: Date.now(),
-    });
-    console.error(`PHASE7C_TELEGRAM_CONTROL_ERROR=${message}`);
+  if (ready) {
+    try {
+      await pollTelegram();
+      lastTelegramSuccessAt = Date.now();
+      await writeStatus({
+        ready,
+        status: "READY",
+        pid: process.pid,
+        mode: lastMode,
+        lastApiSuccessAt: lastApiSuccessAt || null,
+        lastTelegramSuccessAt,
+        updatedAt: lastTelegramSuccessAt,
+      });
+    } catch (error) {
+      const message = errorMessage(error);
+      await writeStatus({
+        ready,
+        status: "DEGRADED_RETRYING",
+        pid: process.pid,
+        mode: lastMode,
+        lastApiSuccessAt: lastApiSuccessAt || null,
+        lastTelegramSuccessAt: lastTelegramSuccessAt || null,
+        lastError: message,
+        updatedAt: Date.now(),
+      });
+      console.error(`PHASE7C_TELEGRAM_CONTROL_ERROR=${message}`);
+    }
   }
 
   await sleep(intervalMs);
@@ -126,14 +136,13 @@ async function pollTelegram() {
   const updates = Array.isArray(payload.result) ? payload.result : [];
 
   for (const update of updates) {
-    updateOffset = Math.max(updateOffset, Number(update.update_id ?? 0) + 1);
     if (update.callback_query) {
       await handleCallback(update.callback_query);
-      continue;
-    }
-    if (update.message) {
+    } else if (update.message) {
       await handleMessage(update.message);
     }
+    // A transient control-API failure must not consume the button press.
+    updateOffset = nextTelegramUpdateOffset(updateOffset, update.update_id);
   }
 }
 
@@ -309,18 +318,52 @@ async function telegramRequest(method, body) {
 }
 
 async function answerCallback(callbackQueryId, text) {
-  await telegramRequest("answerCallbackQuery", {
-    callback_query_id: callbackQueryId,
-    text,
-    show_alert: false,
+  try {
+    await telegramRequest("answerCallbackQuery", {
+      callback_query_id: callbackQueryId,
+      text,
+      show_alert: false,
+    });
+    lastTelegramSuccessAt = Date.now();
+  } catch (error) {
+    const message = errorMessage(error);
+    if (isExpiredTelegramCallbackError(error)) {
+      console.warn(`PHASE7C_TELEGRAM_CALLBACK_EXPIRED=${message}`);
+      return;
+    }
+    throw error;
+  }
+}
+
+async function discardPendingUpdates() {
+  const query = new URLSearchParams({
+    offset: "-1",
+    timeout: "0",
+    limit: "1",
+    allowed_updates: JSON.stringify(["message", "callback_query"]),
   });
-  lastTelegramSuccessAt = Date.now();
+  const payload = await telegramRequest(`getUpdates?${query.toString()}`);
+  const latest = Array.isArray(payload.result) ? payload.result.at(-1) : null;
+  if (latest) {
+    updateOffset = Number(latest.update_id ?? 0) + 1;
+    console.log(`PHASE7C_TELEGRAM_PENDING_DISCARDED_THROUGH=${updateOffset - 1}`);
+  }
+}
+
+async function loadUpdateOffset() {
+  try {
+    const parsed = JSON.parse(await readFile(statusFile, "utf8"));
+    return persistedTelegramUpdateOffset(parsed);
+  } catch {
+    return 0;
+  }
 }
 
 async function writeStatus(next) {
   const now = Date.now();
   const payload = {
-    version: 1,
+    version: 2,
+    updateOffset,
     ...next,
     updatedAt: next.updatedAt ?? now,
     updatedAtIso: new Date(next.updatedAt ?? now).toISOString(),

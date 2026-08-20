@@ -102,7 +102,7 @@ export function estimateVolumePoc(bars, lower, upper, binCount = 24) {
   return lower + (bestIndex + 0.5) * width;
 }
 
-export function buildSidewayPlan({ side, bid, ask, range, atr, poc, point, stopsLevelTicks = 0, digits = 2 }) {
+export function buildSidewayPlan({ side, bid, ask, range, atr, point, stopsLevelTicks = 0, digits = 2 }) {
   if (!range || (side !== "BUY" && side !== "SELL")) return { accepted: false, reason: "INVALID_INPUT" };
   const demandLow = Number(range.demand?.low);
   const demandHigh = Number(range.demand?.high);
@@ -125,13 +125,11 @@ export function buildSidewayPlan({ side, bid, ask, range, atr, poc, point, stops
   const finalTarget = side === "BUY" ? supplyLow : demandHigh;
   const finalDistance = side === "BUY" ? finalTarget - entry : entry - finalTarget;
   if (!(finalDistance > 0)) return { accepted: false, reason: "FINAL_TARGET_NOT_FAVORABLE" };
+  if (finalDistance <= 10 + 1e-9) {
+    return { accepted: false, reason: "FINAL_TARGET_BEFORE_PLUS_10", finalDistance };
+  }
 
-  const corridorMid = (demandHigh + supplyLow) / 2;
-  const pocNumber = Number(poc);
-  const pocFavorable = Number.isFinite(pocNumber) && (side === "BUY" ? pocNumber > entry && pocNumber < finalTarget : pocNumber < entry && pocNumber > finalTarget);
-  const tp1 = pocFavorable ? pocNumber : corridorMid;
-  const tp1Distance = side === "BUY" ? tp1 - entry : entry - tp1;
-  if (!(tp1Distance > 0)) return { accepted: false, reason: "TP1_NOT_FAVORABLE" };
+  const tp1 = side === "BUY" ? entry + 10 : entry - 10;
 
   const rewardRisk = finalDistance / stopDistance;
   if (rewardRisk < 1.2) {
@@ -146,7 +144,7 @@ export function buildSidewayPlan({ side, bid, ask, range, atr, poc, point, stops
     stopLoss: round(stopLoss, digits),
     stopDistance: round(stopDistance, Math.max(digits, 5)),
     tp1: round(tp1, digits),
-    tp1Kind: pocFavorable ? "VOLUME_POC" : "MID_RANGE_FALLBACK",
+    tp1Kind: "FIXED_PLUS_10",
     takeProfit: round(finalTarget, digits),
     rewardRisk: round(rewardRisk, 3),
     range: {
@@ -271,7 +269,7 @@ export function reconcileManagedBrokerState(managed, position, spec) {
       if (partialVolume > 0 && Math.abs(actualVolume - expectedAfterPartial) <= volumeTolerance) {
         next.partialApplied = true;
         next.expectedRemainingVolume = actualVolume;
-        events.push({ type: "TP1_PARTIAL_RECOVERED_FROM_BROKER_VOLUME", actualVolume, partialVolume });
+        events.push({ type: "PLUS10_PARTIAL_RECOVERED_FROM_BROKER_VOLUME", actualVolume, partialVolume });
       } else {
         return {
           accepted: false,

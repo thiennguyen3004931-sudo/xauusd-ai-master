@@ -319,6 +319,20 @@ Write-Host "PHASE7C_DEPENDENCY_WAIT_SECONDS=$DependencyWaitSeconds"
 Write-Host "PHASE7C_TELEGRAM_CONFIGURED=$TelegramConfigured"
 Write-Host "PHASE7C_TELEGRAM_MT5_ORDER_PERMISSION=NONE"
 
+function Start-TelegramModeChild {
+  $process = Start-Process -FilePath "powershell.exe" -ArgumentList ($common + $telegramModeArgs) -WorkingDirectory $ProjectRoot -RedirectStandardOutput $TelegramModeOut -RedirectStandardError $TelegramModeErr -PassThru
+  Set-Content -LiteralPath $TelegramModePidPath -Value $process.Id -Encoding ascii
+  Write-Host "PHASE7C_TELEGRAM_MODE_PID=$($process.Id)"
+  return $process
+}
+
+function Start-RegimeNotifierChild {
+  $process = Start-Process -FilePath "powershell.exe" -ArgumentList ($common + $regimeNotifierArgs) -WorkingDirectory $ProjectRoot -RedirectStandardOutput $RegimeNotifierOut -RedirectStandardError $RegimeNotifierErr -PassThru
+  Set-Content -LiteralPath $RegimeNotifierPidPath -Value $process.Id -Encoding ascii
+  Write-Host "PHASE7C_REGIME_NOTIFIER_PID=$($process.Id)"
+  return $process
+}
+
 $trend = $null
 $sideway = $null
 $telegramMode = $null
@@ -334,51 +348,59 @@ try {
   Set-Content -LiteralPath $SidewayPidPath -Value $sideway.Id -Encoding ascii
   Write-Host "PHASE7C_SIDEWAY_PID=$($sideway.Id)"
 
-  if ($Once -or -not $Armed) {
+  if ($Once) {
     $trend.WaitForExit()
     $sideway.WaitForExit()
     Assert-ShadowProcessSuccess $trend "TREND" $TrendOut $TrendErr "PHASE7B_DEMO_PREFLIGHT_STATUS=PASS"
     Assert-ShadowProcessSuccess $sideway "SIDEWAY" $SidewayOut $SidewayErr "PHASE7C_SIDEWAY_PREFLIGHT_STATUS=PASS"
-    Write-Host "PHASE7C_TELEGRAM_SHADOW=SKIPPED_ARMED_ONLY"
+    Write-Host "PHASE7C_TELEGRAM_ONCE=SKIPPED"
     Write-Host "PHASE7C_EXECUTOR_SHADOW_STATUS=PASS"
     return
   }
 
-  if ($TelegramConfigured) {
-    $telegramMode = Start-Process -FilePath "powershell.exe" -ArgumentList ($common + $telegramModeArgs) -WorkingDirectory $ProjectRoot -RedirectStandardOutput $TelegramModeOut -RedirectStandardError $TelegramModeErr -PassThru
-    Set-Content -LiteralPath $TelegramModePidPath -Value $telegramMode.Id -Encoding ascii
-    Write-Host "PHASE7C_TELEGRAM_MODE_PID=$($telegramMode.Id)"
-
-    $regimeNotifier = Start-Process -FilePath "powershell.exe" -ArgumentList ($common + $regimeNotifierArgs) -WorkingDirectory $ProjectRoot -RedirectStandardOutput $RegimeNotifierOut -RedirectStandardError $RegimeNotifierErr -PassThru
-    Set-Content -LiteralPath $RegimeNotifierPidPath -Value $regimeNotifier.Id -Encoding ascii
-    Write-Host "PHASE7C_REGIME_NOTIFIER_PID=$($regimeNotifier.Id)"
+  if (-not $Armed) {
+    $trend.WaitForExit()
+    $sideway.WaitForExit()
+    Assert-ShadowProcessSuccess $trend "TREND" $TrendOut $TrendErr "PHASE7B_DEMO_PREFLIGHT_STATUS=PASS"
+    Assert-ShadowProcessSuccess $sideway "SIDEWAY" $SidewayOut $SidewayErr "PHASE7C_SIDEWAY_PREFLIGHT_STATUS=PASS"
+    $trend = $null
+    $sideway = $null
+    Write-Host "PHASE7C_EXECUTOR_SHADOW_STATUS=PASS"
+    Write-Host "PHASE7C_EXECUTOR_UNARMED_SUPERVISOR=TELEGRAM_MODE_ONLY"
+  } else {
+    Start-Sleep -Seconds 3
+    $trend.Refresh()
+    $sideway.Refresh()
+    if ($trend.HasExited) { throw "Trend executor exited during startup with code $($trend.ExitCode). Check $TrendErr" }
+    if ($sideway.HasExited) { throw "Sideway executor exited during startup with code $($sideway.ExitCode). Check $SidewayErr" }
+    Write-Host "PHASE7C_EXECUTOR_ARMED_STATUS=RUNNING"
   }
 
-  Start-Sleep -Seconds 3
-  $trend.Refresh()
-  $sideway.Refresh()
-  if ($trend.HasExited) { throw "Trend executor exited during startup with code $($trend.ExitCode). Check $TrendErr" }
-  if ($sideway.HasExited) { throw "Sideway executor exited during startup with code $($sideway.ExitCode). Check $SidewayErr" }
-  Write-Host "PHASE7C_EXECUTOR_ARMED_STATUS=RUNNING"
-
   if ($TelegramConfigured) {
+    $telegramMode = Start-TelegramModeChild
+    if ($Armed) {
+      $regimeNotifier = Start-RegimeNotifierChild
+    }
+    Start-Sleep -Seconds 3
     $telegramMode.Refresh()
-    $regimeNotifier.Refresh()
     if ($telegramMode.HasExited) {
-      Write-Warning "Telegram mode controller exited during startup. Execution remains active. Check $TelegramModeErr"
+      Write-Warning "Telegram mode controller exited during startup. Supervisor will retry. Check $TelegramModeErr"
       Remove-Item -LiteralPath $TelegramModePidPath -Force -ErrorAction SilentlyContinue
       $telegramMode = $null
-      Write-Host "PHASE7C_TELEGRAM_MODE_STATUS=FAILED_NON_FATAL"
+      Write-Host "PHASE7C_TELEGRAM_MODE_STATUS=RESTART_PENDING"
     } else {
       Write-Host "PHASE7C_TELEGRAM_MODE_STATUS=RUNNING"
     }
-    if ($regimeNotifier.HasExited) {
-      Write-Warning "Regime notifier exited during startup. Execution remains active. Check $RegimeNotifierErr"
-      Remove-Item -LiteralPath $RegimeNotifierPidPath -Force -ErrorAction SilentlyContinue
-      $regimeNotifier = $null
-      Write-Host "PHASE7C_REGIME_NOTIFIER_STATUS=FAILED_NON_FATAL"
-    } else {
-      Write-Host "PHASE7C_REGIME_NOTIFIER_STATUS=RUNNING"
+    if ($null -ne $regimeNotifier) {
+      $regimeNotifier.Refresh()
+      if ($regimeNotifier.HasExited) {
+        Write-Warning "Regime notifier exited during startup. Supervisor will retry. Check $RegimeNotifierErr"
+        Remove-Item -LiteralPath $RegimeNotifierPidPath -Force -ErrorAction SilentlyContinue
+        $regimeNotifier = $null
+        Write-Host "PHASE7C_REGIME_NOTIFIER_STATUS=RESTART_PENDING"
+      } else {
+        Write-Host "PHASE7C_REGIME_NOTIFIER_STATUS=RUNNING"
+      }
     }
   } else {
     Write-Host "PHASE7C_TELEGRAM_STATUS=NOT_CONFIGURED_OR_DISABLED"
@@ -386,27 +408,45 @@ try {
 
   while ($true) {
     Start-Sleep -Seconds 2
-    $trend.Refresh()
-    $sideway.Refresh()
-    if ($trend.HasExited) { throw "Trend executor stopped unexpectedly with code $($trend.ExitCode)." }
-    if ($sideway.HasExited) { throw "Sideway executor stopped unexpectedly with code $($sideway.ExitCode)." }
+    if ($null -ne $trend) {
+      $trend.Refresh()
+      if ($trend.HasExited) { throw "Trend executor stopped unexpectedly with code $($trend.ExitCode)." }
+    }
+    if ($null -ne $sideway) {
+      $sideway.Refresh()
+      if ($sideway.HasExited) { throw "Sideway executor stopped unexpectedly with code $($sideway.ExitCode)." }
+    }
 
     if ($null -ne $telegramMode) {
       $telegramMode.Refresh()
       if ($telegramMode.HasExited) {
-        Write-Warning "Telegram mode controller stopped unexpectedly. Execution remains active. Check $TelegramModeErr"
+        Write-Warning "Telegram mode controller stopped unexpectedly. Supervisor will restart it. Check $TelegramModeErr"
         Remove-Item -LiteralPath $TelegramModePidPath -Force -ErrorAction SilentlyContinue
         $telegramMode = $null
-        Write-Host "PHASE7C_TELEGRAM_MODE_STATUS=STOPPED_NON_FATAL"
+        Write-Host "PHASE7C_TELEGRAM_MODE_STATUS=RESTART_PENDING"
+      }
+    } elseif ($TelegramConfigured) {
+      try {
+        $telegramMode = Start-TelegramModeChild
+        Write-Host "PHASE7C_TELEGRAM_MODE_STATUS=RESTARTED"
+      } catch {
+        Write-Warning "Telegram mode controller restart failed: $($_.Exception.Message)"
       }
     }
     if ($null -ne $regimeNotifier) {
       $regimeNotifier.Refresh()
       if ($regimeNotifier.HasExited) {
-        Write-Warning "Regime notifier stopped unexpectedly. Execution remains active. Check $RegimeNotifierErr"
+        Write-Warning "Regime notifier stopped unexpectedly. Supervisor will restart it. Check $RegimeNotifierErr"
         Remove-Item -LiteralPath $RegimeNotifierPidPath -Force -ErrorAction SilentlyContinue
         $regimeNotifier = $null
-        Write-Host "PHASE7C_REGIME_NOTIFIER_STATUS=STOPPED_NON_FATAL"
+        Write-Host "PHASE7C_REGIME_NOTIFIER_STATUS=RESTART_PENDING"
+      }
+    } elseif ($TelegramConfigured -and $Armed) {
+      try {
+        $regimeNotifier = Start-RegimeNotifierChild
+        Write-Host "PHASE7C_REGIME_NOTIFIER_STATUS=RESTARTED"
+      } catch {
+        Write-Warning "Regime notifier restart failed: $($_.Exception.Message)"
       }
     }
   }

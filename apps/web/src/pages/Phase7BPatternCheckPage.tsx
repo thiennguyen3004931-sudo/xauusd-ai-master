@@ -35,6 +35,9 @@ type EntryDiagnostics = {
     m5TrendlineDistance?: number | null;
     m15TrendlineReaction?: boolean;
     m5TrendlineReaction?: boolean;
+    confidenceSide?: Side | null;
+    confidenceM5Supertrend?: Side | null;
+    confidenceScore?: number | null;
     confidenceLevel?: Confidence;
   };
   fvg: { sameDirectionConfirmed: boolean; requiredForEntry: false };
@@ -42,7 +45,9 @@ type EntryDiagnostics = {
     eligible: boolean;
     side: Side | null;
     referenceEntry: number;
+    structuralStopDistance: number | null;
     stopDistance: number | null;
+    action: "WAIT_SIGNAL" | "ENTRY_IMMEDIATE" | "WAIT_PULLBACK";
     reason: string;
   };
 };
@@ -149,10 +154,12 @@ export function Phase7BPatternCheckPage() {
   const wanted = d.pattern.side;
   const m15Pass = Boolean(wanted && d.trend.m15Supertrend === wanted);
   const m5Pass = Boolean(wanted && d.trend.m5Supertrend === wanted);
-  const stopPass = d.entry.stopDistance !== null && d.entry.stopDistance >= 6 && d.entry.stopDistance <= 10;
+  const immediateEntry = d.entry.action === "ENTRY_IMMEDIATE" && d.entry.eligible;
+  const waitPullback = d.entry.action === "WAIT_PULLBACK";
+  const stopPass = immediateEntry || waitPullback;
   const quote = query.data.mt5?.quote;
   const mid = quote?.bid !== undefined && quote?.ask !== undefined ? (Number(quote.bid) + Number(quote.ask)) / 2 : null;
-  const confidence = d.trend.confidenceLevel ?? (d.entry.eligible ? "TIÊU_CHUẨN" : "CHƯA_ĐÁNH_GIÁ");
+  const confidence = d.trend.confidenceLevel ?? "CHƯA_ĐÁNH_GIÁ";
 
   const reasons = [
     {
@@ -175,9 +182,11 @@ export function Phase7BPatternCheckPage() {
     },
     {
       ok: stopPass,
-      text: stopPass
-        ? `Khoảng dừng lỗ hợp lệ: ${d.entry.stopDistance?.toFixed(2)} giá.`
-        : "Chưa xác định được khoảng dừng lỗ hợp lệ trong vùng 6–10 giá.",
+      text: waitPullback
+        ? `SL cấu trúc ${d.entry.structuralStopDistance?.toFixed(2)} giá vượt 10: setup hợp lệ nhưng phải chờ giá hồi trong cửa sổ M15 kế tiếp.`
+        : immediateEntry
+          ? `SL vận hành ${d.entry.stopDistance?.toFixed(2)} giá (SL cấu trúc ${d.entry.structuralStopDistance?.toFixed(2)}; tối thiểu 6, tối đa 10).`
+          : "Chưa xác định được SL cấu trúc hợp lệ.",
     },
   ];
 
@@ -190,8 +199,8 @@ export function Phase7BPatternCheckPage() {
           <Typography variant="body2" color="text.secondary" mt={0.5}>Chỉ đánh giá dữ liệu nến M15/M5 đã đóng. Flip age chỉ để tham khảo, không chặn lệnh.</Typography>
         </Box>
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          <Chip label={d.entry.eligible ? `${tenHuong(d.entry.side)} · ĐỦ ĐIỀU KIỆN` : "CHƯA ĐỦ ĐIỀU KIỆN"} color={d.entry.eligible ? "success" : "default"} sx={{ fontWeight: 900 }} />
-          <Chip label={`ĐỘ TIN CẬY: ${tenDoTinCay(confidence)}`} color={confidence === "RẤT_CAO" || confidence === "CAO" ? "success" : "default"} variant="outlined" sx={{ fontWeight: 900 }} />
+          <Chip label={immediateEntry ? `${tenHuong(d.entry.side)} · VÀO NGAY` : waitPullback ? `${tenHuong(d.entry.side)} · CHỜ HỒI` : "CHỜ TÍN HIỆU"} color={immediateEntry ? "success" : waitPullback ? "warning" : "default"} sx={{ fontWeight: 900 }} />
+          <Chip label={`ĐỘ TIN CẬY ${d.trend.confidenceScore ?? "—"}/100 · ${tenDoTinCay(confidence)}`} color={confidence === "RẤT_CAO" || confidence === "CAO" ? "success" : "default"} variant="outlined" sx={{ fontWeight: 900 }} />
         </Stack>
       </Stack>
 
@@ -213,10 +222,10 @@ export function Phase7BPatternCheckPage() {
           </CardContent></Card>
         </Grid>
         <Grid size={{ xs: 12, md: 4 }}>
-          <Card variant="outlined" sx={{ borderColor: d.entry.eligible ? "success.main" : undefined }}><CardContent>
+          <Card variant="outlined" sx={{ borderColor: immediateEntry ? "success.main" : waitPullback ? "warning.main" : undefined }}><CardContent>
             <Typography variant="caption" color="text.secondary" fontWeight={900}>DỰ KIẾN VÀO LỆNH</Typography>
-            <Typography variant="h6" fontWeight={950}>{d.entry.eligible ? `${tenHuong(d.entry.side)} · SẴN SÀNG` : "CHỜ TÍN HIỆU"}</Typography>
-            <Typography variant="body2" color="text.secondary" mt={0.5}>Giá tham chiếu {price(d.entry.referenceEntry)} · SL {d.entry.stopDistance === null ? "—" : `${d.entry.stopDistance.toFixed(2)} giá`}</Typography>
+            <Typography variant="h6" fontWeight={950}>{immediateEntry ? `${tenHuong(d.entry.side)} · SẴN SÀNG` : waitPullback ? `${tenHuong(d.entry.side)} · CHỜ HỒI` : "CHỜ TÍN HIỆU"}</Typography>
+            <Typography variant="body2" color="text.secondary" mt={0.5}>{waitPullback ? `Giá tín hiệu ${price(d.entry.referenceEntry)} · SL cấu trúc ${fmtDistance(d.entry.structuralStopDistance)}` : `Giá tham chiếu ${price(d.entry.referenceEntry)} · SL vận hành ${fmtDistance(d.entry.stopDistance)}`}</Typography>
           </CardContent></Card>
         </Grid>
       </Grid>
@@ -232,7 +241,7 @@ export function Phase7BPatternCheckPage() {
           <GateCard label="3 · SUPERTREND M5" value={tenHuong(d.trend.m5Supertrend)} status={wanted ? (m5Pass ? "ĐẠT" : "CHỜ") : "THÔNG TIN"} detail={d.trend.m5FlipAgeBars === null ? "Flip age: chưa xác định · chỉ tham khảo" : `Flip age ${d.trend.m5FlipAgeBars} nến · chỉ tham khảo, không chặn lệnh`} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <GateCard label="4 · DỪNG LỖ" value={d.entry.stopDistance === null ? "—" : `${d.entry.stopDistance.toFixed(2)} giá`} status={stopPass ? "ĐẠT" : "CHỜ"} detail="Khoảng SL vận hành: 6–10 giá" />
+          <GateCard label="4 · DỪNG LỖ" value={waitPullback ? `${fmtDistance(d.entry.structuralStopDistance)} · CHỜ HỒI` : fmtDistance(d.entry.stopDistance)} status={immediateEntry ? "ĐẠT" : "CHỜ"} detail={waitPullback ? "Vượt 10: không vào đuổi; chờ hồi trong M15 kế tiếp" : "SL cấu trúc, vận hành tối thiểu 6 và tối đa 10 giá"} />
         </Grid>
       </Grid>
 
@@ -240,8 +249,8 @@ export function Phase7BPatternCheckPage() {
         <CardContent>
           <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1}>
             <Box>
-              <Typography variant="h6" fontWeight={900}>Độ tin cậy: MA20/MA50 + phản ứng gần đường Supertrend</Typography>
-              <Typography variant="body2" color="text.secondary" mt={0.5}>MA20/50 chỉ xác nhận độ tin cậy, không chặn entry. Sau +10 chốt 1/3, runner dời SL theo cấu trúc M15; MA50 xác nhận giữ/chốt runner. MA200 chỉ xác nhận xu hướng khung lớn, không phải entry/exit gate.</Typography>
+              <Typography variant="h6" fontWeight={900}>Độ tin cậy liên tục: {d.trend.confidenceScore ?? "—"}/100 · hướng {tenHuong(d.trend.confidenceSide)}</Typography>
+              <Typography variant="body2" color="text.secondary" mt={0.5}>Điểm được cập nhật cả khi chưa có mô hình entry: ST M15 20, ST M5 20, MA20/50 20, MA200 10, phản ứng gần ST M15/M5 mỗi khung 10 và FVG cùng hướng 10. Điểm chỉ diễn giải chất lượng, không thay thế 4 gate vào lệnh.</Typography>
             </Box>
             <Chip label={tenDoTinCay(confidence)} color={confidence === "RẤT_CAO" || confidence === "CAO" ? "success" : "default"} variant="outlined" />
           </Stack>
@@ -251,7 +260,7 @@ export function Phase7BPatternCheckPage() {
               <Typography variant="caption" color="text.secondary">Đường ST {price(d.trend.m15SupertrendLine ?? null)} · khoảng cách {fmtDistance(d.trend.m15TrendlineDistance)}</Typography>
             </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
-              <Typography variant="body2" fontWeight={800}>M5: {d.trend.m5TrendlineReaction ? "✓ Có phản ứng gần đường Supertrend" : "Không có phản ứng gần rõ ràng"}</Typography>
+              <Typography variant="body2" fontWeight={800}>M5 live ({tenHuong(d.trend.confidenceM5Supertrend)}): {d.trend.m5TrendlineReaction ? "✓ Có phản ứng gần đường Supertrend" : "Không có phản ứng gần rõ ràng"}</Typography>
               <Typography variant="caption" color="text.secondary">Đường ST {price(d.trend.m5SupertrendLine ?? null)} · khoảng cách {fmtDistance(d.trend.m5TrendlineDistance)}</Typography>
             </Grid>
           </Grid>
@@ -261,8 +270,8 @@ export function Phase7BPatternCheckPage() {
       <Card variant="outlined">
         <CardContent>
           <Stack direction="row" justifyContent="space-between" gap={1} alignItems="center">
-            <Typography variant="h6" fontWeight={900}>{d.entry.eligible ? "Vì sao hệ thống được phép vào lệnh?" : "Vì sao hệ thống chưa vào lệnh?"}</Typography>
-            <Chip label={d.entry.eligible ? "ĐỦ 4 ĐIỀU KIỆN" : `${reasons.filter((item) => !item.ok).length} ĐIỀU KIỆN CHƯA ĐẠT`} color={d.entry.eligible ? "success" : "warning"} variant="outlined" />
+            <Typography variant="h6" fontWeight={900}>{immediateEntry ? "Vì sao hệ thống được phép vào lệnh?" : waitPullback ? "Vì sao hệ thống đang chờ hồi?" : "Vì sao hệ thống chưa vào lệnh?"}</Typography>
+            <Chip label={immediateEntry ? "ĐỦ 4 ĐIỀU KIỆN" : waitPullback ? "SETUP ĐẠT · SL > 10" : `${reasons.filter((item) => !item.ok).length} ĐIỀU KIỆN CHƯA ĐẠT`} color={immediateEntry ? "success" : "warning"} variant="outlined" />
           </Stack>
           <Stack spacing={1.1} mt={2}>
             {reasons.map((item, index) => (
@@ -286,12 +295,14 @@ export function Phase7BPatternCheckPage() {
         </CardContent>
       </Card>
 
-      <Alert severity={d.entry.eligible ? "success" : "info"}>
-        {d.entry.eligible
+      <Alert severity={immediateEntry ? "success" : waitPullback ? "warning" : "info"}>
+        {immediateEntry
           ? `KẾT LUẬN: Có thể vào ${tenHuong(d.entry.side)} vì mô hình nến, Supertrend M15, Supertrend M5 và khoảng SL đều đạt. Độ tin cậy hiện tại: ${tenDoTinCay(confidence)}.`
-          : "KẾT LUẬN: Chưa gửi lệnh. Bot tiếp tục chờ đến khi 4 điều kiện bắt buộc cùng đạt trên dữ liệu nến đã đóng."}
+          : waitPullback
+            ? `KẾT LUẬN: Không vào đuổi. Bot chờ giá hồi để SL cấu trúc còn tối đa 10 giá trong cửa sổ M15 kế tiếp; setup hết hạn hoặc mất đồng thuận M15/M5 thì hủy.`
+            : "KẾT LUẬN: Chưa gửi lệnh. Bot tiếp tục chờ đến khi 4 điều kiện bắt buộc cùng đạt trên dữ liệu nến đã đóng."}
       </Alert>
-      <Alert severity="info">Quản lý sau khi khớp: +6 giá → dời SL về hòa vốn · +10 giá → chốt 1/3 · phần còn lại tiếp tục runner. MA200 chỉ xác nhận xu hướng khung lớn, không trực tiếp chốt runner; sau +10 chốt 1/3, runner chỉ chốt khi nến M15 đóng phá MA50 ngược hướng. H1/H4, FVG và phản ứng trendline là bối cảnh, không phải TP cứng.</Alert>
+      <Alert severity="info">Trend NORMAL: +6 → BE, +10 → chốt 1/3; runner siết SL theo cấu trúc M15 và đóng khi M15 phá MA50 ngược hướng hoặc có FVG ngược hướng kèm nến từ chối. Sideway NORMAL: +6 → BE, +10 → chốt 1/3, phần còn lại chốt ở biên đối diện vùng giá. RECOVERY_TP dùng TP full-position thích ứng 6–10 giá, không tăng lot.</Alert>
     </Stack>
   );
 }

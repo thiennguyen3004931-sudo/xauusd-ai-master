@@ -46,24 +46,28 @@ const plans = [
     "API_CLOCK_INFERENCE_CALL",
     `        entryDiagnostics = await getEntryDiagnostics();`,
     `        const brokerClockOffsetMs = inferBrokerClockOffset(\n          telemetry.quote?.timestamp,\n          telemetry.health?.timestamp ?? telemetry.checkedAt,\n        );\n        if (brokerClockOffsetMs === null) {\n          throw new Error("Broker clock offset is not a plausible whole-hour offset.");\n        }\n        entryDiagnostics = await getEntryDiagnostics(brokerClockOffsetMs);`,
+    `entryDiagnostics = await getEntryDiagnostics(brokerClockOffsetMs, telemetry.quote);`,
   ),
   patch(
     files.api,
     "API_DIAGNOSTICS_SIGNATURE",
     `async function getEntryDiagnostics(): Promise<EntryDiagnostics> {`,
     `async function getEntryDiagnostics(brokerClockOffsetMs: number): Promise<EntryDiagnostics> {`,
+    `async function getEntryDiagnostics(\n  brokerClockOffsetMs: number,\n  quote: { bid: number; ask: number } | null | undefined,\n): Promise<EntryDiagnostics> {`,
   ),
   patch(
     files.api,
     "API_DIAGNOSTICS_BUILD_CALL",
     `    return buildEntryDiagnostics(m15Bars, m5Bars);`,
     `    return buildEntryDiagnostics(m15Bars, m5Bars, brokerClockOffsetMs);`,
+    `    return buildEntryDiagnostics(m15Bars, m5Bars, brokerClockOffsetMs, quote);`,
   ),
   patch(
     files.api,
     "API_BUILD_SIGNATURE",
     `function buildEntryDiagnostics(bars: M15Bar[], m5Bars: M15Bar[]): EntryDiagnostics {`,
     `function buildEntryDiagnostics(bars: M15Bar[], m5Bars: M15Bar[], brokerClockOffsetMs: number): EntryDiagnostics {`,
+    `function buildEntryDiagnostics(\n  bars: M15Bar[],\n  m5Bars: M15Bar[],\n  brokerClockOffsetMs: number,\n  quote: { bid: number; ask: number } | null | undefined,\n): EntryDiagnostics {`,
   ),
   patch(
     files.api,
@@ -141,9 +145,11 @@ console.log("PHASE7B_PATTERN_UI_CLOCK_APPLY=PASS");
 console.log("PHASE7B_PATTERN_UI_CLOCK_LINE_ENDINGS=PRESERVED");
 console.log("PHASE7B_PATTERN_UI_CLOCK_EXECUTION_MUTATION=False");
 
-function patch(file, name, before, after) {
+function patch(file, name, before, after, acceptedAfter = null) {
   const source = normalized.get(file);
-  if (source.includes(after)) return { file, name, before, after, changed: false };
+  if (source.includes(after) || (acceptedAfter && source.includes(acceptedAfter))) {
+    return { file, name, before, after, changed: false };
+  }
   const count = source.split(before).length - 1;
   if (count !== 1) {
     throw new Error(`${name}: expected exactly one source anchor, found ${count}. Refusing to modify ${file}`);
