@@ -22,6 +22,7 @@ on:
       - "scripts/phase7c-lot-settings.test.mjs"
       - "scripts/phase7c-decision-audit*.mjs"
       - "scripts/phase7c-decision-monitor.test.mjs"
+      - "scripts/phase7c-web-autostart-contract.test.mjs"
       - "scripts/install-phase7c-mt5-decision-panel-local.ps1"
       - "scripts/install-phase7c-desktop-control-local.ps1"
       - "scripts/open-phase7c-control-center-local.ps1"
@@ -60,6 +61,7 @@ on:
       - "scripts/phase7c-lot-settings.test.mjs"
       - "scripts/phase7c-decision-audit*.mjs"
       - "scripts/phase7c-decision-monitor.test.mjs"
+      - "scripts/phase7c-web-autostart-contract.test.mjs"
       - "scripts/install-phase7c-mt5-decision-panel-local.ps1"
       - "scripts/install-phase7c-desktop-control-local.ps1"
       - "scripts/open-phase7c-control-center-local.ps1"
@@ -139,6 +141,7 @@ jobs:
           node --test scripts/phase7c-lot-settings.test.mjs
           node --test scripts/phase7c-decision-audit.test.mjs
           node --import ./apps/api/node_modules/tsx/dist/loader.mjs --test scripts/phase7c-decision-monitor.test.mjs
+          node --test scripts/phase7c-web-autostart-contract.test.mjs
 
       - name: Build Phase7C web
         run: pnpm --filter @xauusd/web... build

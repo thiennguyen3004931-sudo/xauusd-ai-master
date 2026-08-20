@@ -354,15 +354,23 @@ $lotSettings = $null
 $mode = $null
 $decision = $null
 $uiReady = $false
+$webSelfTestStep = "scheduled-task-start"
+$webSelfTestError = "No successful API/UI probe completed."
 $sidewayRiskParam = $SidewayRiskPercent.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 $sidewayMaxLotParam = $SidewayMaxLot.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 while ((Get-Date) -lt $webDeadline) {
   try {
+    $webSelfTestStep = "phase7b-demo"
     $demoProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7b-demo" -Method Get -TimeoutSec 4
+    $webSelfTestStep = "account-risk"
     $riskProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7c/account-risk?riskPercent=$sidewayRiskParam&maxLot=$sidewayMaxLotParam" -Method Get -TimeoutSec 4
+    $webSelfTestStep = "lot-settings"
     $lotProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7c/lot-settings" -Method Get -TimeoutSec 4
+    $webSelfTestStep = "bot-mode"
     $modeProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 4
+    $webSelfTestStep = "decision-monitor"
     $decisionProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7c/decision-monitor?symbol=XAUUSD" -Method Get -TimeoutSec 8
+    $webSelfTestStep = "web-ui"
     $uiProbe = Invoke-WebRequest -Uri "$webUrl/" -Method Get -UseBasicParsing -TimeoutSec 4
     if (
       $demoProbe -and
@@ -382,12 +390,16 @@ while ((Get-Date) -lt $webDeadline) {
       $uiReady = $true
       break
     }
-  } catch {}
+    $webSelfTestError = "Probe response did not satisfy the Phase 7C safety contract."
+  } catch {
+    $webSelfTestError = $_.Exception.Message
+  }
   Start-Sleep -Seconds 2
 }
 
 if ($null -eq $demo -or $null -eq $risk -or $null -eq $lotSettings -or $null -eq $mode -or $null -eq $decision -or -not $uiReady) {
-  throw "Phase 7C API/UI self-test failed after restart. Check the Web/API scheduled task and its logs."
+  $webLogDir = Join-Path $WorkDir "phase7b-web"
+  throw "Phase 7C API/UI self-test failed after restart. STEP=$webSelfTestStep DETAIL=$webSelfTestError LOGS=$webLogDir"
 }
 if ($risk.safety.executionMutation -ne $false -or $risk.safety.phase7bFixedVolumeUnchanged -ne $true) {
   throw "Phase 7C Auto Lot safety assertion failed."
