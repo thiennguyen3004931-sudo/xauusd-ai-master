@@ -168,6 +168,8 @@ $apiBase = $ControlApiUrl.TrimEnd('/')
 $mode = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 5
 $lotSettings = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/lot-settings" -Method Get -TimeoutSec 5
 $regime = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/live-regime?symbol=XAUUSD&count=320" -Method Get -TimeoutSec 10
+$decision = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/decision-monitor?symbol=XAUUSD" -Method Get -TimeoutSec 10
+$mt5PanelPayload = Invoke-WebRequest -Uri "$apiBase/api/v1/phase7c/decision-monitor/mt5?symbol=XAUUSD" -UseBasicParsing -TimeoutSec 10
 $verifyRiskPercent = ([double]$lotSettings.state.sidewayRiskPercent).ToString([System.Globalization.CultureInfo]::InvariantCulture)
 $verifyMaxLot = ([double]$lotSettings.state.sidewayMaxLot).ToString([System.Globalization.CultureInfo]::InvariantCulture)
 $autoLot = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/auto-lot-preview?stopDistance=5&riskPercent=$verifyRiskPercent&maxLot=$verifyMaxLot" -Method Get -TimeoutSec 10
@@ -183,6 +185,16 @@ Write-Host "PHASE7C_VERIFY_REGIME_CONFIDENCE=$($regime.confidence)"
 Write-Host "PHASE7C_VERIFY_HAS_SUPPLY_DEMAND_RANGE=$($null -ne $regime.supplyDemandRange)"
 Write-Host "PHASE7C_VERIFY_AUTO_LOT_APPROVED=$($autoLot.preview.approved)"
 Write-Host "PHASE7C_VERIFY_AUTO_LOT_RECOMMENDED=$($autoLot.preview.recommendedLot)"
+Write-Host "PHASE7C_VERIFY_DECISION_STRATEGY=$($decision.preTrade.strategy)"
+Write-Host "PHASE7C_VERIFY_DECISION_STAGE=$($decision.preTrade.stage)"
+Write-Host "PHASE7C_VERIFY_DECISION_FINAL_LOT=$($decision.preTrade.finalLot)"
+Write-Host "PHASE7C_VERIFY_MT5_PANEL_ORDER_PERMISSION=$($decision.safety.mt5PanelOrderPermission)"
+if ($decision.source -ne "PHASE7C_CANONICAL_DECISION_OBSERVABILITY") {
+  throw "Phase 7C decision monitor source is invalid."
+}
+if ($decision.safety.mt5PanelOrderPermission -ne "NONE" -or $mt5PanelPayload.Content -notmatch '(?m)^mt5OrderPermission=NONE\r?$') {
+  throw "Phase 7C MT5 decision panel read-only safety marker is missing."
+}
 if ($pidStatuses["supervisor"].alive -and $lotSettings.restartRequired) {
   throw "Supervisor is alive but its active lot settings do not match the saved configuration. PAUSE and reactivate Phase 7C."
 }

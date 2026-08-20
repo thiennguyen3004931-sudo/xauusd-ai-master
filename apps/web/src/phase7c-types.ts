@@ -176,7 +176,15 @@ export interface Phase7CAccountRiskSnapshot {
     riskPercent: number;
     maxLot: number;
     currentFixedVolume: number;
+    configuredTrendFixedLot: number;
+    activeTrendFixedLot: number | null;
+    configuredSidewayRiskPercent: number;
+    configuredSidewayMaxLot: number;
+    lotSettingsRestartRequired: boolean;
     targetRiskUsd: number;
+    managementCompatibility: "EXACT_ONE_THIRD_PARTIAL_ONLY";
+    previewOrderPermission: "NONE";
+    sidewayExecutionOwner: "SIDEWAY_EXECUTOR_FINAL_GATE";
   };
   rows: Array<{
     stopDistance: number;
@@ -386,5 +394,104 @@ export interface Phase7CLotSettingsSnapshot {
     managedLotIncrement: number;
     minRiskPercent: number;
     maxRiskPercent: number;
+  };
+}
+
+export interface Phase7CDecisionAuditRow {
+  timestamp: number;
+  timestampIso?: string;
+  strategy: "TREND" | "SIDEWAY";
+  event: string;
+  stage: string;
+  reason: string;
+  setup?: {
+    side?: string | null;
+    pattern?: string | null;
+  };
+  sizing?: {
+    rawLot?: number | null;
+    finalLot?: number | null;
+    maxLot?: number | null;
+    riskPercent?: number | null;
+    estimatedRiskUsd?: number | null;
+    estimatedRiskPercent?: number | null;
+    limitReason?: string | null;
+  };
+  plan?: {
+    entry?: number | null;
+    stopLoss?: number | null;
+    stopDistance?: number | null;
+    tp1?: number | null;
+    tp2?: number | null;
+  };
+}
+
+export interface Phase7CDecisionMonitorSnapshot {
+  version: 1;
+  source: "PHASE7C_CANONICAL_DECISION_OBSERVABILITY";
+  generatedAt: number;
+  symbol: string;
+  engine: {
+    source: "MarketRegimeClassifier";
+    timeframe: string;
+    regime: string;
+    confidence: number;
+    recommendedMode: "TREND" | "SIDEWAY" | "PAUSE";
+    reasons: string[];
+    checkedAt: number;
+    lastCandleCloseTime: number;
+  };
+  mode: {
+    active: Phase7CBotExecutionMode;
+    effectiveStrategy: "TREND" | "SIDEWAY" | "PAUSE";
+    matchesRecommendation: boolean;
+  };
+  account: {
+    reachable: boolean;
+    accountMode: string | null;
+    server: string | null;
+    currency: string | null;
+    balance: number | null;
+    equity: number | null;
+    openXauusdPositions: number;
+  };
+  lotSettings: Phase7CLotSettingsSnapshot;
+  preTrade: {
+    strategy: "TREND" | "SIDEWAY" | "PAUSE";
+    stage: string;
+    approved: boolean;
+    side: string | null;
+    setup: string | null;
+    confidenceScore: number | null;
+    confidenceLabel: string | null;
+    entry: number | null;
+    stopLoss: number | null;
+    stopDistance: number | null;
+    breakEvenPrice: number | null;
+    breakEvenTriggerDistance: number;
+    tp1: number | null;
+    tp2: number | null;
+    partialTriggerDistance: number;
+    partialFraction: "1/3";
+    rawLot: number | null;
+    finalLot: number | null;
+    lotCap: number | null;
+    riskTargetPercent: number | null;
+    estimatedRiskUsd: number | null;
+    estimatedRiskPercent: number | null;
+    limitReason: string;
+    decisionReason: string;
+    source: string;
+    updatedAt: number;
+  };
+  recentDecisions: Phase7CDecisionAuditRow[];
+  safety: {
+    readOnlyEndpoint: true;
+    demoOnly: true;
+    mt5PanelOrderPermission: "NONE";
+    newPositionsOnly: true;
+    existingPositionMutation: false;
+    martingale: false;
+    recoveryLotEscalation: false;
   };
 }

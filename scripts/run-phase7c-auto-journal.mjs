@@ -84,6 +84,8 @@ function normalizeSnapshot(modePayload, regime, now) {
     regime: String(regime?.regime ?? "UNCERTAIN").toUpperCase(),
     recommendedMode,
     confidence: finiteNumber(regime?.confidence),
+    engineReasons: Array.isArray(regime?.reasons) ? regime.reasons.map(String) : [],
+    engineSource: "MarketRegimeClassifier",
     modeMatchesRecommendation: activeMode === recommendedMode,
     lastCandleCloseTime: finiteNumber(regime?.lastCandleCloseTime),
     metrics: regime?.metrics ?? null,

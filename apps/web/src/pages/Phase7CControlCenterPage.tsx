@@ -9,12 +9,20 @@ import {
   CardContent,
   Chip,
   Grid,
+  LinearProgress,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   TextField,
   Typography,
 } from "@mui/material";
 import {
   getPhase7CAccountRisk,
+  getPhase7CDecisionMonitor,
   getPhase7CDailyRecovery,
   getPhase7CLiveRegime,
   getPhase7CLotSettings,
@@ -78,6 +86,13 @@ export function Phase7CControlCenterPage() {
   const liveRegime = useQuery({
     queryKey: ["phase7c-live-regime-control-center"],
     queryFn: getPhase7CLiveRegime,
+    refetchInterval: 5000,
+    retry: false,
+  });
+
+  const decisionMonitor = useQuery({
+    queryKey: ["phase7c-decision-monitor"],
+    queryFn: getPhase7CDecisionMonitor,
     refetchInterval: 5000,
     retry: false,
   });
@@ -400,6 +415,161 @@ export function Phase7CControlCenterPage() {
                 {" · "}
                 Lot escalation OFF · New positions only.
               </Typography>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <Stack
+            direction={{ xs: "column", md: "row" }}
+            justifyContent="space-between"
+            gap={2}
+          >
+            <Box>
+              <Typography fontWeight={900}>Quyết định trước lệnh · nguồn canonical</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Cùng snapshot được hiển thị trên Web và panel EA MT5. Panel chỉ đọc, quyền đặt lệnh = NONE.
+              </Typography>
+            </Box>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Chip
+                variant="outlined"
+                label={decisionMonitor.data?.mode.effectiveStrategy ?? "ĐANG ĐỌC"}
+              />
+              <Chip
+                color={decisionMonitor.data?.preTrade.approved ? "success" : "warning"}
+                label={decisionMonitor.data?.preTrade.stage ?? "ĐANG ĐỌC"}
+              />
+              <Chip variant="outlined" label="MT5 READ-ONLY" />
+            </Stack>
+          </Stack>
+
+          {decisionMonitor.error ? (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              Không đọc được decision monitor: {decisionMonitor.error instanceof Error
+                ? decisionMonitor.error.message
+                : String(decisionMonitor.error)}
+            </Alert>
+          ) : !decisionMonitor.data ? (
+            <LinearProgress sx={{ mt: 2 }} />
+          ) : (
+            <>
+              {(() => {
+                const decision = decisionMonitor.data;
+                const p = decision.preTrade;
+                return (
+                  <>
+                    <Grid container spacing={2} sx={{ mt: 0.5 }}>
+                      <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
+                        <MetricCard
+                          label="Lot tính toán → cuối"
+                          value={p.finalLot === null ? "CHƯA TÍNH" : `${p.finalLot.toFixed(2)} lot`}
+                          detail={`Raw ${p.rawLot === null ? "—" : p.rawLot.toFixed(4)} · cap ${p.lotCap === null ? "—" : p.lotCap.toFixed(2)}`}
+                          tone={p.approved ? "success.main" : "warning.main"}
+                        />
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
+                        <MetricCard
+                          label="SL trước lệnh"
+                          value={p.stopDistance === null ? "CHƯA CÓ SETUP" : `${p.stopDistance.toFixed(2)} giá`}
+                          detail={`Entry ${p.entry === null ? "—" : p.entry.toFixed(2)} · SL ${p.stopLoss === null ? "—" : p.stopLoss.toFixed(2)}`}
+                        />
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
+                        <MetricCard
+                          label="Rủi ro ước tính"
+                          value={money(p.estimatedRiskUsd, decision.account.currency ?? "USD")}
+                          detail={`${p.estimatedRiskPercent === null ? "—" : p.estimatedRiskPercent.toFixed(3)}% balance · target ${p.riskTargetPercent === null ? "fixed lot" : `${p.riskTargetPercent.toFixed(2)}%`}`}
+                        />
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
+                        <MetricCard
+                          label="Setup / Confidence"
+                          value={`${p.side ?? "—"} · ${p.setup ?? "WAIT"}`}
+                          detail={`${p.confidenceLabel ?? "ENGINE"} · ${p.confidenceScore === null ? decision.engine.confidence : p.confidenceScore}`}
+                        />
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6, xl: 4 }}>
+                        <MetricCard
+                          label="Break-even"
+                          value={`+${p.breakEvenTriggerDistance.toFixed(0)} giá`}
+                          detail={`Dời SL về ${p.breakEvenPrice === null ? "entry khi có lệnh" : p.breakEvenPrice.toFixed(2)}`}
+                        />
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6, xl: 4 }}>
+                        <MetricCard
+                          label="TP1 / Partial"
+                          value={p.tp1 === null ? `+${p.partialTriggerDistance.toFixed(0)} giá` : p.tp1.toFixed(2)}
+                          detail={`Chốt ${p.partialFraction} tại +${p.partialTriggerDistance.toFixed(0)}`}
+                        />
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 6, xl: 4 }}>
+                        <MetricCard
+                          label="TP2"
+                          value={p.tp2 === null ? "THEO RUNNER/SETUP" : p.tp2.toFixed(2)}
+                          detail={p.source}
+                        />
+                      </Grid>
+                    </Grid>
+
+                    <Alert severity={p.approved ? "success" : "info"} sx={{ mt: 2 }}>
+                      <b>{p.approved ? "SETUP ĐỦ ĐIỀU KIỆN" : "CHƯA GỬI LỆNH"}:</b> {p.decisionReason}
+                    </Alert>
+                    <Alert severity="warning" variant="outlined" sx={{ mt: 1 }}>
+                      <b>Giới hạn lot:</b> {p.limitReason}
+                    </Alert>
+                    <Alert severity="info" variant="outlined" sx={{ mt: 1 }}>
+                      <b>Engine {decision.engine.regime} · confidence {decision.engine.confidence}:</b>{" "}
+                      {decision.engine.reasons.length > 0
+                        ? decision.engine.reasons.join(" · ")
+                        : "Engine chưa trả về diễn giải."}
+                    </Alert>
+
+                    <Typography fontWeight={900} sx={{ mt: 2 }}>
+                      Nhật ký quyết định gần nhất
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Gồm cả lý do vào, chờ và chặn; dữ liệu gốc do executor canonical ghi trước/sau lệnh.
+                    </Typography>
+                    <TableContainer sx={{ mt: 1 }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Thời gian</TableCell>
+                            <TableCell>Bot / Event</TableCell>
+                            <TableCell>Lot</TableCell>
+                            <TableCell>SL</TableCell>
+                            <TableCell>Risk</TableCell>
+                            <TableCell>Lý do</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {decision.recentDecisions.slice(0, 12).map((row, index) => (
+                            <TableRow key={`${row.timestamp}-${row.strategy}-${row.event}-${index}`}>
+                              <TableCell>{dateTime(row.timestamp)}</TableCell>
+                              <TableCell>
+                                <b>{row.strategy}</b><br />
+                                <Typography component="span" variant="caption">{row.event} · {row.stage}</Typography>
+                              </TableCell>
+                              <TableCell>{row.sizing?.finalLot == null ? "—" : Number(row.sizing.finalLot).toFixed(2)}</TableCell>
+                              <TableCell>{row.plan?.stopDistance == null ? "—" : `${Number(row.plan.stopDistance).toFixed(2)} giá`}</TableCell>
+                              <TableCell>{money(row.sizing?.estimatedRiskUsd, decision.account.currency ?? "USD")}</TableCell>
+                              <TableCell sx={{ minWidth: 280 }}>{row.reason}</TableCell>
+                            </TableRow>
+                          ))}
+                          {decision.recentDecisions.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={6}>Nhật ký chuẩn sẽ xuất hiện sau khi executor được restart với phiên bản mới.</TableCell>
+                            </TableRow>
+                          ) : null}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </>
+                );
+              })()}
             </>
           )}
         </CardContent>

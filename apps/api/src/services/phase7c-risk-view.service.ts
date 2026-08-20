@@ -1,7 +1,12 @@
 import { getPhase7CAccountRisk } from "./phase7c.service";
+import { phase7CLotSettingsService } from "./phase7c-lot-settings.service";
 
 export async function getPhase7CCanonicalAccountRisk(riskPercent = 0.25, maxLot = 0.03) {
   const data = await getPhase7CAccountRisk(riskPercent, maxLot);
+  const lotSettings = phase7CLotSettingsService.get();
+  const activeLotSettings = lotSettings.activeAlive && lotSettings.active?.armed
+    ? lotSettings.active
+    : null;
   const step = Number(data.spec.volumeStep);
   const minVolume = Number(data.spec.minVolume);
   const brokerMax = Number(data.spec.maxVolume);
@@ -19,7 +24,7 @@ export async function getPhase7CCanonicalAccountRisk(riskPercent = 0.25, maxLot 
       estimatedRiskPercent: balance > 0 ? round(estimatedRiskUsd / balance * 100, 4) : 0,
       approved,
       reason: approved
-        ? "SHADOW recommendation preserves exact +10 one-third partial management; Phase 7B execution remains unchanged."
+        ? "Read-only preview preserves exact +10 one-third partial management; the Sideway executor must validate account, symbol, stop distance and freshness again at its final gate."
         : "Risk/cap cannot support a broker-step lot that preserves exact one-third partial management; BLOCK.",
     };
   });
@@ -28,7 +33,15 @@ export async function getPhase7CCanonicalAccountRisk(riskPercent = 0.25, maxLot 
     ...data,
     configuration: {
       ...data.configuration,
+      currentFixedVolume: activeLotSettings?.trendFixedLot ?? lotSettings.state.trendFixedLot,
+      configuredTrendFixedLot: lotSettings.state.trendFixedLot,
+      activeTrendFixedLot: activeLotSettings?.trendFixedLot ?? null,
+      configuredSidewayRiskPercent: lotSettings.state.sidewayRiskPercent,
+      configuredSidewayMaxLot: lotSettings.state.sidewayMaxLot,
+      lotSettingsRestartRequired: lotSettings.restartRequired,
       managementCompatibility: "EXACT_ONE_THIRD_PARTIAL_ONLY",
+      previewOrderPermission: "NONE",
+      sidewayExecutionOwner: "SIDEWAY_EXECUTOR_FINAL_GATE",
     },
     rows,
   };

@@ -18,6 +18,7 @@ import {
   resolveSidewayPermission,
   targetReached,
 } from "./phase7c-sideway-logic.mjs";
+import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
 
 const symbol = (process.env.ZIQ_PHASE7C_SIDEWAY_SYMBOL || process.env.ZIQ_DEMO_SYMBOL || "XAUUSD").trim().toUpperCase();
 const controlApiBase = (process.env.ZIQ_PHASE7C_CONTROL_API_URL || "http://127.0.0.1:3711").trim().replace(/\/$/, "");
@@ -63,6 +64,11 @@ if (allowReal) throw new Error("Phase 7C Sideway controller refuses MT5_ALLOW_RE
 fs.mkdirSync(workDir, { recursive: true });
 const statePath = path.join(workDir, "phase7c-sideway-state.json");
 const journalPath = path.join(workDir, "phase7c-sideway-events.jsonl");
+const decisionAudit = createPhase7CDecisionAudit({
+  strategy: "SIDEWAY",
+  symbol,
+  configuration: { riskPercent, maxLot },
+});
 let state = loadState();
 
 console.log("PHASE7C_SIDEWAY_CONTROLLER=STARTING");
@@ -493,9 +499,17 @@ async function cycle() {
     confirmation: confirmation.pattern,
     volume,
     riskPercent,
+    rawLot: autoLot?.preview?.rawLot ?? null,
+    maxLot,
     estimatedRiskUsd: autoLotValidation.estimatedRiskUsd,
+    estimatedRiskPercent: autoLot?.preview?.estimatedRiskPercent ?? null,
+    lotLimitReason: `Raw ${autoLot?.preview?.rawLot ?? "n/a"} -> final ${volume}; cap ${maxLot}; broker step + exact one-third partial guard applied.`,
     plan: executionPlan,
+    activeMode: freshMode?.state?.mode ?? null,
+    recommendedMode: freshRegime?.recommendedMode ?? null,
+    regime: freshRegime?.regime ?? null,
     regimeConfidence: freshRegime?.confidence,
+    engineReasons: Array.isArray(freshRegime?.reasons) ? freshRegime.reasons : [],
     finalQuoteTimestamp: freshQuote.timestamp,
     dailyMode: dailyRecovery.mode,
     dailyNetPnl: dailyRecovery.dailyNetPnl,
@@ -962,6 +976,7 @@ function saveState() {
 function journal(event, payload) {
   const record = { timestamp: Date.now(), event, ...payload };
   fs.appendFileSync(journalPath, `${JSON.stringify(record)}\n`, "utf8");
+  decisionAudit.record(event, record);
   console.log(`PHASE7C_SIDEWAY_EVENT=${event}|${JSON.stringify(payload)}`);
 }
 

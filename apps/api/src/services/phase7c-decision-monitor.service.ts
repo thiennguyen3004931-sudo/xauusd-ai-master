@@ -1,0 +1,517 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import type { Mt5TelemetrySnapshot } from "./mt5.service";
+import { getMt5Telemetry } from "./mt5.service";
+import { getPhase7CLiveRegime } from "./phase7c-live-regime.service";
+import { phase7CLotSettingsService } from "./phase7c-lot-settings.service";
+
+type Strategy = "TREND" | "SIDEWAY" | "PAUSE";
+
+interface EntryDiagnostics {
+  pattern?: { matched?: boolean; name?: string | null; side?: "BUY" | "SELL" | null };
+  trend?: { confidenceScore?: number | null; confidenceLevel?: string | null };
+  entry?: {
+    eligible?: boolean;
+    side?: "BUY" | "SELL" | null;
+    referenceEntry?: number;
+    structuralStopDistance?: number | null;
+    stopDistance?: number | null;
+    action?: string;
+    reason?: string;
+  };
+}
+
+interface Phase7BDemoStatus {
+  botStatus?: string;
+  entryDiagnostics?: EntryDiagnostics | null;
+  entryDiagnosticsError?: string | null;
+}
+
+interface DecisionAuditRecord {
+  schemaVersion?: number;
+  timestamp: number;
+  timestampIso?: string;
+  strategy: "TREND" | "SIDEWAY";
+  symbol?: string;
+  event: string;
+  stage: string;
+  reasonCode?: string;
+  reason: string;
+  setup?: {
+    side?: string | null;
+    pattern?: string | null;
+    entryState?: string | null;
+    activeMode?: string | null;
+    recommendedMode?: string | null;
+    regime?: string | null;
+    confidence?: number | null;
+  };
+  sizing?: {
+    configuredLot?: number | null;
+    rawLot?: number | null;
+    finalLot?: number | null;
+    maxLot?: number | null;
+    riskPercent?: number | null;
+    estimatedRiskUsd?: number | null;
+    estimatedRiskPercent?: number | null;
+    limitReason?: string | null;
+  };
+  plan?: {
+    entry?: number | null;
+    stopLoss?: number | null;
+    stopDistance?: number | null;
+    breakEvenPrice?: number | null;
+    breakEvenTriggerDistance?: number | null;
+    partialTriggerDistance?: number | null;
+    partialFraction?: string | null;
+    tp1?: number | null;
+    tp2?: number | null;
+    dailyMode?: string | null;
+  };
+  management?: {
+    ticket?: string | null;
+    breakEvenApplied?: boolean;
+    partialApplied?: boolean;
+  };
+  source?: string;
+  raw?: unknown;
+}
+
+export interface Phase7CPreTradeDecision {
+  strategy: Strategy;
+  stage: string;
+  approved: boolean;
+  side: string | null;
+  setup: string | null;
+  confidenceScore: number | null;
+  confidenceLabel: string | null;
+  entry: number | null;
+  stopLoss: number | null;
+  stopDistance: number | null;
+  breakEvenPrice: number | null;
+  breakEvenTriggerDistance: number;
+  tp1: number | null;
+  tp2: number | null;
+  partialTriggerDistance: number;
+  partialFraction: "1/3";
+  rawLot: number | null;
+  finalLot: number | null;
+  lotCap: number | null;
+  riskTargetPercent: number | null;
+  estimatedRiskUsd: number | null;
+  estimatedRiskPercent: number | null;
+  limitReason: string;
+  decisionReason: string;
+  source: string;
+  updatedAt: number;
+}
+
+function finite(value: unknown): number | null {
+  if (value === null || value === undefined || value === "" || typeof value === "boolean") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function round(value: number | null, digits = 4): number | null {
+  if (value === null) return null;
+  const factor = 10 ** digits;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
+function runtimeRoot(): string {
+  const configured = process.env.PHASE7C_RUNTIME_ROOT?.trim();
+  if (configured) return resolve(configured);
+  const demoDir = process.env.PHASE7B_DEMO_WORK_DIR?.trim();
+  if (demoDir) return resolve(demoDir, "..");
+  return resolve(process.cwd(), ".runtime");
+}
+
+function readJsonlTail(file: string, limit: number): DecisionAuditRecord[] {
+  try {
+    const buffer = readFileSync(file);
+    const maxBytes = 2 * 1024 * 1024;
+    const start = Math.max(0, buffer.length - maxBytes);
+    const text = buffer.subarray(start).toString("utf8");
+    const rows: DecisionAuditRecord[] = [];
+    for (const line of text.split(/\r?\n/).filter(Boolean)) {
+      try {
+        const value = JSON.parse(line) as DecisionAuditRecord;
+        if (
+          (value.strategy === "TREND" || value.strategy === "SIDEWAY") &&
+          Number.isFinite(Number(value.timestamp)) &&
+          typeof value.event === "string"
+        ) {
+          rows.push({ ...value, timestamp: Number(value.timestamp) });
+        }
+      } catch {
+        // The first line can be partial when only a file tail was read.
+      }
+    }
+    return rows.slice(-limit);
+  } catch {
+    return [];
+  }
+}
+
+function loadAudit(): DecisionAuditRecord[] {
+  const root = resolve(runtimeRoot(), "phase7c-executors", "decision-observability");
+  const rows = [
+    ...readJsonlTail(resolve(root, "trend-decisions.jsonl"), 160),
+    ...readJsonlTail(resolve(root, "sideway-decisions.jsonl"), 160),
+  ];
+  return rows.sort((a, b) => b.timestamp - a.timestamp).slice(0, 160);
+}
+
+function localApiBase(): string {
+  const configured = process.env.PHASE7C_CONTROL_API_URL?.trim();
+  if (configured) return configured.replace(/\/$/, "");
+  const port = Number(process.env.PORT ?? 3711);
+  return `http://127.0.0.1:${Number.isInteger(port) && port > 0 ? port : 3711}`;
+}
+
+async function getPhase7BDemoStatus(): Promise<Phase7BDemoStatus | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4_000);
+  try {
+    const response = await fetch(`${localApiBase()}/api/v1/phase7b-demo`, {
+      headers: { accept: "application/json" },
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    return await response.json() as Phase7BDemoStatus;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function safeAccount(telemetry: Mt5TelemetrySnapshot) {
+  return {
+    reachable: telemetry.reachable,
+    accountMode: telemetry.health?.accountMode ?? null,
+    server: telemetry.health?.server ?? null,
+    currency: telemetry.health?.accountCurrency ?? null,
+    balance: finite(telemetry.health?.accountBalance),
+    equity: finite(telemetry.health?.accountEquity),
+    openXauusdPositions: telemetry.positions.length,
+  };
+}
+
+function trendDecision(input: {
+  regime: Awaited<ReturnType<typeof getPhase7CLiveRegime>>;
+  demo: Phase7BDemoStatus | null;
+  telemetry: Mt5TelemetrySnapshot;
+  lots: ReturnType<typeof phase7CLotSettingsService.get>;
+  now: number;
+}): Phase7CPreTradeDecision {
+  const { regime, demo, telemetry, lots, now } = input;
+  const diagnostics = demo?.entryDiagnostics ?? null;
+  const entryInfo = diagnostics?.entry;
+  const side = entryInfo?.side ?? diagnostics?.pattern?.side ?? null;
+  const entry = finite(entryInfo?.referenceEntry);
+  const stopDistance = finite(entryInfo?.stopDistance) ?? finite(entryInfo?.structuralStopDistance);
+  const stopLoss = entry !== null && stopDistance !== null && side
+    ? side === "BUY" ? entry - stopDistance : entry + stopDistance
+    : null;
+  const activeLot = lots.activeAlive && lots.active?.armed
+    ? lots.active.trendFixedLot
+    : lots.state.trendFixedLot;
+  const cashPerPriceUnitPerLot = finite(telemetry.spec?.cashPerPriceUnitPerLot);
+  const estimatedRiskUsd = stopDistance !== null && cashPerPriceUnitPerLot !== null
+    ? stopDistance * cashPerPriceUnitPerLot * activeLot
+    : null;
+  const balance = finite(telemetry.health?.accountBalance);
+  const estimatedRiskPercent = estimatedRiskUsd !== null && balance !== null && balance > 0
+    ? estimatedRiskUsd / balance * 100
+    : null;
+  const modeAllows = regime.activeMode === "TREND" ||
+    (regime.activeMode === "AUTO" && regime.recommendedMode === "TREND");
+  const safetyAllows = telemetry.reachable &&
+    telemetry.health?.accountMode === "demo" &&
+    telemetry.positions.length === 0 &&
+    lots.activeAlive && lots.active?.armed === true &&
+    !lots.restartRequired;
+  const eligible = entryInfo?.eligible === true;
+  const approved = modeAllows && safetyAllows && eligible;
+  const setup = diagnostics?.pattern?.matched
+    ? diagnostics.pattern.name ?? "TREND_PATTERN"
+    : null;
+  const action = String(entryInfo?.action ?? "WAIT_SIGNAL");
+  const stage = approved
+    ? "READY"
+    : action === "WAIT_PULLBACK"
+      ? "WAITING"
+      : !modeAllows || !safetyAllows
+        ? "BLOCKED"
+        : "WAITING";
+  const limitReason = lots.restartRequired
+    ? "Cấu hình lot chưa được executor active; cần restart an toàn khi PAUSE."
+    : `Trend dùng fixed lot ${activeLot.toFixed(2)}; không martingale, không recovery lot escalation.`;
+
+  return {
+    strategy: "TREND",
+    stage,
+    approved,
+    side,
+    setup,
+    confidenceScore: finite(diagnostics?.trend?.confidenceScore),
+    confidenceLabel: diagnostics?.trend?.confidenceLevel ?? null,
+    entry: round(entry, 5),
+    stopLoss: round(stopLoss, 5),
+    stopDistance: round(stopDistance, 5),
+    breakEvenPrice: round(entry, 5),
+    breakEvenTriggerDistance: 6,
+    tp1: entry !== null && side ? round(side === "BUY" ? entry + 10 : entry - 10, 5) : null,
+    tp2: null,
+    partialTriggerDistance: 10,
+    partialFraction: "1/3",
+    rawLot: round(activeLot, 2),
+    finalLot: round(activeLot, 2),
+    lotCap: round(activeLot, 2),
+    riskTargetPercent: null,
+    estimatedRiskUsd: round(estimatedRiskUsd, 2),
+    estimatedRiskPercent: round(estimatedRiskPercent, 4),
+    limitReason,
+    decisionReason: entryInfo?.reason ?? demo?.entryDiagnosticsError ?? "Chưa có Trend diagnostics.",
+    source: "PHASE7B_CANONICAL_ENTRY_DIAGNOSTICS+ACTIVE_LOT_SETTINGS",
+    updatedAt: now,
+  };
+}
+
+function sidewayDecision(input: {
+  regime: Awaited<ReturnType<typeof getPhase7CLiveRegime>>;
+  telemetry: Mt5TelemetrySnapshot;
+  lots: ReturnType<typeof phase7CLotSettingsService.get>;
+  audit: DecisionAuditRecord[];
+  now: number;
+}): Phase7CPreTradeDecision {
+  const { regime, telemetry, lots, audit, now } = input;
+  const latest = audit.find((row) => row.strategy === "SIDEWAY") ?? null;
+  const activeRisk = lots.activeAlive && lots.active?.armed
+    ? lots.active.sidewayRiskPercent
+    : lots.state.sidewayRiskPercent;
+  const activeMaxLot = lots.activeAlive && lots.active?.armed
+    ? lots.active.sidewayMaxLot
+    : lots.state.sidewayMaxLot;
+  const modeAllows = regime.activeMode === "SIDEWAY" ||
+    (regime.activeMode === "AUTO" && regime.recommendedMode === "SIDEWAY");
+  const safetyAllows = telemetry.reachable &&
+    telemetry.health?.accountMode === "demo" &&
+    telemetry.positions.length === 0 &&
+    lots.activeAlive && lots.active?.armed === true &&
+    !lots.restartRequired;
+  const currentDecision = Boolean(latest && now - latest.timestamp <= 30 * 60_000);
+  const executorReady = currentDecision && new Set(["READY", "SUBMITTED"]).has(String(latest?.stage));
+  const approved = modeAllows && safetyAllows && executorReady;
+  const stage = !modeAllows || !safetyAllows
+    ? "BLOCKED"
+    : currentDecision
+      ? String(latest?.stage ?? "WAITING")
+      : "WAITING";
+
+  return {
+    strategy: "SIDEWAY",
+    stage,
+    approved,
+    side: latest?.setup?.side ?? null,
+    setup: latest?.setup?.pattern ?? null,
+    confidenceScore: finite(regime.confidence),
+    confidenceLabel: null,
+    entry: round(finite(latest?.plan?.entry), 5),
+    stopLoss: round(finite(latest?.plan?.stopLoss), 5),
+    stopDistance: round(finite(latest?.plan?.stopDistance), 5),
+    breakEvenPrice: round(finite(latest?.plan?.breakEvenPrice), 5),
+    breakEvenTriggerDistance: 6,
+    tp1: round(finite(latest?.plan?.tp1), 5),
+    tp2: round(finite(latest?.plan?.tp2), 5),
+    partialTriggerDistance: 10,
+    partialFraction: "1/3",
+    rawLot: round(finite(latest?.sizing?.rawLot), 4),
+    finalLot: round(finite(latest?.sizing?.finalLot), 2),
+    lotCap: round(finite(latest?.sizing?.maxLot) ?? activeMaxLot, 2),
+    riskTargetPercent: round(finite(latest?.sizing?.riskPercent) ?? activeRisk, 2),
+    estimatedRiskUsd: round(finite(latest?.sizing?.estimatedRiskUsd), 2),
+    estimatedRiskPercent: round(finite(latest?.sizing?.estimatedRiskPercent), 4),
+    limitReason: latest?.sizing?.limitReason ??
+      `Sideway tính lot sau final gate theo ${activeRisk.toFixed(2)}% balance, cap ${activeMaxLot.toFixed(2)} lot và bước chốt đúng 1/3.`,
+    decisionReason: currentDecision
+      ? latest?.reason ?? "Chờ Sideway setup."
+      : "Chưa có Sideway setup mới trong 30 phút; lot chỉ được tính sau Supply/Demand + ATR + M5 final gate.",
+    source: latest?.source ?? "SIDEWAY_EXECUTOR_CANONICAL_JOURNAL",
+    updatedAt: latest?.timestamp ?? now,
+  };
+}
+
+function pauseDecision(
+  regime: Awaited<ReturnType<typeof getPhase7CLiveRegime>>,
+  now: number,
+): Phase7CPreTradeDecision {
+  return {
+    strategy: "PAUSE",
+    stage: "BLOCKED",
+    approved: false,
+    side: null,
+    setup: null,
+    confidenceScore: finite(regime.confidence),
+    confidenceLabel: null,
+    entry: null,
+    stopLoss: null,
+    stopDistance: null,
+    breakEvenPrice: null,
+    breakEvenTriggerDistance: 6,
+    tp1: null,
+    tp2: null,
+    partialTriggerDistance: 10,
+    partialFraction: "1/3",
+    rawLot: null,
+    finalLot: null,
+    lotCap: null,
+    riskTargetPercent: null,
+    estimatedRiskUsd: null,
+    estimatedRiskPercent: null,
+    limitReason: "PAUSE chặn mọi lệnh mới; không thay đổi vị thế đang được quản lý.",
+    decisionReason: regime.reasons.join(" · ") || "Engine chưa cho phép Trend hoặc Sideway.",
+    source: "MARKET_REGIME_CLASSIFIER",
+    updatedAt: now,
+  };
+}
+
+export function buildPhase7CDecisionMonitor(input: {
+  regime: Awaited<ReturnType<typeof getPhase7CLiveRegime>>;
+  demo: Phase7BDemoStatus | null;
+  telemetry: Mt5TelemetrySnapshot;
+  lots: ReturnType<typeof phase7CLotSettingsService.get>;
+  audit: DecisionAuditRecord[];
+  now?: number;
+}) {
+  const now = input.now ?? Date.now();
+  const requestedStrategy = input.regime.activeMode === "AUTO"
+    ? input.regime.recommendedMode
+    : input.regime.activeMode;
+  const effectiveStrategy: Strategy = requestedStrategy === "TREND" || requestedStrategy === "SIDEWAY"
+    ? requestedStrategy
+    : "PAUSE";
+  const preTrade = effectiveStrategy === "TREND"
+    ? trendDecision({ ...input, now })
+    : effectiveStrategy === "SIDEWAY"
+      ? sidewayDecision({ ...input, now })
+      : pauseDecision(input.regime, now);
+
+  return {
+    version: 1 as const,
+    source: "PHASE7C_CANONICAL_DECISION_OBSERVABILITY" as const,
+    generatedAt: now,
+    symbol: input.regime.symbol,
+    engine: {
+      source: "MarketRegimeClassifier" as const,
+      timeframe: input.regime.timeframe,
+      regime: input.regime.regime,
+      confidence: input.regime.confidence,
+      recommendedMode: input.regime.recommendedMode,
+      reasons: input.regime.reasons,
+      checkedAt: input.regime.checkedAt,
+      lastCandleCloseTime: input.regime.lastCandleCloseTime,
+    },
+    mode: {
+      active: input.regime.activeMode,
+      effectiveStrategy,
+      matchesRecommendation: input.regime.modeMatchesRecommendation,
+    },
+    account: safeAccount(input.telemetry),
+    lotSettings: input.lots,
+    preTrade,
+    recentDecisions: input.audit.slice(0, 40).map(({ raw: _raw, ...row }) => row),
+    safety: {
+      readOnlyEndpoint: true as const,
+      demoOnly: true as const,
+      mt5PanelOrderPermission: "NONE" as const,
+      newPositionsOnly: true as const,
+      existingPositionMutation: false as const,
+      martingale: false as const,
+      recoveryLotEscalation: false as const,
+    },
+  };
+}
+
+let cached: { at: number; value: ReturnType<typeof buildPhase7CDecisionMonitor> } | null = null;
+let pending: Promise<ReturnType<typeof buildPhase7CDecisionMonitor>> | null = null;
+
+export async function getPhase7CDecisionMonitor(symbol = "XAUUSD") {
+  const now = Date.now();
+  if (cached && now - cached.at <= 2_000 && cached.value.symbol === symbol.toUpperCase()) {
+    return cached.value;
+  }
+  if (pending) return pending;
+
+  pending = (async () => {
+    const [regime, demo, telemetry] = await Promise.all([
+      getPhase7CLiveRegime(symbol),
+      getPhase7BDemoStatus(),
+      getMt5Telemetry(symbol),
+    ]);
+    const value = buildPhase7CDecisionMonitor({
+      regime,
+      demo,
+      telemetry,
+      lots: phase7CLotSettingsService.get(),
+      audit: loadAudit(),
+      now: Date.now(),
+    });
+    cached = { at: Date.now(), value };
+    return value;
+  })();
+
+  try {
+    return await pending;
+  } finally {
+    pending = null;
+  }
+}
+
+function lineValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "n/a";
+  return String(value).replace(/[\r\n]+/g, " ").slice(0, 600);
+}
+
+export function formatPhase7CDecisionMonitorForMt5(
+  snapshot: ReturnType<typeof buildPhase7CDecisionMonitor>,
+): string {
+  const p = snapshot.preTrade;
+  const lines: Array<[string, unknown]> = [
+    ["version", snapshot.version],
+    ["generatedAt", snapshot.generatedAt],
+    ["symbol", snapshot.symbol],
+    ["accountMode", snapshot.account.accountMode],
+    ["activeMode", snapshot.mode.active],
+    ["effectiveStrategy", snapshot.mode.effectiveStrategy],
+    ["regime", snapshot.engine.regime],
+    ["recommendedMode", snapshot.engine.recommendedMode],
+    ["confidence", snapshot.engine.confidence],
+    ["stage", p.stage],
+    ["approved", p.approved],
+    ["side", p.side],
+    ["setup", p.setup],
+    ["entry", p.entry],
+    ["stopLoss", p.stopLoss],
+    ["stopDistance", p.stopDistance],
+    ["rawLot", p.rawLot],
+    ["finalLot", p.finalLot],
+    ["lotCap", p.lotCap],
+    ["riskTargetPercent", p.riskTargetPercent],
+    ["estimatedRiskUsd", p.estimatedRiskUsd],
+    ["estimatedRiskPercent", p.estimatedRiskPercent],
+    ["breakEvenPrice", p.breakEvenPrice],
+    ["breakEvenTriggerDistance", p.breakEvenTriggerDistance],
+    ["tp1", p.tp1],
+    ["tp2", p.tp2],
+    ["partial", `${p.partialFraction}@+${p.partialTriggerDistance}`],
+    ["limitReason", p.limitReason],
+    ["decisionReason", p.decisionReason],
+    ["engineReasons", snapshot.engine.reasons.join(" | ")],
+    ["source", p.source],
+    ["mt5OrderPermission", snapshot.safety.mt5PanelOrderPermission],
+  ];
+  return `${lines.map(([key, value]) => `${key}=${lineValue(value)}`).join("\n")}\n`;
+}

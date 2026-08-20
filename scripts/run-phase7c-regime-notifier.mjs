@@ -130,6 +130,8 @@ async function appendDecisionJournal(snapshot, reasons, now) {
     regime: String(snapshot.regime),
     recommendedMode: String(snapshot.recommendedMode),
     confidence: finiteNumber(snapshot.confidence),
+    engineReasons: Array.isArray(snapshot.reasons) ? snapshot.reasons.map(String) : [],
+    engineSource: "MarketRegimeClassifier",
     modeMatchesRecommendation: Boolean(snapshot.modeMatchesRecommendation),
     lastCandleCloseTime: finiteNumber(snapshot.lastCandleCloseTime),
     metrics: snapshot.metrics ?? null,

@@ -7,6 +7,7 @@ import {
   type Phase7BPendingPullback,
   type Phase7BSignal,
 } from "@xauusd/risk-engine";
+import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
 
 type Health = {
   status: "ok" | "degraded";
@@ -17,6 +18,7 @@ type Health = {
   accountLogin?: number;
   accountMode?: "demo" | "contest" | "real";
   server?: string;
+  accountBalance?: number;
   timestamp: number;
 };
 
@@ -215,6 +217,11 @@ if (![fixedVolume, intervalSeconds, magicNumber, sidewayMagicNumber, deviationPo
 fs.mkdirSync(workDir, { recursive: true });
 const statePath = path.join(workDir, "phase7b-demo-state.json");
 const journalPath = path.join(workDir, "phase7b-demo-events.jsonl");
+const decisionAudit = createPhase7CDecisionAudit({
+  strategy: "TREND",
+  symbol,
+  configuration: { fixedLot: fixedVolume },
+});
 let state = loadState(statePath);
 
 console.log("PHASE7B_DEMO_STRATEGY=M15_TRIPLE_PATTERN_SUPERTREND_STRUCTURE_RIDER_MA_CONFIDENCE_FVG_CONTEXT");
@@ -457,7 +464,7 @@ async function cycle(): Promise<void> {
         : pending.structuralStopPrice - pending.structuralStopDistanceAtSignal,
       patternExtreme: pending.structuralStopPrice,
     };
-    const submitted = await submitTrendEntry(signal, marketEntry, quote, spec, m15, "PULLBACK_ENTRY");
+    const submitted = await submitTrendEntry(signal, marketEntry, quote, spec, m15, "PULLBACK_ENTRY", health.accountBalance);
     if (submitted !== "BROKER_GAP_WAIT" && submitted !== "TOO_WIDE_WAIT") {
       state.pendingPullback = null;
       saveState();
@@ -539,7 +546,7 @@ async function cycle(): Promise<void> {
     structuralStopPrice: signal.patternExtreme,
     structuralStopDistance,
   });
-  await submitTrendEntry(signal, marketEntry, quote, spec, m15, "ENTRY_IMMEDIATE");
+  await submitTrendEntry(signal, marketEntry, quote, spec, m15, "ENTRY_IMMEDIATE", health.accountBalance);
 }
 
 async function submitTrendEntry(
@@ -549,6 +556,7 @@ async function submitTrendEntry(
   spec: SymbolSpec,
   m15: Phase7Bar[],
   entryState: "ENTRY_IMMEDIATE" | "PULLBACK_ENTRY",
+  accountBalance?: number,
 ): Promise<"FILLED" | "BROKER_GAP_WAIT" | "TOO_WIDE_WAIT" | "REJECTED" | "UNRESOLVED"> {
   const structuralStopDistance = structuralDistance(signal.side, marketEntry, signal.patternExtreme);
   if (!(structuralStopDistance > 0)) {
@@ -582,6 +590,19 @@ async function submitTrendEntry(
     : 0;
 
   const fvgConfirmedAtEntry = hasRelevantFvg(m15, m15.length - 1, signal.side, 12);
+  const cashPerPriceUnitPerLot = Number(spec.cashPerPriceUnitPerLot) > 0
+    ? Number(spec.cashPerPriceUnitPerLot)
+    : spec.tickSize > 0
+      ? Number(spec.effectiveTickValuePerLot) / Number(spec.tickSize)
+      : 0;
+  const estimatedRiskUsd = stopDistance * cashPerPriceUnitPerLot * fixedVolume;
+  const estimatedRiskPercent = Number(accountBalance) > 0
+    ? estimatedRiskUsd / Number(accountBalance) * 100
+    : null;
+  const partialTarget = roundPrice(
+    signal.side === "BUY" ? marketEntry + 10 : marketEntry - 10,
+    spec.digits,
+  );
   const orderId = `p7b-${entryState === "PULLBACK_ENTRY" ? "pb" : "im"}-${signal.signalTimestamp}-${signal.side}`;
   journal("ENTRY_SUBMIT", {
     signalId: signal.id,
@@ -595,6 +616,16 @@ async function submitTrendEntry(
     stopDistance,
     stopLoss,
     volume: fixedVolume,
+    configuredLot: fixedVolume,
+    estimatedRiskUsd,
+    estimatedRiskPercent,
+    plan: {
+      entry: marketEntry,
+      stopLoss,
+      stopDistance,
+      tp1: partialTarget,
+      takeProfit: takeProfit > 0 ? takeProfit : null,
+    },
     entryRule: "THREE_PATTERNS_PLUS_SUPERTREND_M15_M5_PLUS_VALID_STRUCTURE",
     supertrend: "M15_10_3_AND_M5_10_3",
     engulfBodyTolerancePrice: ENGULF_BODY_TOLERANCE_PRICE,
@@ -1259,6 +1290,7 @@ function saveState(): void {
 function journal(type: string, data: Record<string, unknown>): void {
   const row = { timestamp: new Date().toISOString(), type, ...data };
   fs.appendFileSync(journalPath, `${JSON.stringify(row)}\n`, "utf8");
+  decisionAudit.record(type, row);
   console.log(`PHASE7B_DEMO_EVENT=${JSON.stringify(row)}`);
 }
 

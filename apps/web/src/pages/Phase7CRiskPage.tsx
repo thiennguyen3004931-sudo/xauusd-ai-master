@@ -88,15 +88,15 @@ export function Phase7CRiskPage() {
             PHASE 7C · RISK
           </Typography>
           <Typography variant="h5" fontWeight={900}>
-            Risk & Auto Lot SHADOW
+            Risk & Auto Lot Preview
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Tính lot theo balance + SL thực tế của XAUUSD nhưng chỉ hiển thị khuyến nghị. Phase 7B vẫn giữ fixed 0.03 lot.
+            Endpoint này chỉ tính và hiển thị. Trend executor dùng fixed lot đang active; Sideway executor gọi cùng công thức sau final gate với đúng SL Supply/Demand + ATR + quote cuối.
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
-          <Chip color="warning" label="SHADOW ONLY" />
-          <Chip variant="outlined" label="EXECUTION MUTATION = FALSE" />
+          <Chip color="info" label="READ-ONLY PREVIEW" />
+          <Chip variant="outlined" label="ORDER PERMISSION = NONE" />
         </Stack>
       </Stack>
 
@@ -138,9 +138,11 @@ export function Phase7CRiskPage() {
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
               <MetricCard
-                label="Phase 7B actual"
+                label="Trend fixed active"
                 value={`${data.configuration.currentFixedVolume.toFixed(2)} lot`}
-                detail="UNCHANGED · forward sample"
+                detail={data.configuration.lotSettingsRestartRequired
+                  ? `Configured ${data.configuration.configuredTrendFixedLot.toFixed(2)} · cần restart`
+                  : "Đang khớp cấu hình executor"}
               />
             </Grid>
           </Grid>
@@ -160,7 +162,7 @@ export function Phase7CRiskPage() {
                 Khi Pattern tạo được structural SL, hệ thống dùng đúng stopDistance canonical hiện tại thay vì làm tròn về 6/8/10.
               </Typography>
             </Box>
-            <Chip color="warning" variant="outlined" label="SHADOW · NO ORDER CHANGE" />
+            <Chip color="info" variant="outlined" label="PREVIEW · NO ORDER CHANGE" />
           </Stack>
 
           {demo.isLoading ? (
@@ -189,7 +191,7 @@ export function Phase7CRiskPage() {
               </Grid>
               <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
                 <MetricCard
-                  label="Shadow recommendation"
+                  label="Preview recommendation"
                   value={
                     exact.data.preview.approved
                       ? `${exact.data.preview.recommendedLot.toFixed(2)} lot`
@@ -287,7 +289,7 @@ export function Phase7CRiskPage() {
                         size="small"
                         color={row.approved ? "success" : "error"}
                         variant="outlined"
-                        label={row.approved ? "SHADOW APPROVED" : "BLOCK"}
+                        label={row.approved ? "PREVIEW APPROVED" : "BLOCK"}
                       />
                     </TableCell>
                   </TableRow>
@@ -326,7 +328,8 @@ export function Phase7CRiskPage() {
                 <Status label="Terminal Algo Trading" value={data.account.terminalTradeAllowed} />
                 <Status label="Expert trading" value={data.account.expertTradeAllowed} />
                 <Status label="Account mode DEMO" value={data.account.accountMode === "demo"} />
-                <Status label="Auto Lot execution" value={false} blockedText="OFF · SHADOW ONLY" />
+                <Status label="Preview endpoint order permission" value={false} blockedText="NONE · READ-ONLY" />
+                <Status label="Sideway final-gate sizing owner" value={true} />
               </Stack>
             </CardContent>
           </Card>
@@ -334,7 +337,7 @@ export function Phase7CRiskPage() {
       </Grid>
 
       <Alert severity="warning">
-        Chưa bật Auto Lot vào execution. Sau khi SHADOW + canonical backtest đủ dữ liệu, mới tạo một thay đổi riêng để cho DEMO dùng lot động; LIVE vẫn khóa.
+        Sideway chỉ dùng lot preview sau khi final gate hợp lệ và snapshot khớp account/symbol/SL/thời gian; Trend không dùng lot động. LIVE vẫn khóa.
       </Alert>
     </Stack>
   );

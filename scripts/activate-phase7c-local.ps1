@@ -317,6 +317,7 @@ $webDeadline = (Get-Date).AddSeconds(90)
 $demo = $null
 $risk = $null
 $mode = $null
+$decision = $null
 $uiReady = $false
 $sidewayRiskParam = $SidewayRiskPercent.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 $sidewayMaxLotParam = $SidewayMaxLot.ToString([System.Globalization.CultureInfo]::InvariantCulture)
@@ -326,11 +327,22 @@ while ((Get-Date) -lt $webDeadline) {
     $riskProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7c/account-risk?riskPercent=$sidewayRiskParam&maxLot=$sidewayMaxLotParam" -Method Get -TimeoutSec 4
     $lotProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7c/lot-settings" -Method Get -TimeoutSec 4
     $modeProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 4
+    $decisionProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7c/decision-monitor?symbol=XAUUSD" -Method Get -TimeoutSec 8
     $uiProbe = Invoke-WebRequest -Uri "$webUrl/" -Method Get -UseBasicParsing -TimeoutSec 4
-    if ($demoProbe -and $riskProbe -and $lotProbe -and $modeProbe -and $uiProbe.StatusCode -ge 200 -and $uiProbe.StatusCode -lt 400) {
+    if (
+      $demoProbe -and
+      $riskProbe -and
+      $lotProbe -and
+      $modeProbe -and
+      $decisionProbe.source -eq "PHASE7C_CANONICAL_DECISION_OBSERVABILITY" -and
+      $decisionProbe.safety.mt5PanelOrderPermission -eq "NONE" -and
+      $uiProbe.StatusCode -ge 200 -and
+      $uiProbe.StatusCode -lt 400
+    ) {
       $demo = $demoProbe
       $risk = $riskProbe
       $mode = $modeProbe
+      $decision = $decisionProbe
       $uiReady = $true
       break
     }
@@ -338,7 +350,7 @@ while ((Get-Date) -lt $webDeadline) {
   Start-Sleep -Seconds 2
 }
 
-if ($null -eq $demo -or $null -eq $risk -or $null -eq $mode -or -not $uiReady) {
+if ($null -eq $demo -or $null -eq $risk -or $null -eq $mode -or $null -eq $decision -or -not $uiReady) {
   throw "Phase 7C API/UI self-test failed after restart. Check the Web/API scheduled task and its logs."
 }
 if ($risk.safety.executionMutation -ne $false -or $risk.safety.phase7bFixedVolumeUnchanged -ne $true) {
@@ -354,6 +366,8 @@ Write-Host "PHASE7C_ACTIVATE_TREND_FIXED_LOT=$TrendFixedVolume"
 Write-Host "PHASE7C_ACTIVATE_SIDEWAY_RISK_PERCENT=$SidewayRiskPercent"
 Write-Host "PHASE7C_ACTIVATE_SIDEWAY_MAX_LOT=$SidewayMaxLot"
 Write-Host "PHASE7C_ACTIVATE_LOT_APPLIES_TO=NEW_POSITIONS_ONLY"
+Write-Host "PHASE7C_ACTIVATE_DECISION_MONITOR=PASS"
+Write-Host "PHASE7C_ACTIVATE_MT5_PANEL_ORDER_PERMISSION=$($decision.safety.mt5PanelOrderPermission)"
 
 Start-Phase7CExecutors
 
@@ -361,5 +375,6 @@ $executorMode = if ($ArmExecutors) { "ARMED_DEMO_ONLY" } else { "SHADOW_ONLY" }
 Write-Host "PHASE7C_ACTIVATE_CONTROL_CENTER=$webUrl/"
 Write-Host "PHASE7C_ACTIVATE_BACKTEST=$webUrl/phase7c-backtest"
 Write-Host "PHASE7C_ACTIVATE_RISK=$webUrl/phase7c-risk"
+Write-Host "PHASE7C_ACTIVATE_MT5_PANEL_API=$apiUrl/api/v1/phase7c/decision-monitor/mt5?symbol=XAUUSD"
 Write-Host "PHASE7C_ACTIVATE_EXECUTORS=$executorMode"
 Write-Host "PHASE7C_ACTIVATE_STATUS=PASS"
