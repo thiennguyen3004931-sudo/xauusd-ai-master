@@ -121,24 +121,33 @@ function Start-Phase7CExecutors {
 
   if (-not $ArmExecutors) {
     Write-Host "PHASE7C_EXECUTORS=SHADOW_PREFLIGHT"
-    & powershell.exe @commonArgs
+    $preflightArgs = @($commonArgs)
+    $preflightArgs += "-Once"
+    & powershell.exe @preflightArgs
     if ($LASTEXITCODE -ne 0) { throw "Phase 7C executor shadow/preflight failed with exit code $LASTEXITCODE" }
     Write-Host "PHASE7C_EXECUTORS_SHADOW=PASS"
-    return
   }
 
-  $commonArgs += "-Armed"
+  $supervisorArgs = @($commonArgs)
+  if ($ArmExecutors) {
+    $supervisorArgs += "-Armed"
+  }
   New-Item -ItemType Directory -Force -Path $ExecutorRuntime | Out-Null
   $supervisorOut = Join-Path $ExecutorRuntime "supervisor.out.log"
   $supervisorErr = Join-Path $ExecutorRuntime "supervisor.err.log"
-  $process = Start-Process -FilePath "powershell.exe" -ArgumentList $commonArgs -WorkingDirectory $ProjectRoot -RedirectStandardOutput $supervisorOut -RedirectStandardError $supervisorErr -PassThru
+  $process = Start-Process -FilePath "powershell.exe" -ArgumentList $supervisorArgs -WorkingDirectory $ProjectRoot -RedirectStandardOutput $supervisorOut -RedirectStandardError $supervisorErr -PassThru
   Start-Sleep -Seconds 5
   $process.Refresh()
   if ($process.HasExited) {
     throw "Phase 7C executor supervisor exited during startup with code $($process.ExitCode). Check $supervisorErr"
   }
   Write-Host "PHASE7C_EXECUTOR_SUPERVISOR_PID=$($process.Id)"
-  Write-Host "PHASE7C_EXECUTORS_ARMED=YES"
+  if ($ArmExecutors) {
+    Write-Host "PHASE7C_EXECUTORS_ARMED=YES"
+  } else {
+    Write-Host "PHASE7C_EXECUTORS_ARMED=NO"
+    Write-Host "PHASE7C_EXECUTOR_SUPERVISOR_MODE=TELEGRAM_ONLY"
+  }
 }
 
 $apiUrl = "http://127.0.0.1:$ApiPort"
@@ -190,12 +199,12 @@ if (-not $SkipBuild) {
   Push-Location $ProjectRoot
   try {
     Write-Host "PHASE7C_ACTIVATE_API_BUILD=START"
-    & pnpm --filter @xauusd/api build
+    & pnpm --filter '@xauusd/api...' build
     if ($LASTEXITCODE -ne 0) { throw "API build failed with exit code $LASTEXITCODE" }
     Write-Host "PHASE7C_ACTIVATE_API_BUILD=PASS"
 
     Write-Host "PHASE7C_ACTIVATE_WEB_BUILD=START"
-    & pnpm --filter @xauusd/web build
+    & pnpm --filter '@xauusd/web...' build
     if ($LASTEXITCODE -ne 0) { throw "Web build failed with exit code $LASTEXITCODE" }
     Write-Host "PHASE7C_ACTIVATE_WEB_BUILD=PASS"
   } finally {
