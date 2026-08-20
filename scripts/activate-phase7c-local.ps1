@@ -241,6 +241,13 @@ try {
     }
     $preflightSource = "STALE_RUNTIME_PLUS_LOCAL_STATE_PLUS_BRIDGE"
     Write-Host "PHASE7C_ACTIVATE_BOT_STALE_RECOVERY=SAFE_COLD_START_PENDING_LOCAL_AND_BROKER_CHECKS"
+  } elseif ([string]$current.botStatus -eq "MT5_OFFLINE") {
+    # The API can outlive a closed/stale MetaTrader5 IPC session. Executors
+    # are already frozen above, so allow activation to restart only the core
+    # services and then revalidate the DEMO account and every broker position
+    # directly before any executor is launched.
+    $preflightSource = "MT5_OFFLINE_PLUS_LOCAL_STATE_PLUS_BRIDGE"
+    Write-Host "PHASE7C_ACTIVATE_MT5_OFFLINE_RECOVERY=SAFE_RESTART_PENDING_LOCAL_AND_BROKER_CHECKS"
   } elseif ($acceptedIdleStatuses -notcontains [string]$current.botStatus) {
     throw "Phase 7C activation requires an idle botStatus in [WAITING_SIGNAL, READY_NOT_ARMED]. Current=$($current.botStatus)"
   } else {
