@@ -12,6 +12,7 @@ import type {
   Phase7CBacktestRequest,
   Phase7CBacktestResult,
   Phase7CDailyRecoverySnapshot,
+  Phase7CDecisionMonitorSnapshot,
   Phase7CLiveRegimeSnapshot,
   Phase7CLotSettingsSnapshot,
 } from "./phase7c-types";
@@ -128,6 +129,14 @@ export async function getPhase7CLiveRegime(): Promise<Phase7CLiveRegimeSnapshot>
       `${API_BASE}/api/v1/phase7c/live-regime?symbol=XAUUSD`,
       { cache: "no-store" },
     ),
+  );
+}
+
+export async function getPhase7CDecisionMonitor(): Promise<Phase7CDecisionMonitorSnapshot> {
+  return read<Phase7CDecisionMonitorSnapshot>(
+    await fetch(`${API_BASE}/api/v1/phase7c/decision-monitor?symbol=XAUUSD`, {
+      cache: "no-store",
+    }),
   );
 }
 

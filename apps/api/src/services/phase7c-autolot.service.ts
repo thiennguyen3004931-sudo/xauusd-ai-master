@@ -1,3 +1,5 @@
+import { phase7CLotSettingsService } from "./phase7c-lot-settings.service";
+
 type BridgeHealth = {
   connected: boolean;
   tradingEnabled: boolean;
@@ -93,6 +95,10 @@ export async function getPhase7CAutoLotPreview(
     bridgeGet<BridgeHealth>("/health"),
     bridgeGet<Spec>("/v1/symbols/XAUUSD/spec"),
   ]);
+  const lotSettings = phase7CLotSettingsService.get();
+  const trendFixedVolume = lotSettings.activeAlive && lotSettings.active?.armed
+    ? lotSettings.active.trendFixedLot
+    : lotSettings.state.trendFixedLot;
 
   if (!health.connected) throw new Error("MT5 bridge is disconnected.");
   if (health.accountMode !== "demo") {
@@ -149,7 +155,7 @@ export async function getPhase7CAutoLotPreview(
     configuration: {
       riskPercent,
       maxLot,
-      currentFixedVolume: 0.03,
+      currentFixedVolume: trendFixedVolume,
       targetRiskUsd: round(targetRiskUsd, 2),
       managementCompatibility: "EXACT_ONE_THIRD_PARTIAL_ONLY",
     },
@@ -164,7 +170,7 @@ export async function getPhase7CAutoLotPreview(
       estimatedRiskPercent: round(estimatedRiskUsd / balance * 100, 4),
       approved,
       reason: approved
-        ? "SHADOW only; lot preserves exact +10 one-third partial and runner management. Phase 7B execution remains fixed at 0.03 lot."
+        ? "Read-only sizing snapshot preserves exact +10 one-third partial and runner management; the Sideway executor must validate it again at the final gate before any DEMO order."
         : "Risk/cap cannot support a broker-step lot that preserves exact one-third partial management; shadow recommendation is BLOCK.",
     },
   };

@@ -73,12 +73,15 @@ if (Test-Path $TelegramEnvFile) {
 $RuntimeDir = Join-Path $WorkDir "phase7c-executors"
 $TrendWorkDir = Join-Path $WorkDir "phase7b-demo-forward"
 $SidewayWorkDir = Join-Path $WorkDir "phase7c-sideway-forward"
+$DecisionRuntimeDir = Join-Path $RuntimeDir "decision-observability"
 New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
 New-Item -ItemType Directory -Force -Path $TrendWorkDir | Out-Null
 New-Item -ItemType Directory -Force -Path $SidewayWorkDir | Out-Null
+New-Item -ItemType Directory -Force -Path $DecisionRuntimeDir | Out-Null
 
 $env:ZIQ_PHASE7C_EXECUTION_LOCK = Join-Path $RuntimeDir "phase7c-execution.lock"
 $env:ZIQ_PHASE7C_REGIME_STATE_FILE = Join-Path $RuntimeDir "regime-notifier-state.json"
+$env:ZIQ_PHASE7C_DECISION_DIR = $DecisionRuntimeDir
 $SupervisorPidPath = Join-Path $RuntimeDir "supervisor.pid"
 $TrendPidPath = Join-Path $RuntimeDir "trend.pid"
 $SidewayPidPath = Join-Path $RuntimeDir "sideway.pid"
@@ -344,6 +347,7 @@ Write-Host "PHASE7C_EXECUTOR_DEMO_ONLY=TRUE"
 Write-Host "PHASE7C_EXECUTION_LOCK=$($env:ZIQ_PHASE7C_EXECUTION_LOCK)"
 Write-Host "PHASE7C_TREND_RUNTIME=$TrendWorkDir"
 Write-Host "PHASE7C_SIDEWAY_RUNTIME=$SidewayWorkDir"
+Write-Host "PHASE7C_DECISION_OBSERVABILITY=$DecisionRuntimeDir"
 Write-Host "PHASE7C_DEPENDENCY_WAIT_SECONDS=$DependencyWaitSeconds"
 Write-Host "PHASE7C_TELEGRAM_CONFIGURED=$TelegramConfigured"
 Write-Host "PHASE7C_TELEGRAM_MT5_ORDER_PERMISSION=NONE"

@@ -79,6 +79,7 @@ $env:MT5_MAGIC_NUMBER = [string]$systemMagicNumber
 $env:PHASE7B_DEMO_WORK_DIR = $demoDir
 $env:PHASE7C_LOT_SETTINGS_FILE = Join-Path $WorkDir "phase7c-lot-settings.json"
 $env:PHASE7C_ACTIVE_LOT_SETTINGS_FILE = Join-Path $WorkDir "phase7c-executors\active-lot-settings.json"
+$env:PHASE7C_RUNTIME_ROOT = $WorkDir
 $env:PHASE7B_LOCAL_CONTROL_ENABLED = "true"
 $env:HOST = "127.0.0.1"
 $env:PORT = [string]$ApiPort
@@ -95,6 +96,7 @@ Remove-Item Env:MT5_BRIDGE_API_KEY -ErrorAction SilentlyContinue
 Remove-Item Env:MT5_MAGIC_NUMBER -ErrorAction SilentlyContinue
 Remove-Item Env:PHASE7C_LOT_SETTINGS_FILE -ErrorAction SilentlyContinue
 Remove-Item Env:PHASE7C_ACTIVE_LOT_SETTINGS_FILE -ErrorAction SilentlyContinue
+Remove-Item Env:PHASE7C_RUNTIME_ROOT -ErrorAction SilentlyContinue
 $env:VITE_API_BASE_URL = $apiUrl
 $webCommand = "Set-Location '$ProjectRoot'; pnpm --filter @xauusd/web dev -- --host 127.0.0.1 --port $WebPort --strictPort"
 $webProcess = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @(

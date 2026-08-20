@@ -22,6 +22,10 @@ import {
   validatePhase7CLotSettings,
 } from "../services/phase7c-lot-settings.service";
 import { getMt5Telemetry } from "../services/mt5.service";
+import {
+  formatPhase7CDecisionMonitorForMt5,
+  getPhase7CDecisionMonitor,
+} from "../services/phase7c-decision-monitor.service";
 
 const router = Router();
 
@@ -152,6 +156,33 @@ router.get("/live-regime", async (req: Request, res: Response) => {
     res.status(503).json({
       error: error instanceof Error ? error.message : "Phase 7C live regime detection failed.",
     });
+  }
+});
+
+router.get("/decision-monitor", async (req: Request, res: Response) => {
+  try {
+    const symbol = String(req.query.symbol ?? "XAUUSD").trim().toUpperCase() || "XAUUSD";
+    res.setHeader("cache-control", "no-store");
+    res.json(await getPhase7CDecisionMonitor(symbol));
+  } catch (error) {
+    res.status(503).json({
+      error: error instanceof Error ? error.message : "Phase 7C decision monitor failed.",
+    });
+  }
+});
+
+router.get("/decision-monitor/mt5", async (req: Request, res: Response) => {
+  try {
+    const symbol = String(req.query.symbol ?? "XAUUSD").trim().toUpperCase() || "XAUUSD";
+    const snapshot = await getPhase7CDecisionMonitor(symbol);
+    res.setHeader("cache-control", "no-store");
+    res.type("text/plain; charset=utf-8").send(
+      formatPhase7CDecisionMonitorForMt5(snapshot),
+    );
+  } catch (error) {
+    res.status(503).type("text/plain; charset=utf-8").send(
+      `error=${error instanceof Error ? error.message.replace(/[\r\n]+/g, " ") : "Phase 7C MT5 decision monitor failed."}\n`,
+    );
   }
 });
 

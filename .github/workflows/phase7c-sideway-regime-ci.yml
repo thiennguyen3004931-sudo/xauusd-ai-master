@@ -18,6 +18,10 @@ on:
       - "scripts/report-phase7c-*.ps1"
       - "scripts/phase7c-sideway-*.mjs"
       - "scripts/phase7c-lot-settings.test.mjs"
+      - "scripts/phase7c-decision-audit*.mjs"
+      - "scripts/phase7c-decision-monitor.test.mjs"
+      - "scripts/install-phase7c-mt5-decision-panel-local.ps1"
+      - "mt5/**"
       - "scripts/run-phase7b-web-autostart.ps1"
       - "scripts/run-phase7b-demo-web-local.ps1"
       - "scripts/phase7c-execution-lock*.mjs"
@@ -48,6 +52,10 @@ on:
       - "scripts/report-phase7c-*.ps1"
       - "scripts/phase7c-sideway-*.mjs"
       - "scripts/phase7c-lot-settings.test.mjs"
+      - "scripts/phase7c-decision-audit*.mjs"
+      - "scripts/phase7c-decision-monitor.test.mjs"
+      - "scripts/install-phase7c-mt5-decision-panel-local.ps1"
+      - "mt5/**"
       - "scripts/run-phase7b-web-autostart.ps1"
       - "scripts/run-phase7b-demo-web-local.ps1"
       - "scripts/phase7c-execution-lock*.mjs"
@@ -107,7 +115,10 @@ jobs:
         run: pnpm --filter @xauusd/api... build
 
       - name: Test Phase7C lot settings
-        run: node --test scripts/phase7c-lot-settings.test.mjs
+        run: |
+          node --test scripts/phase7c-lot-settings.test.mjs
+          node --test scripts/phase7c-decision-audit.test.mjs
+          node --import ./apps/api/node_modules/tsx/dist/loader.mjs --test scripts/phase7c-decision-monitor.test.mjs
 
       - name: Build Phase7C web
         run: pnpm --filter @xauusd/web... build
@@ -155,6 +166,7 @@ jobs:
           node --check scripts/phase7c-sideway-execution-guards.mjs
           node --check scripts/phase7c-execution-lock.mjs
           node --check scripts/phase7c-forward-report-utils.mjs
+          node --check scripts/phase7c-decision-audit.mjs
           node --check scripts/report-phase7c-forward.mjs
           node --check scripts/run-phase7c-sideway-controller.mjs
           node --check scripts/run-phase7c-sideway-locked.mjs
@@ -201,7 +213,8 @@ jobs:
             "scripts/verify-phase7c-executors-local.ps1",
             "scripts/verify-phase7c-executor-startup-task-local.ps1",
             "scripts/install-phase7c-forward-dashboard-task-local.ps1",
-            "scripts/verify-phase7c-forward-dashboard-task-local.ps1"
+            "scripts/verify-phase7c-forward-dashboard-task-local.ps1",
+            "scripts/install-phase7c-mt5-decision-panel-local.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null
@@ -217,6 +230,13 @@ jobs:
             }
             Write-Host "PHASE7C_POWERSHELL_PARSE_PASS=$file"
           }
+
+      - name: Verify MT5 panel is read-only
+        shell: bash
+        run: |
+          grep -q 'WebRequest("GET"' mt5/XAUUSD_AI_Master_Decision_Panel.mq5
+          grep -q 'ORDER PERMISSION = ' mt5/XAUUSD_AI_Master_Decision_Panel.mq5
+          ! grep -Eq 'OrderSend|CTrade|PositionClose|PositionModify' mt5/XAUUSD_AI_Master_Decision_Panel.mq5
 
       - name: Validate unarmed activation contract
         shell: bash
