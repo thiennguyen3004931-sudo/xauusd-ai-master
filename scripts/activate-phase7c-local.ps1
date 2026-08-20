@@ -382,12 +382,24 @@ Start-Phase7CExecutors
 
 $activeLotDeadline = (Get-Date).AddSeconds(20)
 $activeLotReady = $false
+$expectedActiveArmed = $ArmExecutors.IsPresent
 while ((Get-Date) -lt $activeLotDeadline) {
   try {
     $activeProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7c/lot-settings" -Method Get -TimeoutSec 4
+    # An armed supervisor must make restartRequired=false. The intentional
+    # TELEGRAM_ONLY shadow supervisor stays armed=false, so restartRequired=true
+    # remains the fail-closed API signal while its PID/settings still prove that
+    # the canonical runtime binding is correct.
+    $activeArmedMatches = [bool]$activeProbe.active.armed -eq $expectedActiveArmed
+    $restartStateMatches = if ($expectedActiveArmed) {
+      $activeProbe.restartRequired -eq $false
+    } else {
+      $activeProbe.restartRequired -eq $true
+    }
     if (
       $activeProbe.activeAlive -eq $true -and
-      $activeProbe.restartRequired -eq $false -and
+      $activeArmedMatches -and
+      $restartStateMatches -and
       [math]::Abs([double]$activeProbe.active.trendFixedLot - $TrendFixedVolume) -le 1e-8 -and
       [math]::Abs([double]$activeProbe.active.sidewayRiskPercent - $SidewayRiskPercent) -le 1e-8 -and
       [math]::Abs([double]$activeProbe.active.sidewayMaxLot - $SidewayMaxLot) -le 1e-8
@@ -402,7 +414,8 @@ if (-not $activeLotReady) {
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ExecutorStopper -WorkDir $WorkDir
   throw "Phase 7C executor active lot settings did not bind to the API runtime. Executors were stopped; keep PAUSE."
 }
-Write-Host "PHASE7C_ACTIVATE_LOT_ACTIVE=PASS"
+$activeLotMode = if ($expectedActiveArmed) { "ARMED_ACTIVE" } else { "SHADOW_BOUND_UNARMED" }
+Write-Host "PHASE7C_ACTIVATE_LOT_ACTIVE=PASS|MODE=$activeLotMode"
 
 $executorMode = if ($ArmExecutors) { "ARMED_DEMO_ONLY" } else { "SHADOW_ONLY" }
 Write-Host "PHASE7C_ACTIVATE_CONTROL_CENTER=$webUrl/"
