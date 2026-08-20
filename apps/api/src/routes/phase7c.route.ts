@@ -26,8 +26,14 @@ import {
   formatPhase7CDecisionMonitorForMt5,
   getPhase7CDecisionMonitor,
 } from "../services/phase7c-decision-monitor.service";
+import {
+  getPhase7CLifecycleRuntimeStatus,
+  startPhase7CFromWeb,
+  stopPhase7CFromWeb,
+} from "../services/phase7c-lifecycle.service";
 
 const router = Router();
+let lifecycleActionInProgress = false;
 
 function isLoopbackRequest(req: Request): boolean {
   const addresses = [req.ip, req.socket.remoteAddress]
@@ -78,6 +84,70 @@ router.post("/bot-mode", (req: Request, res: Response) => {
     state: phase7CBotModeService.set(requestedMode, source),
     options: getPhase7CBotModeOptions(),
   });
+});
+
+router.get("/lifecycle", async (req: Request, res: Response) => {
+  if (!isLoopbackRequest(req)) {
+    res.status(403).json({ error: "Bot lifecycle status is restricted to localhost." });
+    return;
+  }
+  try {
+    const telemetry = await getMt5Telemetry("XAUUSD");
+    res.setHeader("cache-control", "no-store");
+    res.json({
+      ...getPhase7CLifecycleRuntimeStatus(),
+      actionInProgress: lifecycleActionInProgress,
+      bridge: {
+        reachable: telemetry.reachable,
+        accountMode: telemetry.health?.accountMode ?? null,
+        server: telemetry.health?.server ?? null,
+        tradingEnabled: telemetry.health?.tradingEnabled ?? null,
+        terminalTradeAllowed: telemetry.health?.terminalTradeAllowed ?? null,
+        expertTradeAllowed: telemetry.health?.expertTradeAllowed ?? null,
+        openXauusdPositions: telemetry.positions.length,
+      },
+    });
+  } catch (error) {
+    res.status(503).json({ error: error instanceof Error ? error.message : "Phase 7C lifecycle status failed." });
+  }
+});
+
+router.post("/lifecycle/start", async (req: Request, res: Response) => {
+  if (!isLoopbackRequest(req)) {
+    res.status(403).json({ error: "Bot lifecycle controls are restricted to localhost." });
+    return;
+  }
+  if (lifecycleActionInProgress) {
+    res.status(409).json({ error: "Một thao tác Bật/Dừng Bot đang chạy. Vui lòng chờ hoàn tất." });
+    return;
+  }
+  lifecycleActionInProgress = true;
+  try {
+    res.json(await startPhase7CFromWeb(await getMt5Telemetry("XAUUSD")));
+  } catch (error) {
+    res.status(409).json({ error: error instanceof Error ? error.message : "Phase 7C start failed." });
+  } finally {
+    lifecycleActionInProgress = false;
+  }
+});
+
+router.post("/lifecycle/stop", async (req: Request, res: Response) => {
+  if (!isLoopbackRequest(req)) {
+    res.status(403).json({ error: "Bot lifecycle controls are restricted to localhost." });
+    return;
+  }
+  if (lifecycleActionInProgress) {
+    res.status(409).json({ error: "Một thao tác Bật/Dừng Bot đang chạy. Vui lòng chờ hoàn tất." });
+    return;
+  }
+  lifecycleActionInProgress = true;
+  try {
+    res.json(await stopPhase7CFromWeb(await getMt5Telemetry("XAUUSD")));
+  } catch (error) {
+    res.status(409).json({ error: error instanceof Error ? error.message : "Phase 7C stop failed." });
+  } finally {
+    lifecycleActionInProgress = false;
+  }
 });
 
 router.get("/lot-settings", (_req: Request, res: Response) => {

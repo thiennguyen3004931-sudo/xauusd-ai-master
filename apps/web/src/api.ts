@@ -13,6 +13,8 @@ import type {
   Phase7CBacktestResult,
   Phase7CDailyRecoverySnapshot,
   Phase7CDecisionMonitorSnapshot,
+  Phase7CLifecycleActionResponse,
+  Phase7CLifecycleSnapshot,
   Phase7CLiveRegimeSnapshot,
   Phase7CLotSettingsSnapshot,
 } from "./phase7c-types";
@@ -136,6 +138,22 @@ export async function getPhase7CDecisionMonitor(): Promise<Phase7CDecisionMonito
   return read<Phase7CDecisionMonitorSnapshot>(
     await fetch(`${API_BASE}/api/v1/phase7c/decision-monitor?symbol=XAUUSD`, {
       cache: "no-store",
+    }),
+  );
+}
+
+export async function getPhase7CLifecycle(): Promise<Phase7CLifecycleSnapshot> {
+  return read<Phase7CLifecycleSnapshot>(
+    await fetch(`${API_BASE}/api/v1/phase7c/lifecycle`, { cache: "no-store" }),
+  );
+}
+
+export async function runPhase7CLifecycleAction(action: "start" | "stop"): Promise<Phase7CLifecycleActionResponse> {
+  return read<Phase7CLifecycleActionResponse>(
+    await fetch(`${API_BASE}/api/v1/phase7c/lifecycle/${action}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
     }),
   );
 }

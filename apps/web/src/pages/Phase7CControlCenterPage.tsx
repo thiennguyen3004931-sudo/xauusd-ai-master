@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link as RouterLink } from "react-router-dom";
+import PlayArrowRounded from "@mui/icons-material/PlayArrowRounded";
+import StopRounded from "@mui/icons-material/StopRounded";
+import TelegramRounded from "@mui/icons-material/Telegram";
 import {
   Alert,
   Box,
@@ -24,9 +27,11 @@ import {
   getPhase7CAccountRisk,
   getPhase7CDecisionMonitor,
   getPhase7CDailyRecovery,
+  getPhase7CLifecycle,
   getPhase7CLiveRegime,
   getPhase7CLotSettings,
   setPhase7CLotSettings,
+  runPhase7CLifecycleAction,
 } from "../api";
 import { MetricCard } from "../ui/MetricCard";
 import { ErrorState, LoadingState } from "../ui/PageState";
@@ -49,6 +54,23 @@ function dateTime(value: number | string | null | undefined) {
 export function Phase7CControlCenterPage() {
 
   const queryClient = useQueryClient();
+  const lifecycle = useQuery({
+    queryKey: ["phase7c-lifecycle"],
+    queryFn: getPhase7CLifecycle,
+    refetchInterval: 2000,
+    retry: false,
+  });
+  const lifecycleAction = useMutation({
+    mutationFn: runPhase7CLifecycleAction,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["phase7c-lifecycle"] }),
+        queryClient.invalidateQueries({ queryKey: ["phase7c-live-regime-control-center"] }),
+        queryClient.invalidateQueries({ queryKey: ["phase7c-lot-settings"] }),
+        queryClient.invalidateQueries({ queryKey: ["phase7c-decision-monitor"] }),
+      ]);
+    },
+  });
   const lotSettings = useQuery({
     queryKey: ["phase7c-lot-settings"],
     queryFn: getPhase7CLotSettings,
@@ -187,7 +209,102 @@ export function Phase7CControlCenterPage() {
             Tập trung vào AUTO regime, Daily Recovery và giới hạn risk/lot cho lệnh kế tiếp. Điều kiện entry chi tiết nằm ở màn hình Điều kiện tín hiệu.
           </Typography>
         </Box>
+      </Stack>
+
+
+      <Card sx={{ border: "1px solid", borderColor: lifecycle.data?.ready ? "success.main" : "divider" }}>
+        <CardContent>
+          <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" gap={2.5} alignItems={{ lg: "center" }}>
+            <Box>
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography variant="h6" fontWeight={950}>Bot DEMO một chạm</Typography>
+                <Chip
+                  color={lifecycle.data?.ready ? "success" : lifecycle.data?.running ? "warning" : "default"}
+                  label={lifecycle.data?.ready ? "RUNNING · READY" : lifecycle.data?.running ? "ĐANG KHỞI ĐỘNG" : "ĐÃ DỪNG"}
+                  size="small"
+                />
+                <Chip
+                  icon={<TelegramRounded />}
+                  color={lifecycle.data?.telegramReady ? "success" : "default"}
+                  label={lifecycle.data?.telegramReady ? "TELEGRAM READY" : "TELEGRAM OFFLINE"}
+                  size="small"
+                  variant="outlined"
+                />
               </Stack>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.8 }}>
+                Bật Bot sẽ kiểm tra MT5 DEMO, Algo Trading, vị thế mở và cấu hình lot; khởi động Trend + Sideway + Telegram ở PAUSE rồi chỉ chuyển AUTO khi tất cả đều READY.
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.7 }}>
+                MT5 {lifecycle.data?.bridge.reachable ? "đã kết nối" : "offline"} · {lifecycle.data?.bridge.accountMode?.toUpperCase() ?? "UNKNOWN"} · Mode {lifecycle.data?.mode.mode ?? "—"} · XAUUSD positions {lifecycle.data?.bridge.openXauusdPositions ?? "—"}
+              </Typography>
+            </Box>
+
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ minWidth: { lg: 390 } }}>
+              <Button
+                fullWidth
+                variant="contained"
+                color="success"
+                size="large"
+                startIcon={<PlayArrowRounded />}
+                disabled={
+                  lifecycleAction.isPending ||
+                  lifecycle.data?.actionInProgress ||
+                  lifecycle.data?.ready ||
+                  !lifecycle.data?.controlEnabled ||
+                  !lifecycle.data?.bridge.reachable ||
+                  lifecycle.data?.bridge.accountMode !== "demo" ||
+                  lifecycle.data?.bridge.tradingEnabled !== true ||
+                  lifecycle.data?.bridge.terminalTradeAllowed !== true ||
+                  lifecycle.data?.bridge.expertTradeAllowed !== true ||
+                  (lifecycle.data?.bridge.openXauusdPositions ?? 0) > 0 ||
+                  !lifecycle.data?.telegramConfigured
+                }
+                onClick={() => lifecycleAction.mutate("start")}
+                sx={{ fontWeight: 950, minWidth: 190 }}
+              >
+                {lifecycleAction.isPending && lifecycleAction.variables === "start"
+                  ? "ĐANG BẬT..."
+                  : lifecycle.data?.running ? "KHÔI PHỤC BOT" : "BẬT BOT"}
+              </Button>
+              <Button
+                fullWidth
+                variant="outlined"
+                color="error"
+                size="large"
+                startIcon={<StopRounded />}
+                disabled={
+                  lifecycleAction.isPending ||
+                  lifecycle.data?.actionInProgress ||
+                  !lifecycle.data?.running ||
+                  !lifecycle.data?.controlEnabled ||
+                  (lifecycle.data?.bridge.openXauusdPositions ?? 0) > 0
+                }
+                onClick={() => lifecycleAction.mutate("stop")}
+                sx={{ fontWeight: 900, minWidth: 170 }}
+              >
+                {lifecycleAction.isPending && lifecycleAction.variables === "stop" ? "ĐANG DỪNG..." : "DỪNG BOT"}
+              </Button>
+            </Stack>
+          </Stack>
+
+          {lifecycle.error ? (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              Không đọc được bộ điều khiển Desktop: {lifecycle.error instanceof Error ? lifecycle.error.message : String(lifecycle.error)}
+            </Alert>
+          ) : null}
+          {lifecycleAction.isSuccess ? <Alert severity="success" sx={{ mt: 2 }}>{lifecycleAction.data.message}</Alert> : null}
+          {lifecycleAction.error ? (
+            <Alert severity="error" sx={{ mt: 2, whiteSpace: "pre-wrap" }}>
+              {lifecycleAction.error instanceof Error ? lifecycleAction.error.message : String(lifecycleAction.error)}
+            </Alert>
+          ) : null}
+          {(lifecycle.data?.bridge.openXauusdPositions ?? 0) > 0 ? (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              Đang có vị thế XAUUSD; nút Dừng Bot bị khóa để executor tiếp tục quản lý lệnh.
+            </Alert>
+          ) : null}
+        </CardContent>
+      </Card>
 
 
       <Card>

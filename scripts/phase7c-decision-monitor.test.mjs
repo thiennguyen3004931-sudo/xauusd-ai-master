@@ -4,6 +4,7 @@ import {
   buildPhase7CDecisionMonitor,
   formatPhase7CDecisionMonitorForMt5,
 } from "../apps/api/src/services/phase7c-decision-monitor.service.ts";
+import { assertPhase7CDemoReady } from "../apps/api/src/services/phase7c-lifecycle.service.ts";
 
 function fixture(overrides = {}) {
   return {
@@ -84,4 +85,90 @@ test("MT5 payload remains read-only and carries the canonical decision", () => {
   assert.match(payload, /^finalLot=0\.12/m);
   assert.match(payload, /^estimatedRiskUsd=72/m);
   assert.match(payload, /^mt5OrderPermission=NONE/m);
+  assert.match(payload, /^positionState=FLAT/m);
+  assert.match(payload, /^holdReason=Chờ setup hợp lệ; panel không có quyền gửi lệnh\./m);
+});
+
+test("open managed position exposes broker P/L, actual protection and hold reason", () => {
+  const input = fixture();
+  input.telemetry.quote = { bid: 2511, ask: 2511.2, spread: 0.2, timestamp: input.now };
+  input.telemetry.positions = [{
+    ticket: "9001",
+    symbol: "XAUUSD",
+    brokerSymbol: "XAUUSD",
+    side: "LONG",
+    volume: 0.08,
+    entry: 2500,
+    stopLoss: 2500,
+    takeProfit: 0,
+    profit: 131.5,
+    swap: -1,
+    commission: -0.5,
+    openedAt: input.now - 60_000,
+  }];
+  input.managedStates = {
+    TREND: {
+      ticket: "9001",
+      side: "BUY",
+      pattern: "ENGULFING",
+      entry: 2500,
+      initialVolume: 0.12,
+      breakEvenApplied: true,
+      partialApplied: true,
+    },
+    SIDEWAY: null,
+  };
+  input.audit = [{
+    timestamp: input.now - 1_000,
+    strategy: "TREND",
+    event: "FVG_HOLD_CONFIRMED",
+    stage: "MANAGING",
+    reason: "FVG_HOLD_CONFIRMED",
+    setup: { side: "BUY", pattern: "ENGULFING" },
+    management: { ticket: "9001", breakEvenApplied: true, partialApplied: true },
+  }, {
+    timestamp: input.now - 60_000,
+    strategy: "TREND",
+    event: "ENTRY_FILLED",
+    stage: "FILLED",
+    reason: "ENTRY_FILLED",
+    setup: { side: "BUY", pattern: "ENGULFING" },
+    plan: { entry: 2500, stopLoss: 2494, tp1: 2510 },
+    management: { ticket: "9001" },
+  }];
+
+  const snapshot = buildPhase7CDecisionMonitor(input);
+  assert.equal(snapshot.position.state, "MANAGING");
+  assert.equal(snapshot.position.strategy, "TREND");
+  assert.equal(snapshot.position.currentPrice, 2511);
+  assert.equal(snapshot.position.floatingPnlUsd, 130);
+  assert.equal(snapshot.position.tp1, 2510);
+  assert.equal(snapshot.position.breakEvenApplied, true);
+  assert.equal(snapshot.position.partialApplied, true);
+  assert.match(snapshot.position.entryReason, /ENGULFING/);
+  assert.match(snapshot.position.holdReason, /FVG cùng hướng/);
+
+  const payload = formatPhase7CDecisionMonitorForMt5(snapshot);
+  assert.match(payload, /^positionState=MANAGING/m);
+  assert.match(payload, /^floatingPnlUsd=130/m);
+  assert.match(payload, /^entryReason=ENGULFING/m);
+  assert.match(payload, /^holdReason=Giữ runner:/m);
+});
+
+test("desktop lifecycle remains DEMO-only and requires all MT5 trading gates", () => {
+  const ready = fixture().telemetry;
+  ready.health = {
+    ...ready.health,
+    accountMode: "demo",
+    tradingEnabled: true,
+    terminalTradeAllowed: true,
+    expertTradeAllowed: true,
+  };
+  assert.doesNotThrow(() => assertPhase7CDemoReady(ready));
+
+  const real = { ...ready, health: { ...ready.health, accountMode: "real" } };
+  assert.throws(() => assertPhase7CDemoReady(real), /Chỉ cho phép tài khoản DEMO/);
+
+  const algoOff = { ...ready, health: { ...ready.health, expertTradeAllowed: false } };
+  assert.throws(() => assertPhase7CDemoReady(algoOff), /Algo\/Expert Trading chưa bật/);
 });

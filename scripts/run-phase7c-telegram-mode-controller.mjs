@@ -59,7 +59,10 @@ while (true) {
         await discardPendingUpdates();
       }
       if (!initialPanelSent) {
-        await sendPanel(initial.mode, "Bảng điều khiển bot đã sẵn sàng.");
+        const startupNote = initial.mode === "PAUSE"
+          ? "Bot DEMO và Telegram vừa khởi động ở PAUSE; đang chờ xác minh an toàn trước khi cho phép AUTO."
+          : `Bot DEMO và Telegram vừa khởi động ở mode ${initial.mode}.`;
+        await sendPanel(initial.mode, startupNote);
         lastTelegramSuccessAt = Date.now();
         initialPanelSent = true;
       }
@@ -96,6 +99,7 @@ while (true) {
   if (ready) {
     try {
       await pollTelegram();
+      await syncExternalMode();
       lastTelegramSuccessAt = Date.now();
       await writeStatus({
         ready,
@@ -144,6 +148,19 @@ async function pollTelegram() {
     // A transient control-API failure must not consume the button press.
     updateOffset = nextTelegramUpdateOffset(updateOffset, update.update_id);
   }
+}
+
+async function syncExternalMode() {
+  const current = await getBotMode();
+  lastApiSuccessAt = Date.now();
+  if (!current?.mode || current.mode === lastMode) return;
+  const previousMode = lastMode;
+  lastMode = current.mode;
+  await sendPanel(
+    current.mode,
+    `Web/API đã chuyển mode ${previousMode} → ${current.mode}. Bot DEMO và Telegram đang hoạt động.`,
+  );
+  console.log(`PHASE7C_MODE_CHANGED=${current.mode}|SOURCE=EXTERNAL_API`);
 }
 
 async function handleCallback(callback) {
