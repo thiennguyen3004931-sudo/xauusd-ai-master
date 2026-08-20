@@ -203,6 +203,7 @@ jobs:
             "scripts/report-phase7c-forward-local.ps1",
             "scripts/run-phase7c-trend-controller-local.ps1",
             "scripts/run-phase7c-sideway-controller-local.ps1",
+            "scripts/run-phase7b-api-runtime-local.ps1",
             "scripts/run-phase7b-web-autostart.ps1",
             "scripts/run-phase7b-demo-web-local.ps1",
             "scripts/run-phase7c-executors-local.ps1",
@@ -246,3 +247,7 @@ jobs:
           grep -q 'PHASE7C_EXECUTOR_SUPERVISOR_MODE=TELEGRAM_ONLY' scripts/activate-phase7c-local.ps1
           grep -q "pnpm --filter '@xauusd/api...' build" scripts/activate-phase7c-local.ps1
           grep -q "pnpm --filter '@xauusd/web...' build" scripts/activate-phase7c-local.ps1
+          grep -q 'PHASE7C_ACTIVATE_LOT_ACTIVE=PASS' scripts/activate-phase7c-local.ps1
+          grep -q 'PHASE7C_LOT_SETTINGS_FILE' scripts/run-phase7b-api-runtime-local.ps1
+          grep -q 'PHASE7C_ACTIVE_LOT_SETTINGS_FILE' scripts/run-phase7b-api-runtime-local.ps1
+          grep -q 'PHASE7C_RUNTIME_ROOT' scripts/run-phase7b-api-runtime-local.ps1

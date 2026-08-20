@@ -316,6 +316,7 @@ Start-TaskSafe $WebTask
 $webDeadline = (Get-Date).AddSeconds(90)
 $demo = $null
 $risk = $null
+$lotSettings = $null
 $mode = $null
 $decision = $null
 $uiReady = $false
@@ -341,6 +342,7 @@ while ((Get-Date) -lt $webDeadline) {
     ) {
       $demo = $demoProbe
       $risk = $riskProbe
+      $lotSettings = $lotProbe
       $mode = $modeProbe
       $decision = $decisionProbe
       $uiReady = $true
@@ -350,11 +352,18 @@ while ((Get-Date) -lt $webDeadline) {
   Start-Sleep -Seconds 2
 }
 
-if ($null -eq $demo -or $null -eq $risk -or $null -eq $mode -or $null -eq $decision -or -not $uiReady) {
+if ($null -eq $demo -or $null -eq $risk -or $null -eq $lotSettings -or $null -eq $mode -or $null -eq $decision -or -not $uiReady) {
   throw "Phase 7C API/UI self-test failed after restart. Check the Web/API scheduled task and its logs."
 }
 if ($risk.safety.executionMutation -ne $false -or $risk.safety.phase7bFixedVolumeUnchanged -ne $true) {
   throw "Phase 7C Auto Lot safety assertion failed."
+}
+if (
+  [math]::Abs([double]$lotSettings.state.trendFixedLot - $TrendFixedVolume) -gt 1e-8 -or
+  [math]::Abs([double]$lotSettings.state.sidewayRiskPercent - $SidewayRiskPercent) -gt 1e-8 -or
+  [math]::Abs([double]$lotSettings.state.sidewayMaxLot - $SidewayMaxLot) -gt 1e-8
+) {
+  throw "Phase 7C API lot-settings runtime does not match activation WorkDir. Expected=$TrendFixedVolume/$SidewayRiskPercent/$SidewayMaxLot Actual=$($lotSettings.state.trendFixedLot)/$($lotSettings.state.sidewayRiskPercent)/$($lotSettings.state.sidewayMaxLot)"
 }
 
 Write-Host "PHASE7C_ACTIVATE_LEGACY_BOT_TASK=STOPPED_NOT_RESTARTED"
@@ -370,6 +379,30 @@ Write-Host "PHASE7C_ACTIVATE_DECISION_MONITOR=PASS"
 Write-Host "PHASE7C_ACTIVATE_MT5_PANEL_ORDER_PERMISSION=$($decision.safety.mt5PanelOrderPermission)"
 
 Start-Phase7CExecutors
+
+$activeLotDeadline = (Get-Date).AddSeconds(20)
+$activeLotReady = $false
+while ((Get-Date) -lt $activeLotDeadline) {
+  try {
+    $activeProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7c/lot-settings" -Method Get -TimeoutSec 4
+    if (
+      $activeProbe.activeAlive -eq $true -and
+      $activeProbe.restartRequired -eq $false -and
+      [math]::Abs([double]$activeProbe.active.trendFixedLot - $TrendFixedVolume) -le 1e-8 -and
+      [math]::Abs([double]$activeProbe.active.sidewayRiskPercent - $SidewayRiskPercent) -le 1e-8 -and
+      [math]::Abs([double]$activeProbe.active.sidewayMaxLot - $SidewayMaxLot) -le 1e-8
+    ) {
+      $activeLotReady = $true
+      break
+    }
+  } catch {}
+  Start-Sleep -Seconds 1
+}
+if (-not $activeLotReady) {
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ExecutorStopper -WorkDir $WorkDir
+  throw "Phase 7C executor active lot settings did not bind to the API runtime. Executors were stopped; keep PAUSE."
+}
+Write-Host "PHASE7C_ACTIVATE_LOT_ACTIVE=PASS"
 
 $executorMode = if ($ArmExecutors) { "ARMED_DEMO_ONLY" } else { "SHADOW_ONLY" }
 Write-Host "PHASE7C_ACTIVATE_CONTROL_CENTER=$webUrl/"
