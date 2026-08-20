@@ -38,6 +38,26 @@ if (!apiSource.includes("inferBrokerClockOffset") || !apiSource.includes("normal
   throw new Error("API broker clock normalization is missing. Apply the pattern UI clock migration first.");
 }
 
+const layoutSource = normalized.get(files.layout);
+const supertrendGateAlreadyApplied =
+  controllerSource.includes("phase7BSupertrend") &&
+  controllerSource.includes("PHASE7B_DEMO_SUPERTREND=M15_10_3_AND_M5_10_3_MANDATORY") &&
+  apiSource.includes("phase7BSupertrend") &&
+  apiSource.includes("m15Supertrend") &&
+  apiSource.includes("m5Supertrend") &&
+  layoutSource.includes("ST M15/M5");
+
+if (supertrendGateAlreadyApplied) {
+  console.log("PHASE7B_SUPERTREND_GATE_PATCH=START");
+  console.log(`PHASE7B_SUPERTREND_GATE_ROOT=${root}`);
+  console.log(`PHASE7B_SUPERTREND_GATE_MODE=${apply ? "APPLY" : "CHECK_ONLY"}`);
+  console.log("PHASE7B_SUPERTREND_GATE_RULE=M15_10_3_AND_M5_10_3_MANDATORY_AT_M15_SIGNAL_CLOSE");
+  console.log("PHASE7B_SUPERTREND_GATE_CHANGES_NEEDED=0");
+  console.log("PHASE7B_SUPERTREND_GATE_CURRENT_CONTROLLER=ALREADY_APPLIED");
+  console.log(apply ? "PHASE7B_SUPERTREND_GATE_APPLY=PASS" : "PHASE7B_SUPERTREND_GATE_CHECK=PASS");
+  process.exit(0);
+}
+
 const plans = [
   patch(
     files.controller,

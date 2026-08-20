@@ -168,10 +168,10 @@ function validateTempResult() {
   for (const marker of controllerForbidden) {
     if (controller.includes(marker)) throw new Error(`Temporary controller forbidden marker remains: ${marker}`);
   }
-  if (!api.includes("const eligible = Boolean(pattern && supertrendAligned && validStructure);")) {
-    throw new Error("Temporary API still uses a moving-average entry gate.");
+  if (!api.includes("&& supertrendAligned") || !api.includes("&& structuralStopDistance <= 10")) {
+    throw new Error("Temporary API is missing the Supertrend and maximum structural-stop entry gates.");
   }
   if (!api.includes("inferBrokerClockOffset")) throw new Error("Temporary API lost broker-clock normalization.");
-  if (!layout.includes("runner dời SL theo cấu trúc M15")) throw new Error("Temporary layout runner rule missing.");
-  if (!page.includes("MA200 chỉ xác nhận xu hướng khung lớn")) throw new Error("Temporary page MA200 macro role missing.");
+  if (!layout.includes("SL cấu trúc 6–10; >10 chờ hồi")) throw new Error("Temporary layout stop rule missing.");
+  if (!page.includes("Chỉ xác nhận xu hướng khung lớn")) throw new Error("Temporary page MA200 macro role missing.");
 }
