@@ -114,7 +114,7 @@ function Test-ProjectCoreCommand([string]$CommandLine) {
     $ProjectRoot,
     [System.StringComparison]::OrdinalIgnoreCase
   ) -ge 0
-  $hasProjectRuntimeMarker = $CommandLine -match '(?i)(run-phase7b-(web-autostart|api-runtime-local|bridge-service)\.ps1|node_modules[\\/].*(vite|tsx)|mt5_bridge\.app:app)'
+  $hasProjectRuntimeMarker = $CommandLine -match '(?i)(run-phase7b-(web-autostart|api-runtime-local|bridge-service)\.ps1|phase7b-(api|web)-background-v\d+\.ps1|node_modules[\\/].*(vite|tsx)|mt5_bridge\.app:app)'
   $hasWorkspaceFilter = $CommandLine -match '(?i)--filter\s+["'']?@xauusd/(api|web)["'']?'
   return ($hasProjectPath -and $hasProjectRuntimeMarker) -or $hasWorkspaceFilter
 }
