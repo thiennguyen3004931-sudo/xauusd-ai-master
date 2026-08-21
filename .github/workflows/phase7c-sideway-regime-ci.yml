@@ -281,6 +281,9 @@ jobs:
           grep -q 'PHASE7C_ACTIVATE_BOT_STALE_RECOVERY=SAFE_COLD_START_PENDING_LOCAL_AND_BROKER_CHECKS' scripts/activate-phase7c-local.ps1
           grep -q 'PHASE7C_ACTIVATE_MT5_OFFLINE_RECOVERY=SAFE_RESTART_PENDING_LOCAL_AND_BROKER_CHECKS' scripts/activate-phase7c-local.ps1
           grep -q 'MT5_OFFLINE_PLUS_LOCAL_STATE_PLUS_BRIDGE' scripts/activate-phase7c-local.ps1
+          grep -q 'PHASE7C_ACTIVATE_CORE_PORTS_CLEAN=PASS' scripts/activate-phase7c-local.ps1
+          grep -q 'Stop-ProjectCoreProcesses' scripts/activate-phase7c-local.ps1
+          grep -q 'PHASE7C_ACTIVATE_LOT_ACTIVE_DETAIL' scripts/activate-phase7c-local.ps1
           grep -q 'PHASE7C_EXECUTOR_STOP=FAIL|REMAINING=' scripts/stop-phase7c-executors-local.ps1
           grep -q 'PHASE7C_LOT_SETTINGS_FILE' scripts/run-phase7b-api-runtime-local.ps1
           grep -q 'PHASE7C_ACTIVE_LOT_SETTINGS_FILE' scripts/run-phase7b-api-runtime-local.ps1
