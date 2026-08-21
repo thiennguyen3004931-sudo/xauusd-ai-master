@@ -42,3 +42,13 @@ test("Phase 7C activation reports the exact failed API or UI probe", () => {
   assert.match(activation, /STEP=\$webSelfTestStep/);
   assert.match(activation, /DETAIL=\$webSelfTestError/);
 });
+
+test("Phase 7C activation removes project dev watchers before restarting ports", () => {
+  assert.match(activation, /function Stop-ProjectCoreProcesses/);
+  assert.match(activation, /--filter\\s\+\["''\]\?@xauusd\/\(api\|web\)/);
+  assert.match(activation, /function Assert-CorePortsAvailable/);
+  assert.match(activation, /Stop-ProcessTree \$rootPid/);
+  assert.match(activation, /PHASE7C_ACTIVATE_CORE_PORTS_CLEAN=PASS/);
+  assert.match(activation, /PHASE7C_ACTIVATE_LOT_ACTIVE_DETAIL/);
+  assert.doesNotMatch(activation, /function Stop-PortOwner/);
+});

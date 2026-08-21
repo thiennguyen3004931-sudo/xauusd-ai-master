@@ -93,12 +93,89 @@ function Resolve-ExistingTaskName([string[]]$Candidates, [string]$Role) {
   throw "Scheduled Task for $Role is missing. Tried: $($Candidates -join ', ')"
 }
 
-function Stop-PortOwner([int]$Port) {
-  $owners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
-    Select-Object -ExpandProperty OwningProcess -Unique
-  foreach ($owner in $owners) {
-    Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
+function Stop-ProcessTree([int]$ProcessId) {
+  if ($ProcessId -le 0) { return }
+  try {
+    if ($null -eq (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return }
+    $taskkill = Join-Path $env:SystemRoot "System32\taskkill.exe"
+    if (Test-Path -LiteralPath $taskkill) {
+      & $taskkill /PID $ProcessId /T /F 2>$null | Out-Null
+    } else {
+      Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+    }
+  } catch {
+    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
   }
+}
+
+function Test-ProjectCoreCommand([string]$CommandLine) {
+  if ([string]::IsNullOrWhiteSpace($CommandLine)) { return $false }
+  $hasProjectPath = $CommandLine.IndexOf(
+    $ProjectRoot,
+    [System.StringComparison]::OrdinalIgnoreCase
+  ) -ge 0
+  $hasProjectRuntimeMarker = $CommandLine -match '(?i)(run-phase7b-(web-autostart|api-runtime-local|bridge-service)\.ps1|node_modules[\\/].*(vite|tsx)|mt5_bridge\.app:app)'
+  $hasWorkspaceFilter = $CommandLine -match '(?i)--filter\s+["'']?@xauusd/(api|web)["'']?'
+  return ($hasProjectPath -and $hasProjectRuntimeMarker) -or $hasWorkspaceFilter
+}
+
+function Stop-ProjectCoreProcesses([int[]]$Ports) {
+  $snapshot = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+  $byPid = @{}
+  foreach ($process in $snapshot) {
+    $byPid[[int]$process.ProcessId] = $process
+  }
+
+  $listeners = @(
+    Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+      Where-Object { $Ports -contains [int]$_.LocalPort }
+  )
+
+  # Scope cleanup to ancestors of the exact localhost port listeners. Pick the
+  # highest recognized project ancestor so taskkill /T removes pnpm/cmd/node
+  # descendants together and a dev watcher cannot respawn the API.
+  $roots = @()
+  foreach ($listener in $listeners) {
+    $cursor = [int]$listener.OwningProcess
+    $rootPid = 0
+    for ($depth = 0; $depth -lt 16; $depth++) {
+      if (-not $byPid.ContainsKey($cursor)) { break }
+      if (Test-ProjectCoreCommand ([string]$byPid[$cursor].CommandLine)) {
+        $rootPid = $cursor
+      }
+      $parentId = [int]$byPid[$cursor].ParentProcessId
+      if ($parentId -le 0) { break }
+      $cursor = $parentId
+    }
+    if ($rootPid -gt 0) { $roots += $rootPid }
+  }
+
+  foreach ($rootPid in @($roots | Sort-Object -Unique)) {
+    Write-Host "PHASE7C_ACTIVATE_CORE_TREE_STOP=PID=$rootPid"
+    Stop-ProcessTree $rootPid
+  }
+}
+
+function Assert-CorePortsAvailable([int[]]$Ports) {
+  for ($attempt = 1; $attempt -le 6; $attempt++) {
+    Stop-ProjectCoreProcesses $Ports
+    Start-Sleep -Milliseconds 500
+    $listeners = @(
+      Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $Ports -contains [int]$_.LocalPort }
+    )
+    if ($listeners.Count -eq 0) {
+      Write-Host "PHASE7C_ACTIVATE_CORE_PORTS_CLEAN=PASS"
+      return
+    }
+  }
+
+  $remaining = @(
+    Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+      Where-Object { $Ports -contains [int]$_.LocalPort } |
+      ForEach-Object { "PORT=$($_.LocalPort)|PID=$($_.OwningProcess)" }
+  )
+  throw "Phase 7C core restart could not obtain its localhost ports without killing an unrecognized process. Remaining=$($remaining -join ','). Keep PAUSE and inspect those PIDs."
 }
 
 function Stop-BotProcess {
@@ -298,10 +375,8 @@ Stop-TaskSafe $WebTask
 Stop-TaskSafe $BridgeTask
 Stop-BotProcess
 Start-Sleep -Seconds 1
-Stop-PortOwner $ApiPort
-Stop-PortOwner $WebPort
-Stop-PortOwner $BridgePort
-Start-Sleep -Seconds 2
+Assert-CorePortsAvailable @($ApiPort, $WebPort, $BridgePort)
+Start-Sleep -Seconds 1
 
 Start-TaskSafe $BridgeTask
 $bridgeDeadline = (Get-Date).AddSeconds(60)
@@ -428,10 +503,12 @@ Start-Phase7CExecutors
 
 $activeLotDeadline = (Get-Date).AddSeconds(20)
 $activeLotReady = $false
+$activeLotLastDetail = "No lot-settings response received."
 $expectedActiveArmed = $ArmExecutors.IsPresent
 while ((Get-Date) -lt $activeLotDeadline) {
   try {
     $activeProbe = Invoke-RestMethod -Uri "$apiUrl/api/v1/phase7c/lot-settings" -Method Get -TimeoutSec 4
+    $activeLotLastDetail = "ACTIVE_PRESENT=$($null -ne $activeProbe.active)|ACTIVE_ALIVE=$($activeProbe.activeAlive)|ARMED=$($activeProbe.active.armed)|RESTART_REQUIRED=$($activeProbe.restartRequired)|LOT=$($activeProbe.active.trendFixedLot)/$($activeProbe.active.sidewayRiskPercent)/$($activeProbe.active.sidewayMaxLot)"
     # An armed supervisor must make restartRequired=false. The intentional
     # TELEGRAM_ONLY shadow supervisor stays armed=false, so restartRequired=true
     # remains the fail-closed API signal while its PID/settings still prove that
@@ -453,12 +530,15 @@ while ((Get-Date) -lt $activeLotDeadline) {
       $activeLotReady = $true
       break
     }
-  } catch {}
+  } catch {
+    $activeLotLastDetail = $_.Exception.Message
+  }
   Start-Sleep -Seconds 1
 }
 if (-not $activeLotReady) {
+  Write-Host "PHASE7C_ACTIVATE_LOT_ACTIVE_DETAIL=$activeLotLastDetail"
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ExecutorStopper -WorkDir $WorkDir
-  throw "Phase 7C executor active lot settings did not bind to the API runtime. Executors were stopped; keep PAUSE."
+  throw "Phase 7C executor active lot settings did not bind to the API runtime. DETAIL=$activeLotLastDetail Executors were stopped; keep PAUSE."
 }
 $activeLotMode = if ($expectedActiveArmed) { "ARMED_ACTIVE" } else { "SHADOW_BOUND_UNARMED" }
 Write-Host "PHASE7C_ACTIVATE_LOT_ACTIVE=PASS|MODE=$activeLotMode"
