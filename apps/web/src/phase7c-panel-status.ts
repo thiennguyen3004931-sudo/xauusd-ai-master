@@ -1,12 +1,13 @@
 export type Phase7CPanelStatus = Record<string, string>;
 
-const PANEL_STATUS_URL = "/api/v1/phase7c/decision-monitor/mt5?symbol=XAUUSD";
+const PANEL_STATUS_PROXY_URL = "/api/v1/phase7c/decision-monitor/mt5?symbol=XAUUSD";
+const PANEL_STATUS_DIRECT_URL = "http://127.0.0.1:3711/api/v1/phase7c/decision-monitor/mt5?symbol=XAUUSD";
 
-function friendlyHttpMessage(status: number) {
-  if (status === 502) return "Decision Monitor chưa phản hồi qua web proxy (HTTP 502). Trang sẽ tự thử lại.";
-  if (status === 503) return "Decision Monitor đang khởi động lại (HTTP 503). Trang sẽ tự thử lại.";
-  if (status === 504) return "Decision Monitor phản hồi quá thời gian (HTTP 504). Trang sẽ tự thử lại.";
-  return `Decision Monitor trả HTTP ${status}.`;
+function friendlyHttpMessage(status: number, source: string) {
+  if (status === 502) return `${source} chưa phản hồi (HTTP 502). Trang sẽ thử nguồn trực tiếp.`;
+  if (status === 503) return `${source} đang khởi động lại (HTTP 503). Trang sẽ tự thử lại.`;
+  if (status === 504) return `${source} phản hồi quá thời gian (HTTP 504). Trang sẽ tự thử lại.`;
+  return `${source} trả HTTP ${status}.`;
 }
 
 export function parsePanelStatus(text: string): Phase7CPanelStatus {
@@ -23,19 +24,34 @@ export function parsePanelStatus(text: string): Phase7CPanelStatus {
   return result;
 }
 
-export async function fetchPhase7CPanelStatus(): Promise<Phase7CPanelStatus> {
-  const response = await fetch(PANEL_STATUS_URL, {
+async function requestPanelStatus(url: string, source: string): Promise<Phase7CPanelStatus> {
+  const response = await fetch(url, {
     cache: "no-store",
     headers: { accept: "text/plain" },
   });
   const text = await response.text();
-  if (!response.ok) throw new Error(friendlyHttpMessage(response.status));
-  if (!text.trim()) throw new Error("Decision Monitor trả dữ liệu rỗng. Trang sẽ tự thử lại.");
+  if (!response.ok) throw new Error(friendlyHttpMessage(response.status, source));
+  if (!text.trim()) throw new Error(`${source} trả dữ liệu rỗng. Trang sẽ tự thử lại.`);
   const payload = parsePanelStatus(text);
   if (payload.version !== "1") {
-    throw new Error("Decision Monitor trả payload chưa hợp lệ. Trang sẽ tự thử lại.");
+    throw new Error(`${source} trả payload chưa hợp lệ. Trang sẽ tự thử lại.`);
   }
+  payload.__source = source;
   return payload;
+}
+
+export async function fetchPhase7CPanelStatus(): Promise<Phase7CPanelStatus> {
+  try {
+    return await requestPanelStatus(PANEL_STATUS_PROXY_URL, "Web proxy");
+  } catch (proxyError) {
+    try {
+      return await requestPanelStatus(PANEL_STATUS_DIRECT_URL, "Decision Monitor trực tiếp");
+    } catch (directError) {
+      const proxyMessage = proxyError instanceof Error ? proxyError.message : "Web proxy lỗi không xác định.";
+      const directMessage = directError instanceof Error ? directError.message : "Decision Monitor trực tiếp lỗi không xác định.";
+      throw new Error(`${proxyMessage} ${directMessage}`);
+    }
+  }
 }
 
 export function raw(status: Phase7CPanelStatus | undefined, key: string) {
@@ -73,6 +89,8 @@ export function compactReason(input: string, fallback: string) {
     .replaceAll("panel does not have order permission", "panel chỉ đọc, không gửi lệnh")
     .replaceAll("panel không có quyền gửi lệnh", "panel chỉ đọc, không gửi lệnh")
     .replaceAll("No valid setup", "Chưa có setup hợp lệ")
+    .replaceAll(" · ", "\n")
+    .replaceAll(" | ", "\n")
     .replaceAll(" • ", "\n")
     .replaceAll("•", "\n")
     .replaceAll(". Bollinger", "\nBollinger");
