@@ -1,7 +1,6 @@
 import {
   Alert,
   Box,
-  Button,
   Card,
   CardContent,
   Chip,
@@ -9,107 +8,118 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import PlayArrowRounded from "@mui/icons-material/PlayArrowRounded";
-import StopRounded from "@mui/icons-material/StopRounded";
 import SmartToyRounded from "@mui/icons-material/SmartToyRounded";
 import TelegramRounded from "@mui/icons-material/Telegram";
 import HubRounded from "@mui/icons-material/HubRounded";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ErrorState, LoadingState } from "../ui/PageState";
-
-const API_BASE = "";
+import ShieldRounded from "@mui/icons-material/ShieldRounded";
+import { useQuery } from "@tanstack/react-query";
+import { safeReadJson } from "../api";
+import { LoadingState } from "../ui/PageState";
+import { StatusChip } from "../ui/StatusChip";
 
 type OpsStatus = {
-  localOnly: boolean;
-  controlEnabled: boolean;
-  generatedAt: number;
-  bot: {
-    alive: boolean;
-    armed: boolean;
-    status: string;
-    pid: number | null;
-    managedPosition: boolean;
-    canStop: boolean;
-  };
-  telegram: {
-    alive: boolean;
-    status: string;
-    pid: number | null;
-    wrapperPid: number | null;
-    heartbeatAgeMs: number | null;
-    heartbeatFresh: boolean;
-  };
-  bridge: {
-    reachable: boolean;
-    status: string;
-    accountMode: string | null;
-    accountLogin: number | null;
-    server: string | null;
-    tradingEnabled: boolean | null;
-    terminalTradeAllowed: boolean | null;
-    expertTradeAllowed: boolean | null;
-  };
-  safety: {
-    demoOnly: boolean;
-    realAccountAllowed: false;
-    directOrderRouteExposed: false;
-    botStopBlockedWhileManaging: true;
-  };
+  bot?: { alive?: boolean; armed?: boolean; status?: string; pid?: number | null; managedPosition?: boolean };
+  telegram?: { alive?: boolean; status?: string; pid?: number | null; wrapperPid?: number | null; heartbeatAgeMs?: number | null; heartbeatFresh?: boolean };
+  bridge?: { reachable?: boolean; status?: string; accountMode?: string | null; accountLogin?: number | null; server?: string | null; tradingEnabled?: boolean | null; terminalTradeAllowed?: boolean | null; expertTradeAllowed?: boolean | null };
+  safety?: { demoOnly?: boolean; directOrderRouteExposed?: boolean; botStopBlockedWhileManaging?: boolean };
 };
 
-type ActionResponse = {
-  accepted: boolean;
-  action: string;
-  message: string;
-  pid?: number | null;
+type LotSnapshot = {
+  state?: { trendFixedLot?: number; sidewayRiskPercent?: number; sidewayMaxLot?: number };
+  active?: { armed?: boolean; supervisorPid?: number | null };
+  activeAlive?: boolean;
+  restartRequired?: boolean;
+  appliesTo?: string;
+  safety?: { demoOnly?: boolean; existingPositionMutation?: boolean; martingale?: boolean; recoveryLotEscalation?: boolean };
 };
 
-async function readJson<T>(response: Response): Promise<T> {
-  const text = await response.text();
-  let payload: T | { error?: string };
+type BotModeSnapshot = { state?: { mode?: string } };
+
+type DecisionSnapshot = {
+  preTrade?: { strategy?: string; stage?: string };
+  safety?: { mt5PanelOrderPermission?: string; autoLotSafety?: string };
+};
+
+type RegimeSnapshot = { regime?: string; recommendedMode?: string; confidence?: number };
+
+type Status = {
+  ops?: OpsStatus;
+  lot?: LotSnapshot;
+  botMode?: BotModeSnapshot;
+  decision?: DecisionSnapshot;
+  regime?: RegimeSnapshot;
+  errors: string[];
+};
+
+async function load<T>(url: string, label: string): Promise<{ data?: T; error?: string }> {
   try {
-    payload = JSON.parse(text) as T | { error?: string };
-  } catch {
-    throw new Error(text || `HTTP ${response.status}`);
+    return { data: await safeReadJson<T>(await fetch(url, { cache: "no-store" }), label) };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : `${label} chưa sẵn sàng.` };
   }
-  if (!response.ok) {
-    throw new Error("error" in (payload as object) && (payload as { error?: string }).error
-      ? String((payload as { error?: string }).error)
-      : `HTTP ${response.status}`);
-  }
-  return payload as T;
 }
 
-async function getOps(): Promise<OpsStatus> {
-  return readJson<OpsStatus>(await fetch(`${API_BASE}/api/v1/phase7b-ops/status`, { cache: "no-store" }));
+async function getStatus(): Promise<Status> {
+  const [ops, lot, botMode, decision, regime] = await Promise.all([
+    load<OpsStatus>("/api/v1/phase7b-ops/status", "Hệ thống & Telegram"),
+    load<LotSnapshot>("/api/v1/phase7c/lot-settings", "Lot settings"),
+    load<BotModeSnapshot>("/api/v1/phase7c/bot-mode", "Bot mode"),
+    load<DecisionSnapshot>("/api/v1/phase7c/decision-monitor?symbol=XAUUSD", "Decision monitor"),
+    load<RegimeSnapshot>("/api/v1/phase7c/live-regime?symbol=XAUUSD", "Regime Phase7C"),
+  ]);
+
+  return {
+    ops: ops.data,
+    lot: lot.data,
+    botMode: botMode.data,
+    decision: decision.data,
+    regime: regime.data,
+    errors: [ops.error, lot.error, botMode.error, decision.error, regime.error].filter(Boolean) as string[],
+  };
 }
 
-async function runAction(path: string): Promise<ActionResponse> {
-  return readJson<ActionResponse>(await fetch(`${API_BASE}/api/v1/phase7b-ops/${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: "{}",
-  }));
+function dash(value: unknown) {
+  if (value === null || value === undefined || value === "" || value === "n/a") return "Chưa có";
+  return String(value);
 }
 
-
-async function sendTelegramRecoveryTest(): Promise<ActionResponse> {
-  return readJson<ActionResponse>(await fetch(`${API_BASE}/api/v1/phase7b-telegram-test/recovery`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: "{}",
-  }));
+function yesNo(value: boolean | null | undefined) {
+  if (value === true) return "Có";
+  if (value === false) return "Không";
+  return "Chưa rõ";
 }
-function StatusCard({ icon, title, status, detail, online }: { icon: React.ReactNode; title: string; status: string; detail: string; online: boolean }) {
+
+function statusTone(ok?: boolean | null): "success" | "warning" | "default" {
+  if (ok === true) return "success";
+  if (ok === false) return "warning";
+  return "default";
+}
+
+function modeDisplay(mode?: string, effective?: string) {
+  if (!mode) return "Chưa rõ";
+  if (effective && effective !== mode) return `${mode} → ${effective}`;
+  return mode;
+}
+
+function Info({ label, value }: { label: string; value: string }) {
+  return (
+    <Stack direction="row" justifyContent="space-between" gap={2}>
+      <Typography variant="caption" color="text.secondary">{label}</Typography>
+      <Typography variant="caption" fontWeight={900} textAlign="right">{value}</Typography>
+    </Stack>
+  );
+}
+
+function StatusCard({ icon, title, status, detail, ok }: { icon: React.ReactNode; title: string; status: string; detail: string; ok?: boolean | null }) {
   return (
     <Card variant="outlined" sx={{ height: "100%" }}>
       <CardContent>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Box>{icon}</Box>
-          <Chip size="small" label={online ? "ĐANG CHẠY" : "ĐANG DỪNG"} color={online ? "success" : "default"} variant="outlined" />
+          <Chip size="small" label={ok ? "PASS" : ok === false ? "CHỜ" : "CHECK"} color={statusTone(ok)} variant="outlined" />
         </Stack>
         <Typography variant="caption" color="text.secondary" display="block" mt={1.5}>{title}</Typography>
-        <Typography variant="h6" fontWeight={900}>{status}</Typography>
+        <Typography variant="h6" fontWeight={950}>{status}</Typography>
         <Typography variant="body2" color="text.secondary" mt={1}>{detail}</Typography>
       </CardContent>
     </Card>
@@ -117,194 +127,137 @@ function StatusCard({ icon, title, status, detail, online }: { icon: React.React
 }
 
 export function Phase7BOpsPage() {
-  const queryClient = useQueryClient();
   const query = useQuery({
-    queryKey: ["phase7b-ops-status"],
-    queryFn: getOps,
+    queryKey: ["phase7c-system-telegram-sync"],
+    queryFn: getStatus,
     refetchInterval: 2_000,
     retry: false,
   });
 
-  const mutate = useMutation({
-    mutationFn: runAction,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["phase7b-ops-status"] });
-    },
-  });
-  const recoveryTelegramTest = useMutation({ mutationFn: sendTelegramRecoveryTest });
-
   if (query.isLoading) return <LoadingState />;
-  if (query.isError || !query.data) {
-    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được trạng thái Bot & Telegram."} />;
-  }
 
-  const o = query.data;
-  const demoReady = Boolean(
-    o.bridge.reachable &&
-    o.bridge.accountMode === "demo" &&
-    o.bridge.tradingEnabled === true &&
-    o.bridge.terminalTradeAllowed === true &&
-    o.bridge.expertTradeAllowed === true,
-  );
-
-  const actionPending = mutate.isPending;
-  const pendingAction = mutate.variables;
-  const botStarting = actionPending && pendingAction === "bot/start";
-  const botStopping = actionPending && pendingAction === "bot/stop";
-  const telegramStarting = actionPending && pendingAction === "telegram/start";
-  const telegramStopping = actionPending && pendingAction === "telegram/stop";
+  const data = query.data;
+  const ops = data?.ops;
+  const lot = data?.lot;
+  const mode = data?.botMode?.state?.mode;
+  const effective = data?.decision?.preTrade?.strategy ?? data?.regime?.recommendedMode;
+  const bridge = ops?.bridge;
+  const telegram = ops?.telegram;
+  const runtimeOk = Boolean(lot?.activeAlive || ops?.bot?.alive);
+  const lotOk = Boolean(lot?.activeAlive && lot?.restartRequired === false);
+  const demoReady = Boolean(bridge?.reachable && bridge?.accountMode === "demo" && bridge?.tradingEnabled === true);
+  const telegramOk = Boolean(telegram?.alive && (telegram.heartbeatFresh || telegram.status === "READY" || telegram.status === "PASS"));
 
   return (
     <Stack spacing={2.5}>
-      <Box>
-        <Typography variant="overline" color="primary" fontWeight={900}>VẬN HÀNH DEMO</Typography>
-        <Typography variant="h4" fontWeight={950}>Hệ thống & Telegram</Typography>
-        <Typography variant="body2" color="text.secondary" mt={0.7}>
-          Một màn hình cho Bot DEMO, Telegram và MT5 Bridge. Tài khoản thật luôn bị khóa.
-        </Typography>
-      </Box>
+      <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1.5} alignItems={{ md: "center" }}>
+        <Box>
+          <Typography variant="overline" color="primary" fontWeight={900}>VẬN HÀNH DEMO</Typography>
+          <Typography variant="h4" fontWeight={950}>Hệ thống & Telegram</Typography>
+          <Typography variant="body2" color="text.secondary" mt={0.7}>Đồng bộ trạng thái runtime Phase7C, Telegram, MT5 Bridge, lot binding và safety. Không hiển thị lỗi HTTP thô.</Typography>
+        </Box>
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          <StatusChip value={modeDisplay(mode, effective)} />
+          <StatusChip value={lotOk ? "LOT ACTIVE" : "LOT CHECK"} />
+          <StatusChip value={telegramOk ? "TELEGRAM READY" : "TELEGRAM CHECK"} />
+        </Stack>
+      </Stack>
+
+      {data?.errors.length ? (
+        <Alert severity="warning">Một vài endpoint chưa phản hồi chuẩn JSON: {data.errors.slice(0, 2).join(" · ")}</Alert>
+      ) : null}
 
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, md: 4 }}>
+        <Grid size={{ xs: 12, md: 3 }}>
           <StatusCard
-            icon={<SmartToyRounded color={o.bot.alive ? "success" : "disabled"} />}
-            title="BOT DEMO"
-            status={botStarting ? "ĐANG KHỞI ĐỘNG..." : o.bot.alive ? (o.bot.managedPosition ? "ĐANG QUẢN LÝ LỆNH" : "ĐANG CHỜ TÍN HIỆU") : "ĐÃ DỪNG"}
-            detail={botStarting ? "Đang khởi động và kiểm tra heartbeat controller..." : o.bot.alive ? `PID ${o.bot.pid ?? "—"} · ${o.bot.armed ? "ĐÃ ARM" : "CHƯA ARM"}` : "Controller DEMO chưa chạy."}
-            online={o.bot.alive}
+            icon={<SmartToyRounded color={runtimeOk ? "success" : "disabled"} />}
+            title="PHASE7C RUNTIME"
+            status={runtimeOk ? "EXECUTORS ĐANG CHẠY" : "CHƯA XÁC NHẬN"}
+            detail={`Supervisor PID ${dash(lot?.active?.supervisorPid ?? ops?.bot?.pid)} · armed ${yesNo(lot?.active?.armed ?? ops?.bot?.armed)}`}
+            ok={runtimeOk}
           />
         </Grid>
-
-        <Grid size={{ xs: 12, md: 4 }}>
+        <Grid size={{ xs: 12, md: 3 }}>
           <StatusCard
-            icon={<TelegramRounded color={o.telegram.alive ? "success" : "disabled"} />}
-            title="THÔNG BÁO TELEGRAM"
-            status={telegramStarting ? "ĐANG KHỞI ĐỘNG..." : o.telegram.alive ? "ĐANG GỬI THÔNG BÁO" : "ĐÃ TẮT THÔNG BÁO"}
-            detail={telegramStarting ? "Đang kiểm tra notifier và heartbeat..." : o.telegram.alive ? "Thông báo tín hiệu / khớp lệnh / +6 / +10 / HOLD / đóng lệnh / lỗi." : "Không gửi thông báo thường trực."}
-            online={o.telegram.alive}
+            icon={<TelegramRounded color={telegramOk ? "success" : "disabled"} />}
+            title="TELEGRAM MODE"
+            status={telegramOk ? "READY / PASS" : dash(telegram?.status)}
+            detail={`PID ${dash(telegram?.pid)} · heartbeat ${dash(telegram?.heartbeatAgeMs)} ms`}
+            ok={telegramOk}
           />
         </Grid>
-
-        <Grid size={{ xs: 12, md: 4 }}>
+        <Grid size={{ xs: 12, md: 3 }}>
           <StatusCard
             icon={<HubRounded color={demoReady ? "success" : "disabled"} />}
-            title="MT5 DEMO"
-            status={demoReady ? "SẴN SÀNG" : "CHƯA SẴN SÀNG"}
-            detail={`${o.bridge.accountMode?.toUpperCase() ?? "KHÔNG RÕ"} #${o.bridge.accountLogin ?? "—"} · ${o.bridge.server ?? "—"}`}
-            online={demoReady}
+            title="MT5 BRIDGE"
+            status={demoReady ? "DEMO SẴN SÀNG" : "ĐANG KIỂM TRA"}
+            detail={`${dash(bridge?.accountMode).toUpperCase()} #${dash(bridge?.accountLogin)} · ${dash(bridge?.server)}`}
+            ok={demoReady}
+          />
+        </Grid>
+        <Grid size={{ xs: 12, md: 3 }}>
+          <StatusCard
+            icon={<ShieldRounded color={lot?.safety?.demoOnly ? "success" : "disabled"} />}
+            title="SAFETY"
+            status={lot?.safety?.demoOnly ? "DEMO ONLY" : "CHECK"}
+            detail={`ORDER ${data?.decision?.safety?.mt5PanelOrderPermission ?? "NONE"} · ownership/pass được verify bằng script`}
+            ok={lot?.safety?.demoOnly}
           />
         </Grid>
       </Grid>
 
-      {o.bot.managedPosition && (
-        <Alert severity="warning">
-          Bot đang quản lý một vị thế. Nút <b>Dừng Bot DEMO</b> bị khóa để tránh bỏ vị thế đang mở không được quản lý.
-        </Alert>
-      )}
-
-      {!demoReady && (
-        <Alert severity="warning">
-          MT5 DEMO chưa đủ điều kiện chạy Bot. Kiểm tra Bridge, Algo Trading và quyền Expert Trading.
-        </Alert>
-      )}
-
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <Card variant="outlined">
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <Card variant="outlined" sx={{ height: "100%" }}>
             <CardContent>
-              <Typography variant="h6" fontWeight={900}>Bot giao dịch DEMO</Typography>
-              <Typography variant="body2" color="text.secondary" mt={0.5}>
-                Trend entry: 3 mô hình nến + Supertrend M15/M5 cùng hướng + SL cấu trúc. SL vận hành 6–10 giá; nếu cấu trúc vượt 10 thì chờ hồi trong cửa sổ M15 kế tiếp. Flip age và FVG chỉ là bối cảnh. Khối lượng mặc định 0.03 lot.
-              </Typography>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} mt={2.5}>
-                <Button
-                  variant="contained"
-                  color="success"
-                  startIcon={<PlayArrowRounded />}
-                  disabled={actionPending || o.bot.alive || !o.controlEnabled || !demoReady}
-                  onClick={() => mutate.mutate("bot/start")}
-                  sx={{ fontWeight: 900, minWidth: 180 }}
-                >
-                  {botStarting ? "ĐANG BẬT BOT..." : "BẬT BOT DEMO"}
-                </Button>
-                <Button
-                  variant="outlined"
-                  color="error"
-                  startIcon={<StopRounded />}
-                  disabled={actionPending || !o.bot.alive || !o.bot.canStop || !o.controlEnabled}
-                  onClick={() => mutate.mutate("bot/stop")}
-                  sx={{ fontWeight: 900, minWidth: 180 }}
-                >
-                  {botStopping ? "ĐANG DỪNG..." : "DỪNG BOT DEMO"}
-                </Button>
+              <Typography variant="h6" fontWeight={950}>Runtime</Typography>
+              <Stack spacing={1.2} mt={1.4}>
+                <Info label="Active mode" value={dash(mode)} />
+                <Info label="Effective strategy" value={dash(effective)} />
+                <Info label="Decision stage" value={dash(data?.decision?.preTrade?.stage)} />
+                <Info label="Regime" value={`${dash(data?.regime?.regime)} · Conf ${dash(data?.regime?.confidence)}`} />
+                <Info label="Active alive" value={yesNo(lot?.activeAlive)} />
+                <Info label="Restart required" value={yesNo(lot?.restartRequired)} />
               </Stack>
             </CardContent>
           </Card>
         </Grid>
 
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <Card variant="outlined">
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <Card variant="outlined" sx={{ height: "100%" }}>
             <CardContent>
-              <Typography variant="h6" fontWeight={900}>Thông báo Telegram</Typography>
-              <Typography variant="body2" color="text.secondary" mt={0.5}>
-                Telegram chỉ đọc journal/API và gửi thông báo; không có quyền đặt, sửa hoặc đóng lệnh MT5.
-              </Typography>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} mt={2.5} flexWrap="wrap" useFlexGap>
-                <Button
-                  variant="contained"
-                  startIcon={<TelegramRounded />}
-                  disabled={actionPending || o.telegram.alive || !o.controlEnabled}
-                  onClick={() => mutate.mutate("telegram/start")}
-                  sx={{ fontWeight: 900, minWidth: 170 }}
-                >
-                  {telegramStarting ? "ĐANG BẬT..." : "BẬT TELEGRAM"}
-                </Button>
-                <Button
-                  variant="outlined"
-                  color="error"
-                  startIcon={<StopRounded />}
-                  disabled={actionPending || !o.telegram.alive || !o.controlEnabled}
-                  onClick={() => mutate.mutate("telegram/stop")}
-                  sx={{ fontWeight: 900, minWidth: 170 }}
-                >
-                  {telegramStopping ? "ĐANG TẮT..." : "TẮT TELEGRAM"}
-                </Button>
+              <Typography variant="h6" fontWeight={950}>Lot / Risk</Typography>
+              <Stack spacing={1.2} mt={1.4}>
+                <Info label="Trend fixed lot" value={dash(lot?.state?.trendFixedLot)} />
+                <Info label="Sideway risk percent" value={`${dash(lot?.state?.sidewayRiskPercent)}%`} />
+                <Info label="Sideway max lot" value={dash(lot?.state?.sidewayMaxLot)} />
+                <Info label="Applies to" value={dash(lot?.appliesTo)} />
+                <Info label="Existing mutation" value={yesNo(lot?.safety?.existingPositionMutation)} />
+                <Info label="Martingale" value={yesNo(lot?.safety?.martingale)} />
               </Stack>
-              <Typography variant="caption" color="text.secondary" display="block" mt={1.5}>
-                Mẫu hồi phục là one-shot, chỉ gửi PREVIEW; không đặt/sửa/đóng lệnh MT5 và không ghi journal giao dịch.
-              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <Card variant="outlined" sx={{ height: "100%" }}>
+            <CardContent>
+              <Typography variant="h6" fontWeight={950}>MT5 / Telegram</Typography>
+              <Stack spacing={1.2} mt={1.4}>
+                <Info label="Bridge reachable" value={yesNo(bridge?.reachable)} />
+                <Info label="Trading enabled" value={yesNo(bridge?.tradingEnabled)} />
+                <Info label="Terminal trade" value={yesNo(bridge?.terminalTradeAllowed)} />
+                <Info label="Expert trade" value={yesNo(bridge?.expertTradeAllowed)} />
+                <Info label="Telegram alive" value={yesNo(telegram?.alive)} />
+                <Info label="Telegram heartbeat fresh" value={yesNo(telegram?.heartbeatFresh)} />
+              </Stack>
             </CardContent>
           </Card>
         </Grid>
       </Grid>
 
-      {mutate.isSuccess && <Alert severity="success">{mutate.data.message}</Alert>}
-      {mutate.isError && (
-        <Alert severity="error" sx={{ whiteSpace: "pre-wrap", fontFamily: "monospace" }}>
-          {mutate.error instanceof Error ? mutate.error.message : "Không thực hiện được thao tác."}
-        </Alert>
-      )}
-      {recoveryTelegramTest.isSuccess && <Alert severity="success">{recoveryTelegramTest.data.message}</Alert>}
-      {recoveryTelegramTest.isError && (
-        <Alert severity="error" sx={{ whiteSpace: "pre-wrap" }}>
-          {recoveryTelegramTest.error instanceof Error ? recoveryTelegramTest.error.message : "Không gửi được mẫu hồi phục Telegram."}
-        </Alert>
-      )}
-
-      <Card variant="outlined">
-        <CardContent>
-          <Typography variant="h6" fontWeight={900}>Nội dung Telegram sẽ giải thích gì?</Typography>
-          <Grid container spacing={1.5} mt={0.4}>
-            <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Vì sao vào/chờ:</b> mô hình nến, ST M15/M5, SL cấu trúc, trạng thái vào ngay hoặc chờ hồi và bối cảnh FVG.</Typography></Grid>
-            <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Vì sao HOLD:</b> trạng thái +6 hòa vốn, +10 chốt 1/3, runner còn lại và lý do chưa thoát.</Typography></Grid>
-            <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Khi quản lý:</b> dời SL, khối lượng còn lại, lãi/lỗ runner.</Typography></Grid>
-            <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Khi đóng:</b> P&amp;L, giá thoát và lý do đóng.</Typography></Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-
       <Alert severity="info">
-        NORMAL: cả Trend và Sideway đều +6 giá → dời SL về hòa vốn, +10 giá → chốt 1/3. Trend runner siết SL theo cấu trúc M15 và thoát theo MA50/FVG đảo chiều; Sideway chốt phần còn lại ở biên đối diện. RECOVERY_TP chốt toàn bộ tại TP thích ứng 6–10 giá, không tăng lot.
+        Panel MT5 và Web chỉ hiển thị trạng thái. Quyền gửi lệnh vẫn do executor DEMO quản lý; MT5 panel giữ <b>READ ONLY | ORDER NONE</b>.
       </Alert>
     </Stack>
   );
