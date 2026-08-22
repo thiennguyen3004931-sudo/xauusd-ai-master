@@ -11,16 +11,23 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { LoadingState, ErrorState } from "../ui/PageState";
 import {
+  boolText,
+  clean,
   compactReason,
-  fetchPhase7CPanelStatus,
+  fetchPhase7CWebStatus,
   modeDisplay,
+  money,
+  pickText,
   raw,
-  shortValue,
   stageTone,
   value,
 } from "../phase7c-panel-status";
 
-function StatusCard({
+function asRecord(value: unknown): Record<string, any> {
+  return value && typeof value === "object" ? (value as Record<string, any>) : {};
+}
+
+function KpiCard({
   label,
   valueText,
   detail,
@@ -34,32 +41,46 @@ function StatusCard({
   tone?: "success" | "warning" | "error" | "default";
 }) {
   return (
-    <Card variant="outlined" sx={{ height: "100%" }}>
+    <Card variant="outlined" sx={{ height: "100%", borderRadius: 4 }}>
       <CardContent sx={{ p: 3 }}>
         <Stack direction="row" justifyContent="space-between" gap={1} alignItems="center">
-          <Typography variant="caption" color="text.secondary" fontWeight={900}>{label}</Typography>
+          <Typography variant="caption" color="text.secondary" fontWeight={900} letterSpacing=".06em">
+            {label}
+          </Typography>
           {chip && <Chip size="small" label={chip} color={tone} variant="outlined" sx={{ fontWeight: 900 }} />}
         </Stack>
-        <Typography variant="h5" fontWeight={950} mt={1.5}>{valueText}</Typography>
-        <Typography variant="body2" color="text.secondary" mt={1}>{detail}</Typography>
+        <Typography variant="h5" fontWeight={950} mt={1.7}>{valueText}</Typography>
+        <Typography variant="body2" color="text.secondary" mt={1.1}>{detail}</Typography>
       </CardContent>
     </Card>
   );
 }
 
-function Info({ label, valueText }: { label: string; valueText: string }) {
+function SectionCard({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
-    <Stack direction="row" justifyContent="space-between" gap={2} py={0.7}>
+    <Card variant="outlined" sx={{ height: "100%", borderRadius: 4 }}>
+      <CardContent sx={{ p: 3 }}>
+        <Typography variant="h6" fontWeight={950}>{title}</Typography>
+        <Typography variant="body2" color="text.secondary" mt={0.6}>{subtitle}</Typography>
+        <Box mt={2.2}>{children}</Box>
+      </CardContent>
+    </Card>
+  );
+}
+
+function InfoRow({ label, valueText, strong = false }: { label: string; valueText: string; strong?: boolean }) {
+  return (
+    <Stack direction="row" justifyContent="space-between" gap={2} py={0.9} sx={{ borderBottom: "1px solid rgba(148,163,184,.08)" }}>
       <Typography variant="body2" color="text.secondary">{label}</Typography>
-      <Typography variant="body2" fontWeight={900} textAlign="right">{valueText}</Typography>
+      <Typography variant="body2" fontWeight={strong ? 950 : 800} textAlign="right">{valueText}</Typography>
     </Stack>
   );
 }
 
 export function Phase7BDemoPage() {
   const query = useQuery({
-    queryKey: ["phase7c-panel-status-overview"],
-    queryFn: fetchPhase7CPanelStatus,
+    queryKey: ["phase7c-web-status-dashboard-v5"],
+    queryFn: fetchPhase7CWebStatus,
     refetchInterval: 3_000,
     retry: false,
     placeholderData: (previous) => previous,
@@ -67,112 +88,128 @@ export function Phase7BDemoPage() {
 
   if (query.isLoading) return <LoadingState />;
   if (query.isError && !query.data) {
-    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được Decision Monitor."} />;
+    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được Dashboard Phase7C."} />;
   }
 
   const data = query.data;
-  const stage = shortValue(data, "stage");
-  const regime = shortValue(data, "regime");
-  const confidence = value(data, "confidence", "—");
-  const strategy = shortValue(data, "effectiveStrategy");
-  const activeMode = shortValue(data, "activeMode");
-  const entryReasons = compactReason(raw(data, "entryReason"), "Chưa có lý do vào lệnh.");
-  const holdReasons = compactReason(raw(data, "holdReason"), "Đang chờ setup hợp lệ.");
+  const panel = data?.panel;
+  const accountRisk = asRecord(data?.accountRisk);
+  const account = asRecord(accountRisk.account);
+  const configuration = asRecord(accountRisk.configuration);
+  const lifecycle = asRecord(data?.lifecycle);
+  const bridge = asRecord(lifecycle.bridge);
+  const processes = asRecord(lifecycle.processes);
+  const supervisor = asRecord(processes.supervisor);
+  const trend = asRecord(processes.trend);
+  const sideway = asRecord(processes.sideway);
+  const lotRuntime = asRecord(lifecycle.lotSettings);
+
+  const stage = value(panel, "stage", "—");
+  const regime = value(panel, "regime", "—");
+  const confidence = value(panel, "confidence", "—");
+  const activeMode = value(panel, "activeMode", clean(asRecord(lifecycle.mode).mode, "—"));
+  const strategy = value(panel, "effectiveStrategy", "—");
+  const accountMode = pickText(raw(panel, "accountMode"), account.accountMode, bridge.accountMode);
+  const login = pickText(account.accountLogin, bridge.accountLogin);
+  const server = pickText(account.server, bridge.server);
+  const currency = clean(account.accountCurrency, "USD");
+  const entryReasons = compactReason(raw(panel, "entryReason"), "Chưa có lý do vào lệnh.");
+  const holdReasons = compactReason(raw(panel, "holdReason"), "Đang chờ setup hợp lệ.");
+  const errors = data?.errors ?? [];
 
   return (
-    <Stack spacing={2.5}>
-      <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1.5} alignItems={{ md: "center" }}>
-        <Box>
-          <Typography variant="overline" color="primary" fontWeight={900}>XAUUSD · MT5 DEMO</Typography>
-          <Typography variant="h4" fontWeight={950}>Tổng quan giao dịch DEMO</Typography>
-          <Typography variant="body2" color="text.secondary" mt={0.8}>
-            Đồng bộ trực tiếp với Decision Monitor dùng cho panel MT5: mode, regime, entry, TP, Stoploss và lý do chờ lệnh.
-          </Typography>
-        </Box>
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          <Chip label={`Mode ${activeMode}`} color={activeMode === "AUTO" ? "success" : "warning"} variant="outlined" sx={{ fontWeight: 900 }} />
-          <Chip label={`Stage ${stage}`} color={stageTone(stage)} variant="outlined" sx={{ fontWeight: 900 }} />
-          <Chip label={`Regime ${regime}`} color={regime === "REVERSAL" ? "warning" : "default"} variant="outlined" sx={{ fontWeight: 900 }} />
+    <Stack spacing={3}>
+      <Box
+        sx={{
+          p: { xs: 2.5, md: 3.5 },
+          borderRadius: 5,
+          border: "1px solid rgba(148,163,184,.14)",
+          background: "linear-gradient(135deg, rgba(233,185,73,.10), rgba(14,165,233,.06) 45%, rgba(15,23,42,.40))",
+        }}
+      >
+        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2} alignItems={{ md: "center" }}>
+          <Box>
+            <Typography variant="overline" color="primary" fontWeight={900}>XAUUSD AI MASTER · DEMO DASHBOARD v5</Typography>
+            <Typography variant="h4" fontWeight={950} mt={0.5}>Tổng quan vận hành chuyên nghiệp</Typography>
+            <Typography variant="body2" color="text.secondary" mt={1} maxWidth={880}>
+              AUTO đang bật nhưng chiến lược hiệu lực có thể PAUSE theo regime/stage. Dashboard gom trạng thái bot, tài khoản giao dịch, risk/lot, hệ thống và lý do chờ lệnh trong một màn hình.
+            </Typography>
+          </Box>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Chip label={`Mode ${activeMode}`} color={activeMode === "AUTO" ? "success" : "warning"} variant="outlined" sx={{ fontWeight: 900 }} />
+            <Chip label={`Stage ${stage}`} color={stageTone(stage)} variant="outlined" sx={{ fontWeight: 900 }} />
+            <Chip label={`Account ${accountMode}`} color={accountMode.toLowerCase().includes("demo") ? "success" : "error"} variant="outlined" sx={{ fontWeight: 900 }} />
+          </Stack>
         </Stack>
-      </Stack>
+      </Box>
 
-      {query.isError && query.data && (
-        <Alert severity="warning">
-          Đang hiển thị dữ liệu gần nhất từ Decision Monitor. Trang sẽ tự thử lại trong vài giây.
-        </Alert>
+      {data?.usedDirectFallback && (
+        <Alert severity="info">Web proxy 5717 đang lỗi ở một số endpoint; dashboard đã tự lấy trực tiếp từ Control API 3711.</Alert>
+      )}
+      {errors.length > 0 && (
+        <Alert severity="warning">Một số nguồn phụ chưa sẵn sàng: {errors.slice(0, 2).join(" ")}</Alert>
       )}
 
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, md: 6, xl: 3 }}>
-          <StatusCard
-            label="BOT MODE"
-            valueText={modeDisplay(data)}
-            detail={`Regime ${regime} · Confidence ${confidence}`}
-            chip={activeMode}
-            tone={activeMode === "AUTO" ? "success" : "warning"}
-          />
+          <KpiCard label="BOT MODE" valueText={modeDisplay(panel)} detail={`Active ${activeMode} · Effective ${strategy}`} chip={activeMode} tone={activeMode === "AUTO" ? "success" : "warning"} />
         </Grid>
         <Grid size={{ xs: 12, md: 6, xl: 3 }}>
-          <StatusCard
-            label="DECISION"
-            valueText={stage}
-            detail={`Strategy ${strategy}`}
-            chip={stage}
-            tone={stageTone(stage)}
-          />
+          <KpiCard label="MARKET REGIME" valueText={regime} detail={`Confidence ${confidence}/100 · Recommended ${value(panel, "recommendedMode", "—")}`} chip={`CONF ${confidence}`} tone={regime === "REVERSAL" ? "warning" : "default"} />
         </Grid>
         <Grid size={{ xs: 12, md: 6, xl: 3 }}>
-          <StatusCard
-            label="LỆNH KẾ TIẾP"
-            valueText={value(data, "entry", "Đang chờ setup")}
-            detail={`SL ${value(data, "stopLoss", "Chưa có")} · TP1 ${value(data, "tp1", "Chưa có")}`}
-            chip={value(data, "side", "Chờ")}
-            tone="default"
-          />
+          <KpiCard label="DECISION" valueText={stage} detail={value(panel, "limitReason", "Không có lệnh mới.")} chip={stage} tone={stageTone(stage)} />
         </Grid>
         <Grid size={{ xs: 12, md: 6, xl: 3 }}>
-          <StatusCard
-            label="SAFETY"
-            valueText="READ ONLY"
-            detail="DEMO · ORDER PERMISSION = NONE"
-            chip="ORDER NONE"
-            tone="success"
-          />
+          <KpiCard label="ACCOUNT" valueText={login === "—" ? accountMode : `#${login}`} detail={`${server} · ${accountMode}`} chip="DEMO" tone="success" />
+        </Grid>
+      </Grid>
+
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <SectionCard title="Tài khoản giao dịch" subtitle="Thông tin lấy từ MT5 demo / account-risk.">
+            <InfoRow label="Login" valueText={login} strong />
+            <InfoRow label="Server" valueText={server} />
+            <InfoRow label="Account mode" valueText={accountMode} />
+            <InfoRow label="Trading enabled" valueText={boolText(account.tradingEnabled ?? bridge.tradingEnabled)} />
+            <InfoRow label="XAUUSD positions" valueText={pickText(bridge.openXauusdPositions, raw(panel, "positionCount"))} />
+            <InfoRow label="Balance" valueText={money(account.accountBalance, currency)} />
+            <InfoRow label="Equity" valueText={money(account.accountEquity, currency)} />
+            <InfoRow label="Free margin" valueText={money(account.accountFreeMargin, currency)} />
+          </SectionCard>
+        </Grid>
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <SectionCard title="Risk & Lot" subtitle="Chỉ áp dụng cho lệnh mới, không mutate vị thế cũ.">
+            <InfoRow label="Trend fixed lot" valueText={pickText(configuration.configuredTrendFixedLot, raw(panel, "finalLot"))} strong />
+            <InfoRow label="Sideway risk" valueText={`${pickText(configuration.configuredSidewayRiskPercent)}%`} />
+            <InfoRow label="Sideway max lot" valueText={pickText(configuration.configuredSidewayMaxLot)} />
+            <InfoRow label="Recommended lot" valueText={value(panel, "lotCap", pickText(configuration.maxLot))} />
+            <InfoRow label="Order permission" valueText={pickText(configuration.previewOrderPermission, raw(panel, "mt5OrderPermission"))} />
+            <InfoRow label="Restart required" valueText={boolText(configuration.lotSettingsRestartRequired ?? lotRuntime.restartRequired)} />
+          </SectionCard>
+        </Grid>
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <SectionCard title="Hệ thống" subtitle="Runtime chính, executor và lot binding.">
+            <InfoRow label="Supervisor" valueText={supervisor.alive ? "Alive" : "—"} strong />
+            <InfoRow label="Trend executor" valueText={trend.alive ? "Alive" : "—"} />
+            <InfoRow label="Sideway executor" valueText={sideway.alive ? "Alive" : "—"} />
+            <InfoRow label="Telegram" valueText={lifecycle.telegramReady ? "Ready" : clean(lifecycle.telegramStatus, "—")} />
+            <InfoRow label="MT5 Bridge" valueText={bridge.reachable ? "OK" : "—"} />
+            <InfoRow label="Lot binding" valueText={lotRuntime.activeAlive ? "Active" : "—"} />
+          </SectionCard>
         </Grid>
       </Grid>
 
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, lg: 6 }}>
-          <Card variant="outlined">
-            <CardContent sx={{ p: 3 }}>
-              <Typography variant="h6" fontWeight={950}>Kế hoạch lệnh</Typography>
-              <Typography variant="body2" color="text.secondary" mt={0.5}>Các giá trị này phải khớp với panel MT5.</Typography>
-              <Box mt={2}>
-                <Info label="Điểm vào" valueText={value(data, "entry", "Đang chờ setup")} />
-                <Info label="Stoploss" valueText={value(data, "stopLoss", "Chưa có")} />
-                <Info label="Khoảng SL" valueText={value(data, "stopDistance", "Chưa có")} />
-                <Info label="TP1" valueText={value(data, "tp1", "Chưa có")} />
-                <Info label="TP2" valueText={value(data, "tp2", "Chưa có")} />
-                <Info label="Lot cuối" valueText={value(data, "finalLot", "Chưa có")} />
-                <Info label="Risk USD" valueText={value(data, "estimatedRiskUsd", "Chưa có")} />
-                <Info label="BE / Partial" valueText={`${value(data, "breakEvenApplied", "Chưa")} / ${value(data, "partialApplied", "Chưa")}`} />
-              </Box>
-            </CardContent>
-          </Card>
+          <SectionCard title="Lý do vào / chờ lệnh" subtitle="Rút gọn theo Decision Monitor, đồng bộ với panel MT5.">
+            <Stack spacing={1.1}>{entryReasons.map((reason) => <Typography key={reason} variant="body2">• {reason}</Typography>)}</Stack>
+          </SectionCard>
         </Grid>
         <Grid size={{ xs: 12, lg: 6 }}>
-          <Card variant="outlined">
-            <CardContent sx={{ p: 3 }}>
-              <Typography variant="h6" fontWeight={950}>Lý do vào / giữ lệnh</Typography>
-              <Typography variant="body2" color="text.secondary" mt={0.5}>Rút gọn để dễ đọc, không lặp lỗi HTTP thô.</Typography>
-              <Box mt={2}>
-                <Typography variant="subtitle2" color="primary" fontWeight={900}>Lý do vào lệnh / chờ lệnh</Typography>
-                <Stack spacing={0.8} mt={1}>{entryReasons.map((reason) => <Typography key={reason} variant="body2">• {reason}</Typography>)}</Stack>
-                <Typography variant="subtitle2" color="primary" fontWeight={900} mt={2.2}>Lý do giữ / chờ lệnh</Typography>
-                <Stack spacing={0.8} mt={1}>{holdReasons.map((reason) => <Typography key={reason} variant="body2" color="text.secondary">• {reason}</Typography>)}</Stack>
-              </Box>
-            </CardContent>
-          </Card>
+          <SectionCard title="Lý do giữ / không gửi lệnh" subtitle="Giải thích vì sao bot không mở lệnh mới ở thời điểm hiện tại.">
+            <Stack spacing={1.1}>{holdReasons.map((reason) => <Typography key={reason} variant="body2" color="text.secondary">• {reason}</Typography>)}</Stack>
+          </SectionCard>
         </Grid>
       </Grid>
     </Stack>
