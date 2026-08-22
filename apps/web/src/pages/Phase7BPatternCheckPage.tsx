@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   Alert,
   Box,
@@ -9,35 +10,36 @@ import {
   Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { ErrorState, LoadingState } from "../ui/PageState";
+import { LoadingState, ErrorState } from "../ui/PageState";
 import {
+  boolText,
+  clean,
   compactReason,
-  fetchPhase7CPanelStatus,
-  modeDisplay,
+  fetchPhase7CWebStatus,
   raw,
-  shortValue,
   stageTone,
   value,
 } from "../phase7c-panel-status";
 
-function GateCard({ label, valueText, detail, status }: { label: string; valueText: string; detail: string; status: string }) {
+function asRecord(value: unknown): Record<string, any> {
+  return value && typeof value === "object" ? (value as Record<string, any>) : {};
+}
+
+function PanelCard({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
   return (
-    <Card variant="outlined" sx={{ height: "100%" }}>
+    <Card variant="outlined" sx={{ height: "100%", borderRadius: 4 }}>
       <CardContent sx={{ p: 3 }}>
-        <Stack direction="row" justifyContent="space-between" gap={1} alignItems="center">
-          <Typography variant="caption" color="text.secondary" fontWeight={900}>{label}</Typography>
-          <Chip size="small" label={status} color={stageTone(status)} variant="outlined" sx={{ fontWeight: 900 }} />
-        </Stack>
-        <Typography variant="h5" fontWeight={950} mt={1.5}>{valueText}</Typography>
-        <Typography variant="body2" color="text.secondary" mt={1}>{detail}</Typography>
+        <Typography variant="h6" fontWeight={950}>{title}</Typography>
+        <Typography variant="body2" color="text.secondary" mt={0.6}>{subtitle}</Typography>
+        <Box mt={2}>{children}</Box>
       </CardContent>
     </Card>
   );
 }
 
-function TradeRow({ label, valueText }: { label: string; valueText: string }) {
+function InfoRow({ label, valueText }: { label: string; valueText: string }) {
   return (
-    <Stack direction="row" justifyContent="space-between" gap={2} py={0.8}>
+    <Stack direction="row" justifyContent="space-between" gap={2} py={0.9} sx={{ borderBottom: "1px solid rgba(148,163,184,.08)" }}>
       <Typography variant="body2" color="text.secondary">{label}</Typography>
       <Typography variant="body2" fontWeight={900} textAlign="right">{valueText}</Typography>
     </Stack>
@@ -46,88 +48,120 @@ function TradeRow({ label, valueText }: { label: string; valueText: string }) {
 
 export function Phase7BPatternCheckPage() {
   const query = useQuery({
-    queryKey: ["phase7c-panel-status-signal"],
-    queryFn: fetchPhase7CPanelStatus,
+    queryKey: ["phase7c-web-status-signal-v5"],
+    queryFn: fetchPhase7CWebStatus,
     refetchInterval: 3_000,
     retry: false,
     placeholderData: (previous) => previous,
   });
 
   if (query.isLoading) return <LoadingState />;
-  if (query.isError && !query.data) return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được tín hiệu Phase7C."} />;
+  if (query.isError && !query.data) {
+    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được tín hiệu Phase7C."} />;
+  }
 
   const data = query.data;
-  const stage = shortValue(data, "stage");
-  const regime = shortValue(data, "regime");
-  const confidence = value(data, "confidence", "—");
-  const approved = raw(data, "approved") === "true";
-  const entryReasons = compactReason(raw(data, "entryReason"), "Chưa có setup hợp lệ để vào lệnh.");
-  const holdReasons = compactReason(raw(data, "holdReason"), "Đang chờ setup hợp lệ.");
+  const panel = data?.panel;
+  const accountRisk = asRecord(data?.accountRisk);
+  const quote = asRecord(accountRisk.quote);
+  const approved = raw(panel, "approved") === "true";
+  const stage = value(panel, "stage", "—");
+  const regime = value(panel, "regime", "—");
+  const activeMode = value(panel, "activeMode", "—");
+  const strategy = value(panel, "effectiveStrategy", "—");
+  const confidence = value(panel, "confidence", "—");
+  const entryReasons = compactReason(raw(panel, "entryReason"), "Chưa có lý do vào lệnh.");
+  const holdReasons = compactReason(raw(panel, "holdReason"), "Đang chờ setup hợp lệ.");
 
   return (
-    <Stack spacing={2.5}>
-      <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1.5} alignItems={{ md: "center" }}>
-        <Box>
-          <Typography variant="overline" color="primary" fontWeight={900}>TÍN HIỆU & QUYẾT ĐỊNH</Typography>
-          <Typography variant="h4" fontWeight={950}>Điều kiện tín hiệu</Typography>
-          <Typography variant="body2" color="text.secondary" mt={0.8}>
-            Đồng bộ với panel MT5: Entry, TP, Stoploss, lý do vào lệnh và lý do giữ/chờ lệnh.
-          </Typography>
-        </Box>
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          <Chip label={`Mode ${modeDisplay(data)}`} color="success" variant="outlined" sx={{ fontWeight: 900 }} />
-          <Chip label={`Stage ${stage}`} color={stageTone(stage)} variant="outlined" sx={{ fontWeight: 900 }} />
-          <Chip label={`Conf ${confidence}`} color="default" variant="outlined" sx={{ fontWeight: 900 }} />
+    <Stack spacing={3}>
+      <Box sx={{ p: 3, borderRadius: 5, border: "1px solid rgba(148,163,184,.14)", bgcolor: "rgba(15,23,42,.45)" }}>
+        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2} alignItems={{ md: "center" }}>
+          <Box>
+            <Typography variant="overline" color="primary" fontWeight={900}>TÍN HIỆU & QUYẾT ĐỊNH v5</Typography>
+            <Typography variant="h4" fontWeight={950}>Một màn hình cho entry logic</Typography>
+            <Typography variant="body2" color="text.secondary" mt={1}>
+              Trang này chỉ hiển thị tín hiệu, stage, lý do chờ/vào lệnh và điều kiện vào lệnh. Không lặp thông tin tài khoản/hệ thống.
+            </Typography>
+          </Box>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Chip label={`Regime ${regime}`} color={regime === "REVERSAL" ? "warning" : "default"} variant="outlined" sx={{ fontWeight: 900 }} />
+            <Chip label={`Stage ${stage}`} color={stageTone(stage)} variant="outlined" sx={{ fontWeight: 900 }} />
+            <Chip label={approved ? "SETUP HỢP LỆ" : "ĐANG CHỜ"} color={approved ? "success" : "warning"} variant="outlined" sx={{ fontWeight: 900 }} />
+          </Stack>
         </Stack>
-      </Stack>
+      </Box>
 
-      {query.isError && query.data && <Alert severity="warning">Đang hiển thị dữ liệu gần nhất từ Decision Monitor. Trang sẽ tự thử lại.</Alert>}
+      {data?.usedDirectFallback && <Alert severity="info">Đã fallback trực tiếp sang Control API 3711 vì web proxy 5717 chưa ổn định.</Alert>}
 
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, md: 6, xl: 3 }}>
-          <GateCard label="REGIME" valueText={regime} detail={`Khuyến nghị: ${value(data, "effectiveStrategy", "Đang chờ")}`} status={regime} />
+          <PanelCard title="Regime" subtitle="Bối cảnh thị trường hiện tại.">
+            <Typography variant="h5" fontWeight={950}>{regime}</Typography>
+            <Typography variant="body2" color="text.secondary" mt={1}>Confidence {confidence}/100</Typography>
+          </PanelCard>
         </Grid>
         <Grid size={{ xs: 12, md: 6, xl: 3 }}>
-          <GateCard label="ENTRY GATE" valueText={approved ? "SETUP HỢP LỆ" : "ĐANG CHỜ SETUP"} detail={`Stage: ${stage}`} status={approved ? "READY" : stage} />
+          <PanelCard title="Decision" subtitle="Kết luận mở lệnh.">
+            <Typography variant="h5" fontWeight={950}>{stage}</Typography>
+            <Typography variant="body2" color="text.secondary" mt={1}>Mode {activeMode} → {strategy}</Typography>
+          </PanelCard>
         </Grid>
         <Grid size={{ xs: 12, md: 6, xl: 3 }}>
-          <GateCard label="HƯỚNG LỆNH" valueText={value(data, "side", "Chưa có hướng")} detail={`Setup: ${value(data, "setup", "Chưa có")}`} status={value(data, "side", "WAITING")} />
+          <PanelCard title="Approved" subtitle="Entry gate cuối cùng.">
+            <Typography variant="h5" fontWeight={950}>{boolText(approved)}</Typography>
+            <Typography variant="body2" color="text.secondary" mt={1}>{value(panel, "limitReason", "Chưa có setup hợp lệ.")}</Typography>
+          </PanelCard>
         </Grid>
         <Grid size={{ xs: 12, md: 6, xl: 3 }}>
-          <GateCard label="LOT / RISK" valueText={value(data, "finalLot", "Chưa có lot")} detail={`Risk USD: ${value(data, "estimatedRiskUsd", "Chưa có")}`} status="CHECK" />
+          <PanelCard title="Giá XAUUSD" subtitle="Quote từ MT5 nếu endpoint account-risk sẵn sàng.">
+            <Typography variant="h5" fontWeight={950}>{clean(quote.bid, "—")}</Typography>
+            <Typography variant="body2" color="text.secondary" mt={1}>Ask {clean(quote.ask, "—")} · Spread {clean(quote.spread, "—")}</Typography>
+          </PanelCard>
         </Grid>
       </Grid>
 
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <Card variant="outlined">
-            <CardContent sx={{ p: 3 }}>
-              <Typography variant="h6" fontWeight={950}>Kế hoạch lệnh</Typography>
-              <Typography variant="body2" color="text.secondary" mt={0.5}>Khi chưa có setup, các ô sẽ ghi rõ đang chờ thay vì lỗi JSON/HTTP.</Typography>
-              <Box mt={2}>
-                <TradeRow label="Điểm vào" valueText={value(data, "entry", "Đang chờ setup")} />
-                <TradeRow label="Stoploss" valueText={value(data, "stopLoss", "Chưa có")} />
-                <TradeRow label="Khoảng SL" valueText={value(data, "stopDistance", "Chưa có")} />
-                <TradeRow label="TP1" valueText={value(data, "tp1", "Chưa có")} />
-                <TradeRow label="TP2" valueText={value(data, "tp2", "Chưa có")} />
-                <TradeRow label="BE / Partial" valueText="BE +6 / Partial +10 (1/3)" />
+        <Grid size={{ xs: 12, lg: 5 }}>
+          <PanelCard title={approved ? "Kế hoạch lệnh" : "Chưa có kế hoạch lệnh"} subtitle={approved ? "Chỉ hiện khi setup hợp lệ." : "Đang bị BLOCKED/WAITING nên không render bảng Entry/SL/TP giả."}>
+            {approved ? (
+              <Box>
+                <InfoRow label="Entry" valueText={value(panel, "entry", "—")} />
+                <InfoRow label="Stoploss" valueText={value(panel, "stopLoss", "—")} />
+                <InfoRow label="Khoảng SL" valueText={value(panel, "stopDistance", "—")} />
+                <InfoRow label="TP1" valueText={value(panel, "tp1", "—")} />
+                <InfoRow label="TP2" valueText={value(panel, "tp2", "—")} />
+                <InfoRow label="Lot" valueText={value(panel, "finalLot", "—")} />
               </Box>
-            </CardContent>
-          </Card>
+            ) : (
+              <Alert severity="warning" variant="outlined">Bot đang chờ setup hợp lệ. Không có Entry/SL/TP để hiển thị.</Alert>
+            )}
+          </PanelCard>
         </Grid>
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <Card variant="outlined">
-            <CardContent sx={{ p: 3 }}>
-              <Typography variant="h6" fontWeight={950}>Lý do quyết định</Typography>
-              <Typography variant="body2" color="text.secondary" mt={0.5}>Dòng lý do được rút gọn để dễ đọc và khớp với MT5 panel.</Typography>
-              <Typography variant="subtitle2" color="primary" fontWeight={900} mt={2}>Lý do vào / chờ lệnh</Typography>
-              <Stack spacing={0.8} mt={1}>{entryReasons.map((reason) => <Typography key={reason} variant="body2">• {reason}</Typography>)}</Stack>
-              <Typography variant="subtitle2" color="primary" fontWeight={900} mt={2.2}>Lý do giữ / chờ lệnh</Typography>
-              <Stack spacing={0.8} mt={1}>{holdReasons.map((reason) => <Typography key={reason} variant="body2" color="text.secondary">• {reason}</Typography>)}</Stack>
-            </CardContent>
-          </Card>
+        <Grid size={{ xs: 12, lg: 7 }}>
+          <PanelCard title="Lý do quyết định" subtitle="Nội dung rút gọn từ Decision Monitor.">
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <Typography variant="subtitle2" color="primary" fontWeight={900}>Lý do vào / chờ lệnh</Typography>
+                <Stack spacing={1.1} mt={1.2}>{entryReasons.map((reason) => <Typography key={reason} variant="body2">• {reason}</Typography>)}</Stack>
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <Typography variant="subtitle2" color="primary" fontWeight={900}>Lý do giữ / không vào</Typography>
+                <Stack spacing={1.1} mt={1.2}>{holdReasons.map((reason) => <Typography key={reason} variant="body2" color="text.secondary">• {reason}</Typography>)}</Stack>
+              </Grid>
+            </Grid>
+          </PanelCard>
         </Grid>
       </Grid>
+
+      <PanelCard title="Điều kiện vào lệnh chuẩn" subtitle="Quy tắc chung đồng bộ với MT5 panel.">
+        <Grid container spacing={2}>
+          <Grid size={{ xs: 12, md: 3 }}><InfoRow label="SL chuẩn" valueText="6–10 giá" /></Grid>
+          <Grid size={{ xs: 12, md: 3 }}><InfoRow label="SL > 10" valueText="Chờ pullback sau M15" /></Grid>
+          <Grid size={{ xs: 12, md: 3 }}><InfoRow label="Break-even" valueText="+6" /></Grid>
+          <Grid size={{ xs: 12, md: 3 }}><InfoRow label="Partial" valueText="+10, chốt 1/3" /></Grid>
+        </Grid>
+      </PanelCard>
     </Stack>
   );
 }
