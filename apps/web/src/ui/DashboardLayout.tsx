@@ -27,11 +27,11 @@ const drawerWidth = 250;
 type LinkRow = readonly [string, string, typeof SmartToyRounded];
 
 const links: readonly LinkRow[] = [
-  ["/", "Tổng quan", SmartToyRounded],
-  ["/phase7b-pattern-check", "Tín hiệu & quyết định", CandlestickChartRounded],
-  ["/phase7b-ops", "Hệ thống & Telegram", PowerSettingsNewRounded],
+  ["/", "Dashboard", SmartToyRounded],
+  ["/phase7b-pattern-check", "Tín hiệu", CandlestickChartRounded],
+  ["/phase7b-ops", "Tài khoản & Risk", PowerSettingsNewRounded],
   ["/phase7c-control-center", "Control Center", TuneRounded],
-  ["/performance", "Hiệu suất chiến lược", InsightsRounded],
+  ["/performance", "Hiệu suất", InsightsRounded],
 ] as const;
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
@@ -117,8 +117,8 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
           color="text.secondary"
           sx={{ display: "block", mt: 1, lineHeight: 1.5 }}
         >
-          Tài khoản thật luôn bị khóa. Bot chỉ chạy sau khi nhấn BẬT BOT; panel
-          MT5 chỉ đọc và không có quyền gửi lệnh.
+          Tài khoản thật luôn bị khóa. Panel MT5 chỉ đọc, không có quyền gửi lệnh.
+          Lot/Risk chỉ áp dụng cho lệnh mới trong môi trường demo.
         </Typography>
       </Box>
     </Box>
@@ -129,22 +129,19 @@ export function DashboardLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
 
-  let headerTitle = "Tổng quan giao dịch DEMO";
-  let headerSubtitle =
-    "XAUUSD · MT5 DEMO · vị thế / quản lý lệnh / sự kiện gần nhất";
+  let headerTitle = "Dashboard vận hành DEMO";
+  let headerSubtitle = "XAUUSD · AUTO/PAUSE · Regime · tài khoản · risk · hệ thống";
   if (location.pathname.startsWith("/phase7b-pattern-check")) {
-    headerTitle = "Điều kiện tín hiệu";
-    headerSubtitle =
-      "3 mô hình → ST M15/M5 → SL cấu trúc 6–10; >10 chờ hồi · điểm tin cậy 0–100 · quản lý Trend/Sideway/Recovery";
+    headerTitle = "Tín hiệu & quyết định";
+    headerSubtitle = "Regime, stage, lý do chờ/vào lệnh và điều kiện entry M15";
   } else if (location.pathname.startsWith("/phase7b-ops")) {
-    headerTitle = "Hệ thống & Telegram";
-    headerSubtitle = "Bot DEMO · Telegram · MT5 Bridge · trạng thái vận hành";
+    headerTitle = "Tài khoản & Risk";
+    headerSubtitle = "Thông tin tài khoản giao dịch, lot/risk, safety và runtime";
   } else if (location.pathname.startsWith("/phase7c-control-center")) {
     headerTitle = "Control Center";
-    headerSubtitle =
-      "MT5 · Bot · Telegram · quyết định giao dịch và Risk/Lot đồng bộ";
+    headerSubtitle = "MT5 · Bot · Telegram · quyết định giao dịch và Risk/Lot đồng bộ";
   } else if (location.pathname.startsWith("/performance")) {
-    headerTitle = "Hiệu suất chiến lược";
+    headerTitle = "Hiệu suất";
     headerSubtitle = "Kết quả giao dịch XAUUSD do hệ thống thực hiện";
   }
 
