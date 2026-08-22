@@ -1,26 +1,18 @@
 #property copyright "XAUUSD AI MASTER"
-#property version   "1.21"
-#property description "Read-only Phase 7C synchronized position and decision panel"
+#property version   "1.22"
+#property description "Read-only Phase 7C compact synchronized position and decision panel"
 
 input string InpApiUrl = "http://127.0.0.1:3711/api/v1/phase7c/decision-monitor/mt5?symbol=XAUUSD";
 input int InpRefreshSeconds = 3;
 input ENUM_BASE_CORNER InpCorner = CORNER_LEFT_UPPER;
 input int InpX = 12;
 input int InpY = 28;
-input int InpFontSize = 10;
+input int InpFontSize = 9;
 
 const string PREFIX = "XAU_AI_P7C_";
-const int PANEL_WIDTH = 560;
-const int PANEL_HEIGHT = 482;
+const int PANEL_WIDTH = 880;
+const int PANEL_HEIGHT = 526;
 bool g_error_mode = false;
-
-string TrimText(const string value)
-{
-   string copy = value;
-   StringTrimLeft(copy);
-   StringTrimRight(copy);
-   return copy;
-}
 
 string Field(const string payload, const string wanted)
 {
@@ -39,32 +31,80 @@ string Field(const string payload, const string wanted)
    return "n/a";
 }
 
-string Friendly(const string raw, const string fallback = "Chua co")
+string CleanValue(const string value)
 {
-   string value = TrimText(raw);
-   if(value == "" || value == "n/a" || value == "null" || value == "undefined" || value == "NaN")
-      return fallback;
+   if(value == "" || value == "n/a" || value == "N/A" || value == "null" || value == "undefined")
+      return "Chua co";
+   if(value == "true")
+      return "Co";
+   if(value == "false")
+      return "Chua";
    return value;
 }
 
-string BoolLabel(const string raw)
+string Clip(const string value, const int maximum)
 {
-   string value = TrimText(raw);
-   if(value == "true" || value == "True" || value == "1")
-      return "Da bat";
-   if(value == "false" || value == "False" || value == "0")
-      return "Chua";
-   return "Chua co";
+   if(StringLen(value) <= maximum)
+      return value;
+   return StringSubstr(value, 0, maximum - 3) + "...";
 }
 
-string DirectionLabel(const string raw)
+string CompactReason(const string value)
 {
-   string value = TrimText(raw);
-   if(value == "BUY" || value == "LONG")
-      return "MUA";
-   if(value == "SELL" || value == "SHORT")
-      return "BAN";
-   return Friendly(value, "Chua co");
+   string text = value;
+   StringReplace(text, "A confirmed CHOCH indicates a possible structural reversal.", "CHOCH xac nhan kha nang dao chieu.");
+   StringReplace(text, "Bollinger bandwidth is", "Bollinger bandwidth:");
+   StringReplace(text, "No valid setup", "Chua co setup hop le");
+   StringReplace(text, "panel does not have order permission", "panel chi doc, khong gui lenh");
+   StringReplace(text, "panel khong co quyen gui lenh", "panel chi doc, khong gui lenh");
+   StringReplace(text, " | ", ". ");
+   StringReplace(text, " • ", "\n");
+   StringReplace(text, "• ", "");
+   return text;
+}
+
+void TakeWrappedLine(const string value, const int maximum, string &line, string &remaining)
+{
+   if(StringLen(value) <= maximum)
+   {
+      line = value;
+      remaining = "";
+      return;
+   }
+
+   int split = maximum;
+   for(int index = maximum; index >= maximum / 2; index--)
+   {
+      if(StringSubstr(value, index, 1) == " ")
+      {
+         split = index;
+         break;
+      }
+   }
+   line = StringSubstr(value, 0, split);
+   remaining = StringSubstr(value, split + 1);
+}
+
+void WrapThree(const string value, const int maximum, string &first, string &second, string &third)
+{
+   string compact = CompactReason(value);
+   string parts[];
+   ushort separator = (ushort)StringGetCharacter("\n", 0);
+   int count = StringSplit(compact, separator, parts);
+
+   if(count >= 2)
+   {
+      first = Clip(parts[0], maximum);
+      second = Clip(parts[1], maximum);
+      third = count >= 3 ? Clip(parts[2], maximum) : "";
+      return;
+   }
+
+   string remaining;
+   TakeWrappedLine(compact, maximum, first, remaining);
+   TakeWrappedLine(remaining, maximum, second, third);
+   if(StringLen(third) > maximum)
+      third = StringSubstr(third, 0, maximum - 3) + "...";
 }
 
 void DeletePanel()
@@ -94,7 +134,7 @@ void Rectangle(const string suffix, const int x, const int y, const int width, c
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
 }
 
-void Label(const string suffix, const int x, const int y, const string text, const color textColor = clrWhite, const int fontSize = 0, const string font = "Arial")
+void Label(const string suffix, const int x, const int y, const string text, const color textColor = clrWhite, const int fontSize = 0, const string font = "Consolas")
 {
    string name = PREFIX + suffix;
    if(ObjectFind(0, name) < 0)
@@ -111,49 +151,28 @@ void Label(const string suffix, const int x, const int y, const string text, con
    ObjectSetString(0, name, OBJPROP_TEXT, StringLen(text) > 0 ? text : " ");
 }
 
-void TakeWrappedLine(const string value, const int maximum, string &line, string &remaining)
-{
-   if(StringLen(value) <= maximum)
-   {
-      line = value;
-      remaining = "";
-      return;
-   }
-
-   int split = maximum;
-   for(int index = maximum; index >= maximum / 2; index--)
-   {
-      if(StringSubstr(value, index, 1) == " ")
-      {
-         split = index;
-         break;
-      }
-   }
-   line = StringSubstr(value, 0, split);
-   remaining = StringSubstr(value, split + 1);
-}
-
-void WrapThree(const string value, const int maximum, string &first, string &second, string &third)
-{
-   string text = Friendly(value, "Chua co ly do.");
-   string remaining;
-   TakeWrappedLine(text, maximum, first, remaining);
-   TakeWrappedLine(remaining, maximum, second, third);
-   if(StringLen(third) > maximum)
-      third = StringSubstr(third, 0, maximum - 3) + "...";
-}
-
 color StatusColor(const string positionState, const string stage, const string approved)
 {
    if(positionState == "MANAGING")
       return clrLimeGreen;
+   if(positionState == "UNMANAGED" || stage == "ERROR")
+      return clrOrangeRed;
    if(stage == "BLOCKED")
       return clrOrange;
-   if(positionState == "UNMANAGED" || stage == "ERROR")
-      return clrTomato;
    if(approved == "true")
       return clrLimeGreen;
    return clrGold;
+}
+
+color RegimeColor(const string regime)
+{
+   if(regime == "TREND")
+      return clrDeepSkyBlue;
+   if(regime == "SIDEWAY")
+      return clrAqua;
+   if(regime == "REVERSAL")
+      return clrOrange;
+   return clrSilver;
 }
 
 color ProfitColor(const string value)
@@ -171,47 +190,55 @@ void BeginLayout(const bool errorMode)
    if(g_error_mode != errorMode)
       DeletePanel();
    g_error_mode = errorMode;
-   Rectangle("BG", 0, 0, PANEL_WIDTH, errorMode ? 328 : PANEL_HEIGHT, C'13,18,26', C'60,74,92');
-   Rectangle("TOP", 0, 0, PANEL_WIDTH, 5, C'28,178,224', C'28,178,224');
+   Rectangle("BG", 0, 0, PANEL_WIDTH, errorMode ? 360 : PANEL_HEIGHT, C'14,18,25', C'71,86,106');
+   Rectangle("TOP", 0, 0, PANEL_WIDTH, 4, C'36,184,224', C'36,184,224');
 }
 
 void DrawNormalChrome()
 {
    BeginLayout(false);
-   Rectangle("STATUS", 12, 58, 536, 54, C'24,33,43', C'58,73,92');
-   Rectangle("PLAN", 12, 135, 536, 130, C'21,27,36', C'50,63,80');
-   Rectangle("ENTRY_REASON", 12, 292, 536, 62, C'21,27,36', C'50,63,80');
-   Rectangle("HOLD_REASON", 12, 382, 536, 62, C'21,27,36', C'50,63,80');
-   Rectangle("FOOT", 12, 452, 536, 20, C'18,23,31', C'42,54,69');
+   Rectangle("HEAD", 12, 10, 856, 72, C'16,22,31', C'44,58,76');
+   Rectangle("STATUS", 12, 92, 856, 54, C'24,33,43', C'58,73,92');
+   Rectangle("PLAN", 12, 174, 856, 136, C'22,27,36', C'50,63,80');
+   Rectangle("ENTRY_REASON", 12, 344, 856, 68, C'22,27,36', C'50,63,80');
+   Rectangle("HOLD_REASON", 12, 438, 856, 48, C'22,27,36', C'50,63,80');
+   Rectangle("FOOT", 12, 498, 856, 18, C'18,23,31', C'42,54,69');
 }
 
 void RenderError(const string title, const string message, const bool showWebRequestHelp)
 {
    BeginLayout(true);
-   Rectangle("STATUS", 12, 58, 536, 64, C'55,30,30', C'210,70,70');
-   Rectangle("RECOVERY", 12, 138, 536, 124, C'21,27,36', C'50,63,80');
-   Rectangle("FOOT", 12, 278, 536, 34, C'18,23,31', C'42,54,69');
+   Rectangle("STATUS", 12, 58, 856, 64, C'55,30,30', C'210,70,70');
+   Rectangle("RECOVERY", 12, 138, 856, 150, C'22,27,36', C'50,63,80');
+   Rectangle("FOOT", 12, 304, 856, 42, C'18,23,31', C'42,54,69');
 
-   Label("TITLE", 18, 15, "XAUUSD AI MASTER", clrDeepSkyBlue, InpFontSize + 5, "Arial");
-   Label("SUBTITLE", 18, 39, "PHASE 7C | READ ONLY | DEMO", clrSilver, InpFontSize);
+   Label("TITLE", 20, 16, "XAUUSD AI MASTER", clrDeepSkyBlue, InpFontSize + 3, "Arial");
+   Label("SUBTITLE", 20, 39, "Phase 7C | DEMO | READ ONLY", clrSilver, InpFontSize);
    Label("STATUS_TITLE", 26, 70, title, clrTomato, InpFontSize + 2, "Arial");
    Label("STATUS_NOTE", 26, 96, message, clrWhite, InpFontSize);
 
-   Label("RECOVERY_HEAD", 26, 153, "KHOI PHUC KET NOI", clrDeepSkyBlue, InpFontSize + 1, "Arial");
+   Label("RECOVERY_HEAD", 26, 153, "HUONG DAN PHUC HOI", clrDeepSkyBlue, InpFontSize + 1, "Arial");
    if(showWebRequestHelp)
    {
-      Label("HELP1", 28, 184, "1. Tools > Options > Expert Advisors", clrWhite);
-      Label("HELP2", 28, 207, "2. Allow WebRequest: http://127.0.0.1:3711", clrGold);
-      Label("HELP3", 28, 230, "3. Giu API/Web/Bridge dang chay", clrSilver);
+      Label("HELP1", 28, 185, "1. Tools > Options > Expert Advisors", clrWhite);
+      Label("HELP2", 28, 210, "2. Allow WebRequest: http://127.0.0.1:3711", clrGold);
+      Label("HELP3", 28, 235, "3. Attach lai EA panel neu chart chua cap nhat", clrSilver);
    }
    else
    {
-      Label("HELP1", 28, 184, "API/Bridge dang khoi tao hoac tra du lieu cu.", clrWhite);
-      Label("HELP2", 28, 207, "Panel tu tai lai moi " + IntegerToString(InpRefreshSeconds) + " giay.", clrGold);
-      Label("HELP3", 28, 230, "Khong gui lenh tu panel MT5.", clrSilver);
+      Label("HELP1", 28, 185, "API/Bridge dang khoi tao hoac tra du lieu tam thoi loi.", clrWhite);
+      Label("HELP2", 28, 210, "Panel tu dong tai lai moi " + IntegerToString(InpRefreshSeconds) + " giay.", clrGold);
+      Label("HELP3", 28, 235, "Giu MT5 va Control API dang chay.", clrSilver);
    }
-   Label("SAFETY", 26, 288, "READ ONLY | DEMO | ORDER PERMISSION = NONE", clrSilver);
+   Label("SAFETY1", 26, 314, "READ ONLY | DEMO | ORDER NONE", clrSilver);
+   Label("SAFETY2", 26, 333, "Khong co quyen gui lenh tu panel.", clrSilver);
    ChartRedraw();
+}
+
+void DrawInfoPair(const string id, const int xLabel, const int xValue, const int y, const string label, const string value, const color valueColor)
+{
+   Label(id + "L", xLabel, y, label, clrSilver, InpFontSize);
+   Label(id + "V", xValue, y, value, valueColor, InpFontSize);
 }
 
 void Render(const string payload)
@@ -219,97 +246,88 @@ void Render(const string payload)
    string positionState = Field(payload, "positionState");
    string stage = Field(payload, "stage");
    string approved = Field(payload, "approved");
-   string activeMode = Field(payload, "activeMode");
-   string regime = Field(payload, "regime");
-   string confidence = Field(payload, "confidence");
-   string strategy = Field(payload, "effectiveStrategy");
-   color stateColor = StatusColor(positionState, stage, approved);
    bool managing = positionState == "MANAGING" || positionState == "UNMANAGED";
+   color stateColor = StatusColor(positionState, stage, approved);
 
-   string entry = managing ? Field(payload, "positionEntry") : Field(payload, "entry");
-   string current = managing ? Field(payload, "currentPrice") : "";
-   string stopLoss = managing ? Field(payload, "positionStopLoss") : Field(payload, "stopLoss");
-   string tp1 = managing ? Field(payload, "positionTp1") : Field(payload, "tp1");
-   string tp2 = managing ? Field(payload, "positionTp2") : Field(payload, "tp2");
-   string volume = managing ? Field(payload, "positionVolume") : Field(payload, "finalLot");
-   string pnl = managing ? Field(payload, "floatingPnlUsd") : Field(payload, "estimatedRiskUsd");
-   string side = managing ? Field(payload, "positionSide") : Field(payload, "side");
-   string setup = managing ? Field(payload, "positionSetup") : Field(payload, "setup");
-   string ticket = managing ? Field(payload, "ticket") : "";
-   string distance = managing ? Field(payload, "favorableDistance") : Field(payload, "stopDistance");
-   string bePartial = "BE " + BoolLabel(Field(payload, "breakEvenApplied")) + " / 1-3 " + BoolLabel(Field(payload, "partialApplied"));
+   string activeMode = CleanValue(Field(payload, "activeMode"));
+   string effectiveStrategy = CleanValue(Field(payload, "effectiveStrategy"));
+   string regime = CleanValue(Field(payload, "regime"));
+   string confidence = CleanValue(Field(payload, "confidence"));
+
+   string entry = CleanValue(managing ? Field(payload, "positionEntry") : Field(payload, "entry"));
+   string current = CleanValue(managing ? Field(payload, "currentPrice") : "n/a");
+   string stopLoss = CleanValue(managing ? Field(payload, "positionStopLoss") : Field(payload, "stopLoss"));
+   string tp1 = CleanValue(managing ? Field(payload, "positionTp1") : Field(payload, "tp1"));
+   string tp2 = CleanValue(managing ? Field(payload, "positionTp2") : Field(payload, "tp2"));
+   string volume = CleanValue(managing ? Field(payload, "positionVolume") : Field(payload, "finalLot"));
+   string pnl = CleanValue(managing ? Field(payload, "floatingPnlUsd") : Field(payload, "estimatedRiskUsd"));
+   string strategy = managing ? CleanValue(Field(payload, "positionStrategy")) : effectiveStrategy;
+   string side = CleanValue(managing ? Field(payload, "positionSide") : Field(payload, "side"));
+   string setup = CleanValue(managing ? Field(payload, "positionSetup") : Field(payload, "setup"));
+   string ticket = CleanValue(managing ? Field(payload, "ticket") : "n/a");
+   string distance = CleanValue(managing ? Field(payload, "favorableDistance") : Field(payload, "stopDistance"));
 
    string entryLine1, entryLine2, entryLine3, holdLine1, holdLine2, holdLine3;
-   WrapThree(Field(payload, "entryReason"), 70, entryLine1, entryLine2, entryLine3);
-   WrapThree(Field(payload, "holdReason"), 70, holdLine1, holdLine2, holdLine3);
+   WrapThree(Field(payload, "entryReason"), 78, entryLine1, entryLine2, entryLine3);
+   WrapThree(Field(payload, "holdReason"), 78, holdLine1, holdLine2, holdLine3);
 
    string statusTitle;
    string statusNote;
    if(positionState == "MANAGING")
    {
-      statusTitle = "DANG GIU LENH " + DirectionLabel(side) + " | " + Friendly(strategy, "Quan ly");
-      statusNote = "Ticket " + Friendly(ticket) + " | Lot " + Friendly(volume) + " | P/L " + Friendly(pnl, "0") + " USD";
+      statusTitle = "DANG GIU VI THE " + side;
+      statusNote = "Ticket " + ticket + " | " + volume + " lot | P/L " + pnl + " USD";
    }
    else if(positionState == "UNMANAGED")
    {
-      statusTitle = "CAN KIEM TRA LENH NGOAI EXECUTOR";
-      statusNote = "Ticket " + Friendly(ticket) + " | panel chi doc, khong tu quan ly";
+      statusTitle = "CAN KIEM TRA VI THE NGOAI BOT";
+      statusNote = "Ticket " + ticket + " | panel chi doc, khong tu quan ly";
    }
    else
    {
-      statusTitle = approved == "true" ? "SETUP HOP LE | CHO EXECUTOR" : "DANG CHO SETUP";
-      statusNote = "Stage " + Friendly(stage) + " | Mode " + Friendly(activeMode) + " -> " + Friendly(strategy, "PAUSE");
+      statusTitle = approved == "true" ? "SETUP HOP LE" : "DANG CHO SETUP";
+      statusNote = "Stage: " + CleanValue(stage) + " | Mode: " + activeMode + " -> " + strategy;
    }
 
+   string bePartial = "BE +6 / +10 1/3";
+   if(managing)
+      bePartial = "BE " + CleanValue(Field(payload, "breakEvenApplied")) + " / 1/3 " + CleanValue(Field(payload, "partialApplied"));
+
    DrawNormalChrome();
-   Rectangle("STATUS", 12, 58, 536, 54, C'24,33,43', stateColor);
+   Rectangle("STATUS", 12, 92, 856, 54, C'24,33,43', stateColor);
 
-   Label("TITLE", 18, 15, "XAUUSD AI MASTER", clrDeepSkyBlue, InpFontSize + 5, "Arial");
-   Label("SUBTITLE", 18, 40, "Phase 7C | DEMO | READ ONLY", clrSilver, InpFontSize);
-   Label("MODE", 382, 15, "MODE  " + Friendly(activeMode), clrWhite, InpFontSize + 1, "Consolas");
-   Label("REGIME", 382, 40, Friendly(regime) + " | CONF " + Friendly(confidence), clrSilver, InpFontSize, "Consolas");
+   Label("TITLE", 22, 16, "XAUUSD AI MASTER", clrDeepSkyBlue, InpFontSize + 3, "Arial");
+   Label("SUBTITLE", 22, 39, "Phase 7C | DEMO | READ ONLY", clrSilver, InpFontSize);
+   Label("HM1", 22, 62, "Mode: " + activeMode + " -> " + strategy, activeMode == "AUTO" ? clrLimeGreen : clrGold, InpFontSize);
+   Label("HM2", 450, 62, "Regime: " + regime + " | Conf: " + confidence, RegimeColor(regime), InpFontSize);
 
-   Label("STATUS_TITLE", 26, 70, statusTitle, stateColor, InpFontSize + 2, "Arial");
-   Label("STATUS_NOTE", 26, 94, statusNote, clrWhite, InpFontSize, "Arial");
+   Label("STATUS_TITLE", 26, 102, statusTitle, stateColor, InpFontSize + 2, "Arial");
+   Label("STATUS_NOTE", 26, 126, statusNote, clrWhite, InpFontSize);
 
-   Label("SECTION_PLAN", 18, 120, managing ? "LENH DANG QUAN LY" : "KE HOACH LENH KE TIEP", clrDeepSkyBlue, InpFontSize + 1, "Arial");
+   Label("PLAN_HEAD", 20, 154, managing ? "VI THE DANG MO" : "KE HOACH LENH KE TIEP", clrDeepSkyBlue, InpFontSize + 1, "Arial");
+   DrawInfoPair("P1", 30, 152, 188, "Diem vao", entry, clrWhite);
+   DrawInfoPair("P2", 30, 152, 212, managing ? "Gia hien tai" : "Stoploss", managing ? current : stopLoss, managing ? clrWhite : clrTomato);
+   DrawInfoPair("P3", 30, 152, 236, managing ? "Loi gia" : "Khoang SL", distance, clrWhite);
+   DrawInfoPair("P4", 30, 152, 260, "Lot", volume, clrAqua);
+   DrawInfoPair("P5", 30, 152, 284, managing ? "P/L USD" : "Risk USD", pnl, ProfitColor(pnl));
 
-   Label("L1", 28, 150, "Diem vao", clrSilver, InpFontSize, "Arial");
-   Label("L1V", 135, 150, Friendly(entry, "Dang cho"), clrWhite, InpFontSize + 1, "Consolas");
-   Label("R1", 292, 150, "TP1", clrSilver, InpFontSize, "Arial");
-   Label("R1V", 390, 150, Friendly(tp1), clrLimeGreen, InpFontSize + 1, "Consolas");
+   DrawInfoPair("Q1", 450, 584, 188, "TP1", tp1, clrLimeGreen);
+   DrawInfoPair("Q2", 450, 584, 212, "TP2", tp2, clrLimeGreen);
+   DrawInfoPair("Q3", 450, 584, 236, "Huong", side, stateColor);
+   DrawInfoPair("Q4", 450, 584, 260, "Setup", Clip(setup, 24), clrWhite);
+   DrawInfoPair("Q5", 450, 584, 284, "BE/Partial", bePartial, clrAqua);
 
-   Label("L2", 28, 172, managing ? "Gia hien tai" : "Stoploss", clrSilver, InpFontSize, "Arial");
-   Label("L2V", 135, 172, Friendly(managing ? current : stopLoss), managing ? clrWhite : clrTomato, InpFontSize + 1, "Consolas");
-   Label("R2", 292, 172, "TP2", clrSilver, InpFontSize, "Arial");
-   Label("R2V", 390, 172, Friendly(tp2), clrLimeGreen, InpFontSize + 1, "Consolas");
+   Label("ENTRY_HEAD", 20, 322, "LY DO VAO LENH / CHO LENH", clrDeepSkyBlue, InpFontSize + 1, "Arial");
+   Label("ENTRY_1", 30, 356, "- " + entryLine1, clrWhite, InpFontSize);
+   Label("ENTRY_2", 30, 378, StringLen(entryLine2) > 0 ? "- " + entryLine2 : " ", clrSilver, InpFontSize);
+   Label("ENTRY_3", 30, 400, StringLen(entryLine3) > 0 ? "- " + entryLine3 : " ", clrSilver, InpFontSize);
 
-   Label("L3", 28, 194, "Khoang SL", clrSilver, InpFontSize, "Arial");
-   Label("L3V", 135, 194, Friendly(distance), clrWhite, InpFontSize + 1, "Consolas");
-   Label("R3", 292, 194, "Huong", clrSilver, InpFontSize, "Arial");
-   Label("R3V", 390, 194, DirectionLabel(side), stateColor, InpFontSize + 1, "Consolas");
+   Label("HOLD_HEAD", 20, 418, "LY DO GIU / CHO LENH", clrDeepSkyBlue, InpFontSize + 1, "Arial");
+   Label("HOLD_1", 30, 450, "- " + holdLine1, managing ? clrWhite : clrSilver, InpFontSize);
+   Label("HOLD_2", 30, 472, StringLen(holdLine2) > 0 ? "- " + holdLine2 : " ", clrSilver, InpFontSize);
 
-   Label("L4", 28, 216, "Lot", clrSilver, InpFontSize, "Arial");
-   Label("L4V", 135, 216, Friendly(volume), clrAqua, InpFontSize + 1, "Consolas");
-   Label("R4", 292, 216, "Setup", clrSilver, InpFontSize, "Arial");
-   Label("R4V", 390, 216, Friendly(setup), clrWhite, InpFontSize, "Consolas");
-
-   Label("L5", 28, 238, managing ? "P/L USD" : "Risk USD", clrSilver, InpFontSize, "Arial");
-   Label("L5V", 135, 238, Friendly(pnl), ProfitColor(pnl), InpFontSize + 1, "Consolas");
-   Label("R5", 292, 238, "BE/Partial", clrSilver, InpFontSize, "Arial");
-   Label("R5V", 390, 238, bePartial, clrAqua, InpFontSize, "Consolas");
-
-   Label("ENTRY_HEAD", 20, 276, "LY DO VAO LENH / CHO LENH", clrDeepSkyBlue, InpFontSize + 1, "Arial");
-   Label("ENTRY_1", 28, 307, "• " + entryLine1, clrWhite, InpFontSize, "Arial");
-   Label("ENTRY_2", 28, 326, StringLen(entryLine2) > 0 ? "• " + entryLine2 : " ", clrSilver, InpFontSize, "Arial");
-   Label("ENTRY_3", 28, 345, StringLen(entryLine3) > 0 ? "• " + entryLine3 : " ", clrSilver, InpFontSize, "Arial");
-
-   Label("HOLD_HEAD", 20, 366, "LY DO GIU / CHO LENH", clrDeepSkyBlue, InpFontSize + 1, "Arial");
-   Label("HOLD_1", 28, 397, "• " + holdLine1, managing ? clrWhite : clrSilver, InpFontSize, "Arial");
-   Label("HOLD_2", 28, 416, StringLen(holdLine2) > 0 ? "• " + holdLine2 : " ", clrSilver, InpFontSize, "Arial");
-   Label("HOLD_3", 28, 435, StringLen(holdLine3) > 0 ? "• " + holdLine3 : " ", clrSilver, InpFontSize, "Arial");
-
-   Label("SAFETY", 24, 454, "READ ONLY | DEMO | ORDER PERMISSION = NONE | BE +6 | PARTIAL 1/3 @ +10", clrSilver, InpFontSize - 1, "Consolas");
+   Label("SAFETY1", 26, 500, "READ ONLY | DEMO | ORDER NONE", clrSilver, InpFontSize - 1);
+   Label("SAFETY2", 450, 500, "BE +6 | PARTIAL +10 (1/3)", clrSilver, InpFontSize - 1);
    ChartRedraw();
 }
 
