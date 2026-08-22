@@ -10,9 +10,7 @@ import {
 } from "@mui/material";
 import AccountCircleRounded from "@mui/icons-material/AccountCircleRounded";
 import CandlestickChartRounded from "@mui/icons-material/CandlestickChartRounded";
-import ReceiptLongRounded from "@mui/icons-material/ReceiptLongRounded";
 import SmartToyRounded from "@mui/icons-material/SmartToyRounded";
-import TelegramRounded from "@mui/icons-material/Telegram";
 import HubRounded from "@mui/icons-material/HubRounded";
 import { useQuery } from "@tanstack/react-query";
 import { safeReadJson } from "../api";
