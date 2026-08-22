@@ -1,19 +1,18 @@
 #property copyright "XAUUSD AI MASTER"
-#property version   "1.24"
-#property description "Read-only Phase 7C compact synchronized position and decision panel"
+#property version   "1.25"
+#property description "Read-only Phase 7C state-based decision panel"
 
 input string InpApiUrl = "http://127.0.0.1:3711/api/v1/phase7c/decision-monitor/mt5?symbol=XAUUSD";
 input int InpRefreshSeconds = 3;
 input ENUM_BASE_CORNER InpCorner = CORNER_LEFT_UPPER;
 input int InpX = 12;
 input int InpY = 28;
-input int InpFontSize = 9;
+input int InpFontSize = 10;
 
 const string PREFIX = "XAU_AI_P7C_";
-const int PANEL_WIDTH = 700;
-const int PANEL_HEIGHT = 518;
+const int PANEL_WIDTH = 560;
+const int PANEL_HEIGHT = 448;
 // Required installer safety marker: READ ONLY | DEMO | ORDER PERMISSION = NONE
-bool g_error_mode = false;
 
 string Field(const string payload, const string wanted)
 {
@@ -50,7 +49,7 @@ string Clip(const string value, const int maximum)
    return StringSubstr(value, 0, maximum - 3) + "...";
 }
 
-string CompactReason(const string value)
+string CompactText(const string value)
 {
    string text = value;
    StringReplace(text, "A confirmed CHOCH indicates a possible structural reversal.", "CHOCH xac nhan kha nang dao chieu.");
@@ -58,15 +57,15 @@ string CompactReason(const string value)
    StringReplace(text, "No valid setup", "Chua co setup hop le");
    StringReplace(text, "panel does not have order permission", "panel chi doc, khong gui lenh");
    StringReplace(text, "panel khong co quyen gui lenh", "panel chi doc, khong gui lenh");
-   StringReplace(text, " | ", ". ");
+   StringReplace(text, "panel không có quyền gửi lệnh", "panel chi doc, khong gui lenh");
+   StringReplace(text, " · ", "\n");
+   StringReplace(text, " | ", "\n");
    StringReplace(text, " • ", "\n");
-   StringReplace(text, "• ", "\n");
    StringReplace(text, "•", "\n");
-   StringReplace(text, ". Bollinger", "\nBollinger");
    return text;
 }
 
-void TakeWrappedLine(const string value, const int maximum, string &line, string &remaining)
+void TakeLine(const string value, const int maximum, string &line, string &remaining)
 {
    if(StringLen(value) <= maximum)
    {
@@ -88,23 +87,25 @@ void TakeWrappedLine(const string value, const int maximum, string &line, string
    remaining = StringSubstr(value, split + 1);
 }
 
-void WrapTwo(const string value, const int maximum, string &first, string &second)
+void ReasonLines(const string value, const int maximum, string &line1, string &line2, string &line3)
 {
-   string compact = CompactReason(value);
+   string compact = CompactText(value);
    string parts[];
    ushort separator = (ushort)StringGetCharacter("\n", 0);
    int count = StringSplit(compact, separator, parts);
 
    if(count >= 2)
    {
-      first = Clip(parts[0], maximum);
-      second = Clip(parts[1], maximum);
+      line1 = Clip(parts[0], maximum);
+      line2 = Clip(parts[1], maximum);
+      line3 = count >= 3 ? Clip(parts[2], maximum) : "";
       return;
    }
 
-   string remaining;
-   TakeWrappedLine(compact, maximum, first, remaining);
-   second = Clip(remaining, maximum);
+   string rest;
+   TakeLine(compact, maximum, line1, rest);
+   TakeLine(rest, maximum, line2, line3);
+   line3 = Clip(line3, maximum);
 }
 
 void DeletePanel()
@@ -120,8 +121,7 @@ void DeletePanel()
 void Rectangle(const string suffix, const int x, const int y, const int width, const int height, const color background, const color border)
 {
    string name = PREFIX + suffix;
-   if(ObjectFind(0, name) < 0)
-      ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+   ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
    ObjectSetInteger(0, name, OBJPROP_CORNER, InpCorner);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, InpX + x);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, InpY + y);
@@ -137,8 +137,7 @@ void Rectangle(const string suffix, const int x, const int y, const int width, c
 void Label(const string suffix, const int x, const int y, const string text, const color textColor = clrWhite, const int fontSize = 0, const string font = "Arial")
 {
    string name = PREFIX + suffix;
-   if(ObjectFind(0, name) < 0)
-      ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+   ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
    ObjectSetInteger(0, name, OBJPROP_CORNER, InpCorner);
    ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, InpX + x);
@@ -185,149 +184,196 @@ color ProfitColor(const string value)
    return clrSilver;
 }
 
-void BeginLayout(const bool errorMode)
+void DrawBase()
 {
-   if(g_error_mode != errorMode)
-      DeletePanel();
-   g_error_mode = errorMode;
-   Rectangle("BG", 0, 0, PANEL_WIDTH, errorMode ? 360 : PANEL_HEIGHT, C'14,18,25', C'71,86,106');
+   DeletePanel();
+   Rectangle("BG", 0, 0, PANEL_WIDTH, PANEL_HEIGHT, C'14,18,25', C'72,88,110');
    Rectangle("TOP", 0, 0, PANEL_WIDTH, 4, C'36,184,224', C'36,184,224');
 }
 
-void DrawNormalChrome()
+void DrawHeader(const string activeMode, const string strategy, const string regime, const string confidence)
 {
-   BeginLayout(false);
-   Rectangle("HEAD", 12, 10, 676, 62, C'16,22,31', C'44,58,76');
-   Rectangle("STATUS", 12, 82, 676, 50, C'24,33,43', C'58,73,92');
-   Rectangle("PLAN", 12, 164, 676, 128, C'22,27,36', C'50,63,80');
-   Rectangle("ENTRY_REASON", 12, 322, 676, 58, C'22,27,36', C'50,63,80');
-   Rectangle("HOLD_REASON", 12, 406, 676, 50, C'22,27,36', C'50,63,80');
-   Rectangle("FOOT", 12, 466, 676, 42, C'18,23,31', C'42,54,69');
+   Rectangle("HEAD", 12, 10, 536, 90, C'16,22,31', C'44,58,76');
+   Label("TITLE", 22, 17, "XAUUSD AI MASTER", clrDeepSkyBlue, 14, "Arial");
+   Label("SUBTITLE", 22, 42, "Phase 7C | DEMO | READ ONLY", clrSilver, 10, "Arial");
+   Label("MODE", 22, 65, "Mode: " + activeMode + " -> " + strategy, activeMode == "AUTO" ? clrLimeGreen : clrGold, 10, "Arial");
+   Label("REGIME", 295, 65, "Regime: " + regime + " | Conf: " + confidence, RegimeColor(regime), 10, "Arial");
 }
 
-void RenderError(const string title, const string message, const bool showWebRequestHelp)
+void DrawFooter()
 {
-   BeginLayout(true);
-   Rectangle("STATUS", 12, 58, 676, 64, C'55,30,30', C'210,70,70');
-   Rectangle("RECOVERY", 12, 138, 676, 150, C'22,27,36', C'50,63,80');
-   Rectangle("FOOT", 12, 304, 676, 42, C'18,23,31', C'42,54,69');
-
-   Label("TITLE", 22, 16, "XAUUSD AI MASTER", clrDeepSkyBlue, 13, "Arial");
-   Label("SUBTITLE", 22, 38, "Phase 7C | DEMO | READ ONLY", clrSilver, 9, "Arial");
-   Label("STATUS_TITLE", 26, 70, title, clrTomato, 12, "Arial");
-   Label("STATUS_NOTE", 26, 96, message, clrWhite, 9, "Arial");
-
-   Label("RECOVERY_HEAD", 26, 153, "HUONG DAN PHUC HOI", clrDeepSkyBlue, 10, "Arial");
-   if(showWebRequestHelp)
-   {
-      Label("HELP1", 28, 185, "1. Tools > Options > Expert Advisors", clrWhite, 9, "Arial");
-      Label("HELP2", 28, 210, "2. Allow WebRequest: http://127.0.0.1:3711", clrGold, 9, "Arial");
-      Label("HELP3", 28, 235, "3. Attach lai EA panel neu chart chua cap nhat", clrSilver, 9, "Arial");
-   }
-   else
-   {
-      Label("HELP1", 28, 185, "API/Bridge dang khoi tao hoac tra du lieu tam thoi loi.", clrWhite, 9, "Arial");
-      Label("HELP2", 28, 210, "Panel tu dong tai lai moi " + IntegerToString(InpRefreshSeconds) + " giay.", clrGold, 9, "Arial");
-      Label("HELP3", 28, 235, "Giu MT5 va Control API dang chay.", clrSilver, 9, "Arial");
-   }
-   Label("SAFETY1", 26, 314, "READ ONLY | DEMO | ORDER PERMISSION = NONE", clrSilver, 9, "Arial");
-   Label("SAFETY2", 26, 333, "Khong co quyen gui lenh tu panel.", clrSilver, 9, "Arial");
-   ChartRedraw();
+   Rectangle("FOOT", 12, 400, 536, 38, C'18,23,31', C'42,54,69');
+   Label("SAFETY1", 24, 407, "READ ONLY | DEMO | ORDER PERMISSION = NONE", clrSilver, 9, "Arial");
+   Label("SAFETY2", 24, 423, "BE +6 | PARTIAL +10 (1/3)", clrSilver, 9, "Arial");
 }
 
 void DrawInfoPair(const string id, const int xLabel, const int xValue, const int y, const string label, const string value, const color valueColor)
 {
-   Label(id + "L", xLabel, y, label, clrSilver, 9, "Arial");
-   Label(id + "V", xValue, y, value, valueColor, 9, "Arial");
+   Label(id + "L", xLabel, y, label, clrSilver, 10, "Arial");
+   Label(id + "V", xValue, y, value, valueColor, 10, "Arial");
+}
+
+void DrawReasonBlock(const string suffix, const int y, const string title, const string sourceText, const int maxChars)
+{
+   string line1, line2, line3;
+   ReasonLines(sourceText, maxChars, line1, line2, line3);
+   Rectangle(suffix + "BOX", 12, y, 536, 82, C'22,27,36', C'50,63,80');
+   Label(suffix + "HEAD", 22, y + 10, title, clrDeepSkyBlue, 11, "Arial");
+   Label(suffix + "L1", 30, y + 36, "- " + line1, clrWhite, 10, "Arial");
+   Label(suffix + "L2", 30, y + 58, StringLen(line2) > 0 ? "- " + line2 : " ", clrSilver, 10, "Arial");
+}
+
+void RenderWaiting(const string payload)
+{
+   string activeMode = CleanValue(Field(payload, "activeMode"));
+   string strategy = CleanValue(Field(payload, "effectiveStrategy"));
+   string regime = CleanValue(Field(payload, "regime"));
+   string confidence = CleanValue(Field(payload, "confidence"));
+   string stage = CleanValue(Field(payload, "stage"));
+   string entryReason = Field(payload, "entryReason");
+   string holdReason = Field(payload, "holdReason");
+   string stateText = stage == "BLOCKED" ? "DANG CHO SETUP" : "DANG THEO DOI THI TRUONG";
+   color stateColor = stage == "BLOCKED" ? clrOrange : clrGold;
+
+   DrawBase();
+   DrawHeader(activeMode, strategy, regime, confidence);
+
+   Rectangle("STATUS", 12, 112, 536, 62, C'24,33,43', stateColor);
+   Label("STATUS_TITLE", 24, 123, stateText, stateColor, 14, "Arial");
+   Label("STATUS_NOTE", 24, 150, "Stage: " + stage + " | Khong co lenh moi", clrWhite, 10, "Arial");
+
+   DrawReasonBlock("REASON", 188, "LY DO CHO", entryReason + "\n" + holdReason, 62);
+
+   Rectangle("RULES", 12, 284, 536, 104, C'22,27,36', C'50,63,80');
+   Label("RULES_HEAD", 22, 294, "QUY TAC LENH", clrDeepSkyBlue, 11, "Arial");
+   Label("RULE1", 30, 320, "- SL chuan: 6-10 gia", clrWhite, 10, "Arial");
+   Label("RULE2", 30, 342, "- Neu SL > 10 gia: cho pullback sau M15", clrWhite, 10, "Arial");
+   Label("RULE3", 30, 364, "- BE: +6 | Partial: +10, chot 1/3", clrSilver, 10, "Arial");
+
+   DrawFooter();
+   ChartRedraw();
+}
+
+void RenderSetup(const string payload)
+{
+   string activeMode = CleanValue(Field(payload, "activeMode"));
+   string strategy = CleanValue(Field(payload, "effectiveStrategy"));
+   string regime = CleanValue(Field(payload, "regime"));
+   string confidence = CleanValue(Field(payload, "confidence"));
+   string stage = CleanValue(Field(payload, "stage"));
+   string entry = CleanValue(Field(payload, "entry"));
+   string stopLoss = CleanValue(Field(payload, "stopLoss"));
+   string distance = CleanValue(Field(payload, "stopDistance"));
+   string volume = CleanValue(Field(payload, "finalLot"));
+   string riskUsd = CleanValue(Field(payload, "estimatedRiskUsd"));
+   string tp1 = CleanValue(Field(payload, "tp1"));
+   string tp2 = CleanValue(Field(payload, "tp2"));
+   string side = CleanValue(Field(payload, "side"));
+   string setup = CleanValue(Field(payload, "setup"));
+   string stateText = "SETUP HOP LE";
+
+   DrawBase();
+   DrawHeader(activeMode, strategy, regime, confidence);
+   Rectangle("STATUS", 12, 112, 536, 54, C'24,33,43', clrLimeGreen);
+   Label("STATUS_TITLE", 24, 122, stateText, clrLimeGreen, 13, "Arial");
+   Label("STATUS_NOTE", 24, 146, "Stage: " + stage + " | Cho entry gate", clrWhite, 10, "Arial");
+
+   Rectangle("PLAN", 12, 182, 536, 128, C'22,27,36', C'50,63,80');
+   Label("PLAN_HEAD", 22, 192, "KE HOACH LENH", clrDeepSkyBlue, 11, "Arial");
+   DrawInfoPair("P1", 30, 145, 220, "Diem vao", entry, clrWhite);
+   DrawInfoPair("P2", 30, 145, 242, "Stoploss", stopLoss, clrTomato);
+   DrawInfoPair("P3", 30, 145, 264, "Khoang SL", distance, clrWhite);
+   DrawInfoPair("P4", 30, 145, 286, "Lot", volume, clrAqua);
+   DrawInfoPair("Q1", 305, 420, 220, "TP1", tp1, clrLimeGreen);
+   DrawInfoPair("Q2", 305, 420, 242, "TP2", tp2, clrLimeGreen);
+   DrawInfoPair("Q3", 305, 420, 264, "Huong", side, clrGold);
+   DrawInfoPair("Q4", 305, 420, 286, "Risk USD", riskUsd, clrSilver);
+
+   DrawReasonBlock("REASON", 322, "LY DO VAO LENH", Field(payload, "entryReason"), 62);
+   DrawFooter();
+   ChartRedraw();
+}
+
+void RenderManaging(const string payload)
+{
+   string activeMode = CleanValue(Field(payload, "activeMode"));
+   string strategy = CleanValue(Field(payload, "positionStrategy"));
+   string regime = CleanValue(Field(payload, "regime"));
+   string confidence = CleanValue(Field(payload, "confidence"));
+   string ticket = CleanValue(Field(payload, "ticket"));
+   string side = CleanValue(Field(payload, "positionSide"));
+   string entry = CleanValue(Field(payload, "positionEntry"));
+   string current = CleanValue(Field(payload, "currentPrice"));
+   string stopLoss = CleanValue(Field(payload, "positionStopLoss"));
+   string tp1 = CleanValue(Field(payload, "positionTp1"));
+   string tp2 = CleanValue(Field(payload, "positionTp2"));
+   string volume = CleanValue(Field(payload, "positionVolume"));
+   string pnl = CleanValue(Field(payload, "floatingPnlUsd"));
+
+   DrawBase();
+   DrawHeader(activeMode, strategy, regime, confidence);
+   Rectangle("STATUS", 12, 112, 536, 54, C'24,33,43', clrLimeGreen);
+   Label("STATUS_TITLE", 24, 122, "DANG GIU VI THE " + side, clrLimeGreen, 13, "Arial");
+   Label("STATUS_NOTE", 24, 146, "Ticket: " + ticket + " | P/L: " + pnl + " USD", ProfitColor(pnl), 10, "Arial");
+
+   Rectangle("PLAN", 12, 182, 536, 128, C'22,27,36', C'50,63,80');
+   Label("PLAN_HEAD", 22, 192, "VI THE DANG MO", clrDeepSkyBlue, 11, "Arial");
+   DrawInfoPair("P1", 30, 145, 220, "Entry", entry, clrWhite);
+   DrawInfoPair("P2", 30, 145, 242, "Gia hien tai", current, clrWhite);
+   DrawInfoPair("P3", 30, 145, 264, "Stoploss", stopLoss, clrTomato);
+   DrawInfoPair("P4", 30, 145, 286, "Lot", volume, clrAqua);
+   DrawInfoPair("Q1", 305, 420, 220, "TP1", tp1, clrLimeGreen);
+   DrawInfoPair("Q2", 305, 420, 242, "TP2", tp2, clrLimeGreen);
+   DrawInfoPair("Q3", 305, 420, 264, "BE", CleanValue(Field(payload, "breakEvenApplied")), clrGold);
+   DrawInfoPair("Q4", 305, 420, 286, "Partial", CleanValue(Field(payload, "partialApplied")), clrGold);
+
+   DrawReasonBlock("REASON", 322, "LY DO GIU LENH", Field(payload, "holdReason"), 62);
+   DrawFooter();
+   ChartRedraw();
+}
+
+void RenderError(const string title, const string message, const bool showWebRequestHelp)
+{
+   DrawBase();
+   Rectangle("STATUS", 12, 58, 536, 70, C'55,30,30', C'210,70,70');
+   Rectangle("RECOVERY", 12, 145, 536, 150, C'22,27,36', C'50,63,80');
+   Rectangle("FOOT", 12, 310, 536, 42, C'18,23,31', C'42,54,69');
+   Label("TITLE", 22, 17, "XAUUSD AI MASTER", clrDeepSkyBlue, 14, "Arial");
+   Label("SUBTITLE", 22, 42, "Phase 7C | DEMO | READ ONLY", clrSilver, 10, "Arial");
+   Label("STATUS_TITLE", 26, 72, title, clrTomato, 12, "Arial");
+   Label("STATUS_NOTE", 26, 98, message, clrWhite, 10, "Arial");
+   Label("RECOVERY_HEAD", 26, 158, "HUONG DAN PHUC HOI", clrDeepSkyBlue, 11, "Arial");
+   if(showWebRequestHelp)
+   {
+      Label("HELP1", 30, 188, "1. Tools > Options > Expert Advisors", clrWhite, 10, "Arial");
+      Label("HELP2", 30, 212, "2. Allow WebRequest: http://127.0.0.1:3711", clrGold, 10, "Arial");
+      Label("HELP3", 30, 236, "3. Attach lai EA panel", clrSilver, 10, "Arial");
+   }
+   else
+   {
+      Label("HELP1", 30, 188, "API/Bridge dang khoi tao hoac tam thoi loi.", clrWhite, 10, "Arial");
+      Label("HELP2", 30, 212, "Panel tu dong tai lai moi " + IntegerToString(InpRefreshSeconds) + " giay.", clrGold, 10, "Arial");
+   }
+   Label("SAFETY1", 26, 320, "READ ONLY | DEMO | ORDER PERMISSION = NONE", clrSilver, 9, "Arial");
+   Label("SAFETY2", 26, 337, "Khong co quyen gui lenh tu panel.", clrSilver, 9, "Arial");
+   ChartRedraw();
 }
 
 void Render(const string payload)
 {
    string positionState = Field(payload, "positionState");
-   string stage = Field(payload, "stage");
    string approved = Field(payload, "approved");
-   bool managing = positionState == "MANAGING" || positionState == "UNMANAGED";
-   color stateColor = StatusColor(positionState, stage, approved);
-
-   string activeMode = CleanValue(Field(payload, "activeMode"));
-   string effectiveStrategy = CleanValue(Field(payload, "effectiveStrategy"));
-   string regime = CleanValue(Field(payload, "regime"));
-   string confidence = CleanValue(Field(payload, "confidence"));
-
-   string entry = CleanValue(managing ? Field(payload, "positionEntry") : Field(payload, "entry"));
-   string current = CleanValue(managing ? Field(payload, "currentPrice") : "n/a");
-   string stopLoss = CleanValue(managing ? Field(payload, "positionStopLoss") : Field(payload, "stopLoss"));
-   string tp1 = CleanValue(managing ? Field(payload, "positionTp1") : Field(payload, "tp1"));
-   string tp2 = CleanValue(managing ? Field(payload, "positionTp2") : Field(payload, "tp2"));
-   string volume = CleanValue(managing ? Field(payload, "positionVolume") : Field(payload, "finalLot"));
-   string pnl = CleanValue(managing ? Field(payload, "floatingPnlUsd") : Field(payload, "estimatedRiskUsd"));
-   string strategy = managing ? CleanValue(Field(payload, "positionStrategy")) : effectiveStrategy;
-   string side = CleanValue(managing ? Field(payload, "positionSide") : Field(payload, "side"));
-   string setup = CleanValue(managing ? Field(payload, "positionSetup") : Field(payload, "setup"));
-   string ticket = CleanValue(managing ? Field(payload, "ticket") : "n/a");
-   string distance = CleanValue(managing ? Field(payload, "favorableDistance") : Field(payload, "stopDistance"));
-
-   string entryLine1, entryLine2, holdLine1, holdLine2;
-   WrapTwo(Field(payload, "entryReason"), 68, entryLine1, entryLine2);
-   WrapTwo(Field(payload, "holdReason"), 68, holdLine1, holdLine2);
-
-   string statusTitle;
-   string statusNote;
-   if(positionState == "MANAGING")
+   if(positionState == "MANAGING" || positionState == "UNMANAGED")
    {
-      statusTitle = "DANG GIU VI THE " + side;
-      statusNote = "Ticket " + ticket + " | " + volume + " lot | P/L " + pnl + " USD";
+      RenderManaging(payload);
+      return;
    }
-   else if(positionState == "UNMANAGED")
+   if(approved == "true")
    {
-      statusTitle = "CAN KIEM TRA VI THE NGOAI BOT";
-      statusNote = "Ticket " + ticket + " | panel chi doc, khong tu quan ly";
+      RenderSetup(payload);
+      return;
    }
-   else
-   {
-      statusTitle = approved == "true" ? "SETUP HOP LE" : "DANG CHO SETUP";
-      statusNote = "Stage: " + CleanValue(stage) + " | Mode: " + activeMode + " -> " + strategy;
-   }
-
-   string bePartial = "BE +6 / +10 1/3";
-   if(managing)
-      bePartial = "BE " + CleanValue(Field(payload, "breakEvenApplied")) + " / 1/3 " + CleanValue(Field(payload, "partialApplied"));
-
-   DrawNormalChrome();
-   Rectangle("STATUS", 12, 82, 676, 50, C'24,33,43', stateColor);
-
-   Label("TITLE", 22, 15, "XAUUSD AI MASTER", clrDeepSkyBlue, 13, "Arial");
-   Label("SUBTITLE", 22, 37, "Phase 7C | DEMO | READ ONLY", clrSilver, 9, "Arial");
-   Label("HM1", 22, 56, "Mode: " + activeMode + " -> " + strategy, activeMode == "AUTO" ? clrLimeGreen : clrGold, 9, "Arial");
-   Label("HM2", 360, 56, "Regime: " + regime + " | Conf: " + confidence, RegimeColor(regime), 9, "Arial");
-
-   Label("STATUS_TITLE", 26, 92, statusTitle, stateColor, 12, "Arial");
-   Label("STATUS_NOTE", 26, 114, statusNote, clrWhite, 9, "Arial");
-
-   Label("PLAN_HEAD", 20, 140, managing ? "VI THE DANG MO" : "KE HOACH LENH KE TIEP", clrDeepSkyBlue, 10, "Arial");
-   DrawInfoPair("P1", 30, 170, 176, "Diem vao", entry, clrWhite);
-   DrawInfoPair("P2", 30, 170, 199, managing ? "Gia hien tai" : "Stoploss", managing ? current : stopLoss, managing ? clrWhite : clrTomato);
-   DrawInfoPair("P3", 30, 170, 222, managing ? "Loi gia" : "Khoang SL", distance, clrWhite);
-   DrawInfoPair("P4", 30, 170, 245, "Lot", volume, clrAqua);
-   DrawInfoPair("P5", 30, 170, 268, managing ? "P/L USD" : "Risk USD", pnl, ProfitColor(pnl));
-
-   DrawInfoPair("Q1", 388, 530, 176, "TP1", tp1, clrLimeGreen);
-   DrawInfoPair("Q2", 388, 530, 199, "TP2", tp2, clrLimeGreen);
-   DrawInfoPair("Q3", 388, 530, 222, "Huong", side, stateColor);
-   DrawInfoPair("Q4", 388, 530, 245, "Setup", Clip(setup, 18), clrWhite);
-   DrawInfoPair("Q5", 388, 530, 268, "BE/Partial", bePartial, clrAqua);
-
-   Label("ENTRY_HEAD", 20, 302, "LY DO VAO LENH / CHO LENH", clrDeepSkyBlue, 10, "Arial");
-   Label("ENTRY_1", 30, 334, "- " + entryLine1, clrWhite, 9, "Arial");
-   Label("ENTRY_2", 30, 356, StringLen(entryLine2) > 0 ? "- " + entryLine2 : " ", clrSilver, 9, "Arial");
-
-   Label("HOLD_HEAD", 20, 388, "LY DO GIU / CHO LENH", clrDeepSkyBlue, 10, "Arial");
-   Label("HOLD_1", 30, 420, "- " + holdLine1, managing ? clrWhite : clrSilver, 9, "Arial");
-   Label("HOLD_2", 30, 442, StringLen(holdLine2) > 0 ? "- " + holdLine2 : " ", clrSilver, 9, "Arial");
-
-   Label("SAFETY1", 26, 472, "READ ONLY | DEMO | ORDER PERMISSION = NONE", clrSilver, 8, "Arial");
-   Label("SAFETY2", 26, 490, "BE +6 | PARTIAL +10 (1/3)", clrSilver, 8, "Arial");
-   ChartRedraw();
+   RenderWaiting(payload);
 }
 
 void RefreshPanel()
@@ -345,10 +391,7 @@ void RefreshPanel()
    }
    if(status != 200)
    {
-      if(status == 503)
-         RenderError("DANG KET NOI LAI MT5", "Decision API returned HTTP 503", false);
-      else
-         RenderError("CONTROL API CHUA SAN SANG", "Decision API returned HTTP " + IntegerToString(status), false);
+      RenderError("CONTROL API CHUA SAN SANG", "Decision API returned HTTP " + IntegerToString(status), false);
       return;
    }
    string payload = CharArrayToString(response, 0, -1, CP_UTF8);
