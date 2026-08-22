@@ -1,15 +1,17 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Alert,
   Box,
+  Button,
   Card,
   CardContent,
   Chip,
   Grid,
   Stack,
+  TextField,
   Typography,
 } from "@mui/material";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LoadingState, ErrorState } from "../ui/PageState";
 import {
   boolText,
@@ -21,8 +23,47 @@ import {
   value,
 } from "../phase7c-panel-status";
 
+type LotInput = {
+  trendFixedLot: number;
+  sidewayRiskPercent: number;
+  sidewayMaxLot: number;
+};
+
+const LOT_SETTINGS_URL = "/api/v1/phase7c/lot-settings";
+const CONTROL_BASE = "http://127.0.0.1:3711";
+
 function asRecord(value: unknown): Record<string, any> {
   return value && typeof value === "object" ? (value as Record<string, any>) : {};
+}
+
+function numberText(value: unknown, fallback: string) {
+  const cleaned = clean(value, "");
+  if (!cleaned) return fallback;
+  return cleaned;
+}
+
+async function saveLotSettings(input: LotInput) {
+  const urls = [LOT_SETTINGS_URL, `${CONTROL_BASE}${LOT_SETTINGS_URL}`];
+  const body = JSON.stringify({ ...input, source: "web-account-risk-v5" });
+  const errors: string[] = [];
+
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        cache: "no-store",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body,
+      });
+      const text = await response.text();
+      if (response.ok) return text ? JSON.parse(text) : {};
+      errors.push(`HTTP ${response.status}: ${text.slice(0, 180)}`);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "Không kết nối được");
+    }
+  }
+
+  throw new Error(errors.join(" | "));
 }
 
 function SectionCard({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
@@ -58,7 +99,20 @@ function HealthTile({ label, valueText, good }: { label: string; valueText: stri
   );
 }
 
+function clampLotInputs(input: LotInput): LotInput {
+  return {
+    trendFixedLot: Number(input.trendFixedLot.toFixed(2)),
+    sidewayRiskPercent: Number(input.sidewayRiskPercent.toFixed(2)),
+    sidewayMaxLot: Number(input.sidewayMaxLot.toFixed(2)),
+  };
+}
+
 export function Phase7BOpsPage() {
+  const queryClient = useQueryClient();
+  const [trendFixedLot, setTrendFixedLot] = useState("0.12");
+  const [sidewayRiskPercent, setSidewayRiskPercent] = useState("1");
+  const [sidewayMaxLot, setSidewayMaxLot] = useState("0.30");
+
   const query = useQuery({
     queryKey: ["phase7c-web-status-account-risk-v5"],
     queryFn: fetchPhase7CWebStatus,
@@ -67,10 +121,12 @@ export function Phase7BOpsPage() {
     placeholderData: (previous) => previous,
   });
 
-  if (query.isLoading) return <LoadingState />;
-  if (query.isError && !query.data) {
-    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được Tài khoản & Risk."} />;
-  }
+  const mutation = useMutation({
+    mutationFn: saveLotSettings,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["phase7c-web-status-account-risk-v5"] });
+    },
+  });
 
   const data = query.data;
   const panel = data?.panel;
@@ -89,8 +145,36 @@ export function Phase7BOpsPage() {
   const notifier = asRecord(processes.regimeNotifier);
   const lotRuntime = asRecord(lifecycle.lotSettings);
   const mode = asRecord(lifecycle.mode);
+  const configuredLot = asRecord(data?.lotSettings);
   const currency = clean(account.accountCurrency, "USD");
   const accountMode = pickText(raw(panel, "accountMode"), account.accountMode, bridge.accountMode);
+  const activeMode = clean(mode.mode, value(panel, "activeMode", "—"));
+  const openPositions = pickText(bridge.openXauusdPositions, raw(panel, "positionCount"));
+  const canSafelyApply = activeMode === "PAUSE" && Number(openPositions) === 0;
+
+  useEffect(() => {
+    const nextTrend = numberText(configuredLot.trendFixedLot ?? configuration.configuredTrendFixedLot, trendFixedLot);
+    const nextRisk = numberText(configuredLot.sidewayRiskPercent ?? configuration.configuredSidewayRiskPercent, sidewayRiskPercent);
+    const nextMaxLot = numberText(configuredLot.sidewayMaxLot ?? configuration.configuredSidewayMaxLot, sidewayMaxLot);
+    setTrendFixedLot(nextTrend);
+    setSidewayRiskPercent(nextRisk);
+    setSidewayMaxLot(nextMaxLot);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configuredLot.trendFixedLot, configuredLot.sidewayRiskPercent, configuredLot.sidewayMaxLot, configuration.configuredTrendFixedLot, configuration.configuredSidewayRiskPercent, configuration.configuredSidewayMaxLot]);
+
+  if (query.isLoading) return <LoadingState />;
+  if (query.isError && !query.data) {
+    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được Tài khoản & Risk."} />;
+  }
+
+  const onSubmit = () => {
+    const payload = clampLotInputs({
+      trendFixedLot: Number(trendFixedLot),
+      sidewayRiskPercent: Number(sidewayRiskPercent),
+      sidewayMaxLot: Number(sidewayMaxLot),
+    });
+    mutation.mutate(payload);
+  };
 
   return (
     <Stack spacing={3}>
@@ -100,11 +184,11 @@ export function Phase7BOpsPage() {
             <Typography variant="overline" color="primary" fontWeight={900}>TÀI KHOẢN & RISK v5</Typography>
             <Typography variant="h4" fontWeight={950}>Account, lot, safety và runtime</Typography>
             <Typography variant="body2" color="text.secondary" mt={1}>
-              Trang này gom các thông tin vận hành: tài khoản MT5 demo, risk/lot, quote/spec, executor, Telegram, bridge và safety. Không lặp lại phần tín hiệu.
+              Trang này gom tài khoản MT5 demo, quote/spec, runtime và bộ chỉnh lot. Lot mới chỉ áp dụng cho lệnh mới, không sửa vị thế đang mở.
             </Typography>
           </Box>
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            <Chip label={`Mode ${clean(mode.mode, value(panel, "activeMode", "—"))}`} color={clean(mode.mode, value(panel, "activeMode", "—")) === "AUTO" ? "success" : "warning"} variant="outlined" sx={{ fontWeight: 900 }} />
+            <Chip label={`Mode ${activeMode}`} color={activeMode === "AUTO" ? "success" : "warning"} variant="outlined" sx={{ fontWeight: 900 }} />
             <Chip label={`Account ${accountMode}`} color={accountMode.toLowerCase().includes("demo") ? "success" : "error"} variant="outlined" sx={{ fontWeight: 900 }} />
             <Chip label="ORDER NONE" color="success" variant="outlined" sx={{ fontWeight: 900 }} />
           </Stack>
@@ -113,6 +197,13 @@ export function Phase7BOpsPage() {
 
       {data?.usedDirectFallback && <Alert severity="info">Một số request đã được chuyển trực tiếp sang Control API 3711 để tránh lỗi web proxy 5717.</Alert>}
       {(data?.errors ?? []).length > 0 && <Alert severity="warning">Nguồn phụ chưa sẵn sàng: {(data?.errors ?? []).slice(0, 2).join(" ")}</Alert>}
+      {!canSafelyApply && (
+        <Alert severity="warning">
+          Để đổi lot an toàn, chuyển bot về PAUSE và đảm bảo không có vị thế XAUUSD đang mở. Hiện tại: mode {activeMode}, XAUUSD positions {openPositions}.
+        </Alert>
+      )}
+      {mutation.isError && <Alert severity="error">Không lưu được lot: {mutation.error instanceof Error ? mutation.error.message : "lỗi không xác định"}</Alert>}
+      {mutation.isSuccess && <Alert severity="success">Đã lưu cấu hình lot. Nếu hệ thống báo restart required, chạy lại activation để lot active khớp cấu hình mới.</Alert>}
 
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, md: 6, xl: 3 }}><HealthTile label="Supervisor" valueText={supervisor.alive ? `Alive · PID ${clean(supervisor.pid, "—")}` : "Chưa xác nhận"} good={Boolean(supervisor.alive)} /></Grid>
@@ -136,16 +227,58 @@ export function Phase7BOpsPage() {
           </SectionCard>
         </Grid>
         <Grid size={{ xs: 12, lg: 4 }}>
-          <SectionCard title="Cấu hình Lot/Risk" subtitle="Không martingale, không recovery lot escalation.">
-            <InfoRow label="Trend fixed lot" valueText={pickText(configuration.configuredTrendFixedLot, configuration.activeTrendFixedLot)} strong />
-            <InfoRow label="Sideway risk percent" valueText={`${pickText(configuration.configuredSidewayRiskPercent)}%`} />
-            <InfoRow label="Sideway max lot" valueText={pickText(configuration.configuredSidewayMaxLot)} />
+          <SectionCard title="Tự điều chỉnh Lot" subtitle="Giới hạn DEMO: lot 0.03–0.30, risk sideway tối đa 1%.">
+            <Stack spacing={2}>
+              <TextField
+                label="Trend fixed lot"
+                type="number"
+                value={trendFixedLot}
+                onChange={(event) => setTrendFixedLot(event.target.value)}
+                inputProps={{ min: 0.03, max: 0.3, step: 0.01 }}
+                helperText="Lot cố định cho bot Trend. Ví dụ: 0.12"
+                fullWidth
+              />
+              <TextField
+                label="Sideway risk percent"
+                type="number"
+                value={sidewayRiskPercent}
+                onChange={(event) => setSidewayRiskPercent(event.target.value)}
+                inputProps={{ min: 0.01, max: 1, step: 0.01 }}
+                helperText="Risk % cho bot Sideway. Tối đa 1%."
+                fullWidth
+              />
+              <TextField
+                label="Sideway max lot"
+                type="number"
+                value={sidewayMaxLot}
+                onChange={(event) => setSidewayMaxLot(event.target.value)}
+                inputProps={{ min: 0.03, max: 0.3, step: 0.01 }}
+                helperText="Trần lot sideway. Ví dụ: 0.30"
+                fullWidth
+              />
+              <Button variant="contained" size="large" onClick={onSubmit} disabled={mutation.isPending} sx={{ fontWeight: 950 }}>
+                {mutation.isPending ? "Đang lưu..." : "Lưu cấu hình lot"}
+              </Button>
+              <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.6 }}>
+                Cơ chế an toàn: áp dụng cho NEW POSITIONS ONLY, không martingale, không recovery lot escalation, không chỉnh vị thế đang mở.
+              </Typography>
+            </Stack>
+          </SectionCard>
+        </Grid>
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <SectionCard title="Cấu hình Lot/Risk hiện tại" subtitle="Giá trị đang cấu hình và trạng thái active.">
+            <InfoRow label="Trend fixed lot" valueText={pickText(configuredLot.trendFixedLot, configuration.configuredTrendFixedLot, configuration.activeTrendFixedLot)} strong />
+            <InfoRow label="Sideway risk percent" valueText={`${pickText(configuredLot.sidewayRiskPercent, configuration.configuredSidewayRiskPercent)}%`} />
+            <InfoRow label="Sideway max lot" valueText={pickText(configuredLot.sidewayMaxLot, configuration.configuredSidewayMaxLot)} />
             <InfoRow label="Target risk USD" valueText={money(configuration.targetRiskUsd, currency)} />
             <InfoRow label="Lot restart required" valueText={boolText(configuration.lotSettingsRestartRequired ?? lotRuntime.restartRequired)} />
             <InfoRow label="Applies to" valueText="NEW POSITIONS ONLY" />
             <InfoRow label="Order permission" valueText={pickText(configuration.previewOrderPermission, raw(panel, "mt5OrderPermission"))} />
           </SectionCard>
         </Grid>
+      </Grid>
+
+      <Grid container spacing={2}>
         <Grid size={{ xs: 12, lg: 4 }}>
           <SectionCard title="Quote & Broker Spec" subtitle="Thông tin symbol dùng cho tính lot/risk.">
             <InfoRow label="Bid" valueText={clean(quote.bid, "—")} strong />
@@ -157,22 +290,19 @@ export function Phase7BOpsPage() {
             <InfoRow label="Max volume" valueText={clean(spec.maxVolume, "—")} />
           </SectionCard>
         </Grid>
-      </Grid>
-
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12, lg: 6 }}>
+        <Grid size={{ xs: 12, lg: 4 }}>
           <SectionCard title="Runtime & Bridge" subtitle="Trạng thái nền của Phase7C.">
             <InfoRow label="Lifecycle running" valueText={boolText(lifecycle.running)} />
             <InfoRow label="Lifecycle ready" valueText={boolText(lifecycle.ready)} />
-            <InfoRow label="Active mode" valueText={clean(mode.mode, value(panel, "activeMode", "—"))} />
+            <InfoRow label="Active mode" valueText={activeMode} />
             <InfoRow label="MT5 bridge" valueText={bridge.reachable ? "OK" : "Chưa xác nhận"} />
             <InfoRow label="Trading enabled" valueText={boolText(account.tradingEnabled ?? bridge.tradingEnabled)} />
-            <InfoRow label="Open XAUUSD positions" valueText={pickText(bridge.openXauusdPositions, raw(panel, "positionCount"))} />
+            <InfoRow label="Open XAUUSD positions" valueText={openPositions} />
             <InfoRow label="Regime notifier" valueText={notifier.alive ? `Alive · PID ${clean(notifier.pid, "—")}` : "Chưa xác nhận"} />
             <InfoRow label="Telegram PID" valueText={telegram.alive ? `Alive · PID ${clean(telegram.pid, "—")}` : "Chưa xác nhận"} />
           </SectionCard>
         </Grid>
-        <Grid size={{ xs: 12, lg: 6 }}>
+        <Grid size={{ xs: 12, lg: 4 }}>
           <SectionCard title="Safety" subtitle="Các khóa an toàn bắt buộc của DEMO.">
             <InfoRow label="Demo only" valueText="Yes" strong />
             <InfoRow label="Real account allowed" valueText="No" />
