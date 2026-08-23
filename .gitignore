@@ -27,6 +27,13 @@ _backup_packages/
 apps/api/data/execution-state.sqlite3*
 data/execution-state.sqlite3*
 
+# Phase7B / Phase7C local runtime artifacts
+/phase7b-demo-forward/
+/phase7c-executors/
+/phase7c-lot-settings.json
+/phase7c-sideway-forward/
+/scripts/.phase7c-trend-legacy-runtime-*.mjs
+
 # ============================================================
 # XAUUSD AI MASTER - LOCAL DATA / BACKUPS / REPLAY OUTPUT
 # ============================================================
