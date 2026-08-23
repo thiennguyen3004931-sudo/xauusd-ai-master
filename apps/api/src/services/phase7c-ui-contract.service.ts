@@ -52,7 +52,8 @@ export interface Phase7CUiContract {
     floatingPnlPercent: number | null;
   };
   safety: {
-    demoOnly: true;
+    accountMode: "DEMO" | "LIVE";
+    demoOnly: boolean;
     readOnly: true;
     orderPermission: "NONE";
     newPositionsOnly: true;
@@ -144,6 +145,7 @@ function holdReasons(snapshot: Snapshot, state: Phase7CUiState): string[] {
 
 export function buildPhase7CUiContract(snapshot: Snapshot): Phase7CUiContract {
   const state = uiState(snapshot);
+  const accountMode: "DEMO" | "LIVE" = snapshot.account.accountMode === "real" ? "LIVE" : "DEMO";
   const setup = state === "SETUP_READY" ? {
     strategy: snapshot.preTrade.strategy,
     side: snapshot.preTrade.side,
@@ -195,7 +197,8 @@ export function buildPhase7CUiContract(snapshot: Snapshot): Phase7CUiContract {
     setup,
     position,
     safety: {
-      demoOnly: true,
+      accountMode,
+      demoOnly: accountMode === "DEMO",
       readOnly: true,
       orderPermission: "NONE",
       newPositionsOnly: true,
@@ -221,6 +224,7 @@ export function formatPhase7CUiContractForMt5(ui: Phase7CUiContract): string {
     ["generatedAt", ui.generatedAt],
     ["symbol", ui.symbol],
     ["uiState", ui.uiState],
+    ["accountMode", ui.safety.accountMode],
     ["activeMode", ui.mode],
     ["effectiveStrategy", ui.effectiveStrategy],
     ["regime", ui.regime],

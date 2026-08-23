@@ -1,13 +1,19 @@
 import { acquireExecutionLock } from "./phase7c-execution-lock.mjs";
 import { resolveSidewayPermission } from "./phase7c-sideway-logic.mjs";
+import {
+  evaluatePhase7CAccountHealth,
+  resolvePhase7CAccountRuntime,
+} from "./phase7c-account-runtime-guard.mjs";
 
 const nativeFetch = globalThis.fetch.bind(globalThis);
+const accountRuntime = resolvePhase7CAccountRuntime();
 const controlApiBase = (process.env.ZIQ_PHASE7C_CONTROL_API_URL?.trim() || "http://127.0.0.1:3711").replace(/\/$/, "");
 const symbol = (process.env.ZIQ_PHASE7C_SIDEWAY_SYMBOL || process.env.ZIQ_DEMO_SYMBOL || "XAUUSD").trim().toUpperCase();
 const regimeCandleCount = clampInt(process.env.ZIQ_PHASE7C_REGIME_CANDLE_COUNT, 320, 220, 1000);
 const minRegimeConfidence = clampNumber(process.env.ZIQ_PHASE7C_SIDEWAY_MIN_REGIME_CONFIDENCE, 60, 0, 100);
 
 console.log("PHASE7C_SIDEWAY_EXECUTION_LOCK=ENABLED");
+console.log(`PHASE7C_SIDEWAY_LOCK_ACCOUNT_MODE=${accountRuntime.accountMode}`);
 
 globalThis.fetch = async function phase7CSidewayLockedFetch(input, init = undefined) {
   const request = toRequestInfo(input, init);
@@ -20,10 +26,19 @@ globalThis.fetch = async function phase7CSidewayLockedFetch(input, init = undefi
   }
 
   try {
-    const [modePayload, regime] = await Promise.all([
+    const [modePayload, regime, health] = await Promise.all([
       controlRequest("/api/v1/phase7c/bot-mode"),
       controlRequest(`/api/v1/phase7c/live-regime?symbol=${encodeURIComponent(symbol)}&count=${regimeCandleCount}`),
+      fetchHealthUnderLock(request),
     ]);
+
+    const accountGuard = evaluatePhase7CAccountHealth(health, accountRuntime, { armed: true });
+    if (!accountGuard.allowed) {
+      const detail = `${accountGuard.reason}${accountGuard.detail ? `;${accountGuard.detail}` : ""}`;
+      console.warn(`PHASE7C_SIDEWAY_ENTRY_BLOCKED=ACCOUNT_GUARD|DETAIL=${detail}`);
+      return blockedResponse("ACCOUNT_GUARD", detail);
+    }
+
     const permission = resolveSidewayPermission(modePayload?.state?.mode, regime?.recommendedMode);
     if (
       !permission.allowed ||
@@ -58,7 +73,19 @@ globalThis.fetch = async function phase7CSidewayLockedFetch(input, init = undefi
   }
 };
 
-await import("./run-phase7c-sideway-controller.mjs");
+await import("./run-phase7c-sideway-account-mode.mjs");
+
+async function fetchHealthUnderLock(request) {
+  const requestUrl = new URL(request.url);
+  const response = await nativeFetch(`${requestUrl.origin}/health`, {
+    method: "GET",
+    headers: request.headers,
+    cache: "no-store",
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`MT5 bridge health recheck ${response.status}: ${text}`);
+  return text ? JSON.parse(text) : null;
+}
 
 async function fetchOpenPositionsUnderLock(request) {
   const requestUrl = new URL(request.url);

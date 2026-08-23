@@ -4,7 +4,7 @@ import {
   buildPhase7CDecisionMonitor,
   formatPhase7CDecisionMonitorForMt5,
 } from "../apps/api/src/services/phase7c-decision-monitor.service.ts";
-import { assertPhase7CDemoReady } from "../apps/api/src/services/phase7c-lifecycle.service.ts";
+import { assertPhase7CSelectedAccountReady } from "../apps/api/src/services/phase7c-lifecycle.service.ts";
 
 function fixture(overrides = {}) {
   return {
@@ -168,7 +168,7 @@ test("open managed position exposes broker P/L, actual protection and hold reaso
   assert.match(payload, /^holdReason=Giữ runner:/m);
 });
 
-test("desktop lifecycle remains DEMO-only and requires all MT5 trading gates", () => {
+test("desktop lifecycle validates the selected account mode and all MT5 trading gates", () => {
   const ready = fixture().telemetry;
   ready.health = {
     ...ready.health,
@@ -177,11 +177,11 @@ test("desktop lifecycle remains DEMO-only and requires all MT5 trading gates", (
     terminalTradeAllowed: true,
     expertTradeAllowed: true,
   };
-  assert.doesNotThrow(() => assertPhase7CDemoReady(ready));
+  assert.doesNotThrow(() => assertPhase7CSelectedAccountReady(ready));
 
   const real = { ...ready, health: { ...ready.health, accountMode: "real" } };
-  assert.throws(() => assertPhase7CDemoReady(real), /Chỉ cho phép tài khoản DEMO/);
+  assert.throws(() => assertPhase7CSelectedAccountReady(real), /không khớp cấu hình DEMO/);
 
   const algoOff = { ...ready, health: { ...ready.health, expertTradeAllowed: false } };
-  assert.throws(() => assertPhase7CDemoReady(algoOff), /Algo\/Expert Trading chưa bật/);
+  assert.throws(() => assertPhase7CSelectedAccountReady(algoOff), /Algo\/Expert Trading chưa bật/);
 });

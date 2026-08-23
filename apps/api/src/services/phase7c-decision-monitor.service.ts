@@ -1,9 +1,14 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Mt5TelemetrySnapshot } from "./mt5.service";
 import { getMt5Telemetry } from "./mt5.service";
 import { getPhase7CLiveRegime } from "./phase7c-live-regime.service";
 import { phase7CLotSettingsService } from "./phase7c-lot-settings.service";
+import {
+  accountModeAllowsBroker,
+  getPhase7CAccountModeState,
+  type Phase7CAccountModeState,
+} from "./phase7c-account-mode.service";
 
 type Strategy = "TREND" | "SIDEWAY" | "PAUSE";
 
@@ -173,8 +178,15 @@ function readJsonlTail(file: string, limit: number): DecisionAuditRecord[] {
   }
 }
 
-function loadAudit(): DecisionAuditRecord[] {
-  const root = resolve(runtimeRoot(), "phase7c-executors", "decision-observability");
+function decisionAuditRoot(accountModeState: Phase7CAccountModeState): string {
+  const base = resolve(runtimeRoot(), "phase7c-executors", "decision-observability");
+  const accountRoot = resolve(base, accountModeState.accountMode.toLowerCase());
+  if (accountModeState.accountMode === "LIVE") return accountRoot;
+  return existsSync(accountRoot) ? accountRoot : base;
+}
+
+function loadAudit(accountModeState: Phase7CAccountModeState): DecisionAuditRecord[] {
+  const root = decisionAuditRoot(accountModeState);
   const rows = [
     ...readJsonlTail(resolve(root, "trend-decisions.jsonl"), 160),
     ...readJsonlTail(resolve(root, "sideway-decisions.jsonl"), 160),
@@ -191,11 +203,13 @@ function readManagedState(file: string): ManagedRuntimePosition | null {
   }
 }
 
-function loadManagedStates(): ManagedRuntimeStates {
+function loadManagedStates(accountModeState: Phase7CAccountModeState): ManagedRuntimeStates {
   const root = runtimeRoot();
+  const trendDir = accountModeState.accountMode === "LIVE" ? "phase7b-live-forward" : "phase7b-demo-forward";
+  const sidewayDir = accountModeState.accountMode === "LIVE" ? "phase7c-sideway-live-forward" : "phase7c-sideway-forward";
   return {
-    TREND: readManagedState(resolve(root, "phase7b-demo-forward", "phase7b-demo-state.json")),
-    SIDEWAY: readManagedState(resolve(root, "phase7c-sideway-forward", "phase7c-sideway-state.json")),
+    TREND: readManagedState(resolve(root, trendDir, "phase7b-demo-state.json")),
+    SIDEWAY: readManagedState(resolve(root, sidewayDir, "phase7c-sideway-state.json")),
   };
 }
 
@@ -241,9 +255,10 @@ function trendDecision(input: {
   demo: Phase7BDemoStatus | null;
   telemetry: Mt5TelemetrySnapshot;
   lots: ReturnType<typeof phase7CLotSettingsService.get>;
+  accountModeState: Phase7CAccountModeState;
   now: number;
 }): Phase7CPreTradeDecision {
-  const { regime, demo, telemetry, lots, now } = input;
+  const { regime, demo, telemetry, lots, accountModeState, now } = input;
   const diagnostics = demo?.entryDiagnostics ?? null;
   const entryInfo = diagnostics?.entry;
   const side = entryInfo?.side ?? diagnostics?.pattern?.side ?? null;
@@ -266,7 +281,7 @@ function trendDecision(input: {
   const modeAllows = regime.activeMode === "TREND" ||
     (regime.activeMode === "AUTO" && regime.recommendedMode === "TREND");
   const safetyAllows = telemetry.reachable &&
-    telemetry.health?.accountMode === "demo" &&
+    accountModeAllowsBroker(telemetry.health?.accountMode, accountModeState) &&
     telemetry.positions.length === 0 &&
     lots.activeAlive && lots.active?.armed === true &&
     !lots.restartRequired;
@@ -283,9 +298,11 @@ function trendDecision(input: {
       : !modeAllows || !safetyAllows
         ? "BLOCKED"
         : "WAITING";
-  const limitReason = lots.restartRequired
-    ? "Cấu hình lot chưa được executor active; cần restart an toàn khi PAUSE."
-    : `Trend dùng fixed lot ${activeLot.toFixed(2)}; không martingale, không recovery lot escalation.`;
+  const limitReason = !accountModeState.valid
+    ? `Account-mode state không hợp lệ: ${accountModeState.error ?? "unknown"}.`
+    : lots.restartRequired
+      ? "Cấu hình lot chưa được executor active; cần restart an toàn khi PAUSE."
+      : `Trend dùng fixed lot ${activeLot.toFixed(2)}; không martingale, không recovery lot escalation.`;
 
   return {
     strategy: "TREND",
@@ -322,9 +339,10 @@ function sidewayDecision(input: {
   telemetry: Mt5TelemetrySnapshot;
   lots: ReturnType<typeof phase7CLotSettingsService.get>;
   audit: DecisionAuditRecord[];
+  accountModeState: Phase7CAccountModeState;
   now: number;
 }): Phase7CPreTradeDecision {
-  const { regime, telemetry, lots, audit, now } = input;
+  const { regime, telemetry, lots, audit, accountModeState, now } = input;
   const latest = audit.find((row) => row.strategy === "SIDEWAY") ?? null;
   const activeRisk = lots.activeAlive && lots.active?.armed
     ? lots.active.sidewayRiskPercent
@@ -335,7 +353,7 @@ function sidewayDecision(input: {
   const modeAllows = regime.activeMode === "SIDEWAY" ||
     (regime.activeMode === "AUTO" && regime.recommendedMode === "SIDEWAY");
   const safetyAllows = telemetry.reachable &&
-    telemetry.health?.accountMode === "demo" &&
+    accountModeAllowsBroker(telemetry.health?.accountMode, accountModeState) &&
     telemetry.positions.length === 0 &&
     lots.activeAlive && lots.active?.armed === true &&
     !lots.restartRequired;
@@ -371,8 +389,10 @@ function sidewayDecision(input: {
     riskTargetPercent: round(finite(latest?.sizing?.riskPercent) ?? activeRisk, 2),
     estimatedRiskUsd: round(finite(latest?.sizing?.estimatedRiskUsd), 2),
     estimatedRiskPercent: round(finite(latest?.sizing?.estimatedRiskPercent), 4),
-    limitReason: latest?.sizing?.limitReason ??
-      `Sideway tính lot sau final gate theo ${activeRisk.toFixed(2)}% balance, cap ${activeMaxLot.toFixed(2)} lot và bước chốt đúng 1/3.`,
+    limitReason: !accountModeState.valid
+      ? `Account-mode state không hợp lệ: ${accountModeState.error ?? "unknown"}.`
+      : latest?.sizing?.limitReason ??
+        `Sideway tính lot sau final gate theo ${activeRisk.toFixed(2)}% balance, cap ${activeMaxLot.toFixed(2)} lot và bước chốt đúng 1/3.`,
     decisionReason: currentDecision
       ? latest?.reason ?? "Chờ Sideway setup."
       : "Chưa có Sideway setup mới trong 30 phút; lot chỉ được tính sau Supply/Demand + ATR + M5 final gate.",
@@ -589,9 +609,11 @@ export function buildPhase7CDecisionMonitor(input: {
   lots: ReturnType<typeof phase7CLotSettingsService.get>;
   audit: DecisionAuditRecord[];
   managedStates?: ManagedRuntimeStates;
+  accountModeState?: Phase7CAccountModeState;
   now?: number;
 }) {
   const now = input.now ?? Date.now();
+  const accountModeState = input.accountModeState ?? getPhase7CAccountModeState();
   const requestedStrategy = input.regime.activeMode === "AUTO"
     ? input.regime.recommendedMode
     : input.regime.activeMode;
@@ -599,9 +621,9 @@ export function buildPhase7CDecisionMonitor(input: {
     ? requestedStrategy
     : "PAUSE";
   const preTrade = effectiveStrategy === "TREND"
-    ? trendDecision({ ...input, now })
+    ? trendDecision({ ...input, accountModeState, now })
     : effectiveStrategy === "SIDEWAY"
-      ? sidewayDecision({ ...input, now })
+      ? sidewayDecision({ ...input, accountModeState, now })
       : pauseDecision(input.regime, now);
 
   return {
@@ -631,7 +653,10 @@ export function buildPhase7CDecisionMonitor(input: {
     recentDecisions: input.audit.slice(0, 40).map(({ raw: _raw, ...row }) => row),
     safety: {
       readOnlyEndpoint: true as const,
-      demoOnly: true as const,
+      accountMode: accountModeState.accountMode,
+      accountGuardValid: accountModeState.valid,
+      liveExecutionEnabled: accountModeState.liveExecutionEnabled,
+      demoOnly: accountModeState.accountMode === "DEMO",
       mt5PanelOrderPermission: "NONE" as const,
       newPositionsOnly: true as const,
       existingPositionMutation: false as const,
@@ -646,7 +671,14 @@ let pending: Promise<ReturnType<typeof buildPhase7CDecisionMonitor>> | null = nu
 
 export async function getPhase7CDecisionMonitor(symbol = "XAUUSD") {
   const now = Date.now();
-  if (cached && now - cached.at <= 2_000 && cached.value.symbol === symbol.toUpperCase()) {
+  const accountModeState = getPhase7CAccountModeState();
+  if (
+    cached &&
+    now - cached.at <= 2_000 &&
+    cached.value.symbol === symbol.toUpperCase() &&
+    cached.value.safety.accountMode === accountModeState.accountMode &&
+    cached.value.safety.accountGuardValid === accountModeState.valid
+  ) {
     return cached.value;
   }
   if (pending) return pending;
@@ -662,8 +694,9 @@ export async function getPhase7CDecisionMonitor(symbol = "XAUUSD") {
       demo,
       telemetry,
       lots: phase7CLotSettingsService.get(),
-      audit: loadAudit(),
-      managedStates: loadManagedStates(),
+      audit: loadAudit(accountModeState),
+      managedStates: loadManagedStates(accountModeState),
+      accountModeState,
       now: Date.now(),
     });
     cached = { at: Date.now(), value };
@@ -684,6 +717,9 @@ function lineValue(value: unknown): string {
 
 function mt5FlatEntryReason(snapshot: ReturnType<typeof buildPhase7CDecisionMonitor>): string {
   const p = snapshot.preTrade;
+  if (!snapshot.safety.accountGuardValid) {
+    return "Account-mode state không hợp lệ; executor phải giữ fail-closed và không mở lệnh mới.";
+  }
   if (snapshot.mode.active === "PAUSE") {
     return "Bot đang PAUSE; không mở lệnh mới. Mở Control Center và nhấn BẬT BOT sau khi hoàn tất kiểm tra an toàn.";
   }
@@ -711,6 +747,8 @@ export function formatPhase7CDecisionMonitorForMt5(
     ["generatedAt", snapshot.generatedAt],
     ["symbol", snapshot.symbol],
     ["accountMode", snapshot.account.accountMode],
+    ["configuredAccountMode", snapshot.safety.accountMode],
+    ["accountGuardValid", snapshot.safety.accountGuardValid],
     ["activeMode", snapshot.mode.active],
     ["effectiveStrategy", snapshot.mode.effectiveStrategy],
     ["regime", snapshot.engine.regime],

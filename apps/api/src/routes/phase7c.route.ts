@@ -21,6 +21,10 @@ import {
   phase7CLotSettingsService,
   validatePhase7CLotSettings,
 } from "../services/phase7c-lot-settings.service";
+import {
+  accountModeAllowsBroker,
+  getPhase7CAccountModeState,
+} from "../services/phase7c-account-mode.service";
 import { getMt5Telemetry } from "../services/mt5.service";
 import {
   formatPhase7CDecisionMonitorForMt5,
@@ -51,6 +55,31 @@ function canChangeBotMode(req: Request): boolean {
   return providedToken === configuredToken;
 }
 
+router.get("/account-mode", (_req: Request, res: Response) => {
+  res.setHeader("cache-control", "no-store");
+  const state = getPhase7CAccountModeState();
+  res.json({
+    state: {
+      version: state.version,
+      accountMode: state.accountMode,
+      liveExecutionEnabled: state.liveExecutionEnabled,
+      valid: state.valid,
+      source: state.source,
+      error: state.error,
+      updatedAt: state.updatedAt,
+      updatedBy: state.updatedBy,
+    },
+    switchPolicy: {
+      localAdminOnly: true,
+      liveRequiresExplicitConfirmation: true,
+      requiresPause: true,
+      requiresZeroXauusdPositions: true,
+      finalBotMode: "PAUSE",
+      webCanSwitchAccount: false,
+    },
+  });
+});
+
 router.get("/bot-mode", (_req: Request, res: Response) => {
   res.json({
     state: phase7CBotModeService.get(),
@@ -76,6 +105,14 @@ router.post("/bot-mode", (req: Request, res: Response) => {
     return;
   }
 
+  const accountModeState = getPhase7CAccountModeState();
+  if (requestedMode !== "PAUSE" && !accountModeState.valid) {
+    res.status(409).json({
+      error: `Account-mode state is invalid; only PAUSE is allowed. ${accountModeState.error ?? ""}`.trim(),
+    });
+    return;
+  }
+
   const source = typeof req.body?.source === "string" && req.body.source.trim()
     ? req.body.source.trim().slice(0, 80)
     : "operator";
@@ -83,6 +120,7 @@ router.post("/bot-mode", (req: Request, res: Response) => {
   res.json({
     state: phase7CBotModeService.set(requestedMode, source),
     options: getPhase7CBotModeOptions(),
+    accountMode: accountModeState.accountMode,
   });
 });
 
@@ -93,13 +131,16 @@ router.get("/lifecycle", async (req: Request, res: Response) => {
   }
   try {
     const telemetry = await getMt5Telemetry("XAUUSD");
+    const accountModeState = getPhase7CAccountModeState();
     res.setHeader("cache-control", "no-store");
     res.json({
       ...getPhase7CLifecycleRuntimeStatus(),
+      accountMode: accountModeState,
       actionInProgress: lifecycleActionInProgress,
       bridge: {
         reachable: telemetry.reachable,
         accountMode: telemetry.health?.accountMode ?? null,
+        accountModeMatchesConfigured: accountModeAllowsBroker(telemetry.health?.accountMode, accountModeState),
         server: telemetry.health?.server ?? null,
         tradingEnabled: telemetry.health?.tradingEnabled ?? null,
         terminalTradeAllowed: telemetry.health?.terminalTradeAllowed ?? null,
@@ -171,10 +212,16 @@ router.post("/lot-settings", async (req: Request, res: Response) => {
       return;
     }
 
+    const accountModeState = getPhase7CAccountModeState();
+    if (!accountModeState.valid) {
+      res.status(409).json({ error: `Account-mode state is invalid. ${accountModeState.error ?? ""}`.trim() });
+      return;
+    }
+
     const telemetry = await getMt5Telemetry("XAUUSD");
-    if (!telemetry.reachable || telemetry.health?.accountMode !== "demo" || !telemetry.spec) {
+    if (!telemetry.reachable || !accountModeAllowsBroker(telemetry.health?.accountMode, accountModeState) || !telemetry.spec) {
       res.status(409).json({
-        error: "Lot settings require a healthy MT5 DEMO bridge and an available XAUUSD broker specification.",
+        error: `Lot settings require a healthy ${accountModeState.accountMode} MT5 bridge matching the configured account mode and an available XAUUSD broker specification.`,
       });
       return;
     }
@@ -258,28 +305,12 @@ router.get("/decision-monitor/mt5", async (req: Request, res: Response) => {
 
 router.get("/daily-recovery", async (req: Request, res: Response) => {
   try {
-    const symbol = String(
-      req.query.symbol ?? "XAUUSD",
-    )
-      .trim()
-      .toUpperCase();
-
-    const volume = Number(
-      req.query.volume ?? 0.03,
-    );
-
-    res.json(
-      await getPhase7CDailyRecoveryView(
-        symbol || "XAUUSD",
-        volume,
-      ),
-    );
+    const symbol = String(req.query.symbol ?? "XAUUSD").trim().toUpperCase();
+    const volume = Number(req.query.volume ?? 0.03);
+    res.json(await getPhase7CDailyRecoveryView(symbol || "XAUUSD", volume));
   } catch (error) {
     res.status(503).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "Phase 7C Daily Recovery view failed.",
+      error: error instanceof Error ? error.message : "Phase 7C Daily Recovery view failed.",
     });
   }
 });
