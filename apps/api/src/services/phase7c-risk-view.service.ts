@@ -1,8 +1,8 @@
-import { getPhase7CAccountRisk } from "./phase7c.service";
+import { getPhase7CAccountRiskPreview } from "./phase7c-account-risk.service";
 import { phase7CLotSettingsService } from "./phase7c-lot-settings.service";
 
 export async function getPhase7CCanonicalAccountRisk(riskPercent = 0.25, maxLot = 0.03) {
-  const data = await getPhase7CAccountRisk(riskPercent, maxLot);
+  const data = await getPhase7CAccountRiskPreview(riskPercent, maxLot);
   const lotSettings = phase7CLotSettingsService.get();
   const activeLotSettings = lotSettings.activeAlive && lotSettings.active?.armed
     ? lotSettings.active
