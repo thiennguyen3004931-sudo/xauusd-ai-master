@@ -22,7 +22,7 @@ import MenuRounded from "@mui/icons-material/MenuRounded";
 import LockRounded from "@mui/icons-material/LockRounded";
 import { StatusChip } from "./StatusChip";
 
-const drawerWidth = 250;
+const drawerWidth = 220;
 
 type LinkRow = readonly [string, string, typeof SmartToyRounded];
 
@@ -36,35 +36,16 @@ const links: readonly LinkRow[] = [
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   return (
-    <Box
-      sx={{ height: "100%", display: "flex", flexDirection: "column", p: 2 }}
-    >
-      <Stack
-        direction="row"
-        spacing={1.5}
-        alignItems="center"
-        sx={{ px: 1, py: 1.5 }}
-      >
+    <Box sx={{ height: "100%", display: "flex", flexDirection: "column", p: 1.6 }}>
+      <Stack direction="row" spacing={1.25} alignItems="center" sx={{ px: 0.8, py: 1.3 }}>
         <Box className="brand-mark">AU</Box>
         <Box>
-          <Typography
-            variant="caption"
-            color="primary"
-            sx={{ letterSpacing: ".18em" }}
-          >
-            XAUUSD
-          </Typography>
-          <Typography variant="subtitle2" fontWeight={900}>
-            AI MASTER
-          </Typography>
+          <Typography variant="caption" color="primary" sx={{ letterSpacing: ".18em" }}>XAUUSD</Typography>
+          <Typography variant="subtitle2" fontWeight={900}>AI MASTER</Typography>
         </Box>
       </Stack>
 
-      <Typography
-        variant="caption"
-        color="text.disabled"
-        sx={{ px: 1.5, mt: 1.5, letterSpacing: ".12em", fontWeight: 800 }}
-      >
+      <Typography variant="caption" color="text.disabled" sx={{ px: 1.2, mt: 1.2, letterSpacing: ".12em", fontWeight: 800 }}>
         VẬN HÀNH DEMO
       </Typography>
       <List dense sx={{ pt: 0.7 }}>
@@ -76,7 +57,8 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
             end={href === "/"}
             onClick={onNavigate}
             sx={{
-              my: 0.4,
+              my: 0.35,
+              px: 1.25,
               borderRadius: 2,
               color: "text.secondary",
               "&.active": {
@@ -86,39 +68,19 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
               },
             }}
           >
-            <ListItemIcon sx={{ minWidth: 38, color: "inherit" }}>
-              <Icon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText
-              primary={label}
-              primaryTypographyProps={{ fontSize: 14, fontWeight: 700 }}
-            />
+            <ListItemIcon sx={{ minWidth: 34, color: "inherit" }}><Icon fontSize="small" /></ListItemIcon>
+            <ListItemText primary={label} primaryTypographyProps={{ fontSize: 13, fontWeight: 700 }} />
           </ListItemButton>
         ))}
       </List>
 
-      <Box
-        sx={{
-          mt: "auto",
-          p: 2,
-          borderRadius: 3,
-          border: "1px solid rgba(148,163,184,.12)",
-          bgcolor: "rgba(255,255,255,.02)",
-        }}
-      >
-        <Stack direction="row" spacing={1} alignItems="center">
+      <Box sx={{ mt: "auto", p: 1.6, borderRadius: 3, border: "1px solid rgba(148,163,184,.12)", bgcolor: "rgba(255,255,255,.02)" }}>
+        <Stack direction="row" spacing={0.8} alignItems="center">
           <LockRounded fontSize="small" color="primary" />
-          <Typography variant="caption" fontWeight={900}>
-            CHỈ TÀI KHOẢN DEMO
-          </Typography>
+          <Typography variant="caption" fontWeight={900}>CHỈ TÀI KHOẢN DEMO</Typography>
         </Stack>
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ display: "block", mt: 1, lineHeight: 1.5 }}
-        >
-          Tài khoản thật luôn bị khóa. Panel MT5 chỉ đọc, không có quyền gửi lệnh.
-          Lot/Risk chỉ áp dụng cho lệnh mới trong môi trường demo.
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.9, lineHeight: 1.5 }}>
+          MT5 panel chỉ đọc, ORDER NONE. Lot/Risk chỉ áp dụng cho lệnh mới trong môi trường demo.
         </Typography>
       </Box>
     </Box>
@@ -133,10 +95,10 @@ export function DashboardLayout() {
   let headerSubtitle = "XAUUSD · AUTO/PAUSE · Regime · tài khoản · risk · hệ thống";
   if (location.pathname.startsWith("/phase7b-pattern-check")) {
     headerTitle = "Tín hiệu & quyết định";
-    headerSubtitle = "Regime, stage, lý do chờ/vào lệnh và điều kiện entry M15";
+    headerSubtitle = "Semantic gates, reason runtime và entry contract";
   } else if (location.pathname.startsWith("/phase7b-ops")) {
     headerTitle = "Tài khoản & Risk";
-    headerSubtitle = "Thông tin tài khoản giao dịch, lot/risk, safety và runtime";
+    headerSubtitle = "Tài khoản MT5 · lot/risk · safety · runtime";
   } else if (location.pathname.startsWith("/phase7c-control-center")) {
     headerTitle = "Control Center";
     headerSubtitle = "MT5 · Bot · Telegram · quyết định giao dịch và Risk/Lot đồng bộ";
@@ -182,28 +144,16 @@ export function DashboardLayout() {
             borderBottom: "1px solid rgba(148,163,184,.10)",
           }}
         >
-          <Toolbar>
-            <IconButton
-              onClick={() => setMobileOpen(true)}
-              sx={{ display: { lg: "none" }, mr: 1 }}
-            >
-              <MenuRounded />
-            </IconButton>
+          <Toolbar sx={{ minHeight: { xs: 58, md: 62 } }}>
+            <IconButton onClick={() => setMobileOpen(true)} sx={{ display: { lg: "none" }, mr: 1 }}><MenuRounded /></IconButton>
             <Box sx={{ flex: 1 }}>
-              <Typography variant="subtitle2" fontWeight={900}>
-                {headerTitle}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {headerSubtitle}
-              </Typography>
+              <Typography variant="subtitle2" fontWeight={900}>{headerTitle}</Typography>
+              <Typography variant="caption" color="text.secondary">{headerSubtitle}</Typography>
             </Box>
             <StatusChip value="CHỈ DEMO" />
           </Toolbar>
         </AppBar>
-        <Box
-          component="main"
-          sx={{ p: { xs: 2, md: 3 }, maxWidth: 1500, mx: "auto" }}
-        >
+        <Box component="main" sx={{ p: { xs: 1.5, md: 2.2 }, maxWidth: 1780, mx: "auto", width: "100%" }}>
           <Outlet />
         </Box>
       </Box>
