@@ -146,7 +146,7 @@ function Get-Phase7CScheduledTaskErrorClassification {
 
   $message = [string]$Exception.Message
   if ($message -match '(?i)access\s+is\s+denied|access\s+denied|unauthorized') { return 'ACCESS_DENIED' }
-  if ($message -match '(?i)not\s+found|cannot\s+find|no\s+matching\s+MSFT_ScheduledTask') { return 'NOT_FOUND' }
+  if ($message -match '(?i)not\s+found|cannot\s+find|no\s+matching\s+MSFT_ScheduledTask|no\s+MSFT_ScheduledTask\s+objects\s+found') { return 'NOT_FOUND' }
   return 'PROVIDER_ERROR'
 }
 
