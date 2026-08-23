@@ -1,6 +1,6 @@
-Set-StrictMode -Version Latest
-
 function Open-Phase7CStartupRunnerLock([string]$Path) {
+  Set-StrictMode -Version Latest
+
   if ([string]::IsNullOrWhiteSpace($Path)) {
     throw "Startup runner lock path is required."
   }
@@ -44,6 +44,8 @@ function Write-Phase7CJsonAtomic(
   [Parameter(Mandatory = $true)] $Value,
   [int]$Depth = 6
 ) {
+  Set-StrictMode -Version Latest
+
   if ([string]::IsNullOrWhiteSpace($Path)) {
     throw "Atomic JSON path is required."
   }
