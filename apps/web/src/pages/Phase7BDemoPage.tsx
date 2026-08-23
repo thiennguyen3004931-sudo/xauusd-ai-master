@@ -15,6 +15,7 @@ import { LoadingState, ErrorState } from "../ui/PageState";
 import {
   clean,
   compactReason,
+  fetchPhase7CPerformance,
   fetchPhase7CWebStatus,
   getTradeUiState,
   isUsablePanelValue,
@@ -25,6 +26,7 @@ import {
   value,
   type Phase7CCandle,
   type Phase7CPanelStatus,
+  type Phase7CPerformanceTrade,
   type Phase7CUiContract,
   type Phase7CUiGate,
   type TradeUiState,
@@ -118,6 +120,60 @@ function gateTone(gate: Phase7CUiGate | undefined): "success" | "warning" | "def
   if (gate === "ALLOWED") return "success";
   if (gate === "BLOCKED_BY_MODE" || gate === "BLOCKED_BY_REGIME") return "warning";
   return "default";
+}
+
+function formatTradeTime(timestamp: number) {
+  if (!Number.isFinite(timestamp)) return "—";
+  return new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(timestamp));
+}
+
+function price(value: number) {
+  return Number.isFinite(value) ? value.toFixed(2) : "—";
+}
+
+function RecentTradeJournal({ trades, currency, loading, error }: { trades: Phase7CPerformanceTrade[]; currency: string; loading: boolean; error?: string }) {
+  const recent = trades.slice(0, 6);
+  return (
+    <PanelCard title="NHẬT KÝ GIAO DỊCH GẦN NHẤT" accent="cyan">
+      {loading && recent.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">Đang tải lịch sử giao dịch thật từ MT5...</Typography>
+      ) : error && recent.length === 0 ? (
+        <Typography variant="body2" color="warning.main">Chưa đọc được lịch sử MT5: {error}</Typography>
+      ) : recent.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">Chưa có lệnh XAUUSD đã đóng trong cửa sổ 90 ngày. Dashboard không tạo dữ liệu minh họa.</Typography>
+      ) : (
+        <Box sx={{ overflowX: "auto" }}>
+          <Box sx={{ minWidth: 720 }}>
+            <Box sx={{ display: "grid", gridTemplateColumns: "110px 90px 70px 70px 1fr 100px", gap: 1, px: 1, pb: 1, borderBottom: "1px solid rgba(148,163,184,.18)" }}>
+              {[
+                "Đóng lệnh",
+                "Strategy",
+                "Side",
+                "Lot",
+                "Entry → Exit",
+                "P/L",
+              ].map((label) => <Typography key={label} variant="caption" color="text.secondary" fontWeight={900}>{label}</Typography>)}
+            </Box>
+            {recent.map((trade) => (
+              <Box key={trade.id} sx={{ display: "grid", gridTemplateColumns: "110px 90px 70px 70px 1fr 100px", gap: 1, alignItems: "center", px: 1, py: 1.05, borderBottom: "1px solid rgba(148,163,184,.08)" }}>
+                <Typography variant="caption">{formatTradeTime(trade.closedAt)}</Typography>
+                <Chip size="small" label={trade.strategy} variant="outlined" color={trade.strategy === "SIDEWAY" ? "info" : trade.strategy === "TREND" ? "secondary" : "default"} sx={{ width: "fit-content", fontWeight: 850 }} />
+                <Typography variant="body2" fontWeight={900} color={trade.side === "BUY" ? "success.main" : "error.main"}>{trade.side}</Typography>
+                <Typography variant="body2">{trade.volume.toFixed(2)}</Typography>
+                <Typography variant="body2">{price(trade.entry)} → {price(trade.exit)}</Typography>
+                <Typography variant="body2" fontWeight={950} color={trade.netPnl >= 0 ? "success.main" : "error.main"}>{trade.netPnl >= 0 ? "+" : ""}{trade.netPnl.toFixed(2)} {currency}</Typography>
+              </Box>
+            ))}
+          </Box>
+        </Box>
+      )}
+    </PanelCard>
+  );
 }
 
 function LiveCandlestickChart({ candles, panel, uiState, ui }: { candles: Phase7CCandle[]; panel: Phase7CPanelStatus | undefined; uiState: TradeUiState; ui?: Phase7CUiContract }) {
@@ -231,9 +287,16 @@ function LiveCandlestickChart({ candles, panel, uiState, ui }: { candles: Phase7
 
 export function Phase7BDemoPage() {
   const query = useQuery({
-    queryKey: ["phase7c-web-final-dashboard-v3-semantic"],
+    queryKey: ["phase7c-web-final-dashboard-v4-journal"],
     queryFn: fetchPhase7CWebStatus,
     refetchInterval: 3_000,
+    retry: false,
+    placeholderData: (previous) => previous,
+  });
+  const performanceQuery = useQuery({
+    queryKey: ["phase7c-web-mt5-performance-90d"],
+    queryFn: fetchPhase7CPerformance,
+    refetchInterval: 30_000,
     retry: false,
     placeholderData: (previous) => previous,
   });
@@ -251,7 +314,7 @@ export function Phase7BDemoPage() {
   const bridge = asRecord(lifecycle.bridge);
   const processes = asRecord(lifecycle.processes);
   const lotRuntime = asRecord(lifecycle.lotSettings);
-  const currency = clean(account.accountCurrency, "USD");
+  const currency = clean(account.accountCurrency, performanceQuery.data?.currency ?? "USD");
   const activeMode = clean(ui?.mode, value(panel, "activeMode", "—"));
   const effectiveStrategy = clean(ui?.effectiveStrategy, value(panel, "effectiveStrategy", "—"));
   const mode = activeMode !== effectiveStrategy && effectiveStrategy !== "—" ? `${activeMode} → ${effectiveStrategy}` : activeMode;
@@ -274,16 +337,18 @@ export function Phase7BDemoPage() {
   const position = ui?.position;
   const profit = position?.floatingPnlUsd ?? Number(raw(panel, "floatingPnlUsd"));
   const profitText = Number.isFinite(profit) ? `${Number(profit).toFixed(2)} USD` : "—";
+  const performanceError = performanceQuery.error instanceof Error ? performanceQuery.error.message : undefined;
 
   return (
     <Stack spacing={2.4}>
       <Box sx={{ p: 2, borderRadius: 4, bgcolor: "rgba(3,10,18,.82)", border: "1px solid rgba(0,213,255,.18)" }}>
         <Stack direction={{ xs: "column", xl: "row" }} justifyContent="space-between" gap={2} alignItems={{ xl: "center" }}>
           <Box>
-            <Stack direction="row" spacing={1} alignItems="center">
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
               <Typography variant="h5" fontWeight={950}>XAUUSD AI MASTER</Typography>
               <Chip label="PHASE7C" color="secondary" size="small" sx={{ fontWeight: 950 }} />
               {ui && <Chip label="SEMANTIC UI v2" size="small" variant="outlined" color="info" sx={{ fontWeight: 900 }} />}
+              {performanceQuery.data && <Chip label="MT5 JOURNAL" size="small" variant="outlined" color="success" sx={{ fontWeight: 900 }} />}
             </Stack>
             <Typography variant="body2" color="text.secondary" mt={0.5}>MT5 DASHBOARD · LIVE DATA · DEMO ONLY · READ ONLY</Typography>
           </Box>
@@ -329,6 +394,7 @@ export function Phase7BDemoPage() {
               <StatusDot label="Sideway Executor" ok={Boolean(asRecord(processes.sideway).alive)} />
               <StatusDot label="Telegram" ok={Boolean(lifecycle.telegramReady)} />
               <StatusDot label="Lot Binding" ok={Boolean(lotRuntime.activeAlive)} />
+              <StatusDot label="MT5 Journal" ok={Boolean(performanceQuery.data)} />
             </PanelCard>
           </Stack>
         </Grid>
@@ -336,9 +402,12 @@ export function Phase7BDemoPage() {
         <Grid size={{ xs: 12, lg: 6 }}>
           <Stack spacing={2}>
             <LiveCandlestickChart candles={data?.candles ?? []} panel={panel} uiState={uiState} ui={ui} />
-            <PanelCard title="NHẬT KÝ GIAO DỊCH GẦN NHẤT" accent="cyan">
-              <Typography variant="body2" color="text.secondary">Lịch sử lệnh chỉ hiển thị khi API trade journal có dữ liệu thật; dashboard không tạo dữ liệu minh họa.</Typography>
-            </PanelCard>
+            <RecentTradeJournal
+              trades={performanceQuery.data?.trades ?? []}
+              currency={currency}
+              loading={performanceQuery.isLoading}
+              error={performanceError}
+            />
           </Stack>
         </Grid>
 
@@ -410,6 +479,7 @@ export function Phase7BDemoPage() {
           <Typography variant="body2">EXECUTORS: TREND {asRecord(processes.trend).alive ? "✓" : "—"} | SIDEWAY {asRecord(processes.sideway).alive ? "✓" : "—"}</Typography>
           <Typography variant="body2">RISK MODE: DEMO ONLY</Typography>
           <Typography variant="body2">TELEGRAM: {lifecycle.telegramReady ? "READY" : "CHECK"}</Typography>
+          <Typography variant="body2">MT5 JOURNAL: {performanceQuery.data ? "READY" : "CHECK"}</Typography>
           <Typography variant="body2">ORDER PERMISSION: NONE</Typography>
         </Stack>
       </Box>
