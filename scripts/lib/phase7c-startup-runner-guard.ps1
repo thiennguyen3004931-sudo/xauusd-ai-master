@@ -53,7 +53,9 @@ function Write-Phase7CJsonAtomic(
     New-Item -ItemType Directory -Force -Path $directory | Out-Null
   }
 
-  $tempPath = "$Path.$PID.$([Guid]::NewGuid().ToString('N')).tmp"
+  $token = "$PID.$([Guid]::NewGuid().ToString('N'))"
+  $tempPath = "$Path.$token.tmp"
+  $backupPath = "$Path.$token.bak"
   try {
     $json = $Value | ConvertTo-Json -Depth $Depth
     [System.IO.File]::WriteAllText(
@@ -63,13 +65,18 @@ function Write-Phase7CJsonAtomic(
     )
 
     if ([System.IO.File]::Exists($Path)) {
-      [System.IO.File]::Replace($tempPath, $Path, $null, $true)
+      [System.IO.File]::Replace($tempPath, $Path, $backupPath)
+      if ([System.IO.File]::Exists($backupPath)) {
+        [System.IO.File]::Delete($backupPath)
+      }
     } else {
       [System.IO.File]::Move($tempPath, $Path)
     }
   } finally {
-    if ([System.IO.File]::Exists($tempPath)) {
-      Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+    foreach ($candidate in @($tempPath, $backupPath)) {
+      if ([System.IO.File]::Exists($candidate)) {
+        Remove-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue
+      }
     }
   }
 }
