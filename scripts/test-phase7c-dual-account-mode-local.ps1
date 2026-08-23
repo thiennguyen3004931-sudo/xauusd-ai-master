@@ -49,6 +49,14 @@ foreach ($relative in $powerShellFiles) {
   Assert-PowerShellSyntax $path
 }
 
+$bridgeRun = Join-Path $ProjectRoot "packages\mt5-broker\bridge\run.ps1"
+Assert-True (Test-Path $bridgeRun) "bridge run.ps1 must exist"
+Assert-PowerShellSyntax $bridgeRun
+$bridgeRunText = Get-Content -LiteralPath $bridgeRun -Raw
+Assert-True ($bridgeRunText -match 'TrimStart\(\[char\]0xFEFF\)') "bridge env loader must normalize a UTF-8 BOM on variable names"
+Assert-True ($bridgeRunText -match 'StartsWith\(''"''\).*EndsWith\(''"''\)') "bridge env loader must strip matching double quotes"
+Assert-True ($bridgeRunText -match 'StartsWith\("''"\).*EndsWith\("''"\)') "bridge env loader must strip matching single quotes"
+
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("phase7c-dual-account-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 try {
