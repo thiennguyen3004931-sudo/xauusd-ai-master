@@ -1,9 +1,11 @@
+import type { ReactNode } from "react";
 import {
   Alert,
   Box,
   Card,
   CardContent,
   Chip,
+  Divider,
   Grid,
   Stack,
   Typography,
@@ -11,7 +13,6 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { LoadingState, ErrorState } from "../ui/PageState";
 import {
-  boolText,
   clean,
   compactReason,
   fetchPhase7CWebStatus,
@@ -27,59 +28,136 @@ function asRecord(value: unknown): Record<string, any> {
   return value && typeof value === "object" ? (value as Record<string, any>) : {};
 }
 
-function KpiCard({
-  label,
-  valueText,
-  detail,
-  chip,
-  tone = "default",
-}: {
-  label: string;
-  valueText: string;
-  detail: string;
-  chip?: string;
-  tone?: "success" | "warning" | "error" | "default";
-}) {
+function PanelCard({ title, children, accent = "cyan" }: { title: string; children: ReactNode; accent?: "cyan" | "green" | "red" | "orange" | "purple" }) {
+  const colorMap = {
+    cyan: "rgba(0,213,255,.45)",
+    green: "rgba(74,222,128,.45)",
+    red: "rgba(248,113,113,.45)",
+    orange: "rgba(251,191,36,.45)",
+    purple: "rgba(168,85,247,.45)",
+  } as const;
   return (
-    <Card variant="outlined" sx={{ height: "100%", borderRadius: 4 }}>
-      <CardContent sx={{ p: 3 }}>
-        <Stack direction="row" justifyContent="space-between" gap={1} alignItems="center">
-          <Typography variant="caption" color="text.secondary" fontWeight={900} letterSpacing=".06em">
-            {label}
-          </Typography>
-          {chip && <Chip size="small" label={chip} color={tone} variant="outlined" sx={{ fontWeight: 900 }} />}
-        </Stack>
-        <Typography variant="h5" fontWeight={950} mt={1.7}>{valueText}</Typography>
-        <Typography variant="body2" color="text.secondary" mt={1.1}>{detail}</Typography>
+    <Card
+      variant="outlined"
+      sx={{
+        height: "100%",
+        borderRadius: 3,
+        bgcolor: "rgba(3,10,18,.72)",
+        borderColor: colorMap[accent],
+        boxShadow: `0 0 24px ${colorMap[accent].replace(".45", ".10")}`,
+      }}
+    >
+      <CardContent sx={{ p: 2.2 }}>
+        <Typography variant="subtitle2" fontWeight={950} sx={{ letterSpacing: ".03em" }}>
+          {title}
+        </Typography>
+        <Box mt={1.4}>{children}</Box>
       </CardContent>
     </Card>
   );
 }
 
-function SectionCard({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
+function InfoRow({ label, valueText, tone = "default" }: { label: string; valueText: string; tone?: "default" | "success" | "error" | "warning" | "info" }) {
+  const color = tone === "success" ? "success.main" : tone === "error" ? "error.main" : tone === "warning" ? "warning.main" : tone === "info" ? "info.main" : "text.primary";
   return (
-    <Card variant="outlined" sx={{ height: "100%", borderRadius: 4 }}>
-      <CardContent sx={{ p: 3 }}>
-        <Typography variant="h6" fontWeight={950}>{title}</Typography>
-        <Typography variant="body2" color="text.secondary" mt={0.6}>{subtitle}</Typography>
-        <Box mt={2.2}>{children}</Box>
-      </CardContent>
-    </Card>
-  );
-}
-
-function InfoRow({ label, valueText, strong = false }: { label: string; valueText: string; strong?: boolean }) {
-  return (
-    <Stack direction="row" justifyContent="space-between" gap={2} py={0.9} sx={{ borderBottom: "1px solid rgba(148,163,184,.08)" }}>
+    <Stack direction="row" justifyContent="space-between" gap={2} py={0.7} sx={{ borderBottom: "1px solid rgba(148,163,184,.09)" }}>
       <Typography variant="body2" color="text.secondary">{label}</Typography>
-      <Typography variant="body2" fontWeight={strong ? 950 : 800} textAlign="right">{valueText}</Typography>
+      <Typography variant="body2" fontWeight={900} color={color} textAlign="right">{valueText}</Typography>
+    </Stack>
+  );
+}
+
+function HeaderChip({ label, valueText, color = "default" }: { label: string; valueText: string; color?: "success" | "warning" | "error" | "info" | "secondary" | "default" }) {
+  return (
+    <Stack spacing={0.6} alignItems="center" minWidth={120}>
+      <Typography variant="caption" color="text.secondary" fontWeight={900}>{label}</Typography>
+      <Chip label={valueText} color={color} sx={{ fontWeight: 950, minWidth: 96 }} />
+    </Stack>
+  );
+}
+
+function ReasonBox({ title, items, accent = "cyan" }: { title: string; items: string[]; accent?: "cyan" | "purple" | "orange" | "green" }) {
+  return (
+    <PanelCard title={title} accent={accent === "cyan" ? "cyan" : accent === "purple" ? "purple" : accent === "green" ? "green" : "orange"}>
+      <Stack spacing={0.9}>
+        {items.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">Chưa có dữ liệu.</Typography>
+        ) : items.map((item, index) => (
+          <Typography key={`${title}-${index}`} variant="body2" lineHeight={1.5}>
+            • {item}
+          </Typography>
+        ))}
+      </Stack>
+    </PanelCard>
+  );
+}
+
+function MiniChart({ panel }: { panel: Record<string, string> | undefined }) {
+  const entry = value(panel, "entry", "—");
+  const sl = value(panel, "stopLoss", "—");
+  const tp1 = value(panel, "tp1", "—");
+  const tp2 = value(panel, "tp2", "—");
+  const hasPlan = entry !== "—" || sl !== "—" || tp1 !== "—" || tp2 !== "—";
+  return (
+    <Box
+      sx={{
+        position: "relative",
+        height: 420,
+        borderRadius: 3,
+        overflow: "hidden",
+        bgcolor: "#020914",
+        border: "1px solid rgba(0,213,255,.22)",
+        backgroundImage:
+          "linear-gradient(rgba(148,163,184,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,.08) 1px, transparent 1px)",
+        backgroundSize: "54px 42px",
+      }}
+    >
+      <Stack direction="row" justifyContent="space-between" p={2}>
+        <Box>
+          <Typography variant="h6" fontWeight={950}>XAUUSD · M15</Typography>
+          <Typography variant="caption" color="text.secondary">Gold vs US Dollar</Typography>
+        </Box>
+        <Stack direction="row" spacing={1}>
+          <Chip label={`Bid ${value(panel, "currentPrice", "—")}`} variant="outlined" color="info" />
+          <Chip label={`Stage ${value(panel, "stage", "—")}`} variant="outlined" color={stageTone(value(panel, "stage", ""))} />
+        </Stack>
+      </Stack>
+
+      <Box sx={{ position: "absolute", left: 48, right: 72, top: 145, borderTop: "2px dashed rgba(59,130,246,.95)" }} />
+      <Box sx={{ position: "absolute", left: 48, right: 72, top: 230, borderTop: "2px dashed rgba(248,113,113,.95)" }} />
+      <Box sx={{ position: "absolute", left: 48, right: 72, top: 96, borderTop: "2px dashed rgba(34,197,94,.95)" }} />
+      <Box sx={{ position: "absolute", left: 48, right: 72, top: 54, borderTop: "2px dashed rgba(34,197,94,.65)" }} />
+      <Typography sx={{ position: "absolute", right: 28, top: 132 }} color="info.main" fontWeight={950}>ENTRY {entry}</Typography>
+      <Typography sx={{ position: "absolute", right: 28, top: 217 }} color="error.main" fontWeight={950}>SL {sl}</Typography>
+      <Typography sx={{ position: "absolute", right: 28, top: 83 }} color="success.main" fontWeight={950}>TP1 {tp1}</Typography>
+      <Typography sx={{ position: "absolute", right: 28, top: 41 }} color="success.main" fontWeight={950}>TP2 {tp2}</Typography>
+
+      <Box sx={{ position: "absolute", left: 32, bottom: 20, px: 1.2, py: 0.8, borderRadius: 2, bgcolor: "rgba(15,23,42,.85)", border: "1px solid rgba(0,213,255,.20)" }}>
+        <Typography variant="caption" color="text.secondary">AI REGIME SCORE</Typography>
+        <Stack direction="row" spacing={1} mt={0.6} alignItems="center">
+          <Chip label={`${value(panel, "regime", "—")} ${value(panel, "confidence", "—")}%`} color="info" size="small" sx={{ fontWeight: 900 }} />
+          <Chip label={hasPlan ? "TRADE PLAN" : "WAITING"} color={hasPlan ? "success" : "warning"} size="small" variant="outlined" sx={{ fontWeight: 900 }} />
+        </Stack>
+      </Box>
+    </Box>
+  );
+}
+
+function StatusDot({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <Stack direction="row" justifyContent="space-between" alignItems="center" py={0.55}>
+      <Typography variant="body2" color="text.secondary">{label}</Typography>
+      <Stack direction="row" spacing={0.8} alignItems="center">
+        <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: ok ? "success.main" : "warning.main", boxShadow: ok ? "0 0 10px rgba(34,197,94,.65)" : "none" }} />
+        <Typography variant="caption" fontWeight={900}>{ok ? "KẾT NỐI" : "CHECK"}</Typography>
+      </Stack>
     </Stack>
   );
 }
 
 export function Phase7BDemoPage() {
   const query = useQuery({
-    queryKey: ["phase7c-web-status-dashboard-v5"],
+    queryKey: ["phase7c-web-final-dashboard"],
     queryFn: fetchPhase7CWebStatus,
     refetchInterval: 3_000,
     retry: false,
@@ -88,130 +166,165 @@ export function Phase7BDemoPage() {
 
   if (query.isLoading) return <LoadingState />;
   if (query.isError && !query.data) {
-    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được Dashboard Phase7C."} />;
+    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được Dashboard."} />;
   }
 
   const data = query.data;
   const panel = data?.panel;
+  const lifecycle = asRecord(data?.lifecycle);
   const accountRisk = asRecord(data?.accountRisk);
   const account = asRecord(accountRisk.account);
-  const configuration = asRecord(accountRisk.configuration);
-  const lifecycle = asRecord(data?.lifecycle);
+  const config = asRecord(accountRisk.configuration);
   const bridge = asRecord(lifecycle.bridge);
   const processes = asRecord(lifecycle.processes);
-  const supervisor = asRecord(processes.supervisor);
-  const trend = asRecord(processes.trend);
-  const sideway = asRecord(processes.sideway);
   const lotRuntime = asRecord(lifecycle.lotSettings);
-
+  const currency = clean(account.accountCurrency, "USD");
+  const mode = modeDisplay(panel);
   const stage = value(panel, "stage", "—");
   const regime = value(panel, "regime", "—");
   const confidence = value(panel, "confidence", "—");
-  const activeMode = value(panel, "activeMode", clean(asRecord(lifecycle.mode).mode, "—"));
-  const strategy = value(panel, "effectiveStrategy", "—");
-  const accountMode = pickText(raw(panel, "accountMode"), account.accountMode, bridge.accountMode);
-  const login = pickText(account.accountLogin, bridge.accountLogin);
-  const server = pickText(account.server, bridge.server);
-  const currency = clean(account.accountCurrency, "USD");
-  const entryReasons = compactReason(raw(panel, "entryReason"), "Chưa có lý do vào lệnh.");
-  const holdReasons = compactReason(raw(panel, "holdReason"), "Đang chờ setup hợp lệ.");
-  const errors = data?.errors ?? [];
+  const positionState = raw(panel, "positionState");
+  const hasPosition = positionState === "MANAGING" || Number(raw(panel, "positionCount")) > 0;
+  const profit = value(panel, "floatingPnlUsd", "—");
+
+  const entryReasons = compactReason(raw(panel, "entryReason") || raw(panel, "decisionReason"), "Chưa có setup hợp lệ.");
+  const holdReasons = compactReason(raw(panel, "holdReason"), hasPosition ? "Đang theo dõi điều kiện giữ lệnh." : "Chưa có vị thế đang mở. Bot đang chờ setup hợp lệ.");
+  const exitReasons = hasPosition ? ["Chưa có tín hiệu chốt lệnh."] : ["Chưa có lệnh đang mở nên chưa có lý do chốt."];
+
+  const trendRules = [
+    "Regime = TREND, mode AUTO hoặc TREND.",
+    "M15 đóng nến có mẫu hợp lệ: Engulfing / 2-candle / 3-candle body dominance.",
+    "Supertrend M15/M5 cùng hướng với tín hiệu; SL chuẩn 6-10 giá.",
+    "Nếu SL > 10 giá: không vào ngay, chờ pullback sau nến M15 xác nhận.",
+  ];
+
+  const sidewayRules = [
+    "Regime = SIDEWAY, mode AUTO hoặc SIDEWAY.",
+    "Giá chạm vùng supply/demand hoặc biên range còn hiệu lực.",
+    "Có tín hiệu đảo chiều tại vùng biên, RR phù hợp.",
+    "Risk theo Sideway Risk %, lot không vượt Sideway Max Lot.",
+  ];
 
   return (
-    <Stack spacing={3}>
-      <Box
-        sx={{
-          p: { xs: 2.5, md: 3.5 },
-          borderRadius: 5,
-          border: "1px solid rgba(148,163,184,.14)",
-          background: "linear-gradient(135deg, rgba(233,185,73,.10), rgba(14,165,233,.06) 45%, rgba(15,23,42,.40))",
-        }}
-      >
-        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2} alignItems={{ md: "center" }}>
+    <Stack spacing={2.4}>
+      <Box sx={{ p: 2, borderRadius: 4, bgcolor: "rgba(3,10,18,.82)", border: "1px solid rgba(0,213,255,.18)" }}>
+        <Stack direction={{ xs: "column", xl: "row" }} justifyContent="space-between" gap={2} alignItems={{ xl: "center" }}>
           <Box>
-            <Typography variant="overline" color="primary" fontWeight={900}>XAUUSD AI MASTER · DEMO DASHBOARD v5</Typography>
-            <Typography variant="h4" fontWeight={950} mt={0.5}>Tổng quan vận hành chuyên nghiệp</Typography>
-            <Typography variant="body2" color="text.secondary" mt={1} maxWidth={880}>
-              AUTO đang bật nhưng chiến lược hiệu lực có thể PAUSE theo regime/stage. Dashboard gom trạng thái bot, tài khoản giao dịch, risk/lot, hệ thống và lý do chờ lệnh trong một màn hình.
-            </Typography>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Typography variant="h5" fontWeight={950}>XAUUSD AI MASTER</Typography>
+              <Chip label="PHASE7C" color="secondary" size="small" sx={{ fontWeight: 950 }} />
+            </Stack>
+            <Typography variant="body2" color="text.secondary" mt={0.5}>MT5 DASHBOARD · Final UI · DEMO ONLY · READ ONLY</Typography>
           </Box>
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            <Chip label={`Mode ${activeMode}`} color={activeMode === "AUTO" ? "success" : "warning"} variant="outlined" sx={{ fontWeight: 900 }} />
-            <Chip label={`Stage ${stage}`} color={stageTone(stage)} variant="outlined" sx={{ fontWeight: 900 }} />
-            <Chip label={`Account ${accountMode}`} color={accountMode.toLowerCase().includes("demo") ? "success" : "error"} variant="outlined" sx={{ fontWeight: 900 }} />
+          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+            <HeaderChip label="CHẾ ĐỘ BOT" valueText={mode} color={mode.includes("PAUSE") ? "warning" : "success"} />
+            <HeaderChip label="TRẠNG THÁI" valueText={stage} color={stageTone(stage)} />
+            <HeaderChip label="REGIME HIỆN TẠI" valueText={regime} color={regime === "REVERSAL" ? "warning" : "info"} />
+            <HeaderChip label="CONF" valueText={`${confidence}%`} color="default" />
           </Stack>
         </Stack>
       </Box>
 
-      {data?.usedDirectFallback && (
-        <Alert severity="info">Web proxy 5717 đang lỗi ở một số endpoint; dashboard đã tự lấy trực tiếp từ Control API 3711.</Alert>
-      )}
-      {errors.length > 0 && (
-        <Alert severity="warning">Một số nguồn phụ chưa sẵn sàng: {errors.slice(0, 2).join(" ")}</Alert>
-      )}
+      {data?.usedDirectFallback && <Alert severity="info">Web proxy 5717 chưa ổn định nên dashboard đang đọc trực tiếp Control API 3711.</Alert>}
+      {(data?.errors ?? []).length > 0 && <Alert severity="warning">Một số nguồn phụ chưa sẵn sàng: {(data?.errors ?? []).slice(0, 2).join(" ")}</Alert>}
 
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, md: 6, xl: 3 }}>
-          <KpiCard label="BOT MODE" valueText={modeDisplay(panel)} detail={`Active ${activeMode} · Effective ${strategy}`} chip={activeMode} tone={activeMode === "AUTO" ? "success" : "warning"} />
-        </Grid>
-        <Grid size={{ xs: 12, md: 6, xl: 3 }}>
-          <KpiCard label="MARKET REGIME" valueText={regime} detail={`Confidence ${confidence}/100 · Recommended ${value(panel, "recommendedMode", "—")}`} chip={`CONF ${confidence}`} tone={regime === "REVERSAL" ? "warning" : "default"} />
-        </Grid>
-        <Grid size={{ xs: 12, md: 6, xl: 3 }}>
-          <KpiCard label="DECISION" valueText={stage} detail={value(panel, "limitReason", "Không có lệnh mới.")} chip={stage} tone={stageTone(stage)} />
-        </Grid>
-        <Grid size={{ xs: 12, md: 6, xl: 3 }}>
-          <KpiCard label="ACCOUNT" valueText={login === "—" ? accountMode : `#${login}`} detail={`${server} · ${accountMode}`} chip="DEMO" tone="success" />
-        </Grid>
-      </Grid>
+        <Grid size={{ xs: 12, lg: 3 }}>
+          <Stack spacing={2}>
+            <PanelCard title="TÀI KHOẢN" accent="cyan">
+              <InfoRow label="Server" valueText={pickText(account.server, bridge.server)} />
+              <InfoRow label="Account" valueText={pickText(account.accountLogin, bridge.accountLogin)} />
+              <InfoRow label="Mode" valueText={pickText(raw(panel, "accountMode"), account.accountMode, bridge.accountMode)} tone="success" />
+              <InfoRow label="Balance" valueText={money(account.accountBalance, currency)} />
+              <InfoRow label="Equity" valueText={money(account.accountEquity, currency)} />
+              <InfoRow label="Free Margin" valueText={money(account.accountFreeMargin, currency)} />
+              <InfoRow label="Profit" valueText={money(account.accountProfit, currency)} tone={Number(account.accountProfit) >= 0 ? "success" : "error"} />
+            </PanelCard>
 
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12, lg: 4 }}>
-          <SectionCard title="Tài khoản giao dịch" subtitle="Thông tin lấy từ MT5 demo / account-risk.">
-            <InfoRow label="Login" valueText={login} strong />
-            <InfoRow label="Server" valueText={server} />
-            <InfoRow label="Account mode" valueText={accountMode} />
-            <InfoRow label="Trading enabled" valueText={boolText(account.tradingEnabled ?? bridge.tradingEnabled)} />
-            <InfoRow label="XAUUSD positions" valueText={pickText(bridge.openXauusdPositions, raw(panel, "positionCount"))} />
-            <InfoRow label="Balance" valueText={money(account.accountBalance, currency)} />
-            <InfoRow label="Equity" valueText={money(account.accountEquity, currency)} />
-            <InfoRow label="Free margin" valueText={money(account.accountFreeMargin, currency)} />
-          </SectionCard>
-        </Grid>
-        <Grid size={{ xs: 12, lg: 4 }}>
-          <SectionCard title="Risk & Lot" subtitle="Chỉ áp dụng cho lệnh mới, không mutate vị thế cũ.">
-            <InfoRow label="Trend fixed lot" valueText={pickText(configuration.configuredTrendFixedLot, raw(panel, "finalLot"))} strong />
-            <InfoRow label="Sideway risk" valueText={`${pickText(configuration.configuredSidewayRiskPercent)}%`} />
-            <InfoRow label="Sideway max lot" valueText={pickText(configuration.configuredSidewayMaxLot)} />
-            <InfoRow label="Recommended lot" valueText={value(panel, "lotCap", pickText(configuration.maxLot))} />
-            <InfoRow label="Order permission" valueText={pickText(configuration.previewOrderPermission, raw(panel, "mt5OrderPermission"))} />
-            <InfoRow label="Restart required" valueText={boolText(configuration.lotSettingsRestartRequired ?? lotRuntime.restartRequired)} />
-          </SectionCard>
-        </Grid>
-        <Grid size={{ xs: 12, lg: 4 }}>
-          <SectionCard title="Hệ thống" subtitle="Runtime chính, executor và lot binding.">
-            <InfoRow label="Supervisor" valueText={supervisor.alive ? "Alive" : "—"} strong />
-            <InfoRow label="Trend executor" valueText={trend.alive ? "Alive" : "—"} />
-            <InfoRow label="Sideway executor" valueText={sideway.alive ? "Alive" : "—"} />
-            <InfoRow label="Telegram" valueText={lifecycle.telegramReady ? "Ready" : clean(lifecycle.telegramStatus, "—")} />
-            <InfoRow label="MT5 Bridge" valueText={bridge.reachable ? "OK" : "—"} />
-            <InfoRow label="Lot binding" valueText={lotRuntime.activeAlive ? "Active" : "—"} />
-          </SectionCard>
-        </Grid>
-      </Grid>
+            <PanelCard title="CẤU HÌNH LOT" accent="green">
+              <InfoRow label="Trend Fixed Lot" valueText={pickText(config.configuredTrendFixedLot, raw(panel, "finalLot"))} />
+              <InfoRow label="Sideway Risk %" valueText={`${pickText(config.configuredSidewayRiskPercent, "1")}%`} />
+              <InfoRow label="Sideway Max Lot" valueText={pickText(config.configuredSidewayMaxLot, "0.30")} />
+              <InfoRow label="Auto Lot Mode" valueText="AUTO_LOT_SHADOW" />
+              <InfoRow label="Áp dụng" valueText="NEW_POSITIONS_ONLY" />
+            </PanelCard>
 
-      <Grid container spacing={2}>
+            <PanelCard title="TRẠNG THÁI HỆ THỐNG" accent="green">
+              <StatusDot label="Market Data" ok={Boolean(bridge.reachable || panel)} />
+              <StatusDot label="AI Engine" ok={Boolean(panel)} />
+              <StatusDot label="Risk Manager" ok={Boolean(accountRisk.configuration)} />
+              <StatusDot label="Trade Executor" ok={Boolean(asRecord(processes.trend).alive || asRecord(processes.sideway).alive)} />
+              <StatusDot label="Telegram" ok={Boolean(lifecycle.telegramReady)} />
+              <StatusDot label="Lot Binding" ok={Boolean(lotRuntime.activeAlive)} />
+            </PanelCard>
+          </Stack>
+        </Grid>
+
         <Grid size={{ xs: 12, lg: 6 }}>
-          <SectionCard title="Lý do vào / chờ lệnh" subtitle="Rút gọn theo Decision Monitor, đồng bộ với panel MT5.">
-            <Stack spacing={1.1}>{entryReasons.map((reason) => <Typography key={reason} variant="body2">• {reason}</Typography>)}</Stack>
-          </SectionCard>
+          <Stack spacing={2}>
+            <MiniChart panel={panel} />
+            <PanelCard title="NHẬT KÝ GIAO DỊCH GẦN NHẤT" accent="cyan">
+              <Stack spacing={1.1}>
+                {["Chưa có nhật ký giao dịch mới từ payload hiện tại.", "Khi có lệnh, bảng này sẽ hiển thị: thời gian, loại, lot, entry, SL, TP, lý do vào, kết quả, profit."].map((item, index) => (
+                  <Typography key={index} variant="body2" color="text.secondary">• {item}</Typography>
+                ))}
+              </Stack>
+            </PanelCard>
+          </Stack>
         </Grid>
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <SectionCard title="Lý do giữ / không gửi lệnh" subtitle="Giải thích vì sao bot không mở lệnh mới ở thời điểm hiện tại.">
-            <Stack spacing={1.1}>{holdReasons.map((reason) => <Typography key={reason} variant="body2" color="text.secondary">• {reason}</Typography>)}</Stack>
-          </SectionCard>
+
+        <Grid size={{ xs: 12, lg: 3 }}>
+          <Stack spacing={2}>
+            <PanelCard title="CHI TIẾT LỆNH ĐANG MỞ" accent={hasPosition ? "green" : "orange"}>
+              {hasPosition ? (
+                <>
+                  <Stack direction="row" spacing={1} alignItems="center" mb={1.2}>
+                    <Chip label={value(panel, "positionSide", "—")} color="success" sx={{ fontWeight: 950 }} />
+                    <Typography variant="body2" color="text.secondary">Ticket #{value(panel, "ticket", "—")}</Typography>
+                  </Stack>
+                  <InfoRow label="Entry Price" valueText={value(panel, "positionEntry", "—")} />
+                  <InfoRow label="Stop Loss" valueText={value(panel, "positionStopLoss", "—")} tone="error" />
+                  <InfoRow label="TP1" valueText={value(panel, "positionTp1", "—")} tone="success" />
+                  <InfoRow label="TP2" valueText={value(panel, "positionTp2", "—")} tone="success" />
+                  <InfoRow label="Lot" valueText={value(panel, "positionVolume", "—")} />
+                  <InfoRow label="Profit" valueText={`${profit} USD`} tone={Number(profit) >= 0 ? "success" : "error"} />
+                </>
+              ) : (
+                <Typography variant="body2" color="text.secondary">Không có vị thế XAUUSD đang mở. Bot đang chờ setup hợp lệ.</Typography>
+              )}
+            </PanelCard>
+
+            <ReasonBox title={hasPosition ? "LÝ DO VÀO LỆNH" : "LÝ DO CHƯA VÀO LỆNH"} items={entryReasons} accent="cyan" />
+            <ReasonBox title="LÝ DO GIỮ LỆNH" items={holdReasons} accent="purple" />
+            <ReasonBox title="LÝ DO CHỐT LỆNH" items={exitReasons} accent="orange" />
+            <PanelCard title="PROFIT" accent={hasPosition && Number(profit) >= 0 ? "green" : "orange"}>
+              <Typography variant="h4" fontWeight={950} color={hasPosition && Number(profit) >= 0 ? "success.main" : "text.secondary"}>
+                {hasPosition ? `${profit} USD` : "—"}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" mt={0.5}>Floating P/L theo vị thế đang quản lý.</Typography>
+            </PanelCard>
+          </Stack>
         </Grid>
       </Grid>
+
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <ReasonBox title="ĐIỀU KIỆN TREND BOT — ĐÃ CHỈNH LẠI" items={trendRules} accent="green" />
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <ReasonBox title="ĐIỀU KIỆN SIDEWAY BOT" items={sidewayRules} accent="cyan" />
+        </Grid>
+      </Grid>
+
+      <Box sx={{ px: 2, py: 1.4, borderRadius: 3, bgcolor: "rgba(3,10,18,.82)", border: "1px solid rgba(148,163,184,.16)" }}>
+        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1.5}>
+          <Typography variant="body2">BOT STATUS: <b>{stage}</b></Typography>
+          <Typography variant="body2">EXECUTORS: TREND {asRecord(processes.trend).alive ? "✓" : "—"} | SIDEWAY {asRecord(processes.sideway).alive ? "✓" : "—"}</Typography>
+          <Typography variant="body2">RISK MODE: DEMO ONLY</Typography>
+          <Typography variant="body2">TELEGRAM: {lifecycle.telegramReady ? "KẾT NỐI" : "CHECK"}</Typography>
+          <Typography variant="body2">AUTO-LOT: {lotRuntime.activeAlive ? "ON" : "CHECK"}</Typography>
+        </Stack>
+      </Box>
     </Stack>
   );
 }
