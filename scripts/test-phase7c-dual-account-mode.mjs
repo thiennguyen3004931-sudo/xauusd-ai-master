@@ -144,12 +144,14 @@ for (const marker of [
   assert.ok(sidewayLogicSource.includes(marker), `Sideway canonical logic missing stop-policy marker: ${marker}`);
 }
 
+// Drift tests remove every account-mode marker. This proves the adapters fail
+// closed instead of silently transforming only one of several guard clauses.
 assert.throws(
-  () => transformPhase7CTrendLegacySource(trendSource.replace("health.accountMode !== \"demo\"", "health.accountMode !== \"paper\"")),
+  () => transformPhase7CTrendLegacySource(trendSource.replaceAll('health.accountMode !== "demo"', 'health.accountMode !== "paper"')),
   /adapter marker no longer matches source/,
 );
 assert.throws(
-  () => transformPhase7CSidewaySource(sidewaySource.replace("health.accountMode !== \"demo\"", "health.accountMode !== \"paper\"")),
+  () => transformPhase7CSidewaySource(sidewaySource.replaceAll('health.accountMode !== "demo"', 'health.accountMode !== "paper"')),
   /adapter marker no longer matches source/,
 );
 
