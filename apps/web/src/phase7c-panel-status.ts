@@ -13,6 +13,57 @@ export interface Phase7CCandle {
   volume?: number;
 }
 
+export interface Phase7CPerformanceTrade {
+  id: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  ownership: "SYSTEM" | "VALIDATION" | "OTHER";
+  strategy: "TREND" | "SIDEWAY" | "OTHER";
+  openedAt: number;
+  closedAt: number;
+  durationMinutes: number;
+  volume: number;
+  entry: number;
+  exit: number;
+  netPnl: number;
+  session: string;
+  brokerHour: number;
+  weekday: string;
+  exitReason: string;
+}
+
+export interface Phase7CPerformanceSnapshot {
+  source: "MT5_DEMO_READ_ONLY";
+  symbol: string;
+  currency: string;
+  days: number;
+  generatedAt: number;
+  accountWide: {
+    metrics: {
+      totalTrades: number;
+      wins: number;
+      losses: number;
+      netPnl: number;
+      winRatePercent: number;
+      profitFactor: number | null;
+      maxDrawdown: number;
+      maxDrawdownPercent: number;
+    };
+  };
+  systemOwned: {
+    metrics: {
+      totalTrades: number;
+      wins: number;
+      losses: number;
+      netPnl: number;
+      winRatePercent: number;
+      profitFactor: number | null;
+    };
+    sampleReady: boolean;
+  };
+  trades: Phase7CPerformanceTrade[];
+}
+
 export interface Phase7CUiContract {
   version: 2;
   generatedAt: number;
@@ -88,6 +139,7 @@ const LIFECYCLE_URL = "/api/v1/phase7c/lifecycle";
 const ACCOUNT_RISK_URL = "/api/v1/phase7c/account-risk?riskPercent=1&maxLot=0.3";
 const LOT_SETTINGS_URL = "/api/v1/phase7c/lot-settings";
 const CANDLES_URL = "/api/v1/phase7c-chart/candles?symbol=XAUUSD&count=240";
+const PERFORMANCE_URL = "/api/v1/mt5/performance?days=90&symbol=XAUUSD";
 
 type FetchResult<T> = { payload: T; usedDirectFallback: boolean };
 
@@ -200,6 +252,15 @@ export async function fetchPhase7CPanelStatus(): Promise<Phase7CPanelStatus> {
   const payload = parsePanelStatus(result.payload);
   if (payload.version !== "1") {
     throw new Error("Decision Monitor trả payload chưa hợp lệ. Trang sẽ tự thử lại.");
+  }
+  return payload;
+}
+
+export async function fetchPhase7CPerformance(): Promise<Phase7CPerformanceSnapshot> {
+  const result = await fetchJsonWithFallback<Phase7CPerformanceSnapshot>(PERFORMANCE_URL, "Lịch sử MT5");
+  const payload = result.payload;
+  if (payload.source !== "MT5_DEMO_READ_ONLY" || !Array.isArray(payload.trades)) {
+    throw new Error("Lịch sử MT5 trả payload chưa hợp lệ.");
   }
   return payload;
 }
