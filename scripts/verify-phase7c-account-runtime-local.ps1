@@ -107,10 +107,15 @@ $telegramStatusPath = Join-Path $RuntimeDir "telegram-mode-status.json"
 if ($telegramConfigured -and (Test-Path $telegramStatusPath)) {
   try {
     $telegramRuntime = Get-Content -LiteralPath $telegramStatusPath -Raw | ConvertFrom-Json
-    $age = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$telegramRuntime.lastTelegramSuccessAt
-    $telegramReady = [bool]$telegramRuntime.ready -and $age -ge -10000 -and $age -le 60000
+    $lastTelegramSuccessAt = $telegramRuntime.lastTelegramSuccessAt
     Write-Host "PHASE7C_ACCOUNT_VERIFY_TELEGRAM_RUNTIME_STATUS=$($telegramRuntime.status)"
-    Write-Host "PHASE7C_ACCOUNT_VERIFY_TELEGRAM_HEARTBEAT_AGE_MS=$age"
+    if ($null -ne $lastTelegramSuccessAt -and [long]$lastTelegramSuccessAt -gt 0) {
+      $age = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$lastTelegramSuccessAt
+      $telegramReady = [bool]$telegramRuntime.ready -and [string]$telegramRuntime.status -eq "READY" -and $age -ge -10000 -and $age -le 60000
+      Write-Host "PHASE7C_ACCOUNT_VERIFY_TELEGRAM_HEARTBEAT_AGE_MS=$age"
+    } else {
+      Write-Host "PHASE7C_ACCOUNT_VERIFY_TELEGRAM_HEARTBEAT_AGE_MS=NO_SUCCESS_YET"
+    }
   } catch { $telegramReady = $false }
 }
 Write-Host "PHASE7C_ACCOUNT_VERIFY_TELEGRAM_CONFIGURED=$telegramConfigured"
@@ -149,7 +154,14 @@ if ([string]$health.accountMode -ne $ExpectedBrokerMode) { throw "Broker account
 if (-not [bool]$health.tradingEnabled) { throw "MT5 bridge trading is disabled." }
 $login = [long]$health.accountLogin
 if ($envInfo.allowedLogins -notcontains $login) { throw "Connected MT5 login is not in the selected account allowlist." }
-$positions = @(Invoke-RestMethod -Uri "$bridgeBase/v1/positions?symbol=XAUUSD" -Headers $headers -Method Get -TimeoutSec 5)
+$positionResponse = Invoke-WebRequest -Uri "$bridgeBase/v1/positions?symbol=XAUUSD" -Headers $headers -UseBasicParsing -TimeoutSec 5
+$positionRaw = ([string]$positionResponse.Content).Trim()
+if ([string]::IsNullOrWhiteSpace($positionRaw) -or $positionRaw -eq "[]") {
+  $positions = @()
+} else {
+  $positionParsed = $positionRaw | ConvertFrom-Json
+  $positions = @($positionParsed | Where-Object { $null -ne $_ })
+}
 $spec = Invoke-RestMethod -Uri "$bridgeBase/v1/symbols/XAUUSD/spec" -Headers $headers -Method Get -TimeoutSec 5
 Write-Host "PHASE7C_ACCOUNT_VERIFY_BROKER_MODE=$($health.accountMode)"
 Write-Host "PHASE7C_ACCOUNT_VERIFY_TRADING_ENABLED=$($health.tradingEnabled)"
