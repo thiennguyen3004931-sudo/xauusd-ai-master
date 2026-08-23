@@ -58,7 +58,7 @@ globalThis.fetch = async function phase7CSidewayLockedFetch(input, init = undefi
   }
 };
 
-await import("./run-phase7c-sideway-controller.mjs");
+await import("./run-phase7c-sideway-account-mode.mjs");
 
 async function fetchOpenPositionsUnderLock(request) {
   const requestUrl = new URL(request.url);
