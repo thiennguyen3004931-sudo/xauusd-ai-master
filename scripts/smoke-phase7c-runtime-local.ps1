@@ -28,9 +28,9 @@ $webBase = $WebUrl.TrimEnd('/')
 $verifyArgs = @(
   "-NoProfile",
   "-ExecutionPolicy", "Bypass",
-  "-File", ('\"{0}\"' -f $Verifier),
-  "-WorkDir", ('\"{0}\"' -f $WorkDir),
-  "-ControlApiUrl", ('\"{0}\"' -f $apiBase)
+  "-File", ('"{0}"' -f $Verifier),
+  "-WorkDir", ('"{0}"' -f $WorkDir),
+  "-ControlApiUrl", ('"{0}"' -f $apiBase)
 )
 if (-not $SkipTelegramRequirement) {
   $verifyArgs += "-RequireTelegram"
