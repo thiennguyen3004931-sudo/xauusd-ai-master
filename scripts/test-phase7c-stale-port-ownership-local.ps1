@@ -33,7 +33,7 @@ function Assert-PowerShellSyntax([string]$Path) {
   )
   if (@($errors).Count -gt 0) {
     $messages = @($errors | ForEach-Object { $_.Message }) -join " | "
-    throw "PowerShell syntax errors in $Path: $messages"
+    throw "PowerShell syntax errors in ${Path}: $messages"
   }
 }
 
