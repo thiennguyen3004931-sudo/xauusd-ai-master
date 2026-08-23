@@ -1,5 +1,3 @@
-Set-StrictMode -Version Latest
-
 function Get-Phase7CExecutorTaskRunnerPath {
   param([Parameter(Mandatory = $true)] [string]$ProjectRoot)
 
