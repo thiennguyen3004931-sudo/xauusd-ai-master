@@ -60,7 +60,7 @@ test("volume POC stays inside the range", () => {
   assert.ok(poc !== null && poc >= 2392 && poc <= 2408);
 });
 
-test("BUY sideway plan uses zone+ATR stop, fixed +10 partial and opposite range TP2", () => {
+test("BUY sideway plan widens a close structural stop to the project minimum 6 and keeps +10 partial", () => {
   const plan = buildSidewayPlan({
     side: "BUY",
     bid: 2392.2,
@@ -73,14 +73,17 @@ test("BUY sideway plan uses zone+ATR stop, fixed +10 partial and opposite range 
     digits: 2,
   });
   assert.equal(plan.accepted, true);
+  assert.equal(plan.stopDistance, 6);
+  assert.equal(plan.stopLoss, 2386.3);
+  assert.equal(plan.structuralStopDistance, 3.3);
+  assert.equal(plan.stopPolicy, "WIDENED_TO_MIN_6");
   assert.equal(plan.tp1Kind, "FIXED_PLUS_10");
   assert.equal(plan.tp1, 2402.3);
   assert.equal(plan.takeProfit, 2408);
-  assert.ok(plan.stopLoss < 2390);
   assert.ok(plan.rewardRisk >= 1.2);
 });
 
-test("SELL sideway plan applies the same fixed +10 partial symmetrically", () => {
+test("SELL sideway plan applies the same 6 minimum and fixed +10 partial symmetrically", () => {
   const plan = buildSidewayPlan({
     side: "SELL",
     bid: 2407.8,
@@ -93,10 +96,58 @@ test("SELL sideway plan applies the same fixed +10 partial symmetrically", () =>
     digits: 2,
   });
   assert.equal(plan.accepted, true);
+  assert.equal(plan.stopDistance, 6);
+  assert.equal(plan.stopLoss, 2413.8);
+  assert.equal(plan.structuralStopDistance, 3.2);
+  assert.equal(plan.stopPolicy, "WIDENED_TO_MIN_6");
   assert.equal(plan.tp1Kind, "FIXED_PLUS_10");
   assert.equal(plan.tp1, 2397.8);
   assert.equal(plan.takeProfit, 2392);
-  assert.ok(plan.stopLoss > 2410);
+});
+
+test("sideway plan keeps a structural stop unchanged when it is already between 6 and 10", () => {
+  const structuralRange = {
+    demand: { low: 2385, high: 2392 },
+    supply: { low: 2410, high: 2412 },
+  };
+  const plan = buildSidewayPlan({
+    side: "BUY",
+    bid: 2392.2,
+    ask: 2392.3,
+    range: structuralRange,
+    atr: 4,
+    poc: 2400,
+    point: 0.01,
+    stopsLevelTicks: 0,
+    digits: 2,
+  });
+  assert.equal(plan.accepted, true);
+  assert.equal(plan.stopDistance, 8.3);
+  assert.equal(plan.stopLoss, 2384);
+  assert.equal(plan.structuralStopDistance, 8.3);
+  assert.equal(plan.stopPolicy, "STRUCTURAL_6_TO_10");
+});
+
+test("sideway plan fails closed and waits for a later pullback when structural stop exceeds 10", () => {
+  const wideRange = {
+    demand: { low: 2378, high: 2392 },
+    supply: { low: 2410, high: 2412 },
+  };
+  const plan = buildSidewayPlan({
+    side: "BUY",
+    bid: 2392.2,
+    ask: 2392.3,
+    range: wideRange,
+    atr: 4,
+    poc: 2400,
+    point: 0.01,
+    stopsLevelTicks: 0,
+    digits: 2,
+  });
+  assert.equal(plan.accepted, false);
+  assert.equal(plan.reason, "WAIT_PULLBACK_STOP_GT_10");
+  assert.ok(plan.structuralStopDistance > 10);
+  assert.equal(plan.maxInitialStopDistance, 10);
 });
 
 test("sideway plan rejects a range whose opposite boundary is reached before +10", () => {
