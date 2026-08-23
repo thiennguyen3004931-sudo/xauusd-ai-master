@@ -5,11 +5,14 @@ param(
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Supervisor = Join-Path $PSScriptRoot "run-phase7c-executors-local.ps1"
+$GuardLibrary = Join-Path $PSScriptRoot "lib\phase7c-startup-runner-guard.ps1"
 $ConfigPath = Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.json"
 
 if (-not (Test-Path $Supervisor)) { throw "Phase 7C executor supervisor not found: $Supervisor" }
+if (-not (Test-Path $GuardLibrary)) { throw "Phase 7C startup runner guard not found: $GuardLibrary" }
 if (-not (Test-Path $ConfigPath)) { throw "Phase 7C executor task config not found: $ConfigPath" }
 if ($RestartDelaySeconds -lt 5 -or $RestartDelaySeconds -gt 300) { throw "RestartDelaySeconds must be between 5 and 300." }
+. $GuardLibrary
 
 $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
 if ([int]$config.version -ne 1) { throw "Unsupported executor task config version: $($config.version)" }
@@ -66,6 +69,16 @@ $runnerStatusPath = Join-Path $runtimeDir "startup-runner-status.json"
 $runnerErrLog = Join-Path $runtimeDir "startup-runner.err.log"
 $supervisorOut = Join-Path $runtimeDir "startup-supervisor.out.log"
 $supervisorErr = Join-Path $runtimeDir "startup-supervisor.err.log"
+$runnerLockPath = Join-Path $runtimeDir "startup-runner.lock"
+
+$runnerLock = $null
+try {
+  $runnerLock = Open-Phase7CStartupRunnerLock -Path $runnerLockPath
+  Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_LOCK=ACQUIRED|PID=$PID"
+} catch {
+  Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_LOCK=BLOCKED|PID=$PID"
+  throw
+}
 
 function Write-RunnerStatus(
   [string]$Status,
@@ -74,7 +87,7 @@ function Write-RunnerStatus(
   [Nullable[int]]$SupervisorPid,
   [Nullable[int]]$ExitCode
 ) {
-  [pscustomobject]@{
+  $statusPayload = [pscustomobject]@{
     version = 1
     status = $Status
     runnerPid = $PID
@@ -87,7 +100,8 @@ function Write-RunnerStatus(
     pnpmPath = $pnpmPath
     message = $Message
     updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-  } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $runnerStatusPath -Encoding utf8
+  }
+  Write-Phase7CJsonAtomic -Path $runnerStatusPath -Value $statusPayload -Depth 4
 }
 
 function Append-RunnerError([string]$Message) {
@@ -105,56 +119,63 @@ Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_TREND_FIXED_LOT=$trendFixedVolume"
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_SIDEWAY_RISK_PERCENT=$sidewayRiskPercent"
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_SIDEWAY_MAX_LOT=$sidewayMaxLot"
 Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_STATUS=$runnerStatusPath"
+Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_LOCK_PATH=$runnerLockPath"
 
 $attempt = 0
-while ($true) {
-  $attempt++
-  $process = $null
-  try {
-    $arguments = @(
-      "-NoProfile",
-      "-ExecutionPolicy", "Bypass",
-      "-File", ('"{0}"' -f $Supervisor),
-      "-WorkDir", ('"{0}"' -f $workDir),
-      "-ControlApiUrl", ('"{0}"' -f $controlApiUrl),
-      "-EnvFile", ('"{0}"' -f $envFile),
-      "-TelegramEnvFile", ('"{0}"' -f $telegramEnvFile),
-      "-TrendFixedVolume", $trendFixedVolume.ToString([System.Globalization.CultureInfo]::InvariantCulture),
-      "-SidewayRiskPercent", $sidewayRiskPercent.ToString([System.Globalization.CultureInfo]::InvariantCulture),
-      "-SidewayMaxLot", $sidewayMaxLot.ToString([System.Globalization.CultureInfo]::InvariantCulture),
-      "-Armed"
-    )
+try {
+  while ($true) {
+    $attempt++
+    $process = $null
+    try {
+      $arguments = @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", ('\"{0}\"' -f $Supervisor),
+        "-WorkDir", ('\"{0}\"' -f $workDir),
+        "-ControlApiUrl", ('\"{0}\"' -f $controlApiUrl),
+        "-EnvFile", ('\"{0}\"' -f $envFile),
+        "-TelegramEnvFile", ('\"{0}\"' -f $telegramEnvFile),
+        "-TrendFixedVolume", $trendFixedVolume.ToString([System.Globalization.CultureInfo]::InvariantCulture),
+        "-SidewayRiskPercent", $sidewayRiskPercent.ToString([System.Globalization.CultureInfo]::InvariantCulture),
+        "-SidewayMaxLot", $sidewayMaxLot.ToString([System.Globalization.CultureInfo]::InvariantCulture),
+        "-Armed"
+      )
 
-    Write-RunnerStatus "STARTING_SUPERVISOR" "Launching Phase 7C executor supervisor." $attempt $null $null
-    $process = Start-Process `
-      -FilePath "powershell.exe" `
-      -ArgumentList $arguments `
-      -WorkingDirectory $ProjectRoot `
-      -RedirectStandardOutput $supervisorOut `
-      -RedirectStandardError $supervisorErr `
-      -PassThru
+      Write-RunnerStatus "STARTING_SUPERVISOR" "Launching Phase 7C executor supervisor." $attempt $null $null
+      $process = Start-Process `
+        -FilePath "powershell.exe" `
+        -ArgumentList $arguments `
+        -WorkingDirectory $ProjectRoot `
+        -RedirectStandardOutput $supervisorOut `
+        -RedirectStandardError $supervisorErr `
+        -PassThru
 
-    Write-RunnerStatus "SUPERVISOR_RUNNING" "Phase 7C executor supervisor process is running." $attempt $process.Id $null
+      Write-RunnerStatus "SUPERVISOR_RUNNING" "Phase 7C executor supervisor process is running." $attempt $process.Id $null
 
-    while (-not $process.HasExited) {
-      Start-Sleep -Seconds 10
-      $process.Refresh()
-      if (-not $process.HasExited) {
-        Write-RunnerStatus "SUPERVISOR_RUNNING" "Phase 7C executor supervisor process is running." $attempt $process.Id $null
+      while (-not $process.HasExited) {
+        Start-Sleep -Seconds 10
+        $process.Refresh()
+        if (-not $process.HasExited) {
+          Write-RunnerStatus "SUPERVISOR_RUNNING" "Phase 7C executor supervisor process is running." $attempt $process.Id $null
+        }
       }
+
+      $exitCode = $process.ExitCode
+      $message = "Phase 7C executor supervisor exited with code $exitCode; restarting in $RestartDelaySeconds seconds."
+      Append-RunnerError $message
+      Write-RunnerStatus "ERROR_RETRYING" $message $attempt $process.Id $exitCode
+    }
+    catch {
+      $message = "Phase 7C executor supervisor launch/monitor failed: $($_.Exception.Message). Restarting in $RestartDelaySeconds seconds."
+      Append-RunnerError $message
+      $pidValue = if ($null -ne $process) { [Nullable[int]]$process.Id } else { $null }
+      Write-RunnerStatus "ERROR_RETRYING" $message $attempt $pidValue $null
     }
 
-    $exitCode = $process.ExitCode
-    $message = "Phase 7C executor supervisor exited with code $exitCode; restarting in $RestartDelaySeconds seconds."
-    Append-RunnerError $message
-    Write-RunnerStatus "ERROR_RETRYING" $message $attempt $process.Id $exitCode
+    Start-Sleep -Seconds $RestartDelaySeconds
   }
-  catch {
-    $message = "Phase 7C executor supervisor launch/monitor failed: $($_.Exception.Message). Restarting in $RestartDelaySeconds seconds."
-    Append-RunnerError $message
-    $pidValue = if ($null -ne $process) { [Nullable[int]]$process.Id } else { $null }
-    Write-RunnerStatus "ERROR_RETRYING" $message $attempt $pidValue $null
+} finally {
+  if ($null -ne $runnerLock) {
+    $runnerLock.Dispose()
   }
-
-  Start-Sleep -Seconds $RestartDelaySeconds
 }
