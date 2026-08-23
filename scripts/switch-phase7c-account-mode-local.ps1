@@ -19,6 +19,7 @@ $Verifier = Join-Path $PSScriptRoot "verify-phase7c-account-runtime-local.ps1"
 $Smoke = Join-Path $PSScriptRoot "smoke-phase7c-account-runtime-local.ps1"
 $AccountStatePath = Join-Path $ProjectRoot ".runtime\phase7c-account-mode.json"
 $TaskConfigPath = Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.json"
+$BridgeRunnerLockPath = Join-Path $ProjectRoot ".runtime\phase7c-account-bridge\startup-runner.lock"
 $CanonicalRiskPath = $null
 
 foreach ($required in @($AccountLibrary, $ExecutorStopper, $Verifier, $Smoke)) {
@@ -170,6 +171,26 @@ function Assert-LegacyBridgeTaskSafeToStop {
   if (-not $projectOwned) { throw "Legacy bridge task is Running but ownership cannot be proven. Refusing to stop it." }
 }
 
+function Wait-ExclusiveLockReleased([string]$Path, [int]$TimeoutSeconds = 15) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  do {
+    $probe = $null
+    try {
+      $directory = Split-Path -Parent $Path
+      if ($directory) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
+      $probe = [System.IO.File]::Open($Path, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+      $probe.Dispose()
+      Write-Host "PHASE7C_ACCOUNT_SWITCH_LOCK_RELEASED=$Path"
+      return
+    } catch [System.IO.IOException] {
+      Start-Sleep -Milliseconds 500
+    } finally {
+      if ($null -ne $probe) { try { $probe.Dispose() } catch {} }
+    }
+  } while ((Get-Date) -lt $deadline)
+  throw "Timed out waiting for exclusive runner lock release: $Path"
+}
+
 function Stop-ExactVerifiedBridgeListener($CurrentEnv) {
   $port = [int]$CurrentEnv.bridgePort
   $listeners = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { [int]$_.LocalPort -eq $port })
@@ -194,15 +215,7 @@ function Stop-ExactVerifiedBridgeListener($CurrentEnv) {
 function Stop-ExecutorStack {
   Stop-ScheduledTask -TaskName $ExecutorTaskName -ErrorAction SilentlyContinue
   $runnerLock = Join-Path $WorkDir "phase7c-executors\startup-runner.lock"
-  for ($i = 0; $i -lt 20; $i++) {
-    Start-Sleep -Milliseconds 500
-    $probe = $null
-    try {
-      $probe = [System.IO.File]::Open($runnerLock, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
-      if ($null -ne $probe) { $probe.Dispose(); break }
-    } catch [System.IO.IOException] {}
-    finally { if ($null -ne $probe) { try { $probe.Dispose() } catch {} } }
-  }
+  Wait-ExclusiveLockReleased -Path $runnerLock -TimeoutSeconds 15
   & $ExecutorStopper -WorkDir $WorkDir
   if ($LASTEXITCODE -ne 0) { throw "Executor stopper failed." }
 }
@@ -211,7 +224,7 @@ function Stop-BridgeStack($CurrentEnv) {
   Assert-LegacyBridgeTaskSafeToStop
   Stop-ScheduledTask -TaskName $BridgeTaskName -ErrorAction SilentlyContinue
   Stop-ScheduledTask -TaskName $LegacyBridgeTaskName -ErrorAction SilentlyContinue
-  Start-Sleep -Seconds 1
+  Wait-ExclusiveLockReleased -Path $BridgeRunnerLockPath -TimeoutSeconds 15
   Stop-ExactVerifiedBridgeListener $CurrentEnv
 }
 
@@ -350,6 +363,7 @@ try {
     try { Stop-ScheduledTask -TaskName $ExecutorTaskName -ErrorAction SilentlyContinue } catch {}
     try { Stop-ScheduledTask -TaskName $BridgeTaskName -ErrorAction SilentlyContinue } catch {}
     try {
+      Wait-ExclusiveLockReleased -Path $BridgeRunnerLockPath -TimeoutSeconds 15
       Write-SelectedRuntimeFiles $previousMode $previousCurrent.env $previousRisk
       Start-TargetBridge $previousCurrent.env $previousMode
       Start-ScheduledTask -TaskName $ExecutorTaskName -ErrorAction Stop
