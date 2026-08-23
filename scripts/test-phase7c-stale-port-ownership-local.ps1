@@ -2,9 +2,11 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Library = Join-Path $PSScriptRoot "lib\phase7c-core-endpoint-ownership.ps1"
 $Cleanup = Join-Path $PSScriptRoot "clear-phase7c-project-core-ports-local.ps1"
+$SafeActivation = Join-Path $PSScriptRoot "activate-phase7c-safe-local.ps1"
 
 if (-not (Test-Path -LiteralPath $Library)) { throw "Missing ownership library: $Library" }
 if (-not (Test-Path -LiteralPath $Cleanup)) { throw "Missing cleanup script: $Cleanup" }
+if (-not (Test-Path -LiteralPath $SafeActivation)) { throw "Missing safe activation wrapper: $SafeActivation" }
 . $Library
 
 function Assert-True([bool]$Value, [string]$Message) {
@@ -95,11 +97,22 @@ Assert-Equal (Resolve-Phase7CEndpointFallbackPid -ListenerPid 0 -EndpointOwned $
 
 Assert-PowerShellSyntax $Library
 Assert-PowerShellSyntax $Cleanup
+Assert-PowerShellSyntax $SafeActivation
 Assert-PowerShellSyntax (Join-Path $PSScriptRoot "activate-phase7c-local.ps1")
 
 $cleanupText = Get-Content -LiteralPath $Cleanup -Raw
 Assert-True ($cleanupText -match 'SCOPE=LISTENER_ONLY') "cleanup must log listener-only fallback scope"
 Assert-True ($cleanupText -match 'ACTION=KEEP') "cleanup must preserve unproven listeners"
 Assert-True ($cleanupText -match 'refused to kill one or more unproven listeners') "cleanup must fail closed when ownership cannot be proven"
+Assert-True ($cleanupText -match 'accountMode -ne \\"demo\\"') "bridge fallback must remain DEMO-only"
+
+$safeActivationText = Get-Content -LiteralPath $SafeActivation -Raw
+Assert-True ($safeActivationText -match 'safe-activation-entry-freeze') "safe activation must freeze entries before cleanup"
+Assert-True ($safeActivationText -match 'Stop-ExecutorTaskIfRunning') "safe activation must stop an existing task-managed runner before cleanup"
+Assert-True ($safeActivationText -match 'PHASE7C_SAFE_ACTIVATE_TASK_HANDOFF=PASS') "safe activation must restore task-managed ownership after armed recovery"
+Assert-True ($safeActivationText -match 'PHASE7C_SAFE_ACTIVATE_FINAL_MODE=PAUSE') "safe activation must finish fail-closed in PAUSE"
+Assert-True ($safeActivationText -match 'PSBoundParameters.ContainsKey\("TrendFixedVolume"\)') "safe activation must not overwrite saved trend lot with wrapper defaults"
+Assert-True ($safeActivationText -match 'PSBoundParameters.ContainsKey\("SidewayRiskPercent"\)') "safe activation must not overwrite saved sideway risk with wrapper defaults"
+Assert-True ($safeActivationText -match 'PSBoundParameters.ContainsKey\("SidewayMaxLot"\)') "safe activation must not overwrite saved sideway max lot with wrapper defaults"
 
 Write-Host "PHASE7C_STALE_PORT_OWNERSHIP_TEST=PASS"
