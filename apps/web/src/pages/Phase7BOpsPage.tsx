@@ -31,6 +31,7 @@ type LotInput = {
 
 const LOT_SETTINGS_URL = "/api/v1/phase7c/lot-settings";
 const CONTROL_BASE = "http://127.0.0.1:3711";
+const MANAGED_LOT_STEP = 0.03;
 
 function asRecord(value: unknown): Record<string, any> {
   return value && typeof value === "object" ? (value as Record<string, any>) : {};
@@ -107,16 +108,26 @@ function clampLotInputs(input: LotInput): LotInput {
   };
 }
 
+function isManagedLotIncrement(value: number) {
+  if (!Number.isFinite(value)) return false;
+  const units = value / MANAGED_LOT_STEP;
+  return Math.abs(units - Math.round(units)) < 1e-8;
+}
+
 function validateLotInput(input: LotInput) {
   const errors: string[] = [];
   if (!Number.isFinite(input.trendFixedLot) || input.trendFixedLot < 0.03 || input.trendFixedLot > 0.3) {
     errors.push("Trend fixed lot phải trong khoảng 0.03–0.30.");
+  } else if (!isManagedLotIncrement(input.trendFixedLot)) {
+    errors.push("Trend fixed lot phải theo bước 0.03: 0.03, 0.06, 0.09 ... 0.30.");
   }
   if (!Number.isFinite(input.sidewayRiskPercent) || input.sidewayRiskPercent < 0.01 || input.sidewayRiskPercent > 1) {
     errors.push("Sideway risk percent phải trong khoảng 0.01–1.00%.");
   }
   if (!Number.isFinite(input.sidewayMaxLot) || input.sidewayMaxLot < 0.03 || input.sidewayMaxLot > 0.3) {
     errors.push("Sideway max lot phải trong khoảng 0.03–0.30.");
+  } else if (!isManagedLotIncrement(input.sidewayMaxLot)) {
+    errors.push("Sideway max lot phải theo bước 0.03: 0.03, 0.06, 0.09 ... 0.30.");
   }
   return errors;
 }
@@ -203,6 +214,10 @@ export function Phase7BOpsPage() {
 
   const onSubmit = () => {
     if (!canSafelyApply || validationErrors.length > 0 || !hasChanges) return;
+    const confirmed = window.confirm(
+      `Xác nhận lưu cấu hình lot cho LỆNH MỚI?\n\nTrend: ${savedLot.trendFixedLot.toFixed(2)} → ${draftLot.trendFixedLot.toFixed(2)}\nSideway risk: ${savedLot.sidewayRiskPercent.toFixed(2)}% → ${draftLot.sidewayRiskPercent.toFixed(2)}%\nSideway max lot: ${savedLot.sidewayMaxLot.toFixed(2)} → ${draftLot.sidewayMaxLot.toFixed(2)}\n\nKhông thay đổi vị thế đang mở.`,
+    );
+    if (!confirmed) return;
     mutation.mutate(draftLot);
   };
 
@@ -266,16 +281,16 @@ export function Phase7BOpsPage() {
         </Grid>
 
         <Grid size={{ xs: 12, lg: 4 }}>
-          <SectionCard title="Tự điều chỉnh Lot" subtitle="Web kiểm tra range và khóa lưu khi runtime chưa an toàn.">
+          <SectionCard title="Tự điều chỉnh Lot" subtitle="Web kiểm tra range, bước lot 0.03 và khóa lưu khi runtime chưa an toàn.">
             <Stack spacing={2}>
               <TextField
                 label="Trend fixed lot"
                 type="number"
                 value={trendFixedLot}
                 onChange={(event) => setTrendFixedLot(event.target.value)}
-                inputProps={{ min: 0.03, max: 0.3, step: 0.01 }}
-                error={!Number.isFinite(draftLot.trendFixedLot) || draftLot.trendFixedLot < 0.03 || draftLot.trendFixedLot > 0.3}
-                helperText="0.03–0.30 · step 0.01"
+                inputProps={{ min: 0.03, max: 0.3, step: MANAGED_LOT_STEP }}
+                error={!Number.isFinite(draftLot.trendFixedLot) || draftLot.trendFixedLot < 0.03 || draftLot.trendFixedLot > 0.3 || !isManagedLotIncrement(draftLot.trendFixedLot)}
+                helperText="0.03–0.30 · bước 0.03 (0.03, 0.06, 0.09 ... 0.30)"
                 fullWidth
               />
               <TextField
@@ -285,7 +300,7 @@ export function Phase7BOpsPage() {
                 onChange={(event) => setSidewayRiskPercent(event.target.value)}
                 inputProps={{ min: 0.01, max: 1, step: 0.01 }}
                 error={!Number.isFinite(draftLot.sidewayRiskPercent) || draftLot.sidewayRiskPercent < 0.01 || draftLot.sidewayRiskPercent > 1}
-                helperText="0.01–1.00%"
+                helperText="0.01–1.00% · bước 0.01%"
                 fullWidth
               />
               <TextField
@@ -293,9 +308,9 @@ export function Phase7BOpsPage() {
                 type="number"
                 value={sidewayMaxLot}
                 onChange={(event) => setSidewayMaxLot(event.target.value)}
-                inputProps={{ min: 0.03, max: 0.3, step: 0.01 }}
-                error={!Number.isFinite(draftLot.sidewayMaxLot) || draftLot.sidewayMaxLot < 0.03 || draftLot.sidewayMaxLot > 0.3}
-                helperText="0.03–0.30 · step 0.01"
+                inputProps={{ min: 0.03, max: 0.3, step: MANAGED_LOT_STEP }}
+                error={!Number.isFinite(draftLot.sidewayMaxLot) || draftLot.sidewayMaxLot < 0.03 || draftLot.sidewayMaxLot > 0.3 || !isManagedLotIncrement(draftLot.sidewayMaxLot)}
+                helperText="0.03–0.30 · bước 0.03 để +10 có thể chốt đúng 1/3"
                 fullWidth
               />
 
@@ -316,7 +331,7 @@ export function Phase7BOpsPage() {
               </Stack>
 
               <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.6 }}>
-                Cơ chế an toàn: NEW POSITIONS ONLY · không martingale · không recovery lot escalation · không chỉnh vị thế đang mở.
+                Cơ chế an toàn: NEW POSITIONS ONLY · lot quản lý theo bước 0.03 · không martingale · không recovery lot escalation · không chỉnh vị thế đang mở.
               </Typography>
             </Stack>
           </SectionCard>
