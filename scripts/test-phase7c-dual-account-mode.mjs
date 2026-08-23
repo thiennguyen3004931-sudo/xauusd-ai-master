@@ -9,6 +9,7 @@ import {
   transformPhase7CSidewaySource,
   transformPhase7CTrendLegacySource,
 } from "./phase7c-live-source-adapters.mjs";
+import { buildSidewayPlan } from "./phase7c-sideway-logic.mjs";
 
 const scriptsDir = fileURLToPath(new URL("./", import.meta.url));
 
@@ -91,10 +92,56 @@ for (const marker of [
   "PHASE7C_SIDEWAY_PLUS6=SL_TO_ENTRY",
   "PHASE7C_SIDEWAY_PLUS10=PARTIAL_ONE_THIRD",
   "PHASE7C_SIDEWAY_DAILY_RECOVERY_LOT_ESCALATION=OFF",
-  "WAIT_PULLBACK_STOP_GT_10",
 ]) {
   assert.ok(sidewaySource.includes(marker), `Sideway canonical source missing strategy marker: ${marker}`);
   assert.ok(sidewayLive.includes(marker), `Sideway LIVE adapter mutated strategy marker: ${marker}`);
+}
+
+// Verify the canonical Sideway plan itself instead of relying on a controller
+// log literal. A structural stop wider than 10 must fail closed and explicitly
+// wait for a later pullback; a stop closer than 6 must be widened to 6.
+const tooWidePlan = buildSidewayPlan({
+  side: "BUY",
+  bid: 99.9,
+  ask: 100,
+  range: {
+    demand: { low: 89, high: 95 },
+    supply: { low: 120, high: 122 },
+  },
+  atr: 1,
+  point: 0.01,
+  stopsLevelTicks: 0,
+  digits: 2,
+});
+assert.equal(tooWidePlan.accepted, false);
+assert.equal(tooWidePlan.reason, "WAIT_PULLBACK_STOP_GT_10");
+assert.equal(tooWidePlan.maxInitialStopDistance, 10);
+
+const widenedPlan = buildSidewayPlan({
+  side: "BUY",
+  bid: 99.9,
+  ask: 100,
+  range: {
+    demand: { low: 95, high: 97 },
+    supply: { low: 120, high: 122 },
+  },
+  atr: 1,
+  point: 0.01,
+  stopsLevelTicks: 0,
+  digits: 2,
+});
+assert.equal(widenedPlan.accepted, true);
+assert.equal(widenedPlan.stopPolicy, "WIDENED_TO_MIN_6");
+assert.equal(widenedPlan.stopDistance, 6);
+
+const sidewayLogicSource = fs.readFileSync(`${scriptsDir}phase7c-sideway-logic.mjs`, "utf8");
+for (const marker of [
+  "MIN_INITIAL_STOP_DISTANCE = 6",
+  "MAX_INITIAL_STOP_DISTANCE = 10",
+  'reason: "WAIT_PULLBACK_STOP_GT_10"',
+  'stopPolicy: structuralStopDistance < MIN_INITIAL_STOP_DISTANCE',
+]) {
+  assert.ok(sidewayLogicSource.includes(marker), `Sideway canonical logic missing stop-policy marker: ${marker}`);
 }
 
 assert.throws(
