@@ -22,6 +22,11 @@ $RuntimeDir = Join-Path $WorkDir "phase7c-executors"
 $TrendStatePath = Join-Path $WorkDir "phase7b-demo-forward\phase7b-demo-state.json"
 $SidewayStatePath = Join-Path $WorkDir "phase7c-sideway-forward\phase7c-sideway-state.json"
 $TelegramModeStatusPath = Join-Path $RuntimeDir "telegram-mode-status.json"
+$StartupRunnerStatusPath = Join-Path $RuntimeDir "startup-runner-status.json"
+$StartupRunnerLockPath = Join-Path $RuntimeDir "startup-runner.lock"
+$TaskOwnershipHelperPath = Join-Path $PSScriptRoot "lib\phase7c-scheduled-task-ownership.ps1"
+if (-not (Test-Path -LiteralPath $TaskOwnershipHelperPath)) { throw "Scheduled task ownership helper not found: $TaskOwnershipHelperPath" }
+. $TaskOwnershipHelperPath
 
 function Read-EnvValueFromFile([string]$Path, [string]$Name) {
   if (-not (Test-Path $Path)) { return "" }
@@ -101,21 +106,80 @@ function Test-PendingMatchesPosition($Pending, $Position, $Spec) {
   return $true
 }
 
-$task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+$task = $null
+try {
+  $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+} catch {
+  $classification = Get-Phase7CScheduledTaskErrorClassification -Exception $_.Exception
+  Write-Host "PHASE7C_VERIFY_TASK_PROVIDER=$classification"
+  if ($classification -ne 'NOT_FOUND') {
+    throw "Cannot inspect Scheduled Task '$TaskName'. classification=$classification"
+  }
+}
+
+$startupRunner = $false
 if ($null -eq $task) {
   Write-Host "PHASE7C_VERIFY_TASK=NOT_FOUND"
+  Write-Host "PHASE7C_VERIFY_TASK_OWNERSHIP=NOT_FOUND"
   if ($RequireMigratedTask) { throw "Required executor task not found: $TaskName" }
 } else {
+  $expectedRunnerPath = Get-Phase7CExecutorTaskRunnerPath -ProjectRoot $ProjectRoot
+  $ownership = Test-Phase7CExecutorTaskActionOwnership -Actions $task.Actions -ExpectedRunnerPath $expectedRunnerPath
+  $startupRunner = [bool]$ownership.owned
   $actions = @($task.Actions)
   $actionText = if ($actions.Count -eq 1) { "$($actions[0].Execute) $($actions[0].Arguments)" } else { "MULTIPLE_ACTIONS" }
   $directSupervisor = $actions.Count -eq 1 -and $actionText -like "*run-phase7c-executors-local.ps1*" -and $actionText -like "*-Armed*"
-  $startupRunner = $actions.Count -eq 1 -and $actionText -like "*run-phase7c-executor-task-runner-local.ps1*"
   $migrated = $directSupervisor -or $startupRunner
+  $taskDrift = if ($startupRunner) { @(Get-Phase7CExecutorTaskDrift -Task $task) } else { @() }
   Write-Host "PHASE7C_VERIFY_TASK_STATE=$($task.State)"
   Write-Host "PHASE7C_VERIFY_TASK_MIGRATED=$migrated"
   Write-Host "PHASE7C_VERIFY_TASK_STARTUP_RUNNER=$startupRunner"
-  if ($RequireMigratedTask -and -not $migrated) { throw "Scheduled task $TaskName is not migrated to a verified Phase 7C executor action." }
+  Write-Host "PHASE7C_VERIFY_TASK_OWNERSHIP=$($ownership.reason)"
+  Write-Host "PHASE7C_VERIFY_TASK_DRIFT=$(if ($taskDrift.Count -eq 0) { 'NONE' } else { $taskDrift -join ',' })"
+  if ($RequireMigratedTask -and -not $startupRunner) {
+    throw "Scheduled task $TaskName is not the exact owned Phase 7C startup-runner action. reason=$($ownership.reason)"
+  }
+  if ($RequireMigratedTask -and $taskDrift.Count -ne 0) {
+    throw "Scheduled task $TaskName has canonical definition drift: $($taskDrift -join ',')"
+  }
   if (-not $migrated -and $task.State -eq "Running") { throw "Raw/unverified legacy bot task is running. Stop it before Phase 7C execution." }
+}
+
+$startupRunnerPid = $null
+$startupRunnerAlive = $false
+$startupRunnerLockState = 'NOT_APPLICABLE'
+if ($null -ne $task -and $startupRunner) {
+  if (Test-Path -LiteralPath $StartupRunnerStatusPath) {
+    try {
+      $startupRunnerStatus = Get-Content -LiteralPath $StartupRunnerStatusPath -Raw | ConvertFrom-Json
+      if ($null -ne $startupRunnerStatus.runnerPid) {
+        $startupRunnerPid = [int]$startupRunnerStatus.runnerPid
+        $startupRunnerAlive = $null -ne (Get-Process -Id $startupRunnerPid -ErrorAction SilentlyContinue)
+      }
+    } catch {
+      Write-Host 'PHASE7C_VERIFY_STARTUP_RUNNER_STATUS=INVALID'
+    }
+  } else {
+    Write-Host 'PHASE7C_VERIFY_STARTUP_RUNNER_STATUS=MISSING'
+  }
+  $startupRunnerLockState = Get-Phase7CStartupRunnerLockState -LockPath $StartupRunnerLockPath
+  Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_PID=$startupRunnerPid"
+  Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_ALIVE=$startupRunnerAlive"
+  Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_LOCK=$startupRunnerLockState"
+
+  if ($RequireMigratedTask -and $task.State -ne 'Running') {
+    throw "Required startup-runner Scheduled Task is not Running. state=$($task.State)"
+  }
+  if ($RequireMigratedTask -and -not $startupRunnerAlive) {
+    throw 'Required startup-runner task is Running but startup-runner-status.json does not identify a live runner process.'
+  }
+  if ($RequireMigratedTask -and $startupRunnerLockState -ne 'HELD') {
+    throw "Required startup-runner singleton lock is not exclusively held. state=$startupRunnerLockState"
+  }
+} else {
+  Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_PID=$startupRunnerPid"
+  Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_ALIVE=$startupRunnerAlive"
+  Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_LOCK=$startupRunnerLockState"
 }
 
 $telegramToken = Read-EnvValueFromFile $TelegramEnvFile "ZIQ_TELEGRAM_BOT_TOKEN"
