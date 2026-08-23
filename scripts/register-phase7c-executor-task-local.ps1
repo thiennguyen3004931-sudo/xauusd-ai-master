@@ -4,8 +4,8 @@ param(
   [switch]$Repair,
   [switch]$Create,
   [string]$PrincipalUserId = '',
-  [ValidateSet('Interactive', 'S4U', 'ServiceAccount')]
-  [string]$PrincipalLogonType = 'Interactive'
+  [ValidateSet('', 'Interactive', 'S4U', 'ServiceAccount')]
+  [string]$PrincipalLogonType = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -75,11 +75,15 @@ if ($null -eq $task) {
   Write-Host 'PHASE7C_TASK_STATE=NOT_FOUND'
   if (-not $Create) {
     Write-Host 'PHASE7C_TASK_MUTATION=BLOCKED'
-    throw "Task '$TaskName' does not exist. Re-run with -Create and an explicit -PrincipalUserId after reviewing the principal."
+    throw "Task '$TaskName' does not exist. Re-run with -Create and explicit principal identity/logon semantics after review."
   }
   if ([string]::IsNullOrWhiteSpace($PrincipalUserId)) {
     Write-Host 'PHASE7C_TASK_PRINCIPAL=REQUIRED'
     throw '-Create requires an explicit -PrincipalUserId. No task identity is inferred.'
+  }
+  if ([string]::IsNullOrWhiteSpace($PrincipalLogonType)) {
+    Write-Host 'PHASE7C_TASK_LOGON_TYPE=REQUIRED'
+    throw '-Create requires an explicit -PrincipalLogonType (Interactive, S4U, or ServiceAccount). No logon semantics are inferred.'
   }
 
   $action = New-Phase7CCanonicalAction -RunnerPath $runnerPath
