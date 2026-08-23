@@ -70,8 +70,9 @@ if ($AccountMode -eq "LIVE") {
   $TrendWorkDir = Join-Path $WorkDir "phase7b-demo-forward"
   $SidewayWorkDir = Join-Path $WorkDir "phase7c-sideway-forward"
 }
-$DecisionRuntimeDir = Join-Path $RuntimeDir "decision-observability"
-foreach ($dir in @($RuntimeDir, $TrendWorkDir, $SidewayWorkDir, $DecisionRuntimeDir)) {
+$DecisionRuntimeBase = Join-Path $RuntimeDir "decision-observability"
+$DecisionRuntimeDir = Join-Path $DecisionRuntimeBase ($AccountMode.ToLowerInvariant())
+foreach ($dir in @($RuntimeDir, $TrendWorkDir, $SidewayWorkDir, $DecisionRuntimeBase, $DecisionRuntimeDir)) {
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
 }
 
