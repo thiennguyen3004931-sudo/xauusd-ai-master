@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import {
   getPhase7CAccountModeState,
   type Phase7CAccountMode,
-} from "./phase7c-account-mode.service";
+} from "./phase7c-account-mode.service.js";
 
 export interface Phase7CLotSettingsState {
   version: 1;
