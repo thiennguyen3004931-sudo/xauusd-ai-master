@@ -26,7 +26,7 @@ After action ownership is proven, the verifier checks:
 
 `register-phase7c-executor-task-local.ps1 -Repair` only repairs an already-owned task and preserves its existing principal object. It does not delete the task, force-replace an unknown task, or kill runtime processes. Principal RunLevel drift is intentionally not repaired automatically because changing identity/logon semantics requires explicit review.
 
-If the task is absent, creation is opt-in with `-Create` and requires an explicit `-PrincipalUserId`. The script never guesses task identity and does not accept password-based creation modes.
+If the task is absent, creation is opt-in with `-Create` and requires both an explicit `-PrincipalUserId` and an explicit `-PrincipalLogonType` (`Interactive`, `S4U`, or `ServiceAccount`). The script never guesses task identity or logon semantics and does not accept password-based creation modes.
 
 ## Provider diagnostics
 
