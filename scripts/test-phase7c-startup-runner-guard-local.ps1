@@ -31,6 +31,19 @@ function Assert-PowerShellSyntax([string]$Path) {
   }
 }
 
+# The guard is dot-sourced by the long-lived task runner. It must not change
+# StrictMode in the caller scope because legacy v1 task config can omit optional
+# fields such as trendFixedVolume and relies on the runner's null fallback.
+$strictModeLeaked = $false
+try {
+  $legacyConfig = [pscustomobject]@{ version = 1 }
+  $legacyTrendFixedVolume = $legacyConfig.trendFixedVolume
+  Assert-Equal $legacyTrendFixedVolume $null "legacy optional config field should resolve to null"
+} catch {
+  $strictModeLeaked = $true
+}
+Assert-True (-not $strictModeLeaked) "guard library must not enable StrictMode in the caller scope"
+
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("phase7c-runner-guard-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 
