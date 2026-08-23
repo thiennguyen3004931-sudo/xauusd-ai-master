@@ -1,7 +1,14 @@
 Set-StrictMode -Version Latest
 
 function Test-Phase7CModePayload($Payload) {
-  if ($null -eq $Payload -or $null -eq $Payload.state) { return $false }
+  if ($null -eq $Payload) { return $false }
+
+  $payloadProperties = @($Payload.PSObject.Properties.Name)
+  if ($payloadProperties -notcontains "state" -or $payloadProperties -notcontains "options") { return $false }
+  if ($null -eq $Payload.state) { return $false }
+
+  $stateProperties = @($Payload.state.PSObject.Properties.Name)
+  if ($stateProperties -notcontains "mode") { return $false }
 
   $mode = [string]$Payload.state.mode
   $allowedModes = @("AUTO", "TREND", "SIDEWAY", "PAUSE")
@@ -16,7 +23,10 @@ function Test-Phase7CModePayload($Payload) {
 }
 
 function Test-Phase7CLotSettingsPayload($Payload) {
-  if ($null -eq $Payload -or $null -eq $Payload.state) { return $false }
+  if ($null -eq $Payload) { return $false }
+
+  $payloadProperties = @($Payload.PSObject.Properties.Name)
+  if ($payloadProperties -notcontains "state" -or $null -eq $Payload.state) { return $false }
 
   $propertyNames = @($Payload.state.PSObject.Properties.Name)
   foreach ($required in @("trendFixedLot", "sidewayRiskPercent", "sidewayMaxLot")) {
