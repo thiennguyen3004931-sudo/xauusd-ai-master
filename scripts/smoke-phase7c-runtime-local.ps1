@@ -28,9 +28,9 @@ $webBase = $WebUrl.TrimEnd('/')
 $verifyArgs = @(
   "-NoProfile",
   "-ExecutionPolicy", "Bypass",
-  "-File", ('"{0}"' -f $Verifier),
-  "-WorkDir", ('"{0}"' -f $WorkDir),
-  "-ControlApiUrl", ('"{0}"' -f $apiBase)
+  "-File", ('\"{0}\"' -f $Verifier),
+  "-WorkDir", ('\"{0}\"' -f $WorkDir),
+  "-ControlApiUrl", ('\"{0}\"' -f $apiBase)
 )
 if (-not $SkipTelegramRequirement) {
   $verifyArgs += "-RequireTelegram"
@@ -61,8 +61,13 @@ $validUiStates = @("WAITING", "SETUP_READY", "MANAGING")
 if ($validUiStates -notcontains [string]$semantic.uiState) {
   throw "Phase 7C semantic UI state is invalid. Actual=$($semantic.uiState)"
 }
-if ([string]$semantic.safety.mt5OrderPermission -ne "NONE") {
-  throw "Phase 7C semantic UI JSON lost the MT5 read-only safety marker."
+if (
+  [string]$semantic.safety.orderPermission -ne "NONE" -or
+  [bool]$semantic.safety.readOnly -ne $true -or
+  [bool]$semantic.safety.demoOnly -ne $true -or
+  [bool]$semantic.safety.newPositionsOnly -ne $true
+) {
+  throw "Phase 7C semantic UI JSON lost its read-only DEMO safety contract."
 }
 if (
   $semanticMt5.Content -notmatch '(?m)^version=2\r?$' -or
