@@ -4,6 +4,10 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { phase7CBotModeService } from "./phase7c-bot-mode.service";
 import { phase7CLotSettingsService } from "./phase7c-lot-settings.service";
+import {
+  accountModeAllowsBroker,
+  getPhase7CAccountModeState,
+} from "./phase7c-account-mode.service";
 import { getMt5Telemetry, type Mt5TelemetrySnapshot } from "./mt5.service";
 
 const execFileAsync = promisify(execFile);
@@ -88,6 +92,7 @@ function controlEnabled(): boolean {
 
 export function getPhase7CLifecycleRuntimeStatus() {
   const root = executorRuntime();
+  const accountModeState = getPhase7CAccountModeState();
   const supervisorPid = readPid(path.join(root, "supervisor.pid"));
   const trendPid = readPid(path.join(root, "trend.pid"));
   const sidewayPid = readPid(path.join(root, "sideway.pid"));
@@ -115,12 +120,13 @@ export function getPhase7CLifecycleRuntimeStatus() {
     telegramHeartbeatAgeMs !== null &&
     telegramHeartbeatAgeMs <= TELEGRAM_STALE_MS,
   );
-  const ready = running && telegramReady && lots.activeAlive && !lots.restartRequired;
+  const ready = accountModeState.valid && running && telegramReady && lots.activeAlive && !lots.restartRequired;
 
   return {
     controlEnabled: controlEnabled(),
     running,
     ready,
+    accountMode: accountModeState,
     telegramConfigured: telegramConfigured(),
     telegramReady,
     telegramStatus: telegram?.status ?? "STOPPED",
@@ -135,24 +141,40 @@ export function getPhase7CLifecycleRuntimeStatus() {
     },
     safety: {
       localhostOnly: true as const,
-      demoOnly: true as const,
-      realAccountAllowed: false as const,
-      startMode: "PAUSE_THEN_AUTO_AFTER_READY" as const,
+      accountMode: accountModeState.accountMode,
+      demoOnly: accountModeState.accountMode === "DEMO",
+      realAccountAllowed: accountModeState.accountMode === "LIVE" && accountModeState.liveExecutionEnabled,
+      accountGuardValid: accountModeState.valid,
+      accountSwitchFromWeb: false as const,
+      liveColdStartFromWeb: false as const,
+      startMode: accountModeState.accountMode === "LIVE"
+        ? "ADMIN_SWITCH_PAUSE_THEN_OPERATOR_AUTO" as const
+        : "PAUSE_THEN_AUTO_AFTER_READY" as const,
       stopBlockedWithOpenPosition: true as const,
       mt5PanelOrderPermission: "NONE" as const,
     },
   };
 }
 
-export function assertPhase7CDemoReady(telemetry: Mt5TelemetrySnapshot): void {
+export function assertPhase7CSelectedAccountReady(telemetry: Mt5TelemetrySnapshot): void {
+  const accountModeState = getPhase7CAccountModeState();
+  if (!accountModeState.valid) {
+    throw new Error(`Account-mode state không hợp lệ. ${accountModeState.error ?? ""}`.trim());
+  }
   if (!telemetry.reachable) throw new Error("MT5 Bridge chưa kết nối.");
-  if (telemetry.health?.accountMode !== "demo") {
-    throw new Error(`Chỉ cho phép tài khoản DEMO. accountMode=${telemetry.health?.accountMode ?? "unknown"}`);
+  if (!accountModeAllowsBroker(telemetry.health?.accountMode, accountModeState)) {
+    throw new Error(
+      `MT5 account không khớp cấu hình ${accountModeState.accountMode}. broker=${telemetry.health?.accountMode ?? "unknown"}`,
+    );
   }
   if (telemetry.health?.tradingEnabled !== true) throw new Error("Bridge trading chưa bật.");
   if (telemetry.health?.terminalTradeAllowed !== true) throw new Error("MT5 terminal chưa cho phép trading.");
   if (telemetry.health?.expertTradeAllowed !== true) throw new Error("MT5 Algo/Expert Trading chưa bật.");
 }
+
+// Backward-compatible exported name for older imports. It now validates the
+// selected Phase7C account mode instead of hard-coding DEMO.
+export const assertPhase7CDemoReady = assertPhase7CSelectedAccountReady;
 
 function quotePowerShellLiteral(value: string): string {
   return `'${String(value).replace(/'/g, "''")}'`;
@@ -172,7 +194,11 @@ function pairPowerShellArguments(args: string[]): string[] {
   return output;
 }
 
-async function launchSupervisor(): Promise<number> {
+async function launchDemoSupervisor(): Promise<number> {
+  const accountModeState = getPhase7CAccountModeState();
+  if (!accountModeState.valid || accountModeState.accountMode !== "DEMO") {
+    throw new Error("Web cold-start chỉ được phép cho DEMO. LIVE phải dùng account-switch Admin đã verify.");
+  }
   const projectRoot = findProjectRoot();
   const script = path.join(projectRoot, "scripts", "run-phase7c-executors-local.ps1");
   const telegramEnv = path.join(projectRoot, ".env.phase7b-telegram");
@@ -193,6 +219,7 @@ async function launchSupervisor(): Promise<number> {
     "-ControlApiUrl", `http://127.0.0.1:${Number(process.env.PORT ?? 3711) || 3711}`,
     "-EnvFile", bridgeEnv,
     "-TelegramEnvFile", telegramEnv,
+    "-AccountMode", "DEMO",
     "-TrendFixedVolume", String(settings.trendFixedLot),
     "-SidewayRiskPercent", String(settings.sidewayRiskPercent),
     "-SidewayMaxLot", String(settings.sidewayMaxLot),
@@ -242,7 +269,7 @@ async function runStopper(): Promise<void> {
       maxBuffer: 32 * 1024,
     });
   } catch {
-    // The task is normally disabled in desktop-control mode or already stopped.
+    // Task can already be stopped.
   }
   await execFileAsync(
     "powershell.exe",
@@ -288,24 +315,38 @@ function logTail(file: string, lines = 40): string {
 
 export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
   if (!controlEnabled()) throw new Error("Điều khiển Bot chỉ khả dụng trên localhost Windows.");
-  assertPhase7CDemoReady(telemetry);
+  assertPhase7CSelectedAccountReady(telemetry);
   if (telemetry.positions.length > 0) {
     throw new Error(`Không khởi động sạch khi đang có ${telemetry.positions.length} vị thế XAUUSD. Hãy kiểm tra/quản lý vị thế trước.`);
   }
   if (!telegramConfigured()) throw new Error("Telegram chưa được cấu hình; không bật Bot khi thiếu kênh thông báo.");
 
+  const accountModeState = getPhase7CAccountModeState();
   const current = getPhase7CLifecycleRuntimeStatus();
   if (current.ready) {
     const mode = phase7CBotModeService.set("AUTO", "web-control-center-start");
-    return { action: "ALREADY_RUNNING", message: "Bot DEMO đã chạy; mode đã chuyển AUTO.", mode, lifecycle: getPhase7CLifecycleRuntimeStatus() };
+    return {
+      action: "ALREADY_RUNNING",
+      message: `Bot ${accountModeState.accountMode} đã chạy và đã verify; mode chuyển AUTO.`,
+      accountMode: accountModeState.accountMode,
+      mode,
+      lifecycle: getPhase7CLifecycleRuntimeStatus(),
+    };
   }
 
   phase7CBotModeService.set("PAUSE", "web-control-center-preflight");
+
+  if (accountModeState.accountMode === "LIVE") {
+    throw new Error(
+      "LIVE chưa ở trạng thái READY đã verify. Web không được cold-start LIVE; hãy dùng switch-phase7c-account-mode-local.ps1 trong PowerShell Administrator. Bot vẫn PAUSE.",
+    );
+  }
+
   if (current.running || Object.values(current.processes).some((entry) => entry.alive)) {
     await runStopper();
   }
 
-  const launcherPid = await launchSupervisor();
+  const launcherPid = await launchDemoSupervisor();
   const ready = await waitForReady();
   if (!ready) {
     phase7CBotModeService.set("PAUSE", "web-control-center-start-failed");
@@ -321,7 +362,7 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
 
   try {
     const finalTelemetry = await getMt5Telemetry("XAUUSD");
-    assertPhase7CDemoReady(finalTelemetry);
+    assertPhase7CSelectedAccountReady(finalTelemetry);
     if (finalTelemetry.positions.length > 0) {
       throw new Error(`Phát hiện ${finalTelemetry.positions.length} vị thế XAUUSD trong lúc khởi động.`);
     }
@@ -336,6 +377,7 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
     action: "STARTED",
     message: `Bot DEMO đã RUNNING · AUTO · Trend ${ready.lotSettings.configured.trendFixedLot.toFixed(2)} lot · Telegram READY.`,
     launcherPid,
+    accountMode: "DEMO" as const,
     mode,
     lifecycle: getPhase7CLifecycleRuntimeStatus(),
   };
@@ -343,13 +385,13 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
 
 export async function stopPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
   if (!controlEnabled()) throw new Error("Điều khiển Bot chỉ khả dụng trên localhost Windows.");
-  assertPhase7CDemoReady(telemetry);
+  assertPhase7CSelectedAccountReady(telemetry);
   if (telemetry.positions.length > 0) {
     throw new Error("Bot đang có vị thế XAUUSD. Không cho dừng executor để tránh bỏ lệnh không được quản lý.");
   }
 
+  const accountModeState = getPhase7CAccountModeState();
   const mode = phase7CBotModeService.set("PAUSE", "web-control-center-stop");
-  // Give the Telegram controller one polling cycle to report the PAUSE change.
   await new Promise((resolve) => setTimeout(resolve, 2_000));
   await runStopper();
   await new Promise((resolve) => setTimeout(resolve, 500));
@@ -359,7 +401,8 @@ export async function stopPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
   }
   return {
     action: "STOPPED",
-    message: "Bot DEMO đã dừng an toàn · mode PAUSE · Web/MT5 Bridge vẫn hoạt động.",
+    message: `Bot ${accountModeState.accountMode} đã dừng an toàn · mode PAUSE · Web/MT5 Bridge vẫn hoạt động.`,
+    accountMode: accountModeState.accountMode,
     mode,
     lifecycle,
   };
