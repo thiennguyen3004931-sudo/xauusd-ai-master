@@ -1,6 +1,6 @@
 #property copyright "XAUUSD AI MASTER"
-#property version   "1.35"
-#property description "Read-only Phase 7C semantic canvas decision panel v5"
+#property version   "1.36"
+#property description "Read-only Phase 7C semantic canvas decision panel v5.1"
 
 #include <Canvas\Canvas.mqh>
 
@@ -10,9 +10,10 @@ input ENUM_BASE_CORNER InpCorner = CORNER_LEFT_UPPER;
 input int InpX = 12;
 input int InpY = 28;
 
+const string LEGACY_PREFIX = "XAU_AI_P7C_";
 const string CANVAS_NAME = "XAU_AI_P7C_CANVAS_V5";
-const int PANEL_MIN_WIDTH = 700;
-const int PANEL_MAX_WIDTH = 780;
+const int PANEL_MIN_WIDTH = 760;
+const int PANEL_MAX_WIDTH = 860;
 const int WAITING_HEIGHT = 550;
 const int SETUP_HEIGHT = 540;
 const int MANAGING_HEIGHT = 590;
@@ -57,11 +58,21 @@ string Clean(const string value, const string fallback="-")
 int PanelWidth()
 {
    int chart_width = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
-   int target = (int)MathRound(chart_width * 0.36);
+   int target = (int)MathRound(chart_width * 0.40);
    target = (int)MathMax(PANEL_MIN_WIDTH, MathMin(PANEL_MAX_WIDTH, target));
    if(chart_width > 100)
       target = (int)MathMin(target, chart_width - 24);
-   return (int)MathMax(560, target);
+   return (int)MathMax(620, target);
+}
+
+void PurgeLegacyPanelObjects()
+{
+   for(int index = ObjectsTotal(0) - 1; index >= 0; index--)
+   {
+      string name = ObjectName(0, index);
+      if(StringFind(name, LEGACY_PREFIX) == 0)
+         ObjectDelete(0, name);
+   }
 }
 
 void DestroyCanvas()
@@ -131,8 +142,8 @@ void TextRight(const int right_x, const int y, const string value, const color c
 
 void Card(const int x, const int y, const int width, const int height, const color fill, const color border)
 {
-   g_canvas.FillRectangle(x, y, x + width, y + height, A(fill, 245));
-   g_canvas.Rectangle(x, y, x + width, y + height, A(border, 230));
+   g_canvas.FillRectangle(x, y, x + width, y + height, A(fill, 252));
+   g_canvas.Rectangle(x, y, x + width, y + height, A(border, 235));
 }
 
 color ModeTone(const string mode, const string strategy)
@@ -170,8 +181,8 @@ color GateTone(const string gate)
 
 void BeginPanel(const int width, const int height)
 {
-   g_canvas.Erase(A(C'3,10,18', 248));
-   g_canvas.FillRectangle(0, 0, width - 1, height - 1, A(C'3,10,18', 248));
+   g_canvas.Erase(A(C'3,10,18', 255));
+   g_canvas.FillRectangle(0, 0, width - 1, height - 1, A(C'3,10,18', 255));
    g_canvas.Rectangle(0, 0, width - 1, height - 1, A(C'0,190,225'));
    g_canvas.FillRectangle(8, 6, width - 9, 8, A(C'0,210,255'));
 }
@@ -184,8 +195,8 @@ void DrawHeader(const int width, const string mode, const string strategy, const
    const int h = 104;
    Card(x, y, w, h, C'7,20,30', C'0,80,110');
 
-   Text(x + 18, y + 12, "XAUUSD AI MASTER", clrDeepSkyBlue, 15);
-   TextRight(x + w - 18, y + 14, "FINAL v5", clrGold, 9);
+   Text(x + 18, y + 12, "XAUUSD AI MASTER", clrDeepSkyBlue, 14);
+   TextRight(x + w - 18, y + 14, "FINAL v5.1", clrGold, 9);
    Text(x + 18, y + 40, "Phase 7C | DEMO | READ ONLY", clrSilver, 9);
    Text(x + 18, y + 62, "Mode: " + Clean(mode), ModeTone(mode, strategy), 10);
    Text(x + 18, y + 82, "Regime: " + Clean(regime), RegimeTone(regime), 10);
@@ -355,8 +366,8 @@ void RenderError(const string title, const string message)
       return;
    BeginPanel(width, 300);
    Card(14, 16, width - 28, 266, C'12,18,26', C'180,60,60');
-   Text(32, 34, "XAUUSD AI MASTER", clrDeepSkyBlue, 15);
-   TextRight(width - 32, 36, "FINAL v5", clrGold, 9);
+   Text(32, 34, "XAUUSD AI MASTER", clrDeepSkyBlue, 14);
+   TextRight(width - 32, 36, "FINAL v5.1", clrGold, 9);
    Text(32, 78, title, clrTomato, 11);
    Text(32, 112, FitText(message, width - 64, 9), clrWhite, 9);
    Text(32, 156, "1. Allow WebRequest: http://127.0.0.1:3711", clrSilver, 8);
@@ -397,6 +408,8 @@ void RefreshPanel()
 int OnInit()
 {
    DestroyCanvas();
+   PurgeLegacyPanelObjects();
+   ChartRedraw();
    EventSetTimer((int)MathMax(1, InpRefreshSeconds));
    RefreshPanel();
    return INIT_SUCCEEDED;
@@ -406,6 +419,7 @@ void OnDeinit(const int reason)
 {
    EventKillTimer();
    DestroyCanvas();
+   PurgeLegacyPanelObjects();
    ChartRedraw();
 }
 
