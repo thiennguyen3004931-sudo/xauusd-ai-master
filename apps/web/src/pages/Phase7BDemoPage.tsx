@@ -18,7 +18,6 @@ import {
   fetchPhase7CWebStatus,
   getTradeUiState,
   isUsablePanelValue,
-  modeDisplay,
   money,
   pickText,
   raw,
@@ -26,6 +25,8 @@ import {
   value,
   type Phase7CCandle,
   type Phase7CPanelStatus,
+  type Phase7CUiContract,
+  type Phase7CUiGate,
   type TradeUiState,
 } from "../phase7c-panel-status";
 
@@ -75,7 +76,7 @@ function ReasonBox({ title, items, accent = "cyan" }: { title: string; items: st
     <PanelCard title={title} accent={accent}>
       <Stack spacing={0.9}>
         {items.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">Chưa có dữ liệu.</Typography>
+          <Typography variant="body2" color="text.secondary">Chưa có dữ liệu từ engine.</Typography>
         ) : items.map((item, index) => (
           <Typography key={`${title}-${index}`} variant="body2" lineHeight={1.5}>• {item}</Typography>
         ))}
@@ -90,7 +91,7 @@ function StatusDot({ label, ok }: { label: string; ok: boolean }) {
       <Typography variant="body2" color="text.secondary">{label}</Typography>
       <Stack direction="row" spacing={0.8} alignItems="center">
         <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: ok ? "success.main" : "warning.main", boxShadow: ok ? "0 0 10px rgba(34,197,94,.65)" : "none" }} />
-        <Typography variant="caption" fontWeight={900}>{ok ? "KẾT NỐI" : "CHECK"}</Typography>
+        <Typography variant="caption" fontWeight={900}>{ok ? "READY" : "CHECK"}</Typography>
       </Stack>
     </Stack>
   );
@@ -106,7 +107,20 @@ function panelNumber(panel: Phase7CPanelStatus | undefined, ...keys: string[]) {
   return null;
 }
 
-function LiveCandlestickChart({ candles, panel, uiState }: { candles: Phase7CCandle[]; panel: Phase7CPanelStatus | undefined; uiState: TradeUiState }) {
+function gateLabel(gate: Phase7CUiGate | undefined) {
+  if (gate === "ALLOWED") return "ĐƯỢC PHÉP";
+  if (gate === "BLOCKED_BY_MODE") return "CHẶN DO MODE";
+  if (gate === "BLOCKED_BY_REGIME") return "CHƯA CHO PHÉP";
+  return "ĐANG CHỜ";
+}
+
+function gateTone(gate: Phase7CUiGate | undefined): "success" | "warning" | "default" {
+  if (gate === "ALLOWED") return "success";
+  if (gate === "BLOCKED_BY_MODE" || gate === "BLOCKED_BY_REGIME") return "warning";
+  return "default";
+}
+
+function LiveCandlestickChart({ candles, panel, uiState, ui }: { candles: Phase7CCandle[]; panel: Phase7CPanelStatus | undefined; uiState: TradeUiState; ui?: Phase7CUiContract }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -134,7 +148,7 @@ function LiveCandlestickChart({ candles, panel, uiState }: { candles: Phase7CCan
 
     const deduped = new Map<number, Phase7CCandle>();
     candles.forEach((candle) => deduped.set(Math.floor(candle.openTime / 1000), candle));
-    const chartData = Array.from(deduped.entries())
+    series.setData(Array.from(deduped.entries())
       .sort((a, b) => a[0] - b[0])
       .map(([time, candle]) => ({
         time: time as UTCTimestamp,
@@ -142,19 +156,20 @@ function LiveCandlestickChart({ candles, panel, uiState }: { candles: Phase7CCan
         high: candle.high,
         low: candle.low,
         close: candle.close,
-      }));
-    series.setData(chartData);
+      })));
 
     if (uiState !== "WAITING") {
+      const setup = uiState === "SETUP_READY" ? ui?.setup : null;
+      const position = uiState === "MANAGING" ? ui?.position : null;
       const managing = uiState === "MANAGING";
       const levels = [
-        { title: "ENTRY", price: managing ? panelNumber(panel, "positionEntry", "entry") : panelNumber(panel, "entry"), color: "#38bdf8" },
-        { title: "SL", price: managing ? panelNumber(panel, "positionStopLoss", "stopLoss") : panelNumber(panel, "stopLoss"), color: "#f87171" },
-        { title: "TP1", price: managing ? panelNumber(panel, "positionTp1", "tp1") : panelNumber(panel, "tp1"), color: "#4ade80" },
-        { title: "TP2", price: managing ? panelNumber(panel, "positionTp2", "tp2") : panelNumber(panel, "tp2"), color: "#22c55e" },
+        { title: "ENTRY", price: position?.entry ?? setup?.entry ?? (managing ? panelNumber(panel, "positionEntry", "entry") : panelNumber(panel, "entry")), color: "#38bdf8" },
+        { title: "SL", price: position?.stopLoss ?? setup?.stopLoss ?? (managing ? panelNumber(panel, "positionStopLoss", "stopLoss") : panelNumber(panel, "stopLoss")), color: "#f87171" },
+        { title: "TP1", price: position?.tp1 ?? setup?.tp1 ?? (managing ? panelNumber(panel, "positionTp1", "tp1") : panelNumber(panel, "tp1")), color: "#4ade80" },
+        { title: "TP2", price: position?.tp2 ?? setup?.tp2 ?? (managing ? panelNumber(panel, "positionTp2", "tp2") : panelNumber(panel, "tp2")), color: "#22c55e" },
       ];
       levels.forEach((level) => {
-        if (level.price === null) return;
+        if (level.price === null || level.price === undefined || !Number.isFinite(level.price)) return;
         series.createPriceLine({
           price: level.price,
           color: level.color,
@@ -176,7 +191,7 @@ function LiveCandlestickChart({ candles, panel, uiState }: { candles: Phase7CCan
       observer.disconnect();
       chart.remove();
     };
-  }, [candles, panel, uiState]);
+  }, [candles, panel, uiState, ui]);
 
   if (candles.length < 2) {
     return (
@@ -189,21 +204,25 @@ function LiveCandlestickChart({ candles, panel, uiState }: { candles: Phase7CCan
     );
   }
 
+  const regime = ui?.regime ?? value(panel, "regime", "—");
+  const confidence = ui?.confidence ?? value(panel, "confidence", "—");
+  const stage = ui?.stage ?? value(panel, "stage", "—");
+
   return (
     <Box sx={{ position: "relative", borderRadius: 3, overflow: "hidden", border: "1px solid rgba(0,213,255,.22)", bgcolor: "#020914" }}>
       <Box sx={{ position: "absolute", zIndex: 3, left: 16, top: 14, pointerEvents: "none" }}>
         <Typography variant="h6" fontWeight={950}>XAUUSD · M15</Typography>
         <Typography variant="caption" color="text.secondary">Live MT5 candles · {candles.length} bars</Typography>
       </Box>
-      <Stack direction="row" spacing={1} sx={{ position: "absolute", zIndex: 3, right: 14, top: 14, pointerEvents: "none" }}>
+      <Stack direction="row" spacing={1} sx={{ position: "absolute", zIndex: 3, right: 78, top: 14, pointerEvents: "none" }}>
         <Chip size="small" label={uiState === "WAITING" ? "WAITING" : uiState === "SETUP_READY" ? "SETUP READY" : "MANAGING"} color={uiState === "WAITING" ? "warning" : "success"} sx={{ fontWeight: 900 }} />
-        <Chip size="small" label={`${value(panel, "regime", "—")} ${value(panel, "confidence", "—")}%`} color="info" variant="outlined" sx={{ fontWeight: 900 }} />
+        <Chip size="small" label={`${regime} ${confidence}%`} color="info" variant="outlined" sx={{ fontWeight: 900 }} />
       </Stack>
       <Box ref={containerRef} sx={{ width: "100%", height: 430 }} />
       {uiState === "WAITING" && (
         <Box sx={{ position: "absolute", zIndex: 3, left: 18, bottom: 18, px: 1.5, py: 1, borderRadius: 2, bgcolor: "rgba(15,23,42,.90)", border: "1px solid rgba(251,191,36,.35)", pointerEvents: "none" }}>
           <Typography variant="subtitle2" fontWeight={950} color="warning.main">BOT ĐANG CHỜ SETUP</Typography>
-          <Typography variant="caption" color="text.secondary">Stage {value(panel, "stage", "—")} · Không có Entry / SL / TP giả</Typography>
+          <Typography variant="caption" color="text.secondary">Stage {stage} · Entry / SL / TP được ẩn cho tới khi setup được duyệt</Typography>
         </Box>
       )}
     </Box>
@@ -212,7 +231,7 @@ function LiveCandlestickChart({ candles, panel, uiState }: { candles: Phase7CCan
 
 export function Phase7BDemoPage() {
   const query = useQuery({
-    queryKey: ["phase7c-web-final-dashboard-v2"],
+    queryKey: ["phase7c-web-final-dashboard-v3-semantic"],
     queryFn: fetchPhase7CWebStatus,
     refetchInterval: 3_000,
     retry: false,
@@ -224,6 +243,7 @@ export function Phase7BDemoPage() {
 
   const data = query.data;
   const panel = data?.panel;
+  const ui = data?.ui;
   const lifecycle = asRecord(data?.lifecycle);
   const accountRisk = asRecord(data?.accountRisk);
   const account = asRecord(accountRisk.account);
@@ -232,22 +252,28 @@ export function Phase7BDemoPage() {
   const processes = asRecord(lifecycle.processes);
   const lotRuntime = asRecord(lifecycle.lotSettings);
   const currency = clean(account.accountCurrency, "USD");
-  const mode = modeDisplay(panel);
-  const stage = value(panel, "stage", "—");
-  const regime = value(panel, "regime", "—");
-  const confidence = value(panel, "confidence", "—");
-  const uiState = getTradeUiState(panel);
+  const activeMode = clean(ui?.mode, value(panel, "activeMode", "—"));
+  const effectiveStrategy = clean(ui?.effectiveStrategy, value(panel, "effectiveStrategy", "—"));
+  const mode = activeMode !== effectiveStrategy && effectiveStrategy !== "—" ? `${activeMode} → ${effectiveStrategy}` : activeMode;
+  const stage = clean(ui?.stage, value(panel, "stage", "—"));
+  const regime = clean(ui?.regime, value(panel, "regime", "—"));
+  const confidence = clean(ui?.confidence, value(panel, "confidence", "—"));
+  const uiState = getTradeUiState(panel, ui);
   const hasPosition = uiState === "MANAGING";
   const setupReady = uiState === "SETUP_READY";
-  const profit = value(panel, "floatingPnlUsd", "—");
 
-  const waitReasons = compactReason(
+  const fallbackWaitReasons = compactReason(
     [raw(panel, "limitReason"), raw(panel, "decisionReason"), raw(panel, "entryReason")].filter(Boolean).join(" | "),
     "Chưa có setup hợp lệ.",
   );
-  const entryReasons = compactReason(raw(panel, "entryReason") || raw(panel, "decisionReason"), "Engine chưa trả lý do vào lệnh.");
-  const holdReasons = compactReason(raw(panel, "holdReason"), "Engine chưa trả lý do giữ lệnh.");
-  const hasSupplyDemand = raw(panel, "hasSupplyDemandRange") === "true";
+  const waitReasons = ui?.reasons.wait?.length ? ui.reasons.wait : fallbackWaitReasons;
+  const entryReasons = ui?.reasons.entry?.length ? ui.reasons.entry : compactReason(raw(panel, "entryReason") || raw(panel, "decisionReason"), "Engine chưa trả lý do vào lệnh.");
+  const holdReasons = ui?.reasons.hold?.length ? ui.reasons.hold : compactReason(raw(panel, "holdReason"), "Engine chưa trả lý do giữ lệnh.");
+  const exitReasons = ui?.reasons.exit ?? [];
+  const setup = ui?.setup;
+  const position = ui?.position;
+  const profit = position?.floatingPnlUsd ?? Number(raw(panel, "floatingPnlUsd"));
+  const profitText = Number.isFinite(profit) ? `${Number(profit).toFixed(2)} USD` : "—";
 
   return (
     <Stack spacing={2.4}>
@@ -257,11 +283,12 @@ export function Phase7BDemoPage() {
             <Stack direction="row" spacing={1} alignItems="center">
               <Typography variant="h5" fontWeight={950}>XAUUSD AI MASTER</Typography>
               <Chip label="PHASE7C" color="secondary" size="small" sx={{ fontWeight: 950 }} />
+              {ui && <Chip label="SEMANTIC UI v2" size="small" variant="outlined" color="info" sx={{ fontWeight: 900 }} />}
             </Stack>
             <Typography variant="body2" color="text.secondary" mt={0.5}>MT5 DASHBOARD · LIVE DATA · DEMO ONLY · READ ONLY</Typography>
           </Box>
           <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-            <HeaderChip label="CHẾ ĐỘ BOT" valueText={mode} color={mode.includes("PAUSE") ? "warning" : "success"} />
+            <HeaderChip label="CHẾ ĐỘ BOT" valueText={mode} color={effectiveStrategy === "PAUSE" ? "warning" : "success"} />
             <HeaderChip label="TRẠNG THÁI" valueText={stage} color={stageTone(stage)} />
             <HeaderChip label="REGIME" valueText={regime} color={regime === "REVERSAL" ? "warning" : "info"} />
             <HeaderChip label="CONF" valueText={`${confidence}%`} />
@@ -295,6 +322,7 @@ export function Phase7BDemoPage() {
 
             <PanelCard title="TRẠNG THÁI HỆ THỐNG" accent="green">
               <StatusDot label="Market Data" ok={(data?.candles?.length ?? 0) >= 2} />
+              <StatusDot label="Semantic UI" ok={Boolean(ui)} />
               <StatusDot label="Decision Engine" ok={Boolean(panel)} />
               <StatusDot label="Risk Manager" ok={Boolean(accountRisk.configuration)} />
               <StatusDot label="Trend Executor" ok={Boolean(asRecord(processes.trend).alive)} />
@@ -307,7 +335,7 @@ export function Phase7BDemoPage() {
 
         <Grid size={{ xs: 12, lg: 6 }}>
           <Stack spacing={2}>
-            <LiveCandlestickChart candles={data?.candles ?? []} panel={panel} uiState={uiState} />
+            <LiveCandlestickChart candles={data?.candles ?? []} panel={panel} uiState={uiState} ui={ui} />
             <PanelCard title="NHẬT KÝ GIAO DỊCH GẦN NHẤT" accent="cyan">
               <Typography variant="body2" color="text.secondary">Lịch sử lệnh chỉ hiển thị khi API trade journal có dữ liệu thật; dashboard không tạo dữ liệu minh họa.</Typography>
             </PanelCard>
@@ -324,10 +352,10 @@ export function Phase7BDemoPage() {
                 </PanelCard>
                 <ReasonBox title="LÝ DO CHƯA VÀO LỆNH" items={waitReasons} accent="cyan" />
                 <PanelCard title="BOT GATE / FILTER" accent={regime === "REVERSAL" ? "orange" : "cyan"}>
-                  <InfoRow label="Trend gate" valueText={regime === "TREND" && !mode.includes("PAUSE") ? "Được phép xét" : "Chưa được phép"} />
-                  <InfoRow label="Sideway range" valueText={hasSupplyDemand ? "Có range hợp lệ" : "Chưa có range"} />
-                  <InfoRow label="Reversal filter" valueText={regime === "REVERSAL" ? "ĐANG CHẶN" : "Không chặn"} tone={regime === "REVERSAL" ? "warning" : "success"} />
-                  <InfoRow label="Recommended" valueText={value(panel, "recommendedMode", "—")} />
+                  <InfoRow label="Trend gate" valueText={gateLabel(ui?.gates.trend)} tone={gateTone(ui?.gates.trend)} />
+                  <InfoRow label="Sideway gate" valueText={gateLabel(ui?.gates.sideway)} tone={gateTone(ui?.gates.sideway)} />
+                  <InfoRow label="Reversal filter" valueText={ui?.gates.reversalFilter === "BLOCKING" ? "ĐANG CHẶN" : "KHÔNG CHẶN"} tone={ui?.gates.reversalFilter === "BLOCKING" ? "warning" : "success"} />
+                  <InfoRow label="Recommended" valueText={clean(ui?.recommendedMode, value(panel, "recommendedMode", "—"))} />
                 </PanelCard>
               </>
             )}
@@ -335,14 +363,15 @@ export function Phase7BDemoPage() {
             {setupReady && (
               <>
                 <PanelCard title="SETUP ĐANG CHỜ" accent="green">
-                  <InfoRow label="Strategy" valueText={value(panel, "effectiveStrategy", "—")} />
-                  <InfoRow label="Side" valueText={value(panel, "side", "—")} />
-                  <InfoRow label="Entry" valueText={value(panel, "entry", "—")} tone="info" />
-                  <InfoRow label="Stop Loss" valueText={value(panel, "stopLoss", "—")} tone="error" />
-                  <InfoRow label="TP1" valueText={value(panel, "tp1", "—")} tone="success" />
-                  <InfoRow label="TP2" valueText={value(panel, "tp2", "—")} tone="success" />
-                  <InfoRow label="Lot dự kiến" valueText={value(panel, "finalLot", "—")} />
-                  <InfoRow label="Risk %" valueText={value(panel, "estimatedRiskPercent", "—")} />
+                  <InfoRow label="Strategy" valueText={clean(setup?.strategy, value(panel, "effectiveStrategy", "—"))} />
+                  <InfoRow label="Setup" valueText={clean(setup?.name, "—")} />
+                  <InfoRow label="Side" valueText={clean(setup?.side, value(panel, "side", "—"))} />
+                  <InfoRow label="Entry" valueText={clean(setup?.entry, value(panel, "entry", "—"))} tone="info" />
+                  <InfoRow label="Stop Loss" valueText={clean(setup?.stopLoss, value(panel, "stopLoss", "—"))} tone="error" />
+                  <InfoRow label="TP1" valueText={clean(setup?.tp1, value(panel, "tp1", "—"))} tone="success" />
+                  <InfoRow label="TP2" valueText={clean(setup?.tp2, value(panel, "tp2", "—"))} tone="success" />
+                  <InfoRow label="Lot dự kiến" valueText={clean(setup?.finalLot, value(panel, "finalLot", "—"))} />
+                  <InfoRow label="Risk %" valueText={clean(setup?.estimatedRiskPercent, value(panel, "estimatedRiskPercent", "—"))} />
                 </PanelCard>
                 <ReasonBox title="LÝ DO SETUP ĐƯỢC DUYỆT" items={entryReasons} accent="green" />
               </>
@@ -351,18 +380,23 @@ export function Phase7BDemoPage() {
             {hasPosition && (
               <>
                 <PanelCard title="CHI TIẾT LỆNH ĐANG MỞ" accent="green">
-                  <InfoRow label="Side" valueText={value(panel, "positionSide", value(panel, "side", "—"))} tone="success" />
-                  <InfoRow label="Entry" valueText={value(panel, "positionEntry", value(panel, "entry", "—"))} />
-                  <InfoRow label="Stop Loss" valueText={value(panel, "positionStopLoss", value(panel, "stopLoss", "—"))} tone="error" />
-                  <InfoRow label="TP1" valueText={value(panel, "positionTp1", value(panel, "tp1", "—"))} tone="success" />
-                  <InfoRow label="TP2" valueText={value(panel, "positionTp2", value(panel, "tp2", "—"))} tone="success" />
-                  <InfoRow label="Lot" valueText={value(panel, "positionVolume", value(panel, "finalLot", "—"))} />
+                  <InfoRow label="Ticket" valueText={clean(position?.ticket, "—")} />
+                  <InfoRow label="Strategy" valueText={clean(position?.strategy, "—")} />
+                  <InfoRow label="Side" valueText={clean(position?.side, value(panel, "positionSide", value(panel, "side", "—")))} tone="success" />
+                  <InfoRow label="Entry" valueText={clean(position?.entry, value(panel, "positionEntry", value(panel, "entry", "—")))} />
+                  <InfoRow label="Stop Loss" valueText={clean(position?.stopLoss, value(panel, "positionStopLoss", value(panel, "stopLoss", "—")))} tone="error" />
+                  <InfoRow label="TP1" valueText={clean(position?.tp1, value(panel, "positionTp1", value(panel, "tp1", "—")))} tone="success" />
+                  <InfoRow label="TP2" valueText={clean(position?.tp2, value(panel, "positionTp2", value(panel, "tp2", "—")))} tone="success" />
+                  <InfoRow label="Lot" valueText={clean(position?.volume, value(panel, "positionVolume", value(panel, "finalLot", "—")))} />
                 </PanelCard>
                 <ReasonBox title="LÝ DO VÀO LỆNH" items={entryReasons} accent="cyan" />
                 <ReasonBox title="LÝ DO GIỮ LỆNH" items={holdReasons} accent="purple" />
-                <ReasonBox title="LÝ DO CHỐT LỆNH" items={["Chưa có tín hiệu chốt lệnh từ engine."]} accent="orange" />
+                <ReasonBox title="LÝ DO CHỐT LỆNH" items={exitReasons} accent="orange" />
                 <PanelCard title="PROFIT" accent={Number(profit) >= 0 ? "green" : "red"}>
-                  <Typography variant="h4" fontWeight={950} color={Number(profit) >= 0 ? "success.main" : "error.main"}>{profit} USD</Typography>
+                  <Typography variant="h4" fontWeight={950} color={Number(profit) >= 0 ? "success.main" : "error.main"}>{profitText}</Typography>
+                  {position?.floatingPnlPercent !== null && position?.floatingPnlPercent !== undefined && (
+                    <Typography variant="body2" color="text.secondary" mt={0.6}>{Number(position.floatingPnlPercent).toFixed(2)}%</Typography>
+                  )}
                 </PanelCard>
               </>
             )}
@@ -375,7 +409,7 @@ export function Phase7BDemoPage() {
           <Typography variant="body2">UI STATE: <b>{uiState}</b></Typography>
           <Typography variant="body2">EXECUTORS: TREND {asRecord(processes.trend).alive ? "✓" : "—"} | SIDEWAY {asRecord(processes.sideway).alive ? "✓" : "—"}</Typography>
           <Typography variant="body2">RISK MODE: DEMO ONLY</Typography>
-          <Typography variant="body2">TELEGRAM: {lifecycle.telegramReady ? "KẾT NỐI" : "CHECK"}</Typography>
+          <Typography variant="body2">TELEGRAM: {lifecycle.telegramReady ? "READY" : "CHECK"}</Typography>
           <Typography variant="body2">ORDER PERMISSION: NONE</Typography>
         </Stack>
       </Box>
