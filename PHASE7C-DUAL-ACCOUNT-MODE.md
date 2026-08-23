@@ -36,6 +36,17 @@ Secrets remain local and are not committed.
 
 DEMO and LIVE are required to use the same local bridge host, bridge port, and API key so the already-running local API retains a stable read-only bridge credential while the MT5 account connection changes.
 
+## Broker symbol mapping
+
+The strategy and APIs continue to use the canonical symbol `XAUUSD`. Each account environment maps that canonical symbol to the broker-specific symbol exposed by the selected MT5 account/terminal.
+
+For the current broker setup:
+
+- DEMO: `MT5_SYMBOL_MAP_JSON={"XAUUSD":"XAUUSD"}`
+- LIVE: `MT5_SYMBOL_MAP_JSON={"XAUUSD":"XAUUSD.G"}`
+
+Do not change strategy code, routes, state keys, or decision-monitor requests to `XAUUSD.G`; only the LIVE bridge env performs this broker-symbol translation.
+
 ## LIVE prerequisites
 
 The local LIVE env must explicitly set:
@@ -43,6 +54,7 @@ The local LIVE env must explicitly set:
 - `MT5_TRADING_ENABLED=true`
 - `MT5_ALLOW_REAL_ACCOUNT=true`
 - a non-empty `MT5_ALLOWED_LOGINS` containing only the intended LIVE login(s)
+- `MT5_SYMBOL_MAP_JSON={"XAUUSD":"XAUUSD.G"}` for the current LIVE broker account
 
 The switch command additionally requires `-ConfirmLiveExecution`. The repository does not provide a default LIVE risk profile; it must be configured deliberately before a LIVE switch.
 

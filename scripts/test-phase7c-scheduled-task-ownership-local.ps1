@@ -19,17 +19,26 @@ function Assert-Equal($Expected, $Actual, [string]$Message) {
 }
 
 $expectedRunner = Get-Phase7CExecutorTaskRunnerPath -ProjectRoot $ProjectRoot
+$absolutePowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $canonicalAction = [pscustomobject]@{
-  Execute = 'powershell.exe'
+  Execute = $absolutePowerShell
   Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $expectedRunner
 }
 
 $owned = Test-Phase7CExecutorTaskActionOwnership -Actions @($canonicalAction) -ExpectedRunnerPath $expectedRunner
-Assert-True $owned.owned 'Canonical Phase7C action must be owned.'
+Assert-True $owned.owned 'Canonical absolute Phase7C action must be owned.'
 Assert-Equal 'OWNED' $owned.reason 'Canonical ownership reason mismatch.'
 
-$wrongRunner = [pscustomobject]@{
+$legacyRelativeAction = [pscustomobject]@{
   Execute = 'powershell.exe'
+  Arguments = $canonicalAction.Arguments
+}
+$legacyOwned = Test-Phase7CExecutorTaskActionOwnership -Actions @($legacyRelativeAction) -ExpectedRunnerPath $expectedRunner
+Assert-True $legacyOwned.owned 'Legacy relative PowerShell action must remain recognizable as owned for safe repair.'
+Assert-Equal 'OWNED' $legacyOwned.reason 'Legacy relative ownership reason mismatch.'
+
+$wrongRunner = [pscustomobject]@{
+  Execute = $absolutePowerShell
   Arguments = '-NoProfile -ExecutionPolicy Bypass -File "C:\Other\run-phase7c-executor-task-runner-local.ps1"'
 }
 $wrongRunnerResult = Test-Phase7CExecutorTaskActionOwnership -Actions @($wrongRunner) -ExpectedRunnerPath $expectedRunner
@@ -45,7 +54,7 @@ Assert-True (-not $wrongExecutableResult.owned) 'Untrusted PowerShell executable
 Assert-Equal 'EXECUTABLE_MISMATCH' $wrongExecutableResult.reason 'Wrong executable reason mismatch.'
 
 $extraArgument = [pscustomobject]@{
-  Execute = 'powershell.exe'
+  Execute = $absolutePowerShell
   Arguments = "$($canonicalAction.Arguments) -Armed"
 }
 $extraArgumentResult = Test-Phase7CExecutorTaskActionOwnership -Actions @($extraArgument) -ExpectedRunnerPath $expectedRunner
@@ -110,6 +119,8 @@ Assert-True ($registerSource -match 'Test-Phase7CExecutorTaskActionOwnership') '
 Assert-True ($registerSource -match 'Set-ScheduledTask') 'Registration script must use in-place task repair.'
 Assert-True ($registerSource -match 'PHASE7C_TASK_MUTATION=BLOCKED') 'Registration script must expose fail-closed mutation marker.'
 Assert-True ($registerSource -match 'PrincipalUserId') 'Task creation must require explicit principal identity.'
+Assert-True ($registerSource -match 'System32\\WindowsPowerShell\\v1\.0\\powershell\.exe') 'Registration script must use the canonical absolute Windows PowerShell executable.'
+Assert-True ($registerSource -match 'ACTION_EXECUTABLE') 'Registration script must classify legacy relative PowerShell action as repairable executable drift.'
 Assert-True ($registerSource -notmatch 'Register-ScheduledTask[^\r\n]*-Force') 'Registration script must not force-overwrite an existing task.'
 Assert-True ($registerSource -notmatch 'Unregister-ScheduledTask') 'Registration script must never delete an existing task.'
 Assert-True ($registerSource -notmatch '(?i)taskkill') 'Registration script must not kill processes.'

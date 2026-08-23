@@ -20,6 +20,11 @@ $helperPath = Join-Path $PSScriptRoot 'lib\phase7c-scheduled-task-ownership.ps1'
 if (-not (Test-Path -LiteralPath $helperPath)) { throw "Scheduled task ownership helper not found: $helperPath" }
 . $helperPath
 
+$PowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+if (-not (Test-Path -LiteralPath $PowerShellExe -PathType Leaf)) {
+  throw "Windows PowerShell executable not found: $PowerShellExe"
+}
+
 function Assert-Phase7CAdministrator {
   try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -38,7 +43,7 @@ function Assert-Phase7CAdministrator {
 
 function New-Phase7CCanonicalAction([string]$RunnerPath) {
   $arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $RunnerPath
-  return New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments
+  return New-ScheduledTaskAction -Execute $PowerShellExe -Argument $arguments
 }
 
 function New-Phase7CCanonicalTrigger {
@@ -59,6 +64,7 @@ Import-Module ScheduledTasks -ErrorAction Stop
 $runnerPath = Get-Phase7CExecutorTaskRunnerPath -ProjectRoot $ProjectRoot
 if (-not (Test-Path -LiteralPath $runnerPath)) { throw "Executor task runner not found: $runnerPath" }
 Write-Host "PHASE7C_TASK_EXPECTED_RUNNER=$runnerPath"
+Write-Host "PHASE7C_TASK_EXPECTED_POWERSHELL=$PowerShellExe"
 
 $task = $null
 try {
@@ -108,6 +114,10 @@ if ($null -eq $task) {
     throw "Scheduled Task creation failed. classification=$classification. $($_.Exception.Message)"
   }
 
+  $created = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+  if ([string]$created.Actions[0].Execute -ne $PowerShellExe) {
+    throw "Scheduled Task creation did not persist the canonical absolute PowerShell executable."
+  }
   Write-Host 'PHASE7C_TASK_OWNERSHIP=OWNED'
   Write-Host 'PHASE7C_TASK_CREATE=PASS'
   Write-Host 'PHASE7C_TASK_STATUS=PASS'
@@ -122,6 +132,7 @@ if (-not $ownership.owned) {
 }
 
 $drift = @(Get-Phase7CExecutorTaskDrift -Task $task)
+if ([string]$task.Actions[0].Execute -ne $PowerShellExe) { $drift += 'ACTION_EXECUTABLE' }
 Write-Host "PHASE7C_TASK_DRIFT=$(if ($drift.Count -eq 0) { 'NONE' } else { $drift -join ',' })"
 Write-Host "PHASE7C_TASK_PRINCIPAL_USER=$($task.Principal.UserId)"
 Write-Host "PHASE7C_TASK_PRINCIPAL_RUN_LEVEL=$($task.Principal.RunLevel)"
@@ -138,7 +149,7 @@ if ($drift -contains 'PRINCIPAL_RUN_LEVEL') {
 }
 if (-not $Repair) {
   Write-Host 'PHASE7C_TASK_MUTATION=REPAIR_REQUIRED'
-  throw "Owned task has canonical-definition drift. Re-run with -Repair to repair trigger/settings while preserving the existing principal."
+  throw "Owned task has canonical-definition drift. Re-run with -Repair to repair trigger/settings/action while preserving the existing principal."
 }
 
 $action = New-Phase7CCanonicalAction -RunnerPath $runnerPath
@@ -161,6 +172,7 @@ try {
 $verified = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 $verifiedOwnership = Test-Phase7CExecutorTaskActionOwnership -Actions $verified.Actions -ExpectedRunnerPath $runnerPath
 $verifiedDrift = @(Get-Phase7CExecutorTaskDrift -Task $verified)
+if ([string]$verified.Actions[0].Execute -ne $PowerShellExe) { $verifiedDrift += 'ACTION_EXECUTABLE' }
 if (-not $verifiedOwnership.owned -or $verifiedDrift.Count -ne 0) {
   Write-Host 'PHASE7C_TASK_REPAIR=VERIFY_FAILED'
   throw "Scheduled Task repair did not converge to the canonical owned definition. ownership=$($verifiedOwnership.reason) drift=$($verifiedDrift -join ',')"

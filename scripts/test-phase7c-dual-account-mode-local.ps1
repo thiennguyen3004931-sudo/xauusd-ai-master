@@ -49,6 +49,20 @@ foreach ($relative in $powerShellFiles) {
   Assert-PowerShellSyntax $path
 }
 
+$bridgeRun = Join-Path $ProjectRoot "packages\mt5-broker\bridge\run.ps1"
+Assert-True (Test-Path $bridgeRun) "bridge run.ps1 must exist"
+Assert-PowerShellSyntax $bridgeRun
+$bridgeRunText = Get-Content -LiteralPath $bridgeRun -Raw
+Assert-True ($bridgeRunText -match 'TrimStart\(\[char\]0xFEFF\)') "bridge env loader must normalize a UTF-8 BOM on variable names"
+Assert-True ($bridgeRunText -match 'StartsWith\(''"''\).*EndsWith\(''"''\)') "bridge env loader must strip matching double quotes"
+Assert-True ($bridgeRunText -match 'StartsWith\("''"\).*EndsWith\("''"\)') "bridge env loader must strip matching single quotes"
+
+$bridgeRegister = Join-Path $PSScriptRoot "register-phase7c-account-bridge-task-local.ps1"
+$bridgeRegisterText = Get-Content -LiteralPath $bridgeRegister -Raw
+Assert-True ($bridgeRegisterText -match 'System32\\WindowsPowerShell\\v1\.0\\powershell\.exe') "bridge task registration must use an absolute Windows PowerShell executable"
+Assert-True ($bridgeRegisterText -notmatch '-Execute\s+"powershell\.exe"') "bridge task registration must not use a PATH-dependent powershell.exe action"
+Assert-True ($bridgeRegisterText -match 'registeredAction\.Execute\s+-ne\s+\$PowerShellExe') "bridge task registration must verify the persisted executable path"
+
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("phase7c-dual-account-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 try {

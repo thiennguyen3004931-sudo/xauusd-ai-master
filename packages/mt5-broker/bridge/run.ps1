@@ -22,9 +22,15 @@ if (-not (Test-Path $EnvFile)) {
 }
 
 Get-Content $EnvFile | ForEach-Object {
-  if ($_ -match '^\s*#' -or $_ -notmatch '=') { return }
-  $name, $value = $_ -split '=', 2
-  [Environment]::SetEnvironmentVariable($name.Trim(), $value.Trim(), 'Process')
+  $line = ([string]$_).Trim()
+  if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) { return }
+  $index = $line.IndexOf("=")
+  $name = $line.Substring(0, $index).Trim().TrimStart([char]0xFEFF)
+  $value = $line.Substring($index + 1).Trim()
+  if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+    $value = $value.Substring(1, $value.Length - 2)
+  }
+  [Environment]::SetEnvironmentVariable($name, $value, 'Process')
 }
 
 Write-Host "MT5_BRIDGE_ENV_FILE=$EnvFile"
