@@ -36,8 +36,17 @@ Assert-Text "scripts/phase7c-account-runtime-guard.mjs" 'ACCOUNT_LOGIN_NOT_ALLOW
 Assert-Text "scripts/run-phase7c-sideway-locked.mjs" 'fetchHealthUnderLock' "Sideway must recheck account under execution lock"
 Assert-Text "scripts/run-phase7c-sideway-locked.mjs" 'POSITION_PRESENT_UNDER_LOCK' "Sideway must retain single-position final check"
 Assert-Text "scripts/run-phase7c-trend-account-mode.mjs" 'installPhase7CAccountOrderFetchGuard' "Trend must install final account gate"
+Assert-Text "scripts/phase7c-sideway-logic.mjs" 'MIN_INITIAL_STOP_DISTANCE\s*=\s*6' "Sideway minimum initial stop must remain 6"
+Assert-Text "scripts/phase7c-sideway-logic.mjs" 'MAX_INITIAL_STOP_DISTANCE\s*=\s*10' "Sideway maximum initial stop must remain 10"
+Assert-Text "scripts/phase7c-sideway-logic.mjs" 'WAIT_PULLBACK_STOP_GT_10' "Sideway stop wider than 10 must wait pullback"
 
-Assert-NotText "packages/mt5-broker/bridge/.env.phase7b-live.example" 'MT5_PASSWORD\s*=\s*[^<\r\n][^\r\n]*' "LIVE example must not contain a real password"
+# The source-controlled LIVE env is a template only. Login, password, server and
+# allowlist must remain blank so no broker credential can enter Git history.
+Assert-Text "packages/mt5-broker/bridge/.env.phase7b-live.example" '(?m)^MT5_LOGIN=\s*$' "LIVE example login must be blank"
+Assert-Text "packages/mt5-broker/bridge/.env.phase7b-live.example" '(?m)^MT5_PASSWORD=\s*$' "LIVE example password must be blank"
+Assert-Text "packages/mt5-broker/bridge/.env.phase7b-live.example" '(?m)^MT5_SERVER=\s*$' "LIVE example server must be blank"
+Assert-Text "packages/mt5-broker/bridge/.env.phase7b-live.example" '(?m)^MT5_ALLOWED_LOGINS=\s*$' "LIVE example allowlist must be blank"
+Assert-NotText "packages/mt5-broker/bridge/.env.phase7b-live.example" '(?m)^MT5_API_KEY=(?!CHANGE_ME_TO_A_LONG_RANDOM_SECRET\s*$).+' "LIVE example must not contain a real API key"
 Assert-Text ".gitignore" '/phase7b-live-forward/' "LIVE Trend state must be ignored locally"
 Assert-Text ".gitignore" '/phase7c-sideway-live-forward/' "LIVE Sideway state must be ignored locally"
 Assert-Text ".gitignore" '/phase7c-lot-settings\.live\.json' "LIVE risk profile must remain local"
