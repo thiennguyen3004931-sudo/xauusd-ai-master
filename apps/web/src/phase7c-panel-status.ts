@@ -1,6 +1,7 @@
 export type Phase7CPanelStatus = Record<string, string>;
 export type Phase7CJson = Record<string, unknown>;
 export type TradeUiState = "WAITING" | "SETUP_READY" | "MANAGING";
+export type Phase7CUiGate = "ALLOWED" | "BLOCKED_BY_MODE" | "BLOCKED_BY_REGIME" | "PENDING";
 
 export interface Phase7CCandle {
   openTime: number;
@@ -12,8 +13,66 @@ export interface Phase7CCandle {
   volume?: number;
 }
 
+export interface Phase7CUiContract {
+  version: 2;
+  generatedAt: number;
+  symbol: string;
+  uiState: TradeUiState;
+  mode: string;
+  effectiveStrategy: string;
+  regime: string;
+  confidence: number | null;
+  stage: string;
+  approved: boolean;
+  recommendedMode: string;
+  reasons: {
+    wait: string[];
+    entry: string[];
+    hold: string[];
+    exit: string[];
+  };
+  gates: {
+    trend: Phase7CUiGate;
+    sideway: Phase7CUiGate;
+    reversalFilter: "BLOCKING" | "CLEAR";
+  };
+  setup: null | {
+    strategy: string;
+    side: string | null;
+    name: string | null;
+    entry: number | null;
+    stopLoss: number | null;
+    tp1: number | null;
+    tp2: number | null;
+    finalLot: number | null;
+    estimatedRiskPercent: number | null;
+  };
+  position: null | {
+    state: string;
+    strategy: string | null;
+    ticket: string | null;
+    side: string | null;
+    volume: number | null;
+    entry: number | null;
+    stopLoss: number | null;
+    tp1: number | null;
+    tp2: number | null;
+    floatingPnlUsd: number | null;
+    floatingPnlPercent: number | null;
+  };
+  safety: {
+    demoOnly: true;
+    readOnly: true;
+    orderPermission: "NONE";
+    newPositionsOnly: true;
+    martingale: false;
+    recoveryLotEscalation: false;
+  };
+}
+
 export interface Phase7CWebStatus {
   panel?: Phase7CPanelStatus;
+  ui?: Phase7CUiContract;
   lifecycle?: Phase7CJson;
   accountRisk?: Phase7CJson;
   lotSettings?: Phase7CJson;
@@ -24,6 +83,7 @@ export interface Phase7CWebStatus {
 
 const CONTROL_BASE = "http://127.0.0.1:3711";
 const PANEL_STATUS_URL = "/api/v1/phase7c/decision-monitor/mt5?symbol=XAUUSD";
+const SEMANTIC_UI_URL = "/api/v1/phase7c-ui?symbol=XAUUSD";
 const LIFECYCLE_URL = "/api/v1/phase7c/lifecycle";
 const ACCOUNT_RISK_URL = "/api/v1/phase7c/account-risk?riskPercent=1&maxLot=0.3";
 const LOT_SETTINGS_URL = "/api/v1/phase7c/lot-settings";
@@ -65,7 +125,7 @@ async function fetchTextWithFallback(relativeUrl: string, label: string): Promis
   throw new Error(unique(errors).join(" "));
 }
 
-async function fetchJsonWithFallback<T extends Phase7CJson>(relativeUrl: string, label: string): Promise<FetchResult<T>> {
+async function fetchJsonWithFallback<T>(relativeUrl: string, label: string): Promise<FetchResult<T>> {
   const urls = [relativeUrl, `${CONTROL_BASE}${relativeUrl}`];
   const errors: string[] = [];
 
@@ -131,6 +191,10 @@ function toCandles(payload: Phase7CJson): Phase7CCandle[] {
     .sort((a, b) => a.openTime - b.openTime);
 }
 
+function validSemanticUi(payload: Phase7CUiContract | undefined) {
+  return payload?.version === 2 && ["WAITING", "SETUP_READY", "MANAGING"].includes(payload.uiState);
+}
+
 export async function fetchPhase7CPanelStatus(): Promise<Phase7CPanelStatus> {
   const result = await fetchTextWithFallback(PANEL_STATUS_URL, "Decision Monitor");
   const payload = parsePanelStatus(result.payload);
@@ -141,17 +205,19 @@ export async function fetchPhase7CPanelStatus(): Promise<Phase7CPanelStatus> {
 }
 
 export async function fetchPhase7CWebStatus(): Promise<Phase7CWebStatus> {
-  const [panelResult, lifecycleResult, accountRiskResult, lotSettingsResult, candlesResult] = await Promise.allSettled([
+  const [panelResult, uiResult, lifecycleResult, accountRiskResult, lotSettingsResult, candlesResult] = await Promise.allSettled([
     fetchTextWithFallback(PANEL_STATUS_URL, "Decision Monitor"),
-    fetchJsonWithFallback(LIFECYCLE_URL, "Runtime"),
-    fetchJsonWithFallback(ACCOUNT_RISK_URL, "Tài khoản & Risk"),
-    fetchJsonWithFallback(LOT_SETTINGS_URL, "Lot settings"),
-    fetchJsonWithFallback(CANDLES_URL, "Chart M15"),
+    fetchJsonWithFallback<Phase7CUiContract>(SEMANTIC_UI_URL, "Semantic UI"),
+    fetchJsonWithFallback<Phase7CJson>(LIFECYCLE_URL, "Runtime"),
+    fetchJsonWithFallback<Phase7CJson>(ACCOUNT_RISK_URL, "Tài khoản & Risk"),
+    fetchJsonWithFallback<Phase7CJson>(LOT_SETTINGS_URL, "Lot settings"),
+    fetchJsonWithFallback<Phase7CJson>(CANDLES_URL, "Chart M15"),
   ]);
 
   const errors: string[] = [];
   let usedDirectFallback = false;
   let panel: Phase7CPanelStatus | undefined;
+  let ui: Phase7CUiContract | undefined;
   let lifecycle: Phase7CJson | undefined;
   let accountRisk: Phase7CJson | undefined;
   let lotSettings: Phase7CJson | undefined;
@@ -162,6 +228,15 @@ export async function fetchPhase7CWebStatus(): Promise<Phase7CWebStatus> {
     usedDirectFallback = usedDirectFallback || panelResult.value.usedDirectFallback;
   } else {
     errors.push(panelResult.reason instanceof Error ? panelResult.reason.message : "Không đọc được Decision Monitor.");
+  }
+
+  if (uiResult.status === "fulfilled" && validSemanticUi(uiResult.value.payload)) {
+    ui = uiResult.value.payload;
+    usedDirectFallback = usedDirectFallback || uiResult.value.usedDirectFallback;
+  } else if (uiResult.status === "rejected") {
+    errors.push(uiResult.reason instanceof Error ? uiResult.reason.message : "Không đọc được Semantic UI.");
+  } else {
+    errors.push("Semantic UI trả contract chưa hợp lệ.");
   }
 
   if (lifecycleResult.status === "fulfilled") {
@@ -193,11 +268,11 @@ export async function fetchPhase7CWebStatus(): Promise<Phase7CWebStatus> {
     errors.push(candlesResult.reason instanceof Error ? candlesResult.reason.message : "Không đọc được Chart M15.");
   }
 
-  if (!panel && !lifecycle && !accountRisk && !lotSettings && !candles) {
+  if (!panel && !ui && !lifecycle && !accountRisk && !lotSettings && !candles) {
     throw new Error(unique(errors).join(" "));
   }
 
-  return { panel, lifecycle, accountRisk, lotSettings, candles, errors: unique(errors), usedDirectFallback };
+  return { panel, ui, lifecycle, accountRisk, lotSettings, candles, errors: unique(errors), usedDirectFallback };
 }
 
 export function raw(status: Phase7CPanelStatus | undefined, key: string) {
@@ -209,7 +284,8 @@ export function isUsablePanelValue(value: string) {
   return Boolean(normalized) && !["n/a", "null", "undefined", "—", "-"].includes(normalized);
 }
 
-export function getTradeUiState(status: Phase7CPanelStatus | undefined): TradeUiState {
+export function getTradeUiState(status: Phase7CPanelStatus | undefined, ui?: Phase7CUiContract): TradeUiState {
+  if (ui && validSemanticUi(ui)) return ui.uiState;
   const positionCount = Number(raw(status, "positionCount") || "0");
   const positionState = raw(status, "positionState").toUpperCase();
   const approved = raw(status, "approved") === "true";
