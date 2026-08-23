@@ -25,7 +25,8 @@ $BridgeEnv = (Resolve-Path $BridgeEnv).Path
 foreach ($port in @($ApiPort, $WebPort, $BridgePort)) {
   if ($port -lt 1024 -or $port -gt 65535) { throw "Invalid core port: $port" }
 }
-if (@($ApiPort, $WebPort, $BridgePort | Sort-Object -Unique).Count -ne 3) {
+$uniquePorts = @(@($ApiPort, $WebPort, $BridgePort) | Sort-Object -Unique)
+if ($uniquePorts.Count -ne 3) {
   throw "API, WEB and BRIDGE ports must be distinct."
 }
 if ($Attempts -lt 1 -or $Attempts -gt 12) { throw "Attempts must be between 1 and 12." }
