@@ -1,11 +1,23 @@
 export type Phase7CPanelStatus = Record<string, string>;
 export type Phase7CJson = Record<string, unknown>;
+export type TradeUiState = "WAITING" | "SETUP_READY" | "MANAGING";
+
+export interface Phase7CCandle {
+  openTime: number;
+  closeTime: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+}
 
 export interface Phase7CWebStatus {
   panel?: Phase7CPanelStatus;
   lifecycle?: Phase7CJson;
   accountRisk?: Phase7CJson;
   lotSettings?: Phase7CJson;
+  candles?: Phase7CCandle[];
   errors: string[];
   usedDirectFallback: boolean;
 }
@@ -15,6 +27,7 @@ const PANEL_STATUS_URL = "/api/v1/phase7c/decision-monitor/mt5?symbol=XAUUSD";
 const LIFECYCLE_URL = "/api/v1/phase7c/lifecycle";
 const ACCOUNT_RISK_URL = "/api/v1/phase7c/account-risk?riskPercent=1&maxLot=0.3";
 const LOT_SETTINGS_URL = "/api/v1/phase7c/lot-settings";
+const CANDLES_URL = "/api/v1/phase7c-chart/candles?symbol=XAUUSD&count=240";
 
 type FetchResult<T> = { payload: T; usedDirectFallback: boolean };
 
@@ -94,6 +107,30 @@ export function parsePanelStatus(text: string): Phase7CPanelStatus {
   return result;
 }
 
+function toCandles(payload: Phase7CJson): Phase7CCandle[] {
+  const rawCandles = Array.isArray(payload.candles) ? payload.candles : [];
+  return rawCandles
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const row = item as Record<string, unknown>;
+      const candle: Phase7CCandle = {
+        openTime: Number(row.openTime),
+        closeTime: Number(row.closeTime),
+        open: Number(row.open),
+        high: Number(row.high),
+        low: Number(row.low),
+        close: Number(row.close),
+        volume: row.volume === undefined ? undefined : Number(row.volume),
+      };
+      if (![candle.openTime, candle.closeTime, candle.open, candle.high, candle.low, candle.close].every(Number.isFinite)) {
+        return null;
+      }
+      return candle;
+    })
+    .filter((item): item is Phase7CCandle => item !== null)
+    .sort((a, b) => a.openTime - b.openTime);
+}
+
 export async function fetchPhase7CPanelStatus(): Promise<Phase7CPanelStatus> {
   const result = await fetchTextWithFallback(PANEL_STATUS_URL, "Decision Monitor");
   const payload = parsePanelStatus(result.payload);
@@ -104,11 +141,12 @@ export async function fetchPhase7CPanelStatus(): Promise<Phase7CPanelStatus> {
 }
 
 export async function fetchPhase7CWebStatus(): Promise<Phase7CWebStatus> {
-  const [panelResult, lifecycleResult, accountRiskResult, lotSettingsResult] = await Promise.allSettled([
+  const [panelResult, lifecycleResult, accountRiskResult, lotSettingsResult, candlesResult] = await Promise.allSettled([
     fetchTextWithFallback(PANEL_STATUS_URL, "Decision Monitor"),
     fetchJsonWithFallback(LIFECYCLE_URL, "Runtime"),
     fetchJsonWithFallback(ACCOUNT_RISK_URL, "Tài khoản & Risk"),
     fetchJsonWithFallback(LOT_SETTINGS_URL, "Lot settings"),
+    fetchJsonWithFallback(CANDLES_URL, "Chart M15"),
   ]);
 
   const errors: string[] = [];
@@ -117,6 +155,7 @@ export async function fetchPhase7CWebStatus(): Promise<Phase7CWebStatus> {
   let lifecycle: Phase7CJson | undefined;
   let accountRisk: Phase7CJson | undefined;
   let lotSettings: Phase7CJson | undefined;
+  let candles: Phase7CCandle[] | undefined;
 
   if (panelResult.status === "fulfilled") {
     panel = parsePanelStatus(panelResult.value.payload);
@@ -146,15 +185,40 @@ export async function fetchPhase7CWebStatus(): Promise<Phase7CWebStatus> {
     errors.push(lotSettingsResult.reason instanceof Error ? lotSettingsResult.reason.message : "Không đọc được Lot settings.");
   }
 
-  if (!panel && !lifecycle && !accountRisk && !lotSettings) {
+  if (candlesResult.status === "fulfilled") {
+    candles = toCandles(candlesResult.value.payload);
+    usedDirectFallback = usedDirectFallback || candlesResult.value.usedDirectFallback;
+    if (candles.length < 2) errors.push("Chart M15 chưa có đủ dữ liệu nến.");
+  } else {
+    errors.push(candlesResult.reason instanceof Error ? candlesResult.reason.message : "Không đọc được Chart M15.");
+  }
+
+  if (!panel && !lifecycle && !accountRisk && !lotSettings && !candles) {
     throw new Error(unique(errors).join(" "));
   }
 
-  return { panel, lifecycle, accountRisk, lotSettings, errors: unique(errors), usedDirectFallback };
+  return { panel, lifecycle, accountRisk, lotSettings, candles, errors: unique(errors), usedDirectFallback };
 }
 
 export function raw(status: Phase7CPanelStatus | undefined, key: string) {
   return status?.[key]?.trim() ?? "";
+}
+
+export function isUsablePanelValue(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return Boolean(normalized) && !["n/a", "null", "undefined", "—", "-"].includes(normalized);
+}
+
+export function getTradeUiState(status: Phase7CPanelStatus | undefined): TradeUiState {
+  const positionCount = Number(raw(status, "positionCount") || "0");
+  const positionState = raw(status, "positionState").toUpperCase();
+  const approved = raw(status, "approved") === "true";
+  const entry = raw(status, "entry");
+  const stopLoss = raw(status, "stopLoss");
+
+  if (positionCount > 0 || positionState === "MANAGING" || positionState === "UNMANAGED") return "MANAGING";
+  if (approved && isUsablePanelValue(entry) && isUsablePanelValue(stopLoss)) return "SETUP_READY";
+  return "WAITING";
 }
 
 export function clean(value: unknown, fallback = "—") {
@@ -201,7 +265,7 @@ export function compactReason(input: string, fallback: string) {
   let text = clean(input, fallback);
   text = text
     .replaceAll("PAUSE chặn mọi lệnh mới; không thay đổi vị thế đang được quản lý.", "PAUSE chặn lệnh mới; không đổi vị thế đang quản lý.")
-    .replaceAll("A confirmed CHOCH indicates a possible structural reversal.", "CHOCH xác nhận khả năng đảo chiều.")
+    .replaceAll("A confirmed CHOCH indicates a possible structural reversal.", "CHOCH xác nhận khả năng đảo chiều cấu trúc.")
     .replaceAll("Bollinger bandwidth is", "Bollinger bandwidth:")
     .replaceAll("panel does not have order permission", "panel chỉ đọc, không gửi lệnh")
     .replaceAll("panel không có quyền gửi lệnh", "panel chỉ đọc, không gửi lệnh")
