@@ -40,6 +40,28 @@ Assert-Text "scripts/phase7c-sideway-logic.mjs" 'MIN_INITIAL_STOP_DISTANCE\s*=\s
 Assert-Text "scripts/phase7c-sideway-logic.mjs" 'MAX_INITIAL_STOP_DISTANCE\s*=\s*10' "Sideway maximum initial stop must remain 10"
 Assert-Text "scripts/phase7c-sideway-logic.mjs" 'WAIT_PULLBACK_STOP_GT_10' "Sideway stop wider than 10 must wait pullback"
 
+# Runtime-verifier hardening: PowerShell can wrap an empty REST array as one
+# pipeline object in some call sites. Parse the raw JSON so [] is always zero.
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'Invoke-WebRequest\s+-Uri\s+"\$bridgeBase/v1/positions\?symbol=XAUUSD"' "account verifier must inspect raw position JSON"
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" '\$positionRaw\s+-eq\s+"\[\]"' "empty broker position array must map to zero positions"
+Assert-NotText "scripts/verify-phase7c-account-runtime-local.ps1" '\$positions\s*=\s*@\(Invoke-RestMethod\s+-Uri\s+"\$bridgeBase/v1/positions\?symbol=XAUUSD"' "account verifier must not use ambiguous REST array wrapping"
+
+# Telegram starts with lastTelegramSuccessAt=null. The verifier must not cast
+# null to zero and report an enormous fake heartbeat age while STARTING.
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" '\$null\s+-ne\s+\$lastTelegramSuccessAt' "Telegram verifier must guard null heartbeat"
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'TELEGRAM_HEARTBEAT_AGE_MS=NO_SUCCESS_YET' "Telegram verifier must expose startup-without-success explicitly"
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'telegramRuntime\.status\s+-eq\s+"READY"' "Telegram readiness must require READY status"
+
+# Scheduled Tasks must use a deterministic trusted PowerShell executable rather
+# than relying on PATH resolution in Task Scheduler service contexts.
+Assert-Text "scripts/register-phase7c-account-bridge-task-local.ps1" 'System32\\WindowsPowerShell\\v1\.0\\powershell\.exe' "account bridge task must use absolute Windows PowerShell"
+Assert-Text "scripts/register-phase7c-executor-task-local.ps1" 'System32\\WindowsPowerShell\\v1\.0\\powershell\.exe' "executor task must use absolute Windows PowerShell"
+
+# The bridge env parser must remove matching quotes/BOM before passing paths to
+# MetaTrader5.initialize(), otherwise quoted terminal paths fail IPC creation.
+Assert-Text "packages/mt5-broker/bridge/run.ps1" 'TrimStart\(\[char\]0xFEFF\)' "bridge env parser must strip UTF-8 BOM"
+Assert-Text "packages/mt5-broker/bridge/run.ps1" 'value\.Substring\(1,\s*\$value\.Length\s*-\s*2\)' "bridge env parser must remove matching outer quotes"
+
 # The source-controlled LIVE env is a template only. Login, password, server and
 # allowlist must remain blank so no broker credential can enter Git history.
 Assert-Text "packages/mt5-broker/bridge/.env.phase7b-live.example" '(?m)^MT5_LOGIN=\s*$' "LIVE example login must be blank"
