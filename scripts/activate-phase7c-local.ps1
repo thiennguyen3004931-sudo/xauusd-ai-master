@@ -547,6 +547,6 @@ $executorMode = if ($ArmExecutors) { "ARMED_DEMO_ONLY" } else { "SHADOW_ONLY" }
 Write-Host "PHASE7C_ACTIVATE_CONTROL_CENTER=$webUrl/"
 Write-Host "PHASE7C_ACTIVATE_BACKTEST=$webUrl/phase7c-backtest"
 Write-Host "PHASE7C_ACTIVATE_RISK=$webUrl/phase7c-risk"
-Write-Host "PHASE7C_ACTIVATE_MT5_PANEL_API=$apiUrl/api/v1/phase7c/decision-monitor/mt5?symbol=XAUUSD"
+Write-Host "PHASE7C_ACTIVATE_MT5_PANEL_API=$apiUrl/api/v1/phase7c-ui/mt5?symbol=XAUUSD"
 Write-Host "PHASE7C_ACTIVATE_EXECUTORS=$executorMode"
 Write-Host "PHASE7C_ACTIVATE_STATUS=PASS"
