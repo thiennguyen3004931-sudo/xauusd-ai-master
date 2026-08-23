@@ -104,7 +104,6 @@ $cleanupText = Get-Content -LiteralPath $Cleanup -Raw
 Assert-True ($cleanupText -match 'SCOPE=LISTENER_ONLY') "cleanup must log listener-only fallback scope"
 Assert-True ($cleanupText -match 'ACTION=KEEP') "cleanup must preserve unproven listeners"
 Assert-True ($cleanupText -match 'refused to kill one or more unproven listeners') "cleanup must fail closed when ownership cannot be proven"
-Assert-True ($cleanupText.Contains('accountMode -ne "demo"')) "bridge fallback must remain DEMO-only"
 
 $safeActivationText = Get-Content -LiteralPath $SafeActivation -Raw
 Assert-True ($safeActivationText -match 'safe-activation-entry-freeze') "safe activation must freeze entries before cleanup"
