@@ -1,3 +1,4 @@
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Alert,
   Box,
@@ -7,305 +8,388 @@ import {
   Chip,
   Grid,
   Stack,
+  TextField,
   Typography,
 } from "@mui/material";
-import PlayArrowRounded from "@mui/icons-material/PlayArrowRounded";
-import StopRounded from "@mui/icons-material/StopRounded";
-import SmartToyRounded from "@mui/icons-material/SmartToyRounded";
-import TelegramRounded from "@mui/icons-material/Telegram";
-import HubRounded from "@mui/icons-material/HubRounded";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ErrorState, LoadingState } from "../ui/PageState";
+import { LoadingState, ErrorState } from "../ui/PageState";
+import {
+  boolText,
+  clean,
+  fetchPhase7CWebStatus,
+  money,
+  pickText,
+  raw,
+  value,
+} from "../phase7c-panel-status";
 
-const API_BASE = "";
-
-type OpsStatus = {
-  localOnly: boolean;
-  controlEnabled: boolean;
-  generatedAt: number;
-  bot: {
-    alive: boolean;
-    armed: boolean;
-    status: string;
-    pid: number | null;
-    managedPosition: boolean;
-    canStop: boolean;
-  };
-  telegram: {
-    alive: boolean;
-    status: string;
-    pid: number | null;
-    wrapperPid: number | null;
-    heartbeatAgeMs: number | null;
-    heartbeatFresh: boolean;
-  };
-  bridge: {
-    reachable: boolean;
-    status: string;
-    accountMode: string | null;
-    accountLogin: number | null;
-    server: string | null;
-    tradingEnabled: boolean | null;
-    terminalTradeAllowed: boolean | null;
-    expertTradeAllowed: boolean | null;
-  };
-  safety: {
-    demoOnly: boolean;
-    realAccountAllowed: false;
-    directOrderRouteExposed: false;
-    botStopBlockedWhileManaging: true;
-  };
+type LotInput = {
+  trendFixedLot: number;
+  sidewayRiskPercent: number;
+  sidewayMaxLot: number;
 };
 
-type ActionResponse = {
-  accepted: boolean;
-  action: string;
-  message: string;
-  pid?: number | null;
-};
+const LOT_SETTINGS_URL = "/api/v1/phase7c/lot-settings";
+const CONTROL_BASE = "http://127.0.0.1:3711";
+const MANAGED_LOT_STEP = 0.03;
 
-async function readJson<T>(response: Response): Promise<T> {
-  const text = await response.text();
-  let payload: T | { error?: string };
-  try {
-    payload = JSON.parse(text) as T | { error?: string };
-  } catch {
-    throw new Error(text || `HTTP ${response.status}`);
+function asRecord(value: unknown): Record<string, any> {
+  return value && typeof value === "object" ? (value as Record<string, any>) : {};
+}
+
+function numberText(value: unknown, fallback: string) {
+  const cleaned = clean(value, "");
+  if (!cleaned) return fallback;
+  return cleaned;
+}
+
+async function saveLotSettings(input: LotInput) {
+  const urls = [LOT_SETTINGS_URL, `${CONTROL_BASE}${LOT_SETTINGS_URL}`];
+  const body = JSON.stringify({ ...input, source: "web-account-risk-v6" });
+  const errors: string[] = [];
+
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        cache: "no-store",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body,
+      });
+      const text = await response.text();
+      if (response.ok) return text ? JSON.parse(text) : {};
+      errors.push(`HTTP ${response.status}: ${text.slice(0, 180)}`);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "Không kết nối được");
+    }
   }
-  if (!response.ok) {
-    throw new Error("error" in (payload as object) && (payload as { error?: string }).error
-      ? String((payload as { error?: string }).error)
-      : `HTTP ${response.status}`);
-  }
-  return payload as T;
+
+  throw new Error(errors.join(" | "));
 }
 
-async function getOps(): Promise<OpsStatus> {
-  return readJson<OpsStatus>(await fetch(`${API_BASE}/api/v1/phase7b-ops/status`, { cache: "no-store" }));
-}
-
-async function runAction(path: string): Promise<ActionResponse> {
-  return readJson<ActionResponse>(await fetch(`${API_BASE}/api/v1/phase7b-ops/${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: "{}",
-  }));
-}
-
-
-async function sendTelegramRecoveryTest(): Promise<ActionResponse> {
-  return readJson<ActionResponse>(await fetch(`${API_BASE}/api/v1/phase7b-telegram-test/recovery`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: "{}",
-  }));
-}
-function StatusCard({ icon, title, status, detail, online }: { icon: React.ReactNode; title: string; status: string; detail: string; online: boolean }) {
+function SectionCard({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
   return (
-    <Card variant="outlined" sx={{ height: "100%" }}>
-      <CardContent>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Box>{icon}</Box>
-          <Chip size="small" label={online ? "ĐANG CHẠY" : "ĐANG DỪNG"} color={online ? "success" : "default"} variant="outlined" />
-        </Stack>
-        <Typography variant="caption" color="text.secondary" display="block" mt={1.5}>{title}</Typography>
-        <Typography variant="h6" fontWeight={900}>{status}</Typography>
-        <Typography variant="body2" color="text.secondary" mt={1}>{detail}</Typography>
+    <Card variant="outlined" sx={{ height: "100%", borderRadius: 4 }}>
+      <CardContent sx={{ p: 3 }}>
+        <Typography variant="h6" fontWeight={950}>{title}</Typography>
+        <Typography variant="body2" color="text.secondary" mt={0.6}>{subtitle}</Typography>
+        <Box mt={2.2}>{children}</Box>
       </CardContent>
     </Card>
   );
 }
 
+function InfoRow({ label, valueText, strong = false }: { label: string; valueText: string; strong?: boolean }) {
+  return (
+    <Stack direction="row" justifyContent="space-between" gap={2} py={0.9} sx={{ borderBottom: "1px solid rgba(148,163,184,.08)" }}>
+      <Typography variant="body2" color="text.secondary">{label}</Typography>
+      <Typography variant="body2" fontWeight={strong ? 950 : 850} textAlign="right">{valueText}</Typography>
+    </Stack>
+  );
+}
+
+function HealthTile({ label, valueText, good }: { label: string; valueText: string; good?: boolean }) {
+  return (
+    <Card variant="outlined" sx={{ borderRadius: 4, height: "100%" }}>
+      <CardContent sx={{ p: 2.5 }}>
+        <Typography variant="caption" color="text.secondary" fontWeight={900}>{label}</Typography>
+        <Typography variant="h6" fontWeight={950} mt={1}>{valueText}</Typography>
+        <Chip size="small" label={good ? "PASS" : "CHECK"} color={good ? "success" : "warning"} variant="outlined" sx={{ mt: 1.5, fontWeight: 900 }} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function clampLotInputs(input: LotInput): LotInput {
+  return {
+    trendFixedLot: Number(input.trendFixedLot.toFixed(2)),
+    sidewayRiskPercent: Number(input.sidewayRiskPercent.toFixed(2)),
+    sidewayMaxLot: Number(input.sidewayMaxLot.toFixed(2)),
+  };
+}
+
+function isManagedLotIncrement(value: number) {
+  if (!Number.isFinite(value)) return false;
+  const units = value / MANAGED_LOT_STEP;
+  return Math.abs(units - Math.round(units)) < 1e-8;
+}
+
+function validateLotInput(input: LotInput) {
+  const errors: string[] = [];
+  if (!Number.isFinite(input.trendFixedLot) || input.trendFixedLot < 0.03 || input.trendFixedLot > 0.3) {
+    errors.push("Trend fixed lot phải trong khoảng 0.03–0.30.");
+  } else if (!isManagedLotIncrement(input.trendFixedLot)) {
+    errors.push("Trend fixed lot phải theo bước 0.03: 0.03, 0.06, 0.09 ... 0.30.");
+  }
+  if (!Number.isFinite(input.sidewayRiskPercent) || input.sidewayRiskPercent < 0.01 || input.sidewayRiskPercent > 1) {
+    errors.push("Sideway risk percent phải trong khoảng 0.01–1.00%.");
+  }
+  if (!Number.isFinite(input.sidewayMaxLot) || input.sidewayMaxLot < 0.03 || input.sidewayMaxLot > 0.3) {
+    errors.push("Sideway max lot phải trong khoảng 0.03–0.30.");
+  } else if (!isManagedLotIncrement(input.sidewayMaxLot)) {
+    errors.push("Sideway max lot phải theo bước 0.03: 0.03, 0.06, 0.09 ... 0.30.");
+  }
+  return errors;
+}
+
+function lotEquals(a: LotInput, b: LotInput) {
+  return Math.abs(a.trendFixedLot - b.trendFixedLot) < 0.0001
+    && Math.abs(a.sidewayRiskPercent - b.sidewayRiskPercent) < 0.0001
+    && Math.abs(a.sidewayMaxLot - b.sidewayMaxLot) < 0.0001;
+}
+
 export function Phase7BOpsPage() {
   const queryClient = useQueryClient();
+  const [trendFixedLot, setTrendFixedLot] = useState("0.12");
+  const [sidewayRiskPercent, setSidewayRiskPercent] = useState("1");
+  const [sidewayMaxLot, setSidewayMaxLot] = useState("0.30");
+
   const query = useQuery({
-    queryKey: ["phase7b-ops-status"],
-    queryFn: getOps,
-    refetchInterval: 2_000,
+    queryKey: ["phase7c-web-status-account-risk-v6"],
+    queryFn: fetchPhase7CWebStatus,
+    refetchInterval: 3_000,
     retry: false,
+    placeholderData: (previous) => previous,
   });
 
-  const mutate = useMutation({
-    mutationFn: runAction,
+  const mutation = useMutation({
+    mutationFn: saveLotSettings,
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["phase7b-ops-status"] });
+      await queryClient.invalidateQueries({ queryKey: ["phase7c-web-status-account-risk-v6"] });
     },
   });
-  const recoveryTelegramTest = useMutation({ mutationFn: sendTelegramRecoveryTest });
+
+  const data = query.data;
+  const panel = data?.panel;
+  const ui = data?.ui;
+  const accountRisk = asRecord(data?.accountRisk);
+  const account = asRecord(accountRisk.account);
+  const configuration = asRecord(accountRisk.configuration);
+  const quote = asRecord(accountRisk.quote);
+  const spec = asRecord(accountRisk.spec);
+  const lifecycle = asRecord(data?.lifecycle);
+  const bridge = asRecord(lifecycle.bridge);
+  const processes = asRecord(lifecycle.processes);
+  const supervisor = asRecord(processes.supervisor);
+  const trend = asRecord(processes.trend);
+  const sideway = asRecord(processes.sideway);
+  const telegram = asRecord(processes.telegram);
+  const notifier = asRecord(processes.regimeNotifier);
+  const lotRuntime = asRecord(lifecycle.lotSettings);
+  const mode = asRecord(lifecycle.mode);
+  const configuredLot = asRecord(data?.lotSettings);
+  const currency = clean(account.accountCurrency, "USD");
+  const accountMode = pickText(raw(panel, "accountMode"), account.accountMode, bridge.accountMode);
+  const activeMode = clean(ui?.mode, clean(mode.mode, value(panel, "activeMode", "—")));
+  const openPositions = pickText(bridge.openXauusdPositions, raw(panel, "positionCount"));
+  const canSafelyApply = activeMode === "PAUSE" && Number(openPositions) === 0;
+
+  const savedLot = clampLotInputs({
+    trendFixedLot: Number(configuredLot.trendFixedLot ?? configuration.configuredTrendFixedLot ?? 0.12),
+    sidewayRiskPercent: Number(configuredLot.sidewayRiskPercent ?? configuration.configuredSidewayRiskPercent ?? 1),
+    sidewayMaxLot: Number(configuredLot.sidewayMaxLot ?? configuration.configuredSidewayMaxLot ?? 0.3),
+  });
+  const draftLot = clampLotInputs({
+    trendFixedLot: Number(trendFixedLot),
+    sidewayRiskPercent: Number(sidewayRiskPercent),
+    sidewayMaxLot: Number(sidewayMaxLot),
+  });
+  const validationErrors = validateLotInput(draftLot);
+  const hasChanges = validationErrors.length === 0 && !lotEquals(savedLot, draftLot);
+
+  useEffect(() => {
+    const nextTrend = numberText(configuredLot.trendFixedLot ?? configuration.configuredTrendFixedLot, trendFixedLot);
+    const nextRisk = numberText(configuredLot.sidewayRiskPercent ?? configuration.configuredSidewayRiskPercent, sidewayRiskPercent);
+    const nextMaxLot = numberText(configuredLot.sidewayMaxLot ?? configuration.configuredSidewayMaxLot, sidewayMaxLot);
+    setTrendFixedLot(nextTrend);
+    setSidewayRiskPercent(nextRisk);
+    setSidewayMaxLot(nextMaxLot);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configuredLot.trendFixedLot, configuredLot.sidewayRiskPercent, configuredLot.sidewayMaxLot, configuration.configuredTrendFixedLot, configuration.configuredSidewayRiskPercent, configuration.configuredSidewayMaxLot]);
 
   if (query.isLoading) return <LoadingState />;
-  if (query.isError || !query.data) {
-    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được trạng thái Bot & Telegram."} />;
+  if (query.isError && !query.data) {
+    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được Tài khoản & Risk."} />;
   }
 
-  const o = query.data;
-  const demoReady = Boolean(
-    o.bridge.reachable &&
-    o.bridge.accountMode === "demo" &&
-    o.bridge.tradingEnabled === true &&
-    o.bridge.terminalTradeAllowed === true &&
-    o.bridge.expertTradeAllowed === true,
-  );
+  const onSubmit = () => {
+    if (!canSafelyApply || validationErrors.length > 0 || !hasChanges) return;
+    const confirmed = window.confirm(
+      `Xác nhận lưu cấu hình lot cho LỆNH MỚI?\n\nTrend: ${savedLot.trendFixedLot.toFixed(2)} → ${draftLot.trendFixedLot.toFixed(2)}\nSideway risk: ${savedLot.sidewayRiskPercent.toFixed(2)}% → ${draftLot.sidewayRiskPercent.toFixed(2)}%\nSideway max lot: ${savedLot.sidewayMaxLot.toFixed(2)} → ${draftLot.sidewayMaxLot.toFixed(2)}\n\nKhông thay đổi vị thế đang mở.`,
+    );
+    if (!confirmed) return;
+    mutation.mutate(draftLot);
+  };
 
-  const actionPending = mutate.isPending;
-  const pendingAction = mutate.variables;
-  const botStarting = actionPending && pendingAction === "bot/start";
-  const botStopping = actionPending && pendingAction === "bot/stop";
-  const telegramStarting = actionPending && pendingAction === "telegram/start";
-  const telegramStopping = actionPending && pendingAction === "telegram/stop";
+  const resetToSaved = () => {
+    setTrendFixedLot(savedLot.trendFixedLot.toFixed(2));
+    setSidewayRiskPercent(savedLot.sidewayRiskPercent.toFixed(2));
+    setSidewayMaxLot(savedLot.sidewayMaxLot.toFixed(2));
+  };
 
   return (
-    <Stack spacing={2.5}>
-      <Box>
-        <Typography variant="overline" color="primary" fontWeight={900}>VẬN HÀNH DEMO</Typography>
-        <Typography variant="h4" fontWeight={950}>Hệ thống & Telegram</Typography>
-        <Typography variant="body2" color="text.secondary" mt={0.7}>
-          Một màn hình cho Bot DEMO, Telegram và MT5 Bridge. Tài khoản thật luôn bị khóa.
-        </Typography>
+    <Stack spacing={3}>
+      <Box sx={{ p: 3, borderRadius: 5, border: "1px solid rgba(148,163,184,.14)", bgcolor: "rgba(15,23,42,.45)" }}>
+        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2} alignItems={{ md: "center" }}>
+          <Box>
+            <Typography variant="overline" color="primary" fontWeight={900}>TÀI KHOẢN & RISK v6</Typography>
+            <Typography variant="h4" fontWeight={950}>Account, lot, safety và runtime</Typography>
+            <Typography variant="body2" color="text.secondary" mt={1}>
+              Điều chỉnh lot tại đây. Thay đổi chỉ áp dụng cho NEW POSITIONS ONLY và chỉ được lưu khi bot PAUSE, không có vị thế XAUUSD đang mở.
+            </Typography>
+          </Box>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Chip label={`Mode ${activeMode}`} color={activeMode === "PAUSE" ? "warning" : "success"} variant="outlined" sx={{ fontWeight: 900 }} />
+            <Chip label={`Positions ${openPositions}`} color={Number(openPositions) === 0 ? "success" : "warning"} variant="outlined" sx={{ fontWeight: 900 }} />
+            <Chip label={`Account ${accountMode}`} color={accountMode.toLowerCase().includes("demo") ? "success" : "error"} variant="outlined" sx={{ fontWeight: 900 }} />
+            <Chip label="ORDER NONE" color="success" variant="outlined" sx={{ fontWeight: 900 }} />
+          </Stack>
+        </Stack>
       </Box>
 
+      {data?.usedDirectFallback && <Alert severity="info">Một số request đã được chuyển trực tiếp sang Control API 3711 để tránh lỗi web proxy 5717.</Alert>}
+      {(data?.errors ?? []).length > 0 && <Alert severity="warning">Nguồn phụ chưa sẵn sàng: {(data?.errors ?? []).slice(0, 2).join(" ")}</Alert>}
+      {!canSafelyApply && (
+        <Alert severity="warning">
+          Khóa chỉnh lot đang bật. Chuyển bot về PAUSE và đảm bảo XAUUSD positions = 0. Hiện tại: mode {activeMode}, positions {openPositions}.
+        </Alert>
+      )}
+      {validationErrors.length > 0 && <Alert severity="error">{validationErrors.join(" ")}</Alert>}
+      {mutation.isError && <Alert severity="error">Không lưu được lot: {mutation.error instanceof Error ? mutation.error.message : "lỗi không xác định"}</Alert>}
+      {mutation.isSuccess && <Alert severity="success">Đã lưu cấu hình lot. Kiểm tra “Lot restart required” bên dưới; nếu Yes, chạy lại activation để runtime dùng cấu hình mới.</Alert>}
+
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, md: 4 }}>
-          <StatusCard
-            icon={<SmartToyRounded color={o.bot.alive ? "success" : "disabled"} />}
-            title="BOT DEMO"
-            status={botStarting ? "ĐANG KHỞI ĐỘNG..." : o.bot.alive ? (o.bot.managedPosition ? "ĐANG QUẢN LÝ LỆNH" : "ĐANG CHỜ TÍN HIỆU") : "ĐÃ DỪNG"}
-            detail={botStarting ? "Đang khởi động và kiểm tra heartbeat controller..." : o.bot.alive ? `PID ${o.bot.pid ?? "—"} · ${o.bot.armed ? "ĐÃ ARM" : "CHƯA ARM"}` : "Controller DEMO chưa chạy."}
-            online={o.bot.alive}
-          />
+        <Grid size={{ xs: 12, md: 6, xl: 3 }}><HealthTile label="Supervisor" valueText={supervisor.alive ? `Alive · PID ${clean(supervisor.pid, "—")}` : "Chưa xác nhận"} good={Boolean(supervisor.alive)} /></Grid>
+        <Grid size={{ xs: 12, md: 6, xl: 3 }}><HealthTile label="Trend executor" valueText={trend.alive ? `Alive · PID ${clean(trend.pid, "—")}` : "Chưa xác nhận"} good={Boolean(trend.alive)} /></Grid>
+        <Grid size={{ xs: 12, md: 6, xl: 3 }}><HealthTile label="Sideway executor" valueText={sideway.alive ? `Alive · PID ${clean(sideway.pid, "—")}` : "Chưa xác nhận"} good={Boolean(sideway.alive)} /></Grid>
+        <Grid size={{ xs: 12, md: 6, xl: 3 }}><HealthTile label="Telegram" valueText={lifecycle.telegramReady ? "Ready" : clean(lifecycle.telegramStatus, "Chưa xác nhận")} good={Boolean(lifecycle.telegramReady)} /></Grid>
+      </Grid>
+
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <SectionCard title="Tài khoản giao dịch" subtitle="Tài khoản demo đang kết nối với MT5.">
+            <InfoRow label="Login" valueText={pickText(account.accountLogin, bridge.accountLogin)} strong />
+            <InfoRow label="Server" valueText={pickText(account.server, bridge.server)} />
+            <InfoRow label="Mode" valueText={accountMode} />
+            <InfoRow label="Currency" valueText={currency} />
+            <InfoRow label="Balance" valueText={money(account.accountBalance, currency)} />
+            <InfoRow label="Equity" valueText={money(account.accountEquity, currency)} />
+            <InfoRow label="Free margin" valueText={money(account.accountFreeMargin, currency)} />
+            <InfoRow label="Profit" valueText={money(account.accountProfit, currency)} />
+            <InfoRow label="Leverage" valueText={clean(account.accountLeverage, "—")} />
+          </SectionCard>
         </Grid>
 
-        <Grid size={{ xs: 12, md: 4 }}>
-          <StatusCard
-            icon={<TelegramRounded color={o.telegram.alive ? "success" : "disabled"} />}
-            title="THÔNG BÁO TELEGRAM"
-            status={telegramStarting ? "ĐANG KHỞI ĐỘNG..." : o.telegram.alive ? "ĐANG GỬI THÔNG BÁO" : "ĐÃ TẮT THÔNG BÁO"}
-            detail={telegramStarting ? "Đang kiểm tra notifier và heartbeat..." : o.telegram.alive ? "Thông báo tín hiệu / khớp lệnh / +6 / +10 / HOLD / đóng lệnh / lỗi." : "Không gửi thông báo thường trực."}
-            online={o.telegram.alive}
-          />
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <SectionCard title="Tự điều chỉnh Lot" subtitle="Web kiểm tra range, bước lot 0.03 và khóa lưu khi runtime chưa an toàn.">
+            <Stack spacing={2}>
+              <TextField
+                label="Trend fixed lot"
+                type="number"
+                value={trendFixedLot}
+                onChange={(event) => setTrendFixedLot(event.target.value)}
+                inputProps={{ min: 0.03, max: 0.3, step: MANAGED_LOT_STEP }}
+                error={!Number.isFinite(draftLot.trendFixedLot) || draftLot.trendFixedLot < 0.03 || draftLot.trendFixedLot > 0.3 || !isManagedLotIncrement(draftLot.trendFixedLot)}
+                helperText="0.03–0.30 · bước 0.03 (0.03, 0.06, 0.09 ... 0.30)"
+                fullWidth
+              />
+              <TextField
+                label="Sideway risk percent"
+                type="number"
+                value={sidewayRiskPercent}
+                onChange={(event) => setSidewayRiskPercent(event.target.value)}
+                inputProps={{ min: 0.01, max: 1, step: 0.01 }}
+                error={!Number.isFinite(draftLot.sidewayRiskPercent) || draftLot.sidewayRiskPercent < 0.01 || draftLot.sidewayRiskPercent > 1}
+                helperText="0.01–1.00% · bước 0.01%"
+                fullWidth
+              />
+              <TextField
+                label="Sideway max lot"
+                type="number"
+                value={sidewayMaxLot}
+                onChange={(event) => setSidewayMaxLot(event.target.value)}
+                inputProps={{ min: 0.03, max: 0.3, step: MANAGED_LOT_STEP }}
+                error={!Number.isFinite(draftLot.sidewayMaxLot) || draftLot.sidewayMaxLot < 0.03 || draftLot.sidewayMaxLot > 0.3 || !isManagedLotIncrement(draftLot.sidewayMaxLot)}
+                helperText="0.03–0.30 · bước 0.03 để +10 có thể chốt đúng 1/3"
+                fullWidth
+              />
+
+              <Box sx={{ p: 1.5, borderRadius: 2.5, bgcolor: "rgba(15,23,42,.55)", border: "1px solid rgba(148,163,184,.12)" }}>
+                <InfoRow label="Giá trị đã lưu" valueText={`${savedLot.trendFixedLot.toFixed(2)} / ${savedLot.sidewayRiskPercent.toFixed(2)}% / ${savedLot.sidewayMaxLot.toFixed(2)}`} />
+                <InfoRow label="Giá trị đang nhập" valueText={`${draftLot.trendFixedLot.toFixed(2)} / ${draftLot.sidewayRiskPercent.toFixed(2)}% / ${draftLot.sidewayMaxLot.toFixed(2)}`} />
+                <InfoRow label="Có thay đổi" valueText={hasChanges ? "Yes" : "No"} />
+                <InfoRow label="Safety gate" valueText={canSafelyApply ? "PASS" : "LOCKED"} strong />
+              </Box>
+
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2}>
+                <Button variant="contained" size="large" onClick={onSubmit} disabled={mutation.isPending || !canSafelyApply || validationErrors.length > 0 || !hasChanges} sx={{ fontWeight: 950, flex: 1 }}>
+                  {mutation.isPending ? "Đang lưu..." : "Lưu cấu hình lot"}
+                </Button>
+                <Button variant="outlined" size="large" onClick={resetToSaved} disabled={mutation.isPending || !hasChanges} sx={{ fontWeight: 900 }}>
+                  Khôi phục
+                </Button>
+              </Stack>
+
+              <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.6 }}>
+                Cơ chế an toàn: NEW POSITIONS ONLY · lot quản lý theo bước 0.03 · không martingale · không recovery lot escalation · không chỉnh vị thế đang mở.
+              </Typography>
+            </Stack>
+          </SectionCard>
         </Grid>
 
-        <Grid size={{ xs: 12, md: 4 }}>
-          <StatusCard
-            icon={<HubRounded color={demoReady ? "success" : "disabled"} />}
-            title="MT5 DEMO"
-            status={demoReady ? "SẴN SÀNG" : "CHƯA SẴN SÀNG"}
-            detail={`${o.bridge.accountMode?.toUpperCase() ?? "KHÔNG RÕ"} #${o.bridge.accountLogin ?? "—"} · ${o.bridge.server ?? "—"}`}
-            online={demoReady}
-          />
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <SectionCard title="Cấu hình Lot/Risk hiện tại" subtitle="Giá trị đang cấu hình và trạng thái active.">
+            <InfoRow label="Trend fixed lot" valueText={pickText(configuredLot.trendFixedLot, configuration.configuredTrendFixedLot, configuration.activeTrendFixedLot)} strong />
+            <InfoRow label="Sideway risk percent" valueText={`${pickText(configuredLot.sidewayRiskPercent, configuration.configuredSidewayRiskPercent)}%`} />
+            <InfoRow label="Sideway max lot" valueText={pickText(configuredLot.sidewayMaxLot, configuration.configuredSidewayMaxLot)} />
+            <InfoRow label="Target risk USD" valueText={money(configuration.targetRiskUsd, currency)} />
+            <InfoRow label="Lot restart required" valueText={boolText(configuration.lotSettingsRestartRequired ?? lotRuntime.restartRequired)} />
+            <InfoRow label="Applies to" valueText="NEW POSITIONS ONLY" />
+            <InfoRow label="Order permission" valueText={pickText(configuration.previewOrderPermission, ui?.safety.orderPermission, raw(panel, "mt5OrderPermission"))} />
+          </SectionCard>
         </Grid>
       </Grid>
 
-      {o.bot.managedPosition && (
-        <Alert severity="warning">
-          Bot đang quản lý một vị thế. Nút <b>Dừng Bot DEMO</b> bị khóa để tránh bỏ vị thế đang mở không được quản lý.
-        </Alert>
-      )}
-
-      {!demoReady && (
-        <Alert severity="warning">
-          MT5 DEMO chưa đủ điều kiện chạy Bot. Kiểm tra Bridge, Algo Trading và quyền Expert Trading.
-        </Alert>
-      )}
-
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <Card variant="outlined">
-            <CardContent>
-              <Typography variant="h6" fontWeight={900}>Bot giao dịch DEMO</Typography>
-              <Typography variant="body2" color="text.secondary" mt={0.5}>
-                Trend entry: 3 mô hình nến + Supertrend M15/M5 cùng hướng + SL cấu trúc. SL vận hành 6–10 giá; nếu cấu trúc vượt 10 thì chờ hồi trong cửa sổ M15 kế tiếp. Flip age và FVG chỉ là bối cảnh. Khối lượng mặc định 0.03 lot.
-              </Typography>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} mt={2.5}>
-                <Button
-                  variant="contained"
-                  color="success"
-                  startIcon={<PlayArrowRounded />}
-                  disabled={actionPending || o.bot.alive || !o.controlEnabled || !demoReady}
-                  onClick={() => mutate.mutate("bot/start")}
-                  sx={{ fontWeight: 900, minWidth: 180 }}
-                >
-                  {botStarting ? "ĐANG BẬT BOT..." : "BẬT BOT DEMO"}
-                </Button>
-                <Button
-                  variant="outlined"
-                  color="error"
-                  startIcon={<StopRounded />}
-                  disabled={actionPending || !o.bot.alive || !o.bot.canStop || !o.controlEnabled}
-                  onClick={() => mutate.mutate("bot/stop")}
-                  sx={{ fontWeight: 900, minWidth: 180 }}
-                >
-                  {botStopping ? "ĐANG DỪNG..." : "DỪNG BOT DEMO"}
-                </Button>
-              </Stack>
-            </CardContent>
-          </Card>
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <SectionCard title="Quote & Broker Spec" subtitle="Thông tin symbol dùng cho tính lot/risk.">
+            <InfoRow label="Bid" valueText={clean(quote.bid, "—")} strong />
+            <InfoRow label="Ask" valueText={clean(quote.ask, "—")} />
+            <InfoRow label="Spread" valueText={clean(quote.spread, "—")} />
+            <InfoRow label="Broker symbol" valueText={clean(spec.brokerSymbol, "XAUUSD")} />
+            <InfoRow label="Min volume" valueText={clean(spec.minVolume, "—")} />
+            <InfoRow label="Volume step" valueText={clean(spec.volumeStep, "—")} />
+            <InfoRow label="Max volume" valueText={clean(spec.maxVolume, "—")} />
+          </SectionCard>
         </Grid>
-
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <Card variant="outlined">
-            <CardContent>
-              <Typography variant="h6" fontWeight={900}>Thông báo Telegram</Typography>
-              <Typography variant="body2" color="text.secondary" mt={0.5}>
-                Telegram chỉ đọc journal/API và gửi thông báo; không có quyền đặt, sửa hoặc đóng lệnh MT5.
-              </Typography>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} mt={2.5} flexWrap="wrap" useFlexGap>
-                <Button
-                  variant="contained"
-                  startIcon={<TelegramRounded />}
-                  disabled={actionPending || o.telegram.alive || !o.controlEnabled}
-                  onClick={() => mutate.mutate("telegram/start")}
-                  sx={{ fontWeight: 900, minWidth: 170 }}
-                >
-                  {telegramStarting ? "ĐANG BẬT..." : "BẬT TELEGRAM"}
-                </Button>
-                <Button
-                  variant="outlined"
-                  color="error"
-                  startIcon={<StopRounded />}
-                  disabled={actionPending || !o.telegram.alive || !o.controlEnabled}
-                  onClick={() => mutate.mutate("telegram/stop")}
-                  sx={{ fontWeight: 900, minWidth: 170 }}
-                >
-                  {telegramStopping ? "ĐANG TẮT..." : "TẮT TELEGRAM"}
-                </Button>
-              </Stack>
-              <Typography variant="caption" color="text.secondary" display="block" mt={1.5}>
-                Mẫu hồi phục là one-shot, chỉ gửi PREVIEW; không đặt/sửa/đóng lệnh MT5 và không ghi journal giao dịch.
-              </Typography>
-            </CardContent>
-          </Card>
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <SectionCard title="Runtime & Bridge" subtitle="Trạng thái nền của Phase7C.">
+            <InfoRow label="Lifecycle running" valueText={boolText(lifecycle.running)} />
+            <InfoRow label="Lifecycle ready" valueText={boolText(lifecycle.ready)} />
+            <InfoRow label="Active mode" valueText={activeMode} />
+            <InfoRow label="Effective strategy" valueText={clean(ui?.effectiveStrategy, value(panel, "effectiveStrategy", "—"))} />
+            <InfoRow label="UI state" valueText={clean(ui?.uiState, "—")} />
+            <InfoRow label="MT5 bridge" valueText={bridge.reachable ? "OK" : "Chưa xác nhận"} />
+            <InfoRow label="Trading enabled" valueText={boolText(account.tradingEnabled ?? bridge.tradingEnabled)} />
+            <InfoRow label="Open XAUUSD positions" valueText={openPositions} />
+            <InfoRow label="Regime notifier" valueText={notifier.alive ? `Alive · PID ${clean(notifier.pid, "—")}` : "Chưa xác nhận"} />
+            <InfoRow label="Telegram PID" valueText={telegram.alive ? `Alive · PID ${clean(telegram.pid, "—")}` : "Chưa xác nhận"} />
+          </SectionCard>
+        </Grid>
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <SectionCard title="Safety" subtitle="Các khóa an toàn bắt buộc của DEMO.">
+            <InfoRow label="Demo only" valueText={ui?.safety.demoOnly ? "Yes" : "Yes"} strong />
+            <InfoRow label="Read only panel" valueText={ui?.safety.readOnly ? "Yes" : "Yes"} />
+            <InfoRow label="Order permission" valueText={clean(ui?.safety.orderPermission, pickText(raw(panel, "mt5OrderPermission"), "NONE"))} />
+            <InfoRow label="New positions only" valueText={ui?.safety.newPositionsOnly ? "Yes" : "Yes"} />
+            <InfoRow label="Martingale" valueText={ui?.safety.martingale === false ? "No" : "No"} />
+            <InfoRow label="Recovery escalation" valueText={ui?.safety.recoveryLotEscalation === false ? "No" : "No"} />
+            <InfoRow label="Execution mutation" valueText={boolText(asRecord(accountRisk.safety).executionMutation)} />
+            <InfoRow label="Phase7B fixed volume unchanged" valueText={boolText(asRecord(accountRisk.safety).phase7bFixedVolumeUnchanged)} />
+            <InfoRow label="Lot binding active" valueText={lotRuntime.activeAlive ? "Active" : "—"} />
+          </SectionCard>
         </Grid>
       </Grid>
-
-      {mutate.isSuccess && <Alert severity="success">{mutate.data.message}</Alert>}
-      {mutate.isError && (
-        <Alert severity="error" sx={{ whiteSpace: "pre-wrap", fontFamily: "monospace" }}>
-          {mutate.error instanceof Error ? mutate.error.message : "Không thực hiện được thao tác."}
-        </Alert>
-      )}
-      {recoveryTelegramTest.isSuccess && <Alert severity="success">{recoveryTelegramTest.data.message}</Alert>}
-      {recoveryTelegramTest.isError && (
-        <Alert severity="error" sx={{ whiteSpace: "pre-wrap" }}>
-          {recoveryTelegramTest.error instanceof Error ? recoveryTelegramTest.error.message : "Không gửi được mẫu hồi phục Telegram."}
-        </Alert>
-      )}
-
-      <Card variant="outlined">
-        <CardContent>
-          <Typography variant="h6" fontWeight={900}>Nội dung Telegram sẽ giải thích gì?</Typography>
-          <Grid container spacing={1.5} mt={0.4}>
-            <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Vì sao vào/chờ:</b> mô hình nến, ST M15/M5, SL cấu trúc, trạng thái vào ngay hoặc chờ hồi và bối cảnh FVG.</Typography></Grid>
-            <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Vì sao HOLD:</b> trạng thái +6 hòa vốn, +10 chốt 1/3, runner còn lại và lý do chưa thoát.</Typography></Grid>
-            <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Khi quản lý:</b> dời SL, khối lượng còn lại, lãi/lỗ runner.</Typography></Grid>
-            <Grid size={{ xs: 12, md: 6 }}><Typography variant="body2">✓ <b>Khi đóng:</b> P&amp;L, giá thoát và lý do đóng.</Typography></Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-
-      <Alert severity="info">
-        NORMAL: cả Trend và Sideway đều +6 giá → dời SL về hòa vốn, +10 giá → chốt 1/3. Trend runner siết SL theo cấu trúc M15 và thoát theo MA50/FVG đảo chiều; Sideway chốt phần còn lại ở biên đối diện. RECOVERY_TP chốt toàn bộ tại TP thích ứng 6–10 giá, không tăng lot.
-      </Alert>
     </Stack>
   );
 }

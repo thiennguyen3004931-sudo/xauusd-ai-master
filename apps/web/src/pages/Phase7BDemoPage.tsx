@@ -1,381 +1,488 @@
+import { useEffect, useRef, type ReactNode } from "react";
 import {
   Alert,
   Box,
   Card,
   CardContent,
   Chip,
-  Divider,
   Grid,
   Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Typography,
 } from "@mui/material";
-import AccountCircleRounded from "@mui/icons-material/AccountCircleRounded";
-import CandlestickChartRounded from "@mui/icons-material/CandlestickChartRounded";
-import ReceiptLongRounded from "@mui/icons-material/ReceiptLongRounded";
-import SmartToyRounded from "@mui/icons-material/SmartToyRounded";
 import { useQuery } from "@tanstack/react-query";
-import { dateTime, money, price } from "../format";
-import { ErrorState, LoadingState } from "../ui/PageState";
-import { MetricCard } from "../ui/MetricCard";
-import { StatusChip } from "../ui/StatusChip";
+import { ColorType, LineStyle, createChart, type UTCTimestamp } from "lightweight-charts";
+import { LoadingState, ErrorState } from "../ui/PageState";
+import {
+  clean,
+  compactReason,
+  fetchPhase7CPerformance,
+  fetchPhase7CWebStatus,
+  getTradeUiState,
+  isUsablePanelValue,
+  money,
+  pickText,
+  raw,
+  stageTone,
+  value,
+  type Phase7CCandle,
+  type Phase7CPanelStatus,
+  type Phase7CPerformanceTrade,
+  type Phase7CUiContract,
+  type Phase7CUiGate,
+  type TradeUiState,
+} from "../phase7c-panel-status";
 
-type Side = "BUY" | "SELL";
-
-type ManagedState = {
-  ticket: string;
-  side: Side;
-  pattern: string;
-  signalTimestamp: number;
-  entry: number;
-  initialVolume: number;
-  expectedRemainingVolume: number;
-  stopDistance: number;
-  breakEvenApplied: boolean;
-  partialApplied: boolean;
-  lastStructuralStop: number | null;
-};
-
-type EntryDiagnostics = {
-  closeTime: number;
-  nextCloseTime: number;
-  pattern: { matched: boolean; name: string | null; side: Side | null };
-  trend: {
-    m15Supertrend?: Side | null;
-    m5Supertrend?: Side | null;
-    confidenceM5Supertrend?: Side | null;
-    m5FlipAgeBars?: number | null;
-    matchedPatternSide: boolean;
-  };
-  fvg: { sameDirectionConfirmed: boolean; requiredForEntry: false };
-  entry: {
-    eligible: boolean;
-    side: Side | null;
-    rule: string;
-    referenceEntry: number;
-    structuralStopDistance: number | null;
-    stopDistance: number | null;
-    action: "WAIT_SIGNAL" | "ENTRY_IMMEDIATE" | "WAIT_PULLBACK";
-    reason: string;
-  };
-};
-
-type Position = {
-  ticket: string;
-  side: "LONG" | "SHORT";
-  volume: number;
-  entry: number;
-  stopLoss: number;
-  profit: number;
-};
-
-type DemoEvent = {
-  timestamp?: string;
-  type?: string;
-  side?: string;
-  pattern?: string;
-  reason?: string;
-  message?: string;
-  [key: string]: unknown;
-};
-
-type Snapshot = {
-  botStatus: string;
-  generatedAt: number;
-  runtime: { armed?: boolean; alive?: boolean; pid?: number | null } | null;
-  entryDiagnostics: EntryDiagnostics | null;
-  entryDiagnosticsError?: string | null;
-  state: {
-    accountLogin: number | null;
-    pendingPullback?: {
-      side: Side;
-      pattern: string;
-      signalTimestamp: number;
-      expiresAt: number;
-      structuralStopDistanceAtSignal: number;
-    } | null;
-    managed: ManagedState | null;
-  } | null;
-  recentEvents: DemoEvent[];
-  mt5: {
-    reachable: boolean;
-    health: {
-      accountMode?: "demo" | "contest" | "real";
-      accountLogin?: number | null;
-      server?: string;
-      tradingEnabled?: boolean;
-      terminalTradeAllowed?: boolean;
-      expertTradeAllowed?: boolean;
-      accountProfit?: number;
-      accountCurrency?: string;
-    } | null;
-    quote: { bid: number; ask: number; spread: number } | null;
-    positions: Position[];
-    managedPosition: Position | null;
-  };
-};
-
-async function getSnapshot(): Promise<Snapshot> {
-  const response = await fetch("/api/v1/phase7b-demo", { cache: "no-store" });
-  const text = await response.text();
-  if (!response.ok) {
-    try {
-      const parsed = JSON.parse(text) as { error?: string };
-      throw new Error(parsed.error || `HTTP ${response.status}`);
-    } catch (error) {
-      if (error instanceof Error && error.message !== text) throw error;
-      throw new Error(text || `HTTP ${response.status}`);
-    }
-  }
-  return JSON.parse(text) as Snapshot;
+function asRecord(input: unknown): Record<string, any> {
+  return input && typeof input === "object" ? (input as Record<string, any>) : {};
 }
 
-function tenHuong(side: Side | null | undefined) {
-  if (side === "BUY") return "MUA";
-  if (side === "SELL") return "BÁN";
-  return "—";
-}
-
-function tenMoHinh(name: string | null | undefined) {
-  if (name === "ENGULFING") return "Nến nhấn chìm";
-  if (name === "TWO_CANDLE_BODY_DOMINANCE") return "Hai nến thân chiếm ưu thế";
-  return name ? name.replaceAll("_", " ") : "Chưa có mô hình";
-}
-
-function tenTrangThaiBot(status: string) {
-  const map: Record<string, string> = {
-    WAITING_SIGNAL: "ĐANG CHỜ TÍN HIỆU",
-    WAITING_PULLBACK: "ĐANG CHỜ GIÁ HỒI",
-    MANAGING: "ĐANG QUẢN LÝ LỆNH",
-    READY_NOT_ARMED: "SẴN SÀNG · CHƯA BẬT BOT",
-    BOT_STALE: "BOT MẤT HEARTBEAT",
-    POSITION_NOT_MANAGED: "CÓ LỆNH NHƯNG BOT KHÔNG QUẢN LÝ",
-    MT5_OFFLINE: "MT5 MẤT KẾT NỐI",
-    NOT_CONFIGURED: "CHƯA CẤU HÌNH",
-  };
-  return map[status] ?? status.replaceAll("_", " ");
-}
-
-function eventLabel(type?: string) {
-  const labels: Record<string, string> = {
-    ENTRY_SUBMIT: "Gửi yêu cầu vào lệnh",
-    ENTRY_FILLED: "Đã khớp lệnh",
-    ENTRY_REJECTED: "Lệnh vào bị từ chối",
-    PLUS6_SL_TO_ENTRY: "+6 giá → dời SL về hòa vốn",
-    PLUS10_PARTIAL_ONE_THIRD: "+10 giá → chốt 1/3",
-    STRUCTURAL_SL_TIGHTEN: "Siết dừng lỗ",
-    EXIT_EXECUTED: "Đã đóng lệnh",
-    MANAGED_POSITION_CLOSED: "Vị thế đã đóng",
-    DEMO_GUARD_BLOCK: "Bộ bảo vệ DEMO chặn",
-    CYCLE_ERROR: "Lỗi chu kỳ Bot",
-    FVG_HOLD_CONFIRMED: "Bối cảnh FVG cùng hướng",
-    WAIT_PULLBACK: "SL > 10 · bắt đầu chờ hồi",
-    PULLBACK_STILL_TOO_WIDE: "Giá hồi chưa đủ để SL ≤ 10",
-    PULLBACK_ENTRY: "Giá hồi đạt · gửi lệnh",
-    PULLBACK_SETUP_INVALIDATED: "Hủy setup chờ hồi",
-    PULLBACK_M15_ST_INVALIDATED: "Hủy chờ hồi · M15 đổi hướng",
-    PULLBACK_M5_ST_INVALIDATED: "Hủy chờ hồi · M5 đổi hướng",
-    PULLBACK_EXPIRED: "Setup chờ hồi hết hạn",
-  };
-  return labels[type ?? ""] ?? String(type ?? "—").replaceAll("_", " ");
-}
-
-function Info({ label, value }: { label: string; value: string }) {
+function PanelCard({ title, children, accent = "cyan" }: { title: string; children: ReactNode; accent?: "cyan" | "green" | "red" | "orange" | "purple" }) {
+  const colorMap = {
+    cyan: "rgba(0,213,255,.42)",
+    green: "rgba(74,222,128,.42)",
+    red: "rgba(248,113,113,.42)",
+    orange: "rgba(251,191,36,.42)",
+    purple: "rgba(168,85,247,.42)",
+  } as const;
   return (
-    <Box>
-      <Typography variant="caption" color="text.secondary">{label}</Typography>
-      <Typography fontWeight={850}>{value}</Typography>
-    </Box>
+    <Card variant="outlined" sx={{ height: "100%", borderRadius: 3, bgcolor: "rgba(3,10,18,.72)", borderColor: colorMap[accent] }}>
+      <CardContent sx={{ p: 2.2 }}>
+        <Typography variant="subtitle2" fontWeight={950} sx={{ letterSpacing: ".03em" }}>{title}</Typography>
+        <Box mt={1.4}>{children}</Box>
+      </CardContent>
+    </Card>
   );
 }
 
-function ReasonLine({ ok, children }: { ok: boolean; children: React.ReactNode }) {
+function InfoRow({ label, valueText, tone = "default" }: { label: string; valueText: string; tone?: "default" | "success" | "error" | "warning" | "info" }) {
+  const color = tone === "success" ? "success.main" : tone === "error" ? "error.main" : tone === "warning" ? "warning.main" : tone === "info" ? "info.main" : "text.primary";
   return (
-    <Typography variant="body2" fontWeight={700} color={ok ? "success.main" : "warning.main"}>
-      {ok ? "✓" : "•"} {children}
-    </Typography>
+    <Stack direction="row" justifyContent="space-between" gap={2} py={0.7} sx={{ borderBottom: "1px solid rgba(148,163,184,.09)" }}>
+      <Typography variant="body2" color="text.secondary">{label}</Typography>
+      <Typography variant="body2" fontWeight={900} color={color} textAlign="right">{valueText}</Typography>
+    </Stack>
+  );
+}
+
+function HeaderChip({ label, valueText, color = "default" }: { label: string; valueText: string; color?: "success" | "warning" | "error" | "info" | "secondary" | "default" }) {
+  return (
+    <Stack spacing={0.6} alignItems="center" minWidth={112}>
+      <Typography variant="caption" color="text.secondary" fontWeight={900}>{label}</Typography>
+      <Chip label={valueText} color={color} sx={{ fontWeight: 950, minWidth: 96 }} />
+    </Stack>
+  );
+}
+
+function ReasonBox({ title, items, accent = "cyan" }: { title: string; items: string[]; accent?: "cyan" | "purple" | "orange" | "green" }) {
+  return (
+    <PanelCard title={title} accent={accent}>
+      <Stack spacing={0.9}>
+        {items.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">Chưa có dữ liệu từ engine.</Typography>
+        ) : items.map((item, index) => (
+          <Typography key={`${title}-${index}`} variant="body2" lineHeight={1.5}>• {item}</Typography>
+        ))}
+      </Stack>
+    </PanelCard>
+  );
+}
+
+function StatusDot({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <Stack direction="row" justifyContent="space-between" alignItems="center" py={0.55}>
+      <Typography variant="body2" color="text.secondary">{label}</Typography>
+      <Stack direction="row" spacing={0.8} alignItems="center">
+        <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: ok ? "success.main" : "warning.main", boxShadow: ok ? "0 0 10px rgba(34,197,94,.65)" : "none" }} />
+        <Typography variant="caption" fontWeight={900}>{ok ? "READY" : "CHECK"}</Typography>
+      </Stack>
+    </Stack>
+  );
+}
+
+function panelNumber(panel: Phase7CPanelStatus | undefined, ...keys: string[]) {
+  for (const key of keys) {
+    const text = raw(panel, key);
+    if (!isUsablePanelValue(text)) continue;
+    const numberValue = Number(text);
+    if (Number.isFinite(numberValue)) return numberValue;
+  }
+  return null;
+}
+
+function gateLabel(gate: Phase7CUiGate | undefined) {
+  if (gate === "ALLOWED") return "ĐƯỢC PHÉP";
+  if (gate === "BLOCKED_BY_MODE") return "CHẶN DO MODE";
+  if (gate === "BLOCKED_BY_REGIME") return "CHƯA CHO PHÉP";
+  return "ĐANG CHỜ";
+}
+
+function gateTone(gate: Phase7CUiGate | undefined): "success" | "warning" | "default" {
+  if (gate === "ALLOWED") return "success";
+  if (gate === "BLOCKED_BY_MODE" || gate === "BLOCKED_BY_REGIME") return "warning";
+  return "default";
+}
+
+function formatTradeTime(timestamp: number) {
+  if (!Number.isFinite(timestamp)) return "—";
+  return new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(timestamp));
+}
+
+function price(value: number) {
+  return Number.isFinite(value) ? value.toFixed(2) : "—";
+}
+
+function RecentTradeJournal({ trades, currency, loading, error }: { trades: Phase7CPerformanceTrade[]; currency: string; loading: boolean; error?: string }) {
+  const recent = trades.slice(0, 6);
+  return (
+    <PanelCard title="NHẬT KÝ GIAO DỊCH GẦN NHẤT" accent="cyan">
+      {loading && recent.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">Đang tải lịch sử giao dịch thật từ MT5...</Typography>
+      ) : error && recent.length === 0 ? (
+        <Typography variant="body2" color="warning.main">Chưa đọc được lịch sử MT5: {error}</Typography>
+      ) : recent.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">Chưa có lệnh XAUUSD đã đóng trong cửa sổ 90 ngày. Dashboard không tạo dữ liệu minh họa.</Typography>
+      ) : (
+        <Box sx={{ overflowX: "auto" }}>
+          <Box sx={{ minWidth: 720 }}>
+            <Box sx={{ display: "grid", gridTemplateColumns: "110px 90px 70px 70px 1fr 100px", gap: 1, px: 1, pb: 1, borderBottom: "1px solid rgba(148,163,184,.18)" }}>
+              {[
+                "Đóng lệnh",
+                "Strategy",
+                "Side",
+                "Lot",
+                "Entry → Exit",
+                "P/L",
+              ].map((label) => <Typography key={label} variant="caption" color="text.secondary" fontWeight={900}>{label}</Typography>)}
+            </Box>
+            {recent.map((trade) => (
+              <Box key={trade.id} sx={{ display: "grid", gridTemplateColumns: "110px 90px 70px 70px 1fr 100px", gap: 1, alignItems: "center", px: 1, py: 1.05, borderBottom: "1px solid rgba(148,163,184,.08)" }}>
+                <Typography variant="caption">{formatTradeTime(trade.closedAt)}</Typography>
+                <Chip size="small" label={trade.strategy} variant="outlined" color={trade.strategy === "SIDEWAY" ? "info" : trade.strategy === "TREND" ? "secondary" : "default"} sx={{ width: "fit-content", fontWeight: 850 }} />
+                <Typography variant="body2" fontWeight={900} color={trade.side === "BUY" ? "success.main" : "error.main"}>{trade.side}</Typography>
+                <Typography variant="body2">{trade.volume.toFixed(2)}</Typography>
+                <Typography variant="body2">{price(trade.entry)} → {price(trade.exit)}</Typography>
+                <Typography variant="body2" fontWeight={950} color={trade.netPnl >= 0 ? "success.main" : "error.main"}>{trade.netPnl >= 0 ? "+" : ""}{trade.netPnl.toFixed(2)} {currency}</Typography>
+              </Box>
+            ))}
+          </Box>
+        </Box>
+      )}
+    </PanelCard>
+  );
+}
+
+function LiveCandlestickChart({ candles, panel, uiState, ui }: { candles: Phase7CCandle[]; panel: Phase7CPanelStatus | undefined; uiState: TradeUiState; ui?: Phase7CUiContract }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || candles.length < 2) return;
+
+    const chart = createChart(container, {
+      width: container.clientWidth,
+      height: 430,
+      layout: { background: { type: ColorType.Solid, color: "#020914" }, textColor: "#9ca3af" },
+      grid: { vertLines: { color: "rgba(148,163,184,.08)" }, horzLines: { color: "rgba(148,163,184,.08)" } },
+      rightPriceScale: { borderColor: "rgba(148,163,184,.20)" },
+      timeScale: { borderColor: "rgba(148,163,184,.20)", timeVisible: true, secondsVisible: false },
+      crosshair: { vertLine: { color: "rgba(0,213,255,.35)" }, horzLine: { color: "rgba(0,213,255,.35)" } },
+    });
+
+    const series = chart.addCandlestickSeries({
+      upColor: "#22c55e",
+      downColor: "#ef4444",
+      borderUpColor: "#22c55e",
+      borderDownColor: "#ef4444",
+      wickUpColor: "#22c55e",
+      wickDownColor: "#ef4444",
+    });
+
+    const deduped = new Map<number, Phase7CCandle>();
+    candles.forEach((candle) => deduped.set(Math.floor(candle.openTime / 1000), candle));
+    series.setData(Array.from(deduped.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([time, candle]) => ({
+        time: time as UTCTimestamp,
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+      })));
+
+    if (uiState !== "WAITING") {
+      const setup = uiState === "SETUP_READY" ? ui?.setup : null;
+      const position = uiState === "MANAGING" ? ui?.position : null;
+      const managing = uiState === "MANAGING";
+      const levels = [
+        { title: "ENTRY", price: position?.entry ?? setup?.entry ?? (managing ? panelNumber(panel, "positionEntry", "entry") : panelNumber(panel, "entry")), color: "#38bdf8" },
+        { title: "SL", price: position?.stopLoss ?? setup?.stopLoss ?? (managing ? panelNumber(panel, "positionStopLoss", "stopLoss") : panelNumber(panel, "stopLoss")), color: "#f87171" },
+        { title: "TP1", price: position?.tp1 ?? setup?.tp1 ?? (managing ? panelNumber(panel, "positionTp1", "tp1") : panelNumber(panel, "tp1")), color: "#4ade80" },
+        { title: "TP2", price: position?.tp2 ?? setup?.tp2 ?? (managing ? panelNumber(panel, "positionTp2", "tp2") : panelNumber(panel, "tp2")), color: "#22c55e" },
+      ];
+      levels.forEach((level) => {
+        if (level.price === null || level.price === undefined || !Number.isFinite(level.price)) return;
+        series.createPriceLine({
+          price: level.price,
+          color: level.color,
+          lineWidth: 1,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: level.title,
+        });
+      });
+    }
+
+    chart.timeScale().fitContent();
+    const observer = new ResizeObserver(() => {
+      chart.applyOptions({ width: container.clientWidth, height: 430 });
+    });
+    observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+      chart.remove();
+    };
+  }, [candles, panel, uiState, ui]);
+
+  if (candles.length < 2) {
+    return (
+      <Box sx={{ height: 430, display: "grid", placeItems: "center", borderRadius: 3, bgcolor: "#020914", border: "1px solid rgba(0,213,255,.22)" }}>
+        <Box textAlign="center">
+          <Typography variant="h6" fontWeight={900}>Không tải được dữ liệu nến XAUUSD M15</Typography>
+          <Typography variant="body2" color="text.secondary" mt={1}>Chart không dùng dữ liệu giả. Kiểm tra MT5 bridge/history feed.</Typography>
+        </Box>
+      </Box>
+    );
+  }
+
+  const regime = ui?.regime ?? value(panel, "regime", "—");
+  const confidence = ui?.confidence ?? value(panel, "confidence", "—");
+  const stage = ui?.stage ?? value(panel, "stage", "—");
+
+  return (
+    <Box sx={{ position: "relative", borderRadius: 3, overflow: "hidden", border: "1px solid rgba(0,213,255,.22)", bgcolor: "#020914" }}>
+      <Box sx={{ position: "absolute", zIndex: 3, left: 16, top: 14, pointerEvents: "none" }}>
+        <Typography variant="h6" fontWeight={950}>XAUUSD · M15</Typography>
+        <Typography variant="caption" color="text.secondary">Live MT5 candles · {candles.length} bars</Typography>
+      </Box>
+      <Stack direction="row" spacing={1} sx={{ position: "absolute", zIndex: 3, right: 78, top: 14, pointerEvents: "none" }}>
+        <Chip size="small" label={uiState === "WAITING" ? "WAITING" : uiState === "SETUP_READY" ? "SETUP READY" : "MANAGING"} color={uiState === "WAITING" ? "warning" : "success"} sx={{ fontWeight: 900 }} />
+        <Chip size="small" label={`${regime} ${confidence}%`} color="info" variant="outlined" sx={{ fontWeight: 900 }} />
+      </Stack>
+      <Box ref={containerRef} sx={{ width: "100%", height: 430 }} />
+      {uiState === "WAITING" && (
+        <Box sx={{ position: "absolute", zIndex: 3, left: 18, bottom: 18, px: 1.5, py: 1, borderRadius: 2, bgcolor: "rgba(15,23,42,.90)", border: "1px solid rgba(251,191,36,.35)", pointerEvents: "none" }}>
+          <Typography variant="subtitle2" fontWeight={950} color="warning.main">BOT ĐANG CHỜ SETUP</Typography>
+          <Typography variant="caption" color="text.secondary">Stage {stage} · Entry / SL / TP được ẩn cho tới khi setup được duyệt</Typography>
+        </Box>
+      )}
+    </Box>
   );
 }
 
 export function Phase7BDemoPage() {
   const query = useQuery({
-    queryKey: ["phase7b-demo-simple"],
-    queryFn: getSnapshot,
+    queryKey: ["phase7c-web-final-dashboard-v4-journal"],
+    queryFn: fetchPhase7CWebStatus,
     refetchInterval: 3_000,
     retry: false,
+    placeholderData: (previous) => previous,
+  });
+  const performanceQuery = useQuery({
+    queryKey: ["phase7c-web-mt5-performance-90d"],
+    queryFn: fetchPhase7CPerformance,
+    refetchInterval: 30_000,
+    retry: false,
+    placeholderData: (previous) => previous,
   });
 
   if (query.isLoading) return <LoadingState />;
-  if (query.isError || !query.data) {
-    return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được màn hình theo dõi giao dịch."} />;
-  }
+  if (query.isError && !query.data) return <ErrorState message={query.error instanceof Error ? query.error.message : "Không đọc được Dashboard."} />;
 
   const data = query.data;
-  const health = data.mt5.health;
-  const managed = data.state?.managed ?? null;
-  const pendingPullback = data.state?.pendingPullback ?? null;
-  const position = data.mt5.managedPosition;
-  const diagnostics = data.entryDiagnostics;
-  const currency = health?.accountCurrency ?? "USD";
-  const currentPrice = managed?.side === "BUY" ? data.mt5.quote?.bid : managed?.side === "SELL" ? data.mt5.quote?.ask : null;
-  const botAlive = Boolean(data.runtime?.alive && data.runtime?.armed);
-  const guardPass = Boolean(
-    data.mt5.reachable &&
-    health?.accountMode === "demo" &&
-    health?.tradingEnabled === true &&
-    health?.terminalTradeAllowed === true &&
-    health?.expertTradeAllowed === true,
+  const panel = data?.panel;
+  const ui = data?.ui;
+  const lifecycle = asRecord(data?.lifecycle);
+  const accountRisk = asRecord(data?.accountRisk);
+  const account = asRecord(accountRisk.account);
+  const config = asRecord(accountRisk.configuration);
+  const bridge = asRecord(lifecycle.bridge);
+  const processes = asRecord(lifecycle.processes);
+  const lotRuntime = asRecord(lifecycle.lotSettings);
+  const currency = clean(account.accountCurrency, performanceQuery.data?.currency ?? "USD");
+  const activeMode = clean(ui?.mode, value(panel, "activeMode", "—"));
+  const effectiveStrategy = clean(ui?.effectiveStrategy, value(panel, "effectiveStrategy", "—"));
+  const mode = activeMode !== effectiveStrategy && effectiveStrategy !== "—" ? `${activeMode} → ${effectiveStrategy}` : activeMode;
+  const stage = clean(ui?.stage, value(panel, "stage", "—"));
+  const regime = clean(ui?.regime, value(panel, "regime", "—"));
+  const confidence = clean(ui?.confidence, value(panel, "confidence", "—"));
+  const uiState = getTradeUiState(panel, ui);
+  const hasPosition = uiState === "MANAGING";
+  const setupReady = uiState === "SETUP_READY";
+
+  const fallbackWaitReasons = compactReason(
+    [raw(panel, "limitReason"), raw(panel, "decisionReason"), raw(panel, "entryReason")].filter(Boolean).join(" | "),
+    "Chưa có setup hợp lệ.",
   );
-  const recent = data.recentEvents.slice(0, 12);
-  const latestExit = data.recentEvents.find((event) => event.type === "EXIT_EXECUTED" || event.type === "MANAGED_POSITION_CLOSED");
-  const currentM15Aligned = Boolean(managed && diagnostics?.trend.m15Supertrend === managed.side);
-  const currentM5Aligned = Boolean(managed && diagnostics?.trend.confidenceM5Supertrend === managed.side);
+  const waitReasons = ui?.reasons.wait?.length ? ui.reasons.wait : fallbackWaitReasons;
+  const entryReasons = ui?.reasons.entry?.length ? ui.reasons.entry : compactReason(raw(panel, "entryReason") || raw(panel, "decisionReason"), "Engine chưa trả lý do vào lệnh.");
+  const holdReasons = ui?.reasons.hold?.length ? ui.reasons.hold : compactReason(raw(panel, "holdReason"), "Engine chưa trả lý do giữ lệnh.");
+  const exitReasons = ui?.reasons.exit ?? [];
+  const setup = ui?.setup;
+  const position = ui?.position;
+  const profit = position?.floatingPnlUsd ?? Number(raw(panel, "floatingPnlUsd"));
+  const profitText = Number.isFinite(profit) ? `${Number(profit).toFixed(2)} USD` : "—";
+  const performanceError = performanceQuery.error instanceof Error ? performanceQuery.error.message : undefined;
 
   return (
-    <Stack spacing={2.2}>
-      <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1.5} alignItems={{ md: "center" }}>
-        <Box>
-          <Typography variant="overline" color="primary" fontWeight={900}>XAUUSD · CHẠY THỬ DEMO</Typography>
-          <Typography variant="h4" fontWeight={950}>Tổng quan giao dịch</Typography>
-          <Typography variant="body2" color="text.secondary" mt={0.5}>Tập trung vào trạng thái Bot, vị thế đang quản lý và lịch sử sự kiện. Điều kiện entry chi tiết được gom về trang Điều kiện tín hiệu.</Typography>
-        </Box>
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          <StatusChip value={botAlive ? tenTrangThaiBot(data.botStatus) : "BOT ĐANG DỪNG"} />
-          <StatusChip value={guardPass ? "DEMO SẴN SÀNG" : "DEMO BỊ CHẶN"} />
-        </Stack>
-      </Stack>
-
-      {health?.accountMode === "real" && <Alert severity="error">Phát hiện tài khoản thật — Bot DEMO bị khóa hoàn toàn.</Alert>}
-
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <MetricCard label="Tài khoản DEMO" value={String(health?.accountLogin ?? data.state?.accountLogin ?? "—")} detail={`${health?.server ?? "—"}`} icon={<AccountCircleRounded color="primary" />} />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <MetricCard label="Giá XAUUSD" value={price(data.mt5.quote?.bid ?? null)} detail={`Ask ${price(data.mt5.quote?.ask ?? null)} · spread ${price(data.mt5.quote?.spread ?? null)}`} icon={<CandlestickChartRounded color="primary" />} />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <MetricCard label="Trạng thái Bot" value={botAlive ? tenTrangThaiBot(data.botStatus) : "ĐANG DỪNG"} detail={botAlive ? `PID ${data.runtime?.pid ?? "—"}` : "Bật Bot tại trang Bot & Telegram"} icon={<SmartToyRounded color="primary" />} />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <MetricCard label="Lãi/lỗ đang mở" value={money(position?.profit ?? health?.accountProfit ?? 0, currency)} detail={managed ? `${tenHuong(managed.side)} · ${position?.volume ?? managed.expectedRemainingVolume} lot` : "Không có lệnh đang quản lý"} icon={<ReceiptLongRounded color={position && position.profit >= 0 ? "success" : "primary"} />} tone={position ? (position.profit >= 0 ? "success.main" : "error.main") : "text.primary"} />
-        </Grid>
-      </Grid>
-
-      <Grid container spacing={2}>
-
-        <Grid size={{ xs: 12 }}>
-          <Card variant="outlined" sx={{ height: "100%" }}>
-            <CardContent>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
-                <Typography variant="h6" fontWeight={900}>Lệnh đang quản lý</Typography>
-                <StatusChip value={managed ? tenHuong(managed.side) : "KHÔNG CÓ LỆNH"} />
-              </Stack>
-
-              {!managed ? (
-                pendingPullback ? (
-                  <Alert severity="warning" sx={{ mt: 2 }}>
-                    Setup {tenHuong(pendingPullback.side)} bằng {tenMoHinh(pendingPullback.pattern)} có SL cấu trúc {pendingPullback.structuralStopDistanceAtSignal.toFixed(2)} giá. Bot không vào đuổi; đang chờ giá hồi để SL còn tối đa 10 giá, hết hạn lúc {dateTime(pendingPullback.expiresAt)}.
-                  </Alert>
-                ) : (
-                  <Typography variant="body2" color="text.secondary" mt={2}>Chưa có lệnh. Bot chỉ vào khi toàn bộ điều kiện bắt buộc cùng đạt trên nến đã đóng; nếu SL cấu trúc vượt 10 giá thì chuyển sang chờ hồi trong M15 kế tiếp.</Typography>
-                )
-              ) : (
-                <>
-                  <Grid container spacing={2} mt={0.3}>
-                    <Grid size={6}><Info label="Mã lệnh" value={managed.ticket} /></Grid>
-                    <Grid size={6}><Info label="Mô hình đã kích hoạt" value={tenMoHinh(managed.pattern)} /></Grid>
-                    <Grid size={6}><Info label="Giá vào" value={price(position?.entry ?? managed.entry)} /></Grid>
-                    <Grid size={6}><Info label="Giá hiện tại" value={price(currentPrice ?? null)} /></Grid>
-                    <Grid size={6}><Info label="Khối lượng còn lại" value={`${position?.volume ?? managed.expectedRemainingVolume} lot`} /></Grid>
-                    <Grid size={6}><Info label="SL hiện tại" value={price(position?.stopLoss ?? managed.lastStructuralStop)} /></Grid>
-                    <Grid size={6}><Info label="+6 → hòa vốn" value={managed.breakEvenApplied ? "ĐÃ DỜI" : "CHƯA"} /></Grid>
-                    <Grid size={6}><Info label="+10 → chốt 1/3" value={managed.partialApplied ? "ĐÃ CHỐT" : "CHƯA"} /></Grid>
-                    <Grid size={12}><Info label="Lãi/lỗ thả nổi" value={money(position?.profit ?? 0, currency)} /></Grid>
-                  </Grid>
-
-                  <Divider sx={{ my: 2 }} />
-                  <Typography fontWeight={900}>Vì sao lệnh này đã được vào?</Typography>
-                  <Stack spacing={0.8} mt={1.2}>
-                    <ReasonLine ok>Mô hình {tenMoHinh(managed.pattern)} đã kích hoạt hướng {tenHuong(managed.side)}.</ReasonLine>
-                    <ReasonLine ok>Rule bắt buộc Supertrend M15 cùng hướng tại thời điểm kích hoạt.</ReasonLine>
-                    <ReasonLine ok>Rule bắt buộc Supertrend M5 cùng hướng; tuổi flip chỉ là thông tin, không chặn entry.</ReasonLine>
-                    <ReasonLine ok>SL cấu trúc hợp lệ; SL vận hành tối thiểu 6 và tối đa 10 giá. Setup rộng hơn 10 chỉ được vào sau khi hồi đủ.</ReasonLine>
-                    <Typography variant="body2" color="text.secondary">ℹ FVG chỉ ghi nhận bối cảnh; không có FVG vẫn được phép vào nếu các gate bắt buộc đạt.</Typography>
-                  </Stack>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {managed && (
-        <Card variant="outlined" sx={{ borderColor: "rgba(56,189,248,.25)" }}>
-          <CardContent>
-            <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1}>
-              <Box>
-                <Typography variant="h6" fontWeight={900}>Vì sao Bot đang HOLD lệnh?</Typography>
-                <Typography variant="body2" color="text.secondary" mt={0.4}>Giải thích theo trạng thái quản lý hiện tại; không biến H1/H4/FVG thành điều kiện thoát cứng.</Typography>
-              </Box>
-              <Chip label="ĐANG GIỮ LỆNH" color="info" variant="outlined" />
+    <Stack spacing={2.4}>
+      <Box sx={{ p: 2, borderRadius: 4, bgcolor: "rgba(3,10,18,.82)", border: "1px solid rgba(0,213,255,.18)" }}>
+        <Stack direction={{ xs: "column", xl: "row" }} justifyContent="space-between" gap={2} alignItems={{ xl: "center" }}>
+          <Box>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+              <Typography variant="h5" fontWeight={950}>XAUUSD AI MASTER</Typography>
+              <Chip label="PHASE7C" color="secondary" size="small" sx={{ fontWeight: 950 }} />
+              {ui && <Chip label="SEMANTIC UI v2" size="small" variant="outlined" color="info" sx={{ fontWeight: 900 }} />}
+              {performanceQuery.data && <Chip label="MT5 JOURNAL" size="small" variant="outlined" color="success" sx={{ fontWeight: 900 }} />}
             </Stack>
-            <Grid container spacing={2} mt={0.5}>
-              <Grid size={{ xs: 12, md: 6 }}>
-                <Stack spacing={1}>
-                  <ReasonLine ok={Boolean(position)}>Vị thế vẫn còn tồn tại trên MT5 và đang thuộc state quản lý của Bot.</ReasonLine>
-                  <ReasonLine ok={managed.breakEvenApplied}>{managed.breakEvenApplied ? "+6 đã đạt: SL đã được đưa về hòa vốn." : "+6 chưa được áp dụng: Bot tiếp tục giữ với SL hiện hành."}</ReasonLine>
-                  <ReasonLine ok={managed.partialApplied}>{managed.partialApplied ? "+10 đã đạt: đã chốt 1/3, phần còn lại tiếp tục runner." : "+10 chưa được áp dụng: chưa đến bước chốt 1/3."}</ReasonLine>
-                  <Typography variant="body2" color="text.secondary" fontWeight={700}>ℹ H1/H4 và FVG chỉ là bối cảnh; không tự đóng lệnh chỉ vì chạm các vùng này.</Typography>
-                </Stack>
-              </Grid>
-              <Grid size={{ xs: 12, md: 6 }}>
-                <Stack spacing={1}>
-                  <ReasonLine ok={currentM15Aligned}>Supertrend M15 hiện tại {currentM15Aligned ? `vẫn cùng hướng ${tenHuong(managed.side)}` : "không còn cùng hướng hoàn toàn"}.</ReasonLine>
-                  <ReasonLine ok={currentM5Aligned}>M5 live {currentM5Aligned ? `vẫn cùng hướng ${tenHuong(managed.side)}` : "không còn đồng thuận với hướng lệnh"}.</ReasonLine>
-                  <Typography variant="body2" color="text.secondary" fontWeight={700}>ℹ M15/M5 hiện tại là bối cảnh theo dõi. Bot chỉ thoát khi management canonical thực sự phát điều kiện thoát/SL.</Typography>
-                  <Typography variant="body2" color="text.secondary">Sự kiện đóng gần nhất: {latestExit?.timestamp ? `${eventLabel(latestExit.type)} lúc ${dateTime(Date.parse(latestExit.timestamp))}` : "chưa có trong journal gần đây"}.</Typography>
-                </Stack>
-              </Grid>
-            </Grid>
-          </CardContent>
-        </Card>
-      )}
+            <Typography variant="body2" color="text.secondary" mt={0.5}>MT5 DASHBOARD · LIVE DATA · DEMO ONLY · READ ONLY</Typography>
+          </Box>
+          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+            <HeaderChip label="CHẾ ĐỘ BOT" valueText={mode} color={effectiveStrategy === "PAUSE" ? "warning" : "success"} />
+            <HeaderChip label="TRẠNG THÁI" valueText={stage} color={stageTone(stage)} />
+            <HeaderChip label="REGIME" valueText={regime} color={regime === "REVERSAL" ? "warning" : "info"} />
+            <HeaderChip label="CONF" valueText={`${confidence}%`} />
+          </Stack>
+        </Stack>
+      </Box>
 
-      <Alert severity={guardPass ? "success" : "warning"}>
-        {guardPass
-          ? "DEMO sẵn sàng · Trend: 3 mô hình nến + ST M15/M5 · SL cấu trúc 6–10; vượt 10 thì chờ hồi trong M15 kế tiếp · NORMAL: +6 BE, +10 chốt 1/3."
-          : "DEMO chưa đủ điều kiện. Kiểm tra MT5 Bridge / Algo Trading / quyền Expert Trading."}
-      </Alert>
+      {data?.usedDirectFallback && <Alert severity="info">Web proxy 5717 chưa ổn định nên một số nguồn đang đọc trực tiếp Control API 3711.</Alert>}
+      {(data?.errors ?? []).length > 0 && <Alert severity="warning">Nguồn chưa sẵn sàng: {(data?.errors ?? []).slice(0, 3).join(" ")}</Alert>}
 
-      <Card variant="outlined">
-        <CardContent>
-          <Typography variant="h6" fontWeight={900}>Hoạt động gần đây</Typography>
-          <TableContainer sx={{ mt: 1.5, maxHeight: 400 }}>
-            <Table stickyHeader size="small">
-              <TableHead>
-                <TableRow><TableCell>Thời gian</TableCell><TableCell>Sự kiện</TableCell><TableCell>Chi tiết</TableCell></TableRow>
-              </TableHead>
-              <TableBody>
-                {recent.length === 0 ? (
-                  <TableRow><TableCell colSpan={3}>Chưa có sự kiện.</TableCell></TableRow>
-                ) : recent.map((event, index) => (
-                  <TableRow key={`${event.timestamp ?? "event"}-${index}`} hover>
-                    <TableCell sx={{ whiteSpace: "nowrap" }}>{event.timestamp ? dateTime(Date.parse(event.timestamp)) : "—"}</TableCell>
-                    <TableCell><Typography variant="body2" fontWeight={800}>{eventLabel(event.type)}</Typography></TableCell>
-                    <TableCell><Typography variant="caption" color="text.secondary">{event.side ? tenHuong(event.side as Side) : ""} {event.pattern ? tenMoHinh(String(event.pattern)) : ""} {event.reason ? `· ${event.reason}` : ""} {event.message ? `· ${event.message}` : ""}</Typography></TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </CardContent>
-      </Card>
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12, lg: 3 }}>
+          <Stack spacing={2}>
+            <PanelCard title="TÀI KHOẢN" accent="cyan">
+              <InfoRow label="Server" valueText={pickText(account.server, bridge.server)} />
+              <InfoRow label="Account" valueText={pickText(account.accountLogin, bridge.accountLogin)} />
+              <InfoRow label="Mode" valueText={pickText(raw(panel, "accountMode"), account.accountMode, bridge.accountMode)} tone="success" />
+              <InfoRow label="Balance" valueText={money(account.accountBalance, currency)} />
+              <InfoRow label="Equity" valueText={money(account.accountEquity, currency)} />
+              <InfoRow label="Free Margin" valueText={money(account.accountFreeMargin, currency)} />
+              <InfoRow label="Profit" valueText={money(account.accountProfit, currency)} tone={Number(account.accountProfit) >= 0 ? "success" : "error"} />
+            </PanelCard>
+
+            <PanelCard title="CẤU HÌNH LOT" accent="green">
+              <InfoRow label="Trend Fixed Lot" valueText={pickText(config.configuredTrendFixedLot, "0.12")} />
+              <InfoRow label="Sideway Risk %" valueText={`${pickText(config.configuredSidewayRiskPercent, "1")}%`} />
+              <InfoRow label="Sideway Max Lot" valueText={pickText(config.configuredSidewayMaxLot, "0.30")} />
+              <InfoRow label="Auto Lot Mode" valueText="AUTO_LOT_SHADOW" />
+              <InfoRow label="Áp dụng" valueText="NEW_POSITIONS_ONLY" />
+            </PanelCard>
+
+            <PanelCard title="TRẠNG THÁI HỆ THỐNG" accent="green">
+              <StatusDot label="Market Data" ok={(data?.candles?.length ?? 0) >= 2} />
+              <StatusDot label="Semantic UI" ok={Boolean(ui)} />
+              <StatusDot label="Decision Engine" ok={Boolean(panel)} />
+              <StatusDot label="Risk Manager" ok={Boolean(accountRisk.configuration)} />
+              <StatusDot label="Trend Executor" ok={Boolean(asRecord(processes.trend).alive)} />
+              <StatusDot label="Sideway Executor" ok={Boolean(asRecord(processes.sideway).alive)} />
+              <StatusDot label="Telegram" ok={Boolean(lifecycle.telegramReady)} />
+              <StatusDot label="Lot Binding" ok={Boolean(lotRuntime.activeAlive)} />
+              <StatusDot label="MT5 Journal" ok={Boolean(performanceQuery.data)} />
+            </PanelCard>
+          </Stack>
+        </Grid>
+
+        <Grid size={{ xs: 12, lg: 6 }}>
+          <Stack spacing={2}>
+            <LiveCandlestickChart candles={data?.candles ?? []} panel={panel} uiState={uiState} ui={ui} />
+            <RecentTradeJournal
+              trades={performanceQuery.data?.trades ?? []}
+              currency={currency}
+              loading={performanceQuery.isLoading}
+              error={performanceError}
+            />
+          </Stack>
+        </Grid>
+
+        <Grid size={{ xs: 12, lg: 3 }}>
+          <Stack spacing={2}>
+            {uiState === "WAITING" && (
+              <>
+                <PanelCard title="TRẠNG THÁI GIAO DỊCH" accent="orange">
+                  <Typography variant="body2">Không có vị thế XAUUSD đang mở.</Typography>
+                  <Typography variant="body2" color="text.secondary" mt={0.8}>Bot đang chờ setup hợp lệ. Entry / SL / TP được ẩn cho tới khi engine duyệt setup.</Typography>
+                </PanelCard>
+                <ReasonBox title="LÝ DO CHƯA VÀO LỆNH" items={waitReasons} accent="cyan" />
+                <PanelCard title="BOT GATE / FILTER" accent={regime === "REVERSAL" ? "orange" : "cyan"}>
+                  <InfoRow label="Trend gate" valueText={gateLabel(ui?.gates.trend)} tone={gateTone(ui?.gates.trend)} />
+                  <InfoRow label="Sideway gate" valueText={gateLabel(ui?.gates.sideway)} tone={gateTone(ui?.gates.sideway)} />
+                  <InfoRow label="Reversal filter" valueText={ui?.gates.reversalFilter === "BLOCKING" ? "ĐANG CHẶN" : "KHÔNG CHẶN"} tone={ui?.gates.reversalFilter === "BLOCKING" ? "warning" : "success"} />
+                  <InfoRow label="Recommended" valueText={clean(ui?.recommendedMode, value(panel, "recommendedMode", "—"))} />
+                </PanelCard>
+              </>
+            )}
+
+            {setupReady && (
+              <>
+                <PanelCard title="SETUP ĐANG CHỜ" accent="green">
+                  <InfoRow label="Strategy" valueText={clean(setup?.strategy, value(panel, "effectiveStrategy", "—"))} />
+                  <InfoRow label="Setup" valueText={clean(setup?.name, "—")} />
+                  <InfoRow label="Side" valueText={clean(setup?.side, value(panel, "side", "—"))} />
+                  <InfoRow label="Entry" valueText={clean(setup?.entry, value(panel, "entry", "—"))} tone="info" />
+                  <InfoRow label="Stop Loss" valueText={clean(setup?.stopLoss, value(panel, "stopLoss", "—"))} tone="error" />
+                  <InfoRow label="TP1" valueText={clean(setup?.tp1, value(panel, "tp1", "—"))} tone="success" />
+                  <InfoRow label="TP2" valueText={clean(setup?.tp2, value(panel, "tp2", "—"))} tone="success" />
+                  <InfoRow label="Lot dự kiến" valueText={clean(setup?.finalLot, value(panel, "finalLot", "—"))} />
+                  <InfoRow label="Risk %" valueText={clean(setup?.estimatedRiskPercent, value(panel, "estimatedRiskPercent", "—"))} />
+                </PanelCard>
+                <ReasonBox title="LÝ DO SETUP ĐƯỢC DUYỆT" items={entryReasons} accent="green" />
+              </>
+            )}
+
+            {hasPosition && (
+              <>
+                <PanelCard title="CHI TIẾT LỆNH ĐANG MỞ" accent="green">
+                  <InfoRow label="Ticket" valueText={clean(position?.ticket, "—")} />
+                  <InfoRow label="Strategy" valueText={clean(position?.strategy, "—")} />
+                  <InfoRow label="Side" valueText={clean(position?.side, value(panel, "positionSide", value(panel, "side", "—")))} tone="success" />
+                  <InfoRow label="Entry" valueText={clean(position?.entry, value(panel, "positionEntry", value(panel, "entry", "—")))} />
+                  <InfoRow label="Stop Loss" valueText={clean(position?.stopLoss, value(panel, "positionStopLoss", value(panel, "stopLoss", "—")))} tone="error" />
+                  <InfoRow label="TP1" valueText={clean(position?.tp1, value(panel, "positionTp1", value(panel, "tp1", "—")))} tone="success" />
+                  <InfoRow label="TP2" valueText={clean(position?.tp2, value(panel, "positionTp2", value(panel, "tp2", "—")))} tone="success" />
+                  <InfoRow label="Lot" valueText={clean(position?.volume, value(panel, "positionVolume", value(panel, "finalLot", "—")))} />
+                </PanelCard>
+                <ReasonBox title="LÝ DO VÀO LỆNH" items={entryReasons} accent="cyan" />
+                <ReasonBox title="LÝ DO GIỮ LỆNH" items={holdReasons} accent="purple" />
+                <ReasonBox title="LÝ DO CHỐT LỆNH" items={exitReasons} accent="orange" />
+                <PanelCard title="PROFIT" accent={Number(profit) >= 0 ? "green" : "red"}>
+                  <Typography variant="h4" fontWeight={950} color={Number(profit) >= 0 ? "success.main" : "error.main"}>{profitText}</Typography>
+                  {position?.floatingPnlPercent !== null && position?.floatingPnlPercent !== undefined && (
+                    <Typography variant="body2" color="text.secondary" mt={0.6}>{Number(position.floatingPnlPercent).toFixed(2)}%</Typography>
+                  )}
+                </PanelCard>
+              </>
+            )}
+          </Stack>
+        </Grid>
+      </Grid>
+
+      <Box sx={{ px: 2, py: 1.4, borderRadius: 3, bgcolor: "rgba(3,10,18,.82)", border: "1px solid rgba(148,163,184,.16)" }}>
+        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1.5}>
+          <Typography variant="body2">UI STATE: <b>{uiState}</b></Typography>
+          <Typography variant="body2">EXECUTORS: TREND {asRecord(processes.trend).alive ? "✓" : "—"} | SIDEWAY {asRecord(processes.sideway).alive ? "✓" : "—"}</Typography>
+          <Typography variant="body2">RISK MODE: DEMO ONLY</Typography>
+          <Typography variant="body2">TELEGRAM: {lifecycle.telegramReady ? "READY" : "CHECK"}</Typography>
+          <Typography variant="body2">MT5 JOURNAL: {performanceQuery.data ? "READY" : "CHECK"}</Typography>
+          <Typography variant="body2">ORDER PERMISSION: NONE</Typography>
+        </Stack>
+      </Box>
     </Stack>
   );
 }

@@ -49,7 +49,7 @@ function recommendMode(regime: string): BotMode {
 async function loadM15Candles(symbol: string, count: number): Promise<Candle[]> {
   const apiKey = bridgeApiKey();
   if (!apiKey) {
-    throw new Error("MT5_BRIDGE_API_KEY or MT5_API_KEY is required for Phase 7C live regime detection.");
+    throw new Error("MT5_BRIDGE_API_KEY or MT5_API_KEY is required for Phase 7C live candles.");
   }
 
   const controller = new AbortController();
@@ -66,9 +66,10 @@ async function loadM15Candles(symbol: string, count: number): Promise<Candle[]> 
     if (!response.ok) {
       throw new Error(`MT5 bridge candles failed ${response.status}: ${text}`);
     }
+
     const bars = JSON.parse(text) as BridgeBar[];
-    if (!Array.isArray(bars) || bars.length < 220) {
-      throw new Error(`Phase 7C regime detection requires at least 220 M15 candles; received ${Array.isArray(bars) ? bars.length : 0}.`);
+    if (!Array.isArray(bars) || bars.length < 2) {
+      throw new Error(`Phase 7C M15 candles require at least 2 bars; received ${Array.isArray(bars) ? bars.length : 0}.`);
     }
 
     return bars.map((bar) => ({
@@ -88,10 +89,27 @@ async function loadM15Candles(symbol: string, count: number): Promise<Candle[]> 
   }
 }
 
+export async function getPhase7CM15Candles(symbol = "XAUUSD", count = 240) {
+  const normalizedSymbol = symbol.trim().toUpperCase() || "XAUUSD";
+  const candleCount = Math.min(1_000, Math.max(2, Math.trunc(count)));
+  const candles = await loadM15Candles(normalizedSymbol, candleCount);
+  return {
+    symbol: normalizedSymbol,
+    timeframe: Timeframe.M15,
+    count: candles.length,
+    candles,
+    checkedAt: Date.now(),
+  };
+}
+
 export async function getPhase7CLiveRegime(symbol = "XAUUSD", count = 320) {
   const normalizedSymbol = symbol.trim().toUpperCase() || "XAUUSD";
   const candleCount = Math.min(1_000, Math.max(220, Math.trunc(count)));
   const candles = await loadM15Candles(normalizedSymbol, candleCount);
+  if (candles.length < 220) {
+    throw new Error(`Phase 7C regime detection requires at least 220 M15 candles; received ${candles.length}.`);
+  }
+
   const analysis = analysisPipeline.analyze(normalizedSymbol, Timeframe.M15, candles);
   const indicators = indicatorPipeline.calculate(candles);
   const assessment = regimeClassifier.classify(

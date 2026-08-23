@@ -1,18 +1,33 @@
 #property copyright "XAUUSD AI MASTER"
-#property version   "1.20"
-#property description "Read-only Phase 7C synchronized position and decision panel"
+#property version   "1.37"
+#property description "Read-only Phase 7C semantic canvas decision panel v5.2"
 
-input string InpApiUrl = "http://127.0.0.1:3711/api/v1/phase7c/decision-monitor/mt5?symbol=XAUUSD";
+#include <Canvas\Canvas.mqh>
+
+input string InpApiUrl = "http://127.0.0.1:3711/api/v1/phase7c-ui/mt5?symbol=XAUUSD";
 input int InpRefreshSeconds = 3;
 input ENUM_BASE_CORNER InpCorner = CORNER_LEFT_UPPER;
 input int InpX = 12;
 input int InpY = 28;
-input int InpFontSize = 10;
 
-const string PREFIX = "XAU_AI_P7C_";
-const int PANEL_WIDTH = 700;
-const int PANEL_HEIGHT = 568;
-bool g_error_mode = false;
+const string LEGACY_PREFIX = "XAU_AI_P7C_";
+const string CANVAS_NAME = "XAU_AI_P7C_CANVAS_V5";
+const int PANEL_MIN_WIDTH = 760;
+const int PANEL_MAX_WIDTH = 860;
+const int WAITING_HEIGHT = 550;
+const int SETUP_HEIGHT = 540;
+const int MANAGING_HEIGHT = 590;
+// Required installer safety marker: READ ONLY | DEMO | ORDER PERMISSION = NONE
+
+CCanvas g_canvas;
+bool g_canvas_ready = false;
+int g_canvas_width = 0;
+int g_canvas_height = 0;
+
+uint A(const color value, const int alpha=255)
+{
+   return ColorToARGB(value, (uchar)MathMax(0, MathMin(255, alpha)));
+}
 
 string Field(const string payload, const string wanted)
 {
@@ -24,281 +39,388 @@ string Field(const string payload, const string wanted)
       int equals = StringFind(lines[index], "=");
       if(equals <= 0)
          continue;
-      string key = StringSubstr(lines[index], 0, equals);
-      if(key == wanted)
+      if(StringSubstr(lines[index], 0, equals) == wanted)
          return StringSubstr(lines[index], equals + 1);
    }
    return "n/a";
 }
 
-void DeletePanel()
+bool EmptyValue(const string value)
+{
+   return value == "" || value == "n/a" || value == "N/A" || value == "null" || value == "undefined" || value == "-";
+}
+
+string Clean(const string value, const string fallback="-")
+{
+   return EmptyValue(value) ? fallback : value;
+}
+
+int PanelWidth()
+{
+   int chart_width = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
+   int target = (int)MathRound(chart_width * 0.40);
+   target = (int)MathMax(PANEL_MIN_WIDTH, MathMin(PANEL_MAX_WIDTH, target));
+   if(chart_width > 100)
+      target = (int)MathMin(target, chart_width - 24);
+   return (int)MathMax(620, target);
+}
+
+void PurgeLegacyPanelObjects()
 {
    for(int index = ObjectsTotal(0) - 1; index >= 0; index--)
    {
       string name = ObjectName(0, index);
-      if(StringFind(name, PREFIX) == 0)
+      if(StringFind(name, LEGACY_PREFIX) == 0)
          ObjectDelete(0, name);
    }
 }
 
-void Rectangle(const string suffix, const int x, const int y, const int width, const int height, const color background, const color border)
+void DestroyCanvas()
 {
-   string name = PREFIX + suffix;
-   if(ObjectFind(0, name) < 0)
-      ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, name, OBJPROP_CORNER, InpCorner);
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, InpX + x);
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, InpY + y);
-   ObjectSetInteger(0, name, OBJPROP_XSIZE, width);
-   ObjectSetInteger(0, name, OBJPROP_YSIZE, height);
-   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, background);
-   ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR, border);
-   ObjectSetInteger(0, name, OBJPROP_BACK, false);
-   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
-}
-
-void Label(const string suffix, const int x, const int y, const string text, const color textColor = clrWhite, const int fontSize = 0, const string font = "Consolas")
-{
-   string name = PREFIX + suffix;
-   if(ObjectFind(0, name) < 0)
-      ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, name, OBJPROP_CORNER, InpCorner);
-   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, InpX + x);
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, InpY + y);
-   ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize > 0 ? fontSize : InpFontSize);
-   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, name, OBJPROP_FONT, font);
-   ObjectSetString(0, name, OBJPROP_TEXT, StringLen(text) > 0 ? text : " ");
-}
-
-void TakeWrappedLine(const string value, const int maximum, string &line, string &remaining)
-{
-   if(StringLen(value) <= maximum)
+   if(g_canvas_ready)
    {
-      line = value;
-      remaining = "";
-      return;
+      g_canvas.Destroy();
+      g_canvas_ready = false;
    }
-
-   int split = maximum;
-   for(int index = maximum; index >= maximum / 2; index--)
-   {
-      if(StringSubstr(value, index, 1) == " ")
-      {
-         split = index;
-         break;
-      }
-   }
-   line = StringSubstr(value, 0, split);
-   remaining = StringSubstr(value, split + 1);
+   ObjectDelete(0, CANVAS_NAME);
+   g_canvas_width = 0;
+   g_canvas_height = 0;
 }
 
-void WrapThree(const string value, const int maximum, string &first, string &second, string &third)
+bool EnsureCanvas(const int width, const int height)
 {
-   string remaining;
-   TakeWrappedLine(value, maximum, first, remaining);
-   TakeWrappedLine(remaining, maximum, second, third);
-   if(StringLen(third) > maximum)
-      third = StringSubstr(third, 0, maximum - 3) + "...";
+   if(g_canvas_ready && g_canvas_width == width && g_canvas_height == height)
+      return true;
+
+   DestroyCanvas();
+   if(!g_canvas.CreateBitmapLabel(0, 0, CANVAS_NAME, 0, 0, width, height, COLOR_FORMAT_ARGB_NORMALIZE))
+      return false;
+
+   ObjectSetInteger(0, CANVAS_NAME, OBJPROP_CORNER, InpCorner);
+   ObjectSetInteger(0, CANVAS_NAME, OBJPROP_XDISTANCE, InpX);
+   ObjectSetInteger(0, CANVAS_NAME, OBJPROP_YDISTANCE, InpY);
+   ObjectSetInteger(0, CANVAS_NAME, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, CANVAS_NAME, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, CANVAS_NAME, OBJPROP_BACK, false);
+
+   g_canvas_width = width;
+   g_canvas_height = height;
+   g_canvas_ready = true;
+   return true;
 }
 
-color StatusColor(const string positionState, const string stage, const string approved)
+void SetFont(const int px)
 {
-   if(positionState == "MANAGING")
-      return clrLimeGreen;
-   if(positionState == "UNMANAGED" || stage == "ERROR" || stage == "BLOCKED")
-      return clrOrangeRed;
-   if(approved == "true")
-      return clrLimeGreen;
+   g_canvas.FontSet("Segoe UI", -px * 10);
+}
+
+string FitText(const string source, const int max_width, const int px)
+{
+   string text = source;
+   SetFont(px);
+   if(g_canvas.TextWidth(text) <= max_width)
+      return text;
+
+   const string suffix = "...";
+   while(StringLen(text) > 1 && g_canvas.TextWidth(text + suffix) > max_width)
+      text = StringSubstr(text, 0, StringLen(text) - 1);
+   return text + suffix;
+}
+
+void Text(const int x, const int y, const string value, const color clr, const int px)
+{
+   SetFont(px);
+   g_canvas.TextOut(x, y, value, A(clr), 0);
+}
+
+void TextRight(const int right_x, const int y, const string value, const color clr, const int px)
+{
+   SetFont(px);
+   int width = g_canvas.TextWidth(value);
+   g_canvas.TextOut(right_x - width, y, value, A(clr), 0);
+}
+
+void TextCenter(const int center_x, const int y, const string value, const color clr, const int px)
+{
+   SetFont(px);
+   int width = g_canvas.TextWidth(value);
+   g_canvas.TextOut(center_x - width / 2, y, value, A(clr), 0);
+}
+
+void Card(const int x, const int y, const int width, const int height, const color fill, const color border)
+{
+   g_canvas.FillRectangle(x, y, x + width, y + height, A(fill, 252));
+   g_canvas.Rectangle(x, y, x + width, y + height, A(border, 235));
+}
+
+color ModeTone(const string mode, const string strategy)
+{
+   if(mode == "PAUSE" || strategy == "PAUSE") return clrOrange;
+   if(mode == "AUTO") return clrLimeGreen;
+   if(mode == "TREND") return clrDeepSkyBlue;
+   if(mode == "SIDEWAY") return clrAqua;
    return clrGold;
 }
 
-color ProfitColor(const string value)
+color RegimeTone(const string regime)
 {
-   double pnl = StringToDouble(value);
-   if(pnl > 0.005)
-      return clrLimeGreen;
-   if(pnl < -0.005)
-      return clrTomato;
+   if(regime == "REVERSAL") return clrOrange;
+   if(regime == "TREND") return clrDeepSkyBlue;
+   if(regime == "SIDEWAY") return clrAqua;
    return clrSilver;
 }
 
-void BeginLayout(const bool errorMode)
+string GateText(const string gate)
 {
-   if(g_error_mode != errorMode)
-      DeletePanel();
-   g_error_mode = errorMode;
-   Rectangle("BG", 0, 0, PANEL_WIDTH, errorMode ? 372 : PANEL_HEIGHT, C'14,18,25', C'71,86,106');
-   Rectangle("TOP", 0, 0, PANEL_WIDTH, 5, C'36,184,224', C'36,184,224');
+   if(gate == "ALLOWED") return "DUOC PHEP";
+   if(gate == "BLOCKED_BY_MODE") return "CHAN DO MODE";
+   if(gate == "BLOCKED_BY_REGIME") return "CHUA CHO PHEP";
+   return "DANG CHO";
 }
 
-void DrawNormalChrome()
+color GateTone(const string gate)
 {
-   BeginLayout(false);
-   Rectangle("STATUS", 12, 58, 676, 55, C'24,33,43', C'58,73,92');
-   Rectangle("LEFT", 12, 148, 328, 148, C'22,27,36', C'50,63,80');
-   Rectangle("RIGHT", 348, 148, 340, 148, C'22,27,36', C'50,63,80');
-   Rectangle("ENTRY_REASON", 12, 330, 676, 82, C'22,27,36', C'50,63,80');
-   Rectangle("HOLD_REASON", 12, 446, 676, 82, C'22,27,36', C'50,63,80');
-   Rectangle("FOOT", 12, 538, 676, 20, C'18,23,31', C'42,54,69');
+   if(gate == "ALLOWED") return clrLimeGreen;
+   if(gate == "BLOCKED_BY_MODE") return clrOrange;
+   if(gate == "BLOCKED_BY_REGIME") return clrGold;
+   return clrSilver;
 }
 
-void RenderError(const string title, const string message, const bool showWebRequestHelp)
+void BeginPanel(const int width, const int height)
 {
-   BeginLayout(true);
-   Rectangle("STATUS", 12, 58, 676, 64, C'55,30,30', C'210,70,70');
-   Rectangle("RECOVERY", 12, 138, 676, 164, C'22,27,36', C'50,63,80');
-   Rectangle("FOOT", 12, 318, 676, 42, C'18,23,31', C'42,54,69');
+   g_canvas.Erase(A(C'3,10,18', 255));
+   g_canvas.FillRectangle(0, 0, width - 1, height - 1, A(C'3,10,18', 255));
+   g_canvas.Rectangle(0, 0, width - 1, height - 1, A(C'0,190,225'));
+   g_canvas.FillRectangle(8, 6, width - 9, 8, A(C'0,210,255'));
+}
 
-   Label("TITLE", 18, 15, "XAUUSD AI MASTER", clrDeepSkyBlue, InpFontSize + 4, "Arial");
-   Label("SUBTITLE", 18, 39, "PHASE 7C | READ-ONLY | SYNCHRONIZED", clrSilver);
-   Label("STATUS_TITLE", 26, 70, title, clrTomato, InpFontSize + 2, "Arial");
-   Label("STATUS_NOTE", 26, 96, message, clrWhite);
+void DrawHeader(const int width, const string mode, const string strategy, const string regime, const string confidence)
+{
+   const int x = 14;
+   const int y = 16;
+   const int w = width - 28;
+   const int h = 104;
+   Card(x, y, w, h, C'7,20,30', C'0,80,110');
 
-   Label("RECOVERY_HEAD", 26, 153, "TU DONG PHUC HOI KET NOI", clrDeepSkyBlue, InpFontSize + 1, "Arial");
-   if(showWebRequestHelp)
-   {
-      Label("HELP1", 28, 187, "1. Tools > Options > Expert Advisors", clrWhite);
-      Label("HELP2", 28, 215, "2. Allow WebRequest: http://127.0.0.1:3711", clrGold);
-      Label("HELP3", 28, 243, "3. Mo lai Control Center neu API chua chay", clrSilver);
-   }
+   Text(x + 18, y + 12, "XAUUSD AI MASTER", clrDeepSkyBlue, 14);
+   TextRight(x + w - 18, y + 14, "FINAL v5.2", clrGold, 9);
+   Text(x + 18, y + 40, "Phase 7C | DEMO | READ ONLY", clrSilver, 9);
+   Text(x + 18, y + 62, "Mode: " + Clean(mode), ModeTone(mode, strategy), 10);
+   TextRight(x + w - 18, y + 62, "Effective: " + Clean(strategy), ModeTone(mode, strategy), 9);
+   Text(x + 18, y + 82, "Regime: " + Clean(regime), RegimeTone(regime), 10);
+   TextRight(x + w - 18, y + 82, "Confidence: " + Clean(confidence) + "%", RegimeTone(regime), 10);
+}
+
+void DrawStateCard(const int width, const string title, const string stage, const string action, const color tone)
+{
+   const int x = 14;
+   const int y = 128;
+   const int w = width - 28;
+   const int h = 68;
+   Card(x, y, w, h, C'9,24,34', tone);
+   Text(x + 18, y + 12, title, tone, 11);
+   Text(x + 18, y + 40, "Stage: " + Clean(stage), clrWhite, 9);
+   TextRight(x + w - 18, y + 40, action, clrSilver, 9);
+}
+
+void DrawReasons(const int width, const int y, const string title, const string r1, const string r2, const string r3, const color tone)
+{
+   const int x = 14;
+   const int w = width - 28;
+   const int h = 120;
+   Card(x, y, w, h, C'7,21,30', C'0,72,102');
+   Text(x + 18, y + 12, title, tone, 10);
+   int max_text_width = w - 54;
+   string a = FitText(Clean(r1, "Chua co ly do tu engine"), max_text_width, 9);
+   string b = FitText(Clean(r2, ""), max_text_width, 9);
+   string c = FitText(Clean(r3, ""), max_text_width, 9);
+   Text(x + 28, y + 42, "- " + a, clrWhite, 9);
+   if(StringLen(b) > 0) Text(x + 28, y + 66, "- " + b, clrSilver, 9);
+   if(StringLen(c) > 0) Text(x + 28, y + 90, "- " + c, clrSilver, 9);
+}
+
+void DrawGateCard(const int width, const int y, const string trend, const string sideway, const string reversal, const string recommended)
+{
+   const int x = 14;
+   const int w = width - 28;
+   const int h = 132;
+   const int label_x = x + 28;
+   const int value_right = x + w - 28;
+   Card(x, y, w, h, C'7,21,30', C'0,72,102');
+   Text(x + 18, y + 12, "BOT GATE / FILTER", clrAqua, 10);
+
+   Text(label_x, y + 42, "Trend", clrSilver, 9);
+   TextRight(value_right, y + 42, GateText(trend), GateTone(trend), 9);
+   Text(label_x, y + 64, "Sideway", clrSilver, 9);
+   TextRight(value_right, y + 64, GateText(sideway), GateTone(sideway), 9);
+   Text(label_x, y + 86, "Reversal filter", clrSilver, 9);
+   TextRight(value_right, y + 86, reversal == "BLOCKING" ? "DANG CHAN" : "KHONG CHAN", reversal == "BLOCKING" ? clrOrange : clrLimeGreen, 9);
+   Text(label_x, y + 108, "Recommended", clrSilver, 9);
+   TextRight(value_right, y + 108, Clean(recommended), clrWhite, 9);
+}
+
+void DrawFooter(const int width, const int y)
+{
+   const int x = 14;
+   const int w = width - 28;
+   const int h = 62;
+   Card(x, y, w, h, C'6,18,26', C'0,72,102');
+   int center_x = x + w / 2;
+   TextCenter(center_x, y + 12, "READ ONLY | DEMO | ORDER NONE", clrSilver, 8);
+   TextCenter(center_x, y + 34, "BE +6 | PARTIAL +10 (1/3) | NEW POSITIONS ONLY", clrSilver, 8);
+}
+
+void DrawWaiting(const string payload, const int width)
+{
+   DrawStateCard(width, "BOT DANG CHO SETUP", Field(payload, "stage"), "Khong mo lenh moi", clrOrange);
+   DrawReasons(width, 204, "LY DO CHUA VAO LENH", Field(payload, "waitReason1"), Field(payload, "waitReason2"), Field(payload, "waitReason3"), clrDeepSkyBlue);
+   DrawGateCard(width, 332, Field(payload, "trendGate"), Field(payload, "sidewayGate"), Field(payload, "reversalFilter"), Field(payload, "recommendedMode"));
+   DrawFooter(width, 472);
+}
+
+void DrawTradePlan(const string payload, const int width, const bool managing)
+{
+   const int x = 14;
+   const int y = 128;
+   const int w = width - 28;
+   const int h = 88;
+   Card(x, y, w, h, C'6,18,27', C'0,72,102');
+
+   int gap = 8;
+   int box_w = (w - 36 - gap * 2) / 3;
+   int bx1 = x + 12;
+   int bx2 = bx1 + box_w + gap;
+   int bx3 = bx2 + box_w + gap;
+   string entry = managing ? Field(payload, "positionEntry") : Field(payload, "setupEntry");
+   string stop = managing ? Field(payload, "positionStopLoss") : Field(payload, "setupStopLoss");
+   string tp = managing ? Field(payload, "positionTp2") : Field(payload, "setupTp2");
+   if(EmptyValue(tp)) tp = managing ? Field(payload, "positionTp1") : Field(payload, "setupTp1");
+
+   Card(bx1, y + 12, box_w, 62, C'7,25,38', C'0,120,170');
+   Card(bx2, y + 12, box_w, 62, C'30,14,22', C'150,45,60');
+   Card(bx3, y + 12, box_w, 62, C'12,28,20', C'50,150,75');
+   Text(bx1 + 12, y + 20, "ENTRY", clrDeepSkyBlue, 8);
+   Text(bx2 + 12, y + 20, "STOPLOSS", clrTomato, 8);
+   Text(bx3 + 12, y + 20, "TP", clrLimeGreen, 8);
+   Text(bx1 + 12, y + 42, FitText(Clean(entry), box_w - 24, 10), clrWhite, 10);
+   Text(bx2 + 12, y + 42, FitText(Clean(stop), box_w - 24, 10), clrWhite, 10);
+   Text(bx3 + 12, y + 42, FitText(Clean(tp), box_w - 24, 10), clrWhite, 10);
+}
+
+void DrawSetup(const string payload, const int width)
+{
+   DrawTradePlan(payload, width, false);
+   DrawReasons(width, 224, "LY DO SETUP DUOC DUYET", Field(payload, "entryReason1"), Field(payload, "entryReason2"), Field(payload, "entryReason3"), clrLimeGreen);
+
+   const int x = 14;
+   const int y = 352;
+   const int w = width - 28;
+   Card(x, y, w, 88, C'7,21,30', C'0,72,102');
+   Text(x + 18, y + 12, "LOT / RISK", clrAqua, 10);
+   Text(x + 28, y + 42, "Strategy: " + Clean(Field(payload, "setupStrategy")), clrWhite, 9);
+   TextRight(x + w - 28, y + 42, "Side: " + Clean(Field(payload, "setupSide")), clrWhite, 9);
+   Text(x + 28, y + 64, "Lot: " + Clean(Field(payload, "setupFinalLot")), clrSilver, 9);
+   TextRight(x + w - 28, y + 64, "Risk: " + Clean(Field(payload, "setupRiskPercent")) + "%", clrSilver, 9);
+   DrawFooter(width, 448);
+}
+
+void DrawManaging(const string payload, const int width)
+{
+   DrawTradePlan(payload, width, true);
+
+   const int x = 14;
+   const int w = width - 28;
+   Card(x, 224, w, 62, C'8,26,20', C'45,130,70');
+   Text(x + 18, 238, "DANG GIU LENH", clrLimeGreen, 10);
+   TextRight(x + w - 18, 238, "P/L: " + Clean(Field(payload, "floatingPnlUsd")) + " USD", clrWhite, 10);
+   Text(x + 18, 260, "Side: " + Clean(Field(payload, "positionSide")) + " | Lot: " + Clean(Field(payload, "positionVolume")), clrSilver, 8);
+
+   DrawReasons(width, 294, "LY DO GIU LENH", Field(payload, "holdReason1"), Field(payload, "holdReason2"), Field(payload, "holdReason3"), clrDeepSkyBlue);
+
+   Card(x, 422, w, 80, C'7,21,30', C'0,72,102');
+   Text(x + 18, 436, "QUAN TRI LENH", clrAqua, 10);
+   Text(x + 28, 466, "BE +6", clrWhite, 9);
+   Text(x + 150, 466, "Partial +10: chot 1/3", clrWhite, 9);
+   TextRight(x + w - 28, 466, "READ ONLY", clrSilver, 9);
+   DrawFooter(width, 510);
+}
+
+void RenderPanel(const string payload)
+{
+   string ui_state = Clean(Field(payload, "uiState"), "WAITING");
+   int height = ui_state == "MANAGING" ? MANAGING_HEIGHT : (ui_state == "SETUP_READY" ? SETUP_HEIGHT : WAITING_HEIGHT);
+   int width = PanelWidth();
+   if(!EnsureCanvas(width, height))
+      return;
+
+   BeginPanel(width, height);
+   DrawHeader(width,
+      Field(payload, "activeMode"),
+      Field(payload, "effectiveStrategy"),
+      Field(payload, "regime"),
+      Field(payload, "confidence"));
+
+   if(ui_state == "MANAGING")
+      DrawManaging(payload, width);
+   else if(ui_state == "SETUP_READY")
+      DrawSetup(payload, width);
    else
-   {
-      Label("HELP1", 28, 187, "Bridge dang khoi tao lai phien MetaTrader5 IPC.", clrWhite);
-      Label("HELP2", 28, 215, "Giu MT5 mo, dung tai khoan DEMO va cho gia cap nhat.", clrGold);
-      Label("HELP3", 28, 243, "Panel tu dong tai lai moi " + IntegerToString(InpRefreshSeconds) + " giay.", clrSilver);
-   }
-   Label("HELP4", 28, 271, "Khong bam gui lenh; panel khong co quyen giao dich.", clrSilver);
-   Label("SAFETY", 26, 330, "READ ONLY | DEMO ONLY | ORDER PERMISSION = NONE", clrSilver);
-   ChartRedraw();
+      DrawWaiting(payload, width);
+
+   g_canvas.Update(true);
 }
 
-void Render(const string payload)
+void RenderError(const string title, const string message)
 {
-   string positionState = Field(payload, "positionState");
-   string stage = Field(payload, "stage");
-   string approved = Field(payload, "approved");
-   color stateColor = StatusColor(positionState, stage, approved);
-   bool managing = positionState == "MANAGING" || positionState == "UNMANAGED";
-
-   string entry = managing ? Field(payload, "positionEntry") : Field(payload, "entry");
-   string current = managing ? Field(payload, "currentPrice") : "n/a";
-   string stopLoss = managing ? Field(payload, "positionStopLoss") : Field(payload, "stopLoss");
-   string tp1 = managing ? Field(payload, "positionTp1") : Field(payload, "tp1");
-   string tp2 = managing ? Field(payload, "positionTp2") : Field(payload, "tp2");
-   string volume = managing ? Field(payload, "positionVolume") : Field(payload, "finalLot");
-   string pnl = managing ? Field(payload, "floatingPnlUsd") : Field(payload, "estimatedRiskUsd");
-   string strategy = managing ? Field(payload, "positionStrategy") : Field(payload, "effectiveStrategy");
-   string side = managing ? Field(payload, "positionSide") : Field(payload, "side");
-   string setup = managing ? Field(payload, "positionSetup") : Field(payload, "setup");
-   string ticket = managing ? Field(payload, "ticket") : "n/a";
-   string distance = managing ? Field(payload, "favorableDistance") : Field(payload, "stopDistance");
-   string entryLine1, entryLine2, entryLine3, holdLine1, holdLine2, holdLine3;
-   WrapThree(Field(payload, "entryReason"), 62, entryLine1, entryLine2, entryLine3);
-   WrapThree(Field(payload, "holdReason"), 62, holdLine1, holdLine2, holdLine3);
-
-   string statusTitle;
-   string statusNote;
-   if(positionState == "MANAGING")
-   {
-      statusTitle = "DANG GIU VI THE " + side + " | " + strategy;
-      statusNote = "Ticket " + ticket + " | " + volume + " lot | P/L " + pnl + " USD";
-   }
-   else if(positionState == "UNMANAGED")
-   {
-      statusTitle = "CAN KIEM TRA VI THE KHONG THUOC EXECUTOR";
-      statusNote = "Ticket " + ticket + " | panel chi doc, khong tu quan ly";
-   }
-   else
-   {
-      statusTitle = approved == "true" ? "SETUP HOP LE | CHO EXECUTOR" : "DANG CHO SETUP";
-      statusNote = "Stage " + stage + " | Mode " + Field(payload, "activeMode") + " -> " + strategy;
-   }
-
-   DrawNormalChrome();
-   Rectangle("STATUS", 12, 58, 676, 55, C'24,33,43', stateColor);
-   Label("TITLE", 18, 15, "XAUUSD AI MASTER", clrDeepSkyBlue, InpFontSize + 4, "Arial");
-   Label("SUBTITLE", 18, 39, "PHASE 7C | POSITION & DECISION MONITOR", clrSilver);
-   Label("MODE", 500, 16, "MODE " + Field(payload, "activeMode"), clrWhite, InpFontSize + 1);
-   Label("REGIME", 500, 39, Field(payload, "regime") + " | CONF " + Field(payload, "confidence"), clrSilver);
-   Label("STATUS_TITLE", 26, 70, statusTitle, stateColor, InpFontSize + 2, "Arial");
-   Label("STATUS_NOTE", 26, 94, statusNote, clrWhite);
-
-   Label("SECTION", 18, 124, managing ? "VI THE DANG MO" : "KE HOACH LENH KE TIEP", clrDeepSkyBlue, InpFontSize + 1, "Arial");
-
-   Label("L1", 28, 159, "ENTRY", clrSilver);
-   Label("L1V", 128, 159, entry, clrWhite, InpFontSize + 1);
-   Label("L2", 28, 186, managing ? "CURRENT" : "SL DIST", clrSilver);
-   Label("L2V", 128, 186, managing ? current : distance, clrWhite, InpFontSize + 1);
-   Label("L3", 28, 213, "STOP LOSS", clrSilver);
-   Label("L3V", 128, 213, stopLoss, clrTomato, InpFontSize + 1);
-   Label("L4", 28, 240, "LOT", clrSilver);
-   Label("L4V", 128, 240, volume, clrAqua, InpFontSize + 1);
-   Label("L5", 28, 267, managing ? "P/L USD" : "RISK USD", clrSilver);
-   Label("L5V", 128, 267, pnl, ProfitColor(pnl), InpFontSize + 1);
-
-   Label("R1", 364, 159, "TP1", clrSilver);
-   Label("R1V", 472, 159, tp1, clrLimeGreen, InpFontSize + 1);
-   Label("R2", 364, 186, "TP2", clrSilver);
-   Label("R2V", 472, 186, tp2, clrLimeGreen, InpFontSize + 1);
-   Label("R3", 364, 213, "SIDE", clrSilver);
-   Label("R3V", 472, 213, side, stateColor, InpFontSize + 1);
-   Label("R4", 364, 240, "SETUP", clrSilver);
-   Label("R4V", 472, 240, setup, clrWhite);
-   Label("R5", 364, 267, "BE / PARTIAL", clrSilver);
-   Label("R5V", 472, 267, Field(payload, "breakEvenApplied") + " / " + Field(payload, "partialApplied"), clrAqua);
-
-   Label("ENTRY_HEAD", 20, 307, "LY DO VAO LENH / CHO LENH", clrDeepSkyBlue, InpFontSize + 1, "Arial");
-   Label("ENTRY_1", 28, 342, entryLine1, clrWhite);
-   Label("ENTRY_2", 28, 365, entryLine2, clrSilver);
-   Label("ENTRY_3", 28, 388, entryLine3, clrSilver);
-
-   Label("HOLD_HEAD", 20, 423, "LY DO VAN GIU", clrDeepSkyBlue, InpFontSize + 1, "Arial");
-   Label("HOLD_1", 28, 458, holdLine1, managing ? clrWhite : clrSilver);
-   Label("HOLD_2", 28, 481, holdLine2, clrSilver);
-   Label("HOLD_3", 28, 504, holdLine3, clrSilver);
-
-   Label("SAFETY", 26, 540, "READ ONLY | DEMO | ORDER NONE | BE +6 | PARTIAL 1/3@+10", clrSilver);
-   ChartRedraw();
+   int width = PanelWidth();
+   if(!EnsureCanvas(width, 300))
+      return;
+   BeginPanel(width, 300);
+   Card(14, 16, width - 28, 266, C'12,18,26', C'180,60,60');
+   Text(32, 34, "XAUUSD AI MASTER", clrDeepSkyBlue, 14);
+   TextRight(width - 32, 36, "FINAL v5.2", clrGold, 9);
+   Text(32, 78, title, clrTomato, 11);
+   Text(32, 112, FitText(message, width - 64, 9), clrWhite, 9);
+   Text(32, 156, "1. Allow WebRequest: http://127.0.0.1:3711", clrSilver, 8);
+   Text(32, 180, "2. Kiem tra Control API/Bridge", clrSilver, 8);
+   Text(32, 204, "3. Attach lai EA panel neu can", clrSilver, 8);
+   TextCenter(width / 2, 250, "READ ONLY | DEMO | ORDER NONE", clrSilver, 8);
+   g_canvas.Update(true);
 }
 
 void RefreshPanel()
 {
    char request[];
    char response[];
-   string responseHeaders;
+   string response_headers;
    string headers = "Accept: text/plain\r\nCache-Control: no-store\r\n";
    ResetLastError();
-   int status = WebRequest("GET", InpApiUrl, headers, 5000, request, response, responseHeaders);
+   int status = WebRequest("GET", InpApiUrl, headers, 5000, request, response, response_headers);
    if(status == -1)
    {
-      RenderError("KHONG GOI DUOC CONTROL API", "WebRequest error " + IntegerToString(GetLastError()), true);
+      RenderError("KHONG GOI DUOC CONTROL API", "WebRequest error " + IntegerToString(GetLastError()));
       return;
    }
    if(status != 200)
    {
-      if(status == 503)
-         RenderError("DANG KET NOI LAI MT5", "Decision API returned HTTP 503", false);
-      else
-         RenderError("CONTROL API TAM THOI CHUA SAN SANG", "Decision API returned HTTP " + IntegerToString(status), false);
+      RenderError("CONTROL API CHUA SAN SANG", "HTTP " + IntegerToString(status));
       return;
    }
+
    string payload = CharArrayToString(response, 0, -1, CP_UTF8);
-   if(Field(payload, "version") != "1")
+   if(Field(payload, "version") != "2")
    {
-      RenderError("DU LIEU PANEL KHONG HOP LE", "Decision API payload version is invalid", false);
+      RenderError("DU LIEU UI KHONG HOP LE", "Semantic UI contract version khong phai 2");
       return;
    }
-   Render(payload);
+   RenderPanel(payload);
 }
 
 int OnInit()
 {
-   DeletePanel();
+   DestroyCanvas();
+   PurgeLegacyPanelObjects();
+   ChartRedraw();
    EventSetTimer((int)MathMax(1, InpRefreshSeconds));
    RefreshPanel();
    return INIT_SUCCEEDED;
@@ -307,7 +429,8 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    EventKillTimer();
-   DeletePanel();
+   DestroyCanvas();
+   PurgeLegacyPanelObjects();
    ChartRedraw();
 }
 

@@ -39,16 +39,75 @@ import type {
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
-async function read<T>(response: Response): Promise<T> {
-  const payload: unknown = await response.json();
-  if (!response.ok) {
-    const message =
-      payload && typeof payload === "object" && "error" in payload
-        ? String((payload as { error: unknown }).error)
-        : `HTTP ${response.status}`;
-    throw new Error(message);
+type ApiErrorPayload = {
+  error?: unknown;
+  message?: unknown;
+  detail?: unknown;
+};
+
+function friendlyHttpMessage(status: number, raw?: string) {
+  if (status === 502) {
+    return "Không lấy được dữ liệu từ dịch vụ nền (HTTP 502). API/Bridge/Telegram có thể đang khởi động lại; trang sẽ tự thử lại.";
   }
+  if (status === 503) {
+    return "Dịch vụ nền chưa sẵn sàng (HTTP 503). Giữ MT5/API mở và thử lại sau vài giây.";
+  }
+  if (status === 504) {
+    return "Dịch vụ nền phản hồi quá thời gian (HTTP 504). Trang sẽ tự thử lại.";
+  }
+  if (status >= 500) {
+    return `Lỗi dịch vụ nền HTTP ${status}. Kiểm tra API/Bridge rồi thử lại.`;
+  }
+  if (status >= 400) {
+    return `Yêu cầu không hợp lệ hoặc bị từ chối HTTP ${status}.`;
+  }
+  return raw?.trim() || `HTTP ${status}`;
+}
+
+function payloadMessage(payload: unknown, fallback: string) {
+  if (payload && typeof payload === "object") {
+    const errorPayload = payload as ApiErrorPayload;
+    const candidate = errorPayload.error ?? errorPayload.message ?? errorPayload.detail;
+    if (typeof candidate === "string" && candidate.trim()) return candidate;
+    if (candidate && typeof candidate === "object" && "message" in candidate) {
+      const nested = (candidate as { message?: unknown }).message;
+      if (typeof nested === "string" && nested.trim()) return nested;
+    }
+  }
+  return fallback;
+}
+
+export async function safeReadJson<T>(response: Response, label = "API"): Promise<T> {
+  const text = await response.text();
+  const trimmed = text.trim();
+
+  if (!trimmed) {
+    throw new Error(
+      response.ok
+        ? `${label} trả về dữ liệu rỗng. Trang sẽ tự thử lại; kiểm tra API nếu lỗi kéo dài.`
+        : friendlyHttpMessage(response.status),
+    );
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(trimmed) as unknown;
+  } catch {
+    if (!response.ok) {
+      throw new Error(friendlyHttpMessage(response.status, trimmed.slice(0, 180)));
+    }
+    throw new Error(`${label} trả về JSON không hợp lệ hoặc chưa hoàn chỉnh. Trang sẽ tự thử lại.`);
+  }
+
+  if (!response.ok) {
+    throw new Error(payloadMessage(payload, friendlyHttpMessage(response.status, trimmed.slice(0, 180))));
+  }
+
   return payload as T;
+}
+
+async function read<T>(response: Response): Promise<T> {
+  return safeReadJson<T>(response);
 }
 
 export async function getDashboard(): Promise<DashboardSnapshot> {
@@ -65,7 +124,7 @@ export async function getMt5Telemetry(
     { cache: "no-store" },
   );
 
-  const payload = (await response.json()) as Mt5TelemetrySnapshot;
+  const payload = await safeReadJson<Mt5TelemetrySnapshot>(response, "MT5 telemetry");
 
   if (
     payload &&
@@ -75,10 +134,6 @@ export async function getMt5Telemetry(
     typeof payload.status === "string"
   ) {
     return payload;
-  }
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
   }
 
   return payload;
