@@ -1,6 +1,6 @@
 #property copyright "XAUUSD AI MASTER"
-#property version   "1.36"
-#property description "Read-only Phase 7C semantic canvas decision panel v5.1"
+#property version   "1.37"
+#property description "Read-only Phase 7C semantic canvas decision panel v5.2"
 
 #include <Canvas\Canvas.mqh>
 
@@ -140,6 +140,13 @@ void TextRight(const int right_x, const int y, const string value, const color c
    g_canvas.TextOut(right_x - width, y, value, A(clr), 0);
 }
 
+void TextCenter(const int center_x, const int y, const string value, const color clr, const int px)
+{
+   SetFont(px);
+   int width = g_canvas.TextWidth(value);
+   g_canvas.TextOut(center_x - width / 2, y, value, A(clr), 0);
+}
+
 void Card(const int x, const int y, const int width, const int height, const color fill, const color border)
 {
    g_canvas.FillRectangle(x, y, x + width, y + height, A(fill, 252));
@@ -196,9 +203,10 @@ void DrawHeader(const int width, const string mode, const string strategy, const
    Card(x, y, w, h, C'7,20,30', C'0,80,110');
 
    Text(x + 18, y + 12, "XAUUSD AI MASTER", clrDeepSkyBlue, 14);
-   TextRight(x + w - 18, y + 14, "FINAL v5.1", clrGold, 9);
+   TextRight(x + w - 18, y + 14, "FINAL v5.2", clrGold, 9);
    Text(x + 18, y + 40, "Phase 7C | DEMO | READ ONLY", clrSilver, 9);
    Text(x + 18, y + 62, "Mode: " + Clean(mode), ModeTone(mode, strategy), 10);
+   TextRight(x + w - 18, y + 62, "Effective: " + Clean(strategy), ModeTone(mode, strategy), 9);
    Text(x + 18, y + 82, "Regime: " + Clean(regime), RegimeTone(regime), 10);
    TextRight(x + w - 18, y + 82, "Confidence: " + Clean(confidence) + "%", RegimeTone(regime), 10);
 }
@@ -212,7 +220,7 @@ void DrawStateCard(const int width, const string title, const string stage, cons
    Card(x, y, w, h, C'9,24,34', tone);
    Text(x + 18, y + 12, title, tone, 11);
    Text(x + 18, y + 40, "Stage: " + Clean(stage), clrWhite, 9);
-   Text(x + 220, y + 40, action, clrSilver, 9);
+   TextRight(x + w - 18, y + 40, action, clrSilver, 9);
 }
 
 void DrawReasons(const int width, const int y, const string title, const string r1, const string r2, const string r3, const color tone)
@@ -236,17 +244,19 @@ void DrawGateCard(const int width, const int y, const string trend, const string
    const int x = 14;
    const int w = width - 28;
    const int h = 132;
+   const int label_x = x + 28;
+   const int value_right = x + w - 28;
    Card(x, y, w, h, C'7,21,30', C'0,72,102');
    Text(x + 18, y + 12, "BOT GATE / FILTER", clrAqua, 10);
 
-   Text(x + 28, y + 42, "Trend", clrSilver, 9);
-   Text(x + 190, y + 42, GateText(trend), GateTone(trend), 9);
-   Text(x + 28, y + 64, "Sideway", clrSilver, 9);
-   Text(x + 190, y + 64, GateText(sideway), GateTone(sideway), 9);
-   Text(x + 28, y + 86, "Reversal filter", clrSilver, 9);
-   Text(x + 190, y + 86, reversal == "BLOCKING" ? "DANG CHAN" : "KHONG CHAN", reversal == "BLOCKING" ? clrOrange : clrLimeGreen, 9);
-   Text(x + 28, y + 108, "Recommended", clrSilver, 9);
-   Text(x + 190, y + 108, Clean(recommended), clrWhite, 9);
+   Text(label_x, y + 42, "Trend", clrSilver, 9);
+   TextRight(value_right, y + 42, GateText(trend), GateTone(trend), 9);
+   Text(label_x, y + 64, "Sideway", clrSilver, 9);
+   TextRight(value_right, y + 64, GateText(sideway), GateTone(sideway), 9);
+   Text(label_x, y + 86, "Reversal filter", clrSilver, 9);
+   TextRight(value_right, y + 86, reversal == "BLOCKING" ? "DANG CHAN" : "KHONG CHAN", reversal == "BLOCKING" ? clrOrange : clrLimeGreen, 9);
+   Text(label_x, y + 108, "Recommended", clrSilver, 9);
+   TextRight(value_right, y + 108, Clean(recommended), clrWhite, 9);
 }
 
 void DrawFooter(const int width, const int y)
@@ -255,8 +265,9 @@ void DrawFooter(const int width, const int y)
    const int w = width - 28;
    const int h = 62;
    Card(x, y, w, h, C'6,18,26', C'0,72,102');
-   Text(x + 18, y + 12, "READ ONLY | DEMO | ORDER NONE", clrSilver, 8);
-   Text(x + 18, y + 34, "BE +6 | PARTIAL +10 (1/3) | NEW POSITIONS ONLY", clrSilver, 8);
+   int center_x = x + w / 2;
+   TextCenter(center_x, y + 12, "READ ONLY | DEMO | ORDER NONE", clrSilver, 8);
+   TextCenter(center_x, y + 34, "BE +6 | PARTIAL +10 (1/3) | NEW POSITIONS ONLY", clrSilver, 8);
 }
 
 void DrawWaiting(const string payload, const int width)
@@ -307,9 +318,9 @@ void DrawSetup(const string payload, const int width)
    Card(x, y, w, 88, C'7,21,30', C'0,72,102');
    Text(x + 18, y + 12, "LOT / RISK", clrAqua, 10);
    Text(x + 28, y + 42, "Strategy: " + Clean(Field(payload, "setupStrategy")), clrWhite, 9);
-   Text(x + 260, y + 42, "Side: " + Clean(Field(payload, "setupSide")), clrWhite, 9);
+   TextRight(x + w - 28, y + 42, "Side: " + Clean(Field(payload, "setupSide")), clrWhite, 9);
    Text(x + 28, y + 64, "Lot: " + Clean(Field(payload, "setupFinalLot")), clrSilver, 9);
-   Text(x + 260, y + 64, "Risk: " + Clean(Field(payload, "setupRiskPercent")) + "%", clrSilver, 9);
+   TextRight(x + w - 28, y + 64, "Risk: " + Clean(Field(payload, "setupRiskPercent")) + "%", clrSilver, 9);
    DrawFooter(width, 448);
 }
 
@@ -321,7 +332,7 @@ void DrawManaging(const string payload, const int width)
    const int w = width - 28;
    Card(x, 224, w, 62, C'8,26,20', C'45,130,70');
    Text(x + 18, 238, "DANG GIU LENH", clrLimeGreen, 10);
-   Text(x + 210, 238, "P/L: " + Clean(Field(payload, "floatingPnlUsd")) + " USD", clrWhite, 10);
+   TextRight(x + w - 18, 238, "P/L: " + Clean(Field(payload, "floatingPnlUsd")) + " USD", clrWhite, 10);
    Text(x + 18, 260, "Side: " + Clean(Field(payload, "positionSide")) + " | Lot: " + Clean(Field(payload, "positionVolume")), clrSilver, 8);
 
    DrawReasons(width, 294, "LY DO GIU LENH", Field(payload, "holdReason1"), Field(payload, "holdReason2"), Field(payload, "holdReason3"), clrDeepSkyBlue);
@@ -330,7 +341,7 @@ void DrawManaging(const string payload, const int width)
    Text(x + 18, 436, "QUAN TRI LENH", clrAqua, 10);
    Text(x + 28, 466, "BE +6", clrWhite, 9);
    Text(x + 150, 466, "Partial +10: chot 1/3", clrWhite, 9);
-   Text(x + 380, 466, "READ ONLY", clrSilver, 9);
+   TextRight(x + w - 28, 466, "READ ONLY", clrSilver, 9);
    DrawFooter(width, 510);
 }
 
@@ -367,13 +378,13 @@ void RenderError(const string title, const string message)
    BeginPanel(width, 300);
    Card(14, 16, width - 28, 266, C'12,18,26', C'180,60,60');
    Text(32, 34, "XAUUSD AI MASTER", clrDeepSkyBlue, 14);
-   TextRight(width - 32, 36, "FINAL v5.1", clrGold, 9);
+   TextRight(width - 32, 36, "FINAL v5.2", clrGold, 9);
    Text(32, 78, title, clrTomato, 11);
    Text(32, 112, FitText(message, width - 64, 9), clrWhite, 9);
    Text(32, 156, "1. Allow WebRequest: http://127.0.0.1:3711", clrSilver, 8);
    Text(32, 180, "2. Kiem tra Control API/Bridge", clrSilver, 8);
    Text(32, 204, "3. Attach lai EA panel neu can", clrSilver, 8);
-   Text(32, 250, "READ ONLY | DEMO | ORDER NONE", clrSilver, 8);
+   TextCenter(width / 2, 250, "READ ONLY | DEMO | ORDER NONE", clrSilver, 8);
    g_canvas.Update(true);
 }
 
