@@ -1,3 +1,6 @@
+const MIN_INITIAL_STOP_DISTANCE = 6;
+const MAX_INITIAL_STOP_DISTANCE = 10;
+
 export function resolveSidewayPermission(activeMode, recommendedMode) {
   const active = String(activeMode ?? "PAUSE").trim().toUpperCase();
   const recommended = String(recommendedMode ?? "PAUSE").trim().toUpperCase();
@@ -116,11 +119,28 @@ export function buildSidewayPlan({ side, bid, ask, range, atr, point, stopsLevel
   const entry = side === "BUY" ? ask : bid;
   const brokerGap = Math.max(0, Number(stopsLevelTicks) || 0) * point;
   const buffer = Math.max(atr * 0.25, brokerGap, point * 20);
-  const stopLoss = side === "BUY" ? demandLow - buffer : supplyHigh + buffer;
-  const stopDistance = Math.abs(entry - stopLoss);
-  if (!(stopDistance > 0) || stopDistance > 50) {
-    return { accepted: false, reason: "STOP_DISTANCE_OUT_OF_RANGE", stopDistance };
+  const structuralStopLoss = side === "BUY" ? demandLow - buffer : supplyHigh + buffer;
+  const structuralStopDistance = Math.abs(entry - structuralStopLoss);
+  if (!(structuralStopDistance > 0)) {
+    return { accepted: false, reason: "STOP_DISTANCE_INVALID", structuralStopDistance };
   }
+
+  // Project-wide initial stop policy: keep the broker-protected initial SL in
+  // the 6-10 price-unit window. If the structural stop is closer than 6, widen
+  // safely to 6. If structure requires more than 10, fail closed and wait for
+  // a later pullback/confirmation rather than entering with an oversized stop.
+  if (structuralStopDistance > MAX_INITIAL_STOP_DISTANCE + 1e-9) {
+    return {
+      accepted: false,
+      reason: "WAIT_PULLBACK_STOP_GT_10",
+      structuralStopLoss: round(structuralStopLoss, digits),
+      structuralStopDistance: round(structuralStopDistance, Math.max(digits, 5)),
+      maxInitialStopDistance: MAX_INITIAL_STOP_DISTANCE,
+    };
+  }
+
+  const stopDistance = Math.max(MIN_INITIAL_STOP_DISTANCE, structuralStopDistance);
+  const stopLoss = side === "BUY" ? entry - stopDistance : entry + stopDistance;
 
   const finalTarget = side === "BUY" ? supplyLow : demandHigh;
   const finalDistance = side === "BUY" ? finalTarget - entry : entry - finalTarget;
@@ -143,6 +163,11 @@ export function buildSidewayPlan({ side, bid, ask, range, atr, point, stopsLevel
     entry: round(entry, digits),
     stopLoss: round(stopLoss, digits),
     stopDistance: round(stopDistance, Math.max(digits, 5)),
+    structuralStopLoss: round(structuralStopLoss, digits),
+    structuralStopDistance: round(structuralStopDistance, Math.max(digits, 5)),
+    stopPolicy: structuralStopDistance < MIN_INITIAL_STOP_DISTANCE - 1e-9
+      ? "WIDENED_TO_MIN_6"
+      : "STRUCTURAL_6_TO_10",
     tp1: round(tp1, digits),
     tp1Kind: "FIXED_PLUS_10",
     takeProfit: round(finalTarget, digits),
