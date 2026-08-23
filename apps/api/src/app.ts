@@ -13,6 +13,7 @@ import phase7bPatternCheckRouter from "./routes/phase7b-pattern-check.route";
 import phase7bOpsRouter from "./routes/phase7b-ops.route";
 import phase7bTelegramTestRouter from "./routes/phase7b-telegram-test.route";
 import phase7cRouter from "./routes/phase7c.route";
+import phase7cChartRouter from "./routes/phase7c-chart.route";
 import phase7dRouter from "./routes/phase7d.route";
 import phase7eRouter from "./routes/phase7e.route";
 
@@ -40,6 +41,7 @@ app.use("/api/v1/phase7b-pattern-check", phase7bPatternCheckRouter);
 app.use("/api/v1/phase7b-ops", phase7bOpsRouter);
 app.use("/api/v1/phase7b-telegram-test", phase7bTelegramTestRouter);
 app.use("/api/v1/phase7c", phase7cRouter);
+app.use("/api/v1/phase7c-chart", phase7cChartRouter);
 app.use("/api/v1/phase7d", phase7dRouter);
 app.use("/api/v1/phase7e", phase7eRouter);
 
