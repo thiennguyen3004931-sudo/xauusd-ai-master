@@ -2,7 +2,7 @@ param(
   [string]$BridgeEnv = "packages/mt5-broker/bridge/.env.phase7b-demo",
   [string]$TerminalPath = "",
   [string]$DataPath = "",
-  [string]$ApiUrl = "http://127.0.0.1:3711/api/v1/phase7c/decision-monitor/mt5?symbol=XAUUSD",
+  [string]$ApiUrl = "http://127.0.0.1:3711/api/v1/phase7c-ui/mt5?symbol=XAUUSD",
   [switch]$SkipCompile
 )
 
