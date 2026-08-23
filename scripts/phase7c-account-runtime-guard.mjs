@@ -96,3 +96,97 @@ export function assertPhase7CAccountHealth(health, runtime, options = {}) {
   }
   return result;
 }
+
+function requestInfo(input, init) {
+  const isRequest = typeof Request !== "undefined" && input instanceof Request;
+  const requestMethod = isRequest ? input.method : undefined;
+  const rawUrl = isRequest
+    ? input.url
+    : input instanceof URL
+      ? input.href
+      : String(input);
+  return {
+    method: String(init?.method ?? requestMethod ?? "GET").toUpperCase(),
+    url: rawUrl,
+    headers: new Headers(init?.headers ?? (isRequest ? input.headers : undefined)),
+  };
+}
+
+function blockedAccountResponse(runtime, result) {
+  return new Response(
+    JSON.stringify({
+      error: "PHASE7C_ACCOUNT_GUARD_BLOCKED",
+      accepted: false,
+      status: "blocked_by_phase7c_account_gate",
+      accountMode: runtime.accountMode,
+      expectedBrokerMode: runtime.expectedBrokerMode,
+      reason: result.reason,
+      detail: result.detail ?? null,
+    }),
+    { status: 423, headers: { "content-type": "application/json; charset=utf-8" } },
+  );
+}
+
+export function installPhase7CAccountOrderFetchGuard({
+  label = "EXECUTOR",
+  env = process.env,
+} = {}) {
+  const runtime = resolvePhase7CAccountRuntime(env);
+  const nativeFetch = globalThis.fetch.bind(globalThis);
+
+  globalThis.fetch = async function phase7CAccountGuardedFetch(input, init = undefined) {
+    const request = requestInfo(input, init);
+    if (request.method !== "POST") return nativeFetch(input, init);
+
+    let url;
+    try {
+      url = new URL(request.url);
+    } catch {
+      return nativeFetch(input, init);
+    }
+    if (url.pathname !== "/v1/orders") return nativeFetch(input, init);
+
+    try {
+      const healthResponse = await nativeFetch(`${url.origin}/health`, {
+        method: "GET",
+        headers: request.headers,
+        cache: "no-store",
+      });
+      const text = await healthResponse.text();
+      if (!healthResponse.ok) {
+        const result = {
+          allowed: false,
+          reason: "HEALTH_RECHECK_FAILED",
+          detail: `HTTP=${healthResponse.status};${text.slice(0, 200)}`,
+        };
+        console.error(`PHASE7C_${label}_ACCOUNT_ENTRY_BLOCKED=${result.reason}`);
+        return blockedAccountResponse(runtime, result);
+      }
+      let health;
+      try {
+        health = text ? JSON.parse(text) : null;
+      } catch {
+        const result = { allowed: false, reason: "HEALTH_RECHECK_INVALID_JSON" };
+        console.error(`PHASE7C_${label}_ACCOUNT_ENTRY_BLOCKED=${result.reason}`);
+        return blockedAccountResponse(runtime, result);
+      }
+      const result = evaluatePhase7CAccountHealth(health, runtime, { armed: true });
+      if (!result.allowed) {
+        console.warn(`PHASE7C_${label}_ACCOUNT_ENTRY_BLOCKED=${result.reason}|MODE=${runtime.accountMode}`);
+        return blockedAccountResponse(runtime, result);
+      }
+      console.log(`PHASE7C_${label}_ACCOUNT_ENTRY_GATE=PASS|MODE=${runtime.accountMode}`);
+      return nativeFetch(input, init);
+    } catch (error) {
+      const result = {
+        allowed: false,
+        reason: "ACCOUNT_RECHECK_ERROR_FAIL_CLOSED",
+        detail: error instanceof Error ? error.message : String(error),
+      };
+      console.error(`PHASE7C_${label}_ACCOUNT_ENTRY_BLOCKED=${result.reason}`);
+      return blockedAccountResponse(runtime, result);
+    }
+  };
+
+  return runtime;
+}
