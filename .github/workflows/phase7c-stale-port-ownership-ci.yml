@@ -1,0 +1,36 @@
+name: Phase7C Stale Port Ownership CI
+
+on:
+  push:
+    branches:
+      - fix/phase7c-stale-port-ownership
+    paths:
+      - "scripts/lib/phase7c-core-endpoint-ownership.ps1"
+      - "scripts/clear-phase7c-project-core-ports-local.ps1"
+      - "scripts/activate-phase7c-safe-local.ps1"
+      - "scripts/test-phase7c-stale-port-ownership-local.ps1"
+      - ".github/workflows/phase7c-stale-port-ownership-ci.yml"
+  pull_request:
+    branches:
+      - fix/phase7c-legacy-background-cleanup
+    paths:
+      - "scripts/lib/phase7c-core-endpoint-ownership.ps1"
+      - "scripts/clear-phase7c-project-core-ports-local.ps1"
+      - "scripts/activate-phase7c-safe-local.ps1"
+      - "scripts/test-phase7c-stale-port-ownership-local.ps1"
+      - ".github/workflows/phase7c-stale-port-ownership-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ownership-safety:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test fail-closed endpoint ownership
+        shell: pwsh
+        run: .\scripts\test-phase7c-stale-port-ownership-local.ps1
