@@ -1,31 +1,32 @@
 #property copyright "XAUUSD AI MASTER"
-#property version   "1.34"
-#property description "Read-only Phase 7C state-driven wide dashboard panel v4"
+#property version   "1.35"
+#property description "Read-only Phase 7C semantic canvas decision panel v5"
 
-input string InpApiUrl = "http://127.0.0.1:3711/api/v1/phase7c/decision-monitor/mt5?symbol=XAUUSD";
+#include <Canvas\Canvas.mqh>
+
+input string InpApiUrl = "http://127.0.0.1:3711/api/v1/phase7c-ui/mt5?symbol=XAUUSD";
 input int InpRefreshSeconds = 3;
 input ENUM_BASE_CORNER InpCorner = CORNER_LEFT_UPPER;
 input int InpX = 12;
 input int InpY = 28;
 
-const string PREFIX = "XAU_AI_P7C_";
-const int PANEL_WIDTH = 620;
-const int PANEL_HEIGHT_WAITING = 520;
-const int PANEL_HEIGHT_SETUP = 520;
-const int PANEL_HEIGHT_MANAGING = 570;
-const int INNER_X = 14;
-const int INNER_W = 592;
-
-const int FONT_TITLE = 16;
-const int FONT_VERSION = 9;
-const int FONT_META = 10;
-const int FONT_STATUS = 12;
-const int FONT_SECTION = 11;
-const int FONT_BODY = 10;
-const int FONT_VALUE = 11;
-const int FONT_FOOTER = 9;
-
+const string CANVAS_NAME = "XAU_AI_P7C_CANVAS_V5";
+const int PANEL_MIN_WIDTH = 700;
+const int PANEL_MAX_WIDTH = 780;
+const int WAITING_HEIGHT = 550;
+const int SETUP_HEIGHT = 540;
+const int MANAGING_HEIGHT = 590;
 // Required installer safety marker: READ ONLY | DEMO | ORDER PERMISSION = NONE
+
+CCanvas g_canvas;
+bool g_canvas_ready = false;
+int g_canvas_width = 0;
+int g_canvas_height = 0;
+
+uint A(const color value, const int alpha=255)
+{
+   return ColorToARGB(value, (uchar)MathMax(0, MathMin(255, alpha)));
+}
 
 string Field(const string payload, const string wanted)
 {
@@ -37,8 +38,7 @@ string Field(const string payload, const string wanted)
       int equals = StringFind(lines[index], "=");
       if(equals <= 0)
          continue;
-      string key = StringSubstr(lines[index], 0, equals);
-      if(key == wanted)
+      if(StringSubstr(lines[index], 0, equals) == wanted)
          return StringSubstr(lines[index], equals + 1);
    }
    return "n/a";
@@ -49,337 +49,336 @@ bool EmptyValue(const string value)
    return value == "" || value == "n/a" || value == "N/A" || value == "null" || value == "undefined" || value == "-";
 }
 
-string CleanValue(const string value, const string fallback)
+string Clean(const string value, const string fallback="-")
 {
-   if(EmptyValue(value))
-      return fallback;
-   return value;
+   return EmptyValue(value) ? fallback : value;
 }
 
-bool UsableValue(const string value)
+int PanelWidth()
 {
-   return !EmptyValue(value);
+   int chart_width = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
+   int target = (int)MathRound(chart_width * 0.36);
+   target = (int)MathMax(PANEL_MIN_WIDTH, MathMin(PANEL_MAX_WIDTH, target));
+   if(chart_width > 100)
+      target = (int)MathMin(target, chart_width - 24);
+   return (int)MathMax(560, target);
 }
 
-string Clip(const string value, const int maximum)
+void DestroyCanvas()
 {
-   if(maximum <= 3 || StringLen(value) <= maximum)
-      return value;
-   return StringSubstr(value, 0, maximum - 3) + "...";
-}
-
-string CompactText(const string value)
-{
-   string text = value;
-   StringReplace(text, "PAUSE chặn mọi lệnh mới; không thay đổi vị thế đang được quản lý.", "PAUSE chan lenh moi; khong doi vi the dang quan ly.");
-   StringReplace(text, "A confirmed CHOCH indicates a possible structural reversal.", "CHOCH xac nhan kha nang dao chieu cau truc.");
-   StringReplace(text, "Bollinger bandwidth is", "Bollinger bandwidth:");
-   StringReplace(text, "No valid setup", "Chua co setup hop le");
-   StringReplace(text, "panel does not have order permission", "panel chi doc, khong gui lenh");
-   StringReplace(text, "panel không có quyền gửi lệnh", "panel chi doc, khong gui lenh");
-   StringReplace(text, "Chờ setup hợp lệ", "Cho setup hop le");
-   StringReplace(text, " · ", "\n");
-   StringReplace(text, " | ", "\n");
-   StringReplace(text, "; ", "\n");
-   StringReplace(text, " • ", "\n");
-   return text;
-}
-
-void ReasonLines3(const string value, const int maximum, string &line1, string &line2, string &line3)
-{
-   string compact = CompactText(value);
-   string parts[];
-   ushort separator = (ushort)StringGetCharacter("\n", 0);
-   int count = StringSplit(compact, separator, parts);
-   line1 = "";
-   line2 = "";
-   line3 = "";
-
-   int written = 0;
-   for(int i = 0; i < count && written < 3; i++)
+   if(g_canvas_ready)
    {
-      string part = parts[i];
-      StringTrimLeft(part);
-      StringTrimRight(part);
-      if(StringLen(part) == 0 || EmptyValue(part))
-         continue;
-      if(written == 0)
-         line1 = Clip(part, maximum);
-      else if(written == 1)
-         line2 = Clip(part, maximum);
-      else
-         line3 = Clip(part, maximum);
-      written++;
+      g_canvas.Destroy();
+      g_canvas_ready = false;
    }
-
-   if(written == 0)
-      line1 = "Chua co ly do tu engine";
+   ObjectDelete(0, CANVAS_NAME);
+   g_canvas_width = 0;
+   g_canvas_height = 0;
 }
 
-void DeletePanel()
+bool EnsureCanvas(const int width, const int height)
 {
-   for(int index = ObjectsTotal(0) - 1; index >= 0; index--)
-   {
-      string name = ObjectName(0, index);
-      if(StringFind(name, PREFIX) == 0)
-         ObjectDelete(0, name);
-   }
+   if(g_canvas_ready && g_canvas_width == width && g_canvas_height == height)
+      return true;
+
+   DestroyCanvas();
+   if(!g_canvas.CreateBitmapLabel(0, 0, CANVAS_NAME, 0, 0, width, height, COLOR_FORMAT_ARGB_NORMALIZE))
+      return false;
+
+   ObjectSetInteger(0, CANVAS_NAME, OBJPROP_CORNER, InpCorner);
+   ObjectSetInteger(0, CANVAS_NAME, OBJPROP_XDISTANCE, InpX);
+   ObjectSetInteger(0, CANVAS_NAME, OBJPROP_YDISTANCE, InpY);
+   ObjectSetInteger(0, CANVAS_NAME, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, CANVAS_NAME, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, CANVAS_NAME, OBJPROP_BACK, false);
+
+   g_canvas_width = width;
+   g_canvas_height = height;
+   g_canvas_ready = true;
+   return true;
 }
 
-void Rectangle(const string suffix, const int x, const int y, const int width, const int height, const color background, const color border)
+void SetFont(const int px)
 {
-   string name = PREFIX + suffix;
-   ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, name, OBJPROP_CORNER, InpCorner);
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, InpX + x);
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, InpY + y);
-   ObjectSetInteger(0, name, OBJPROP_XSIZE, width);
-   ObjectSetInteger(0, name, OBJPROP_YSIZE, height);
-   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, background);
-   ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR, border);
-   ObjectSetInteger(0, name, OBJPROP_BACK, false);
-   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   g_canvas.FontSet("Segoe UI", -px * 10);
 }
 
-void Label(const string suffix, const int x, const int y, const string text, const color textColor, const int fontSize)
+string FitText(const string source, const int max_width, const int px)
 {
-   string name = PREFIX + suffix;
-   ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, name, OBJPROP_CORNER, InpCorner);
-   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, InpX + x);
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, InpY + y);
-   ObjectSetInteger(0, name, OBJPROP_COLOR, textColor);
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
-   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
-   ObjectSetString(0, name, OBJPROP_FONT, "Segoe UI");
-   ObjectSetString(0, name, OBJPROP_TEXT, StringLen(text) > 0 ? text : " ");
+   string text = source;
+   SetFont(px);
+   if(g_canvas.TextWidth(text) <= max_width)
+      return text;
+
+   const string suffix = "...";
+   while(StringLen(text) > 1 && g_canvas.TextWidth(text + suffix) > max_width)
+      text = StringSubstr(text, 0, StringLen(text) - 1);
+   return text + suffix;
 }
 
-color ModeColor(const string activeMode, const string strategy)
+void Text(const int x, const int y, const string value, const color clr, const int px)
 {
-   if(activeMode == "PAUSE" || strategy == "PAUSE")
-      return clrOrange;
-   if(activeMode == "AUTO")
-      return clrLimeGreen;
-   if(activeMode == "TREND")
-      return clrDeepSkyBlue;
-   if(activeMode == "SIDEWAY")
-      return clrAqua;
+   SetFont(px);
+   g_canvas.TextOut(x, y, value, A(clr), 0);
+}
+
+void TextRight(const int right_x, const int y, const string value, const color clr, const int px)
+{
+   SetFont(px);
+   int width = g_canvas.TextWidth(value);
+   g_canvas.TextOut(right_x - width, y, value, A(clr), 0);
+}
+
+void Card(const int x, const int y, const int width, const int height, const color fill, const color border)
+{
+   g_canvas.FillRectangle(x, y, x + width, y + height, A(fill, 245));
+   g_canvas.Rectangle(x, y, x + width, y + height, A(border, 230));
+}
+
+color ModeTone(const string mode, const string strategy)
+{
+   if(mode == "PAUSE" || strategy == "PAUSE") return clrOrange;
+   if(mode == "AUTO") return clrLimeGreen;
+   if(mode == "TREND") return clrDeepSkyBlue;
+   if(mode == "SIDEWAY") return clrAqua;
    return clrGold;
 }
 
-color RegimeColor(const string regime)
+color RegimeTone(const string regime)
 {
-   if(regime == "TREND")
-      return clrDeepSkyBlue;
-   if(regime == "SIDEWAY")
-      return clrAqua;
-   if(regime == "REVERSAL")
-      return clrOrange;
+   if(regime == "REVERSAL") return clrOrange;
+   if(regime == "TREND") return clrDeepSkyBlue;
+   if(regime == "SIDEWAY") return clrAqua;
    return clrSilver;
 }
 
-string DisplayMode(const string activeMode, const string strategy)
+string GateText(const string gate)
 {
-   if(activeMode != strategy && strategy != "Chua co")
-      return activeMode + " -> " + strategy;
-   return activeMode;
+   if(gate == "ALLOWED") return "DUOC PHEP";
+   if(gate == "BLOCKED_BY_MODE") return "CHAN DO MODE";
+   if(gate == "BLOCKED_BY_REGIME") return "CHUA CHO PHEP";
+   return "DANG CHO";
 }
 
-void DrawBase(const int panelHeight)
+color GateTone(const string gate)
 {
-   DeletePanel();
-   Rectangle("BG", 0, 0, PANEL_WIDTH, panelHeight, C'4,13,20', C'0,185,220');
-   Rectangle("TOP", 8, 6, PANEL_WIDTH - 16, 3, C'0,210,255', C'0,210,255');
+   if(gate == "ALLOWED") return clrLimeGreen;
+   if(gate == "BLOCKED_BY_MODE") return clrOrange;
+   if(gate == "BLOCKED_BY_REGIME") return clrGold;
+   return clrSilver;
 }
 
-void DrawHeader(const string modeText, const string regime, const string confidence, const color modeTone)
+void BeginPanel(const int width, const int height)
 {
-   Rectangle("HEAD", INNER_X, 14, INNER_W, 104, C'8,20,30', C'0,80,110');
-   Label("TITLE", 30, 24, "XAUUSD AI MASTER", clrDeepSkyBlue, FONT_TITLE);
-   Label("VER", 526, 28, "FINAL v4", clrGold, FONT_VERSION);
-   Label("SUB", 30, 52, "Phase 7C | DEMO | READ ONLY", clrSilver, FONT_META);
-   Label("MODE", 30, 75, "Mode: " + Clip(modeText, 48), modeTone, FONT_META);
-   Label("REGIME", 30, 96, "Regime: " + regime, RegimeColor(regime), FONT_META);
-   Label("CONF", 390, 96, "Confidence: " + confidence + "%", RegimeColor(regime), FONT_META);
+   g_canvas.Erase(A(C'3,10,18', 248));
+   g_canvas.FillRectangle(0, 0, width - 1, height - 1, A(C'3,10,18', 248));
+   g_canvas.Rectangle(0, 0, width - 1, height - 1, A(C'0,190,225'));
+   g_canvas.FillRectangle(8, 6, width - 9, 8, A(C'0,210,255'));
 }
 
-void DrawReasonCard(const string suffix, const int y, const string title, const string reasonText, const color tone)
+void DrawHeader(const int width, const string mode, const string strategy, const string regime, const string confidence)
 {
-   Rectangle(suffix + "BOX", INNER_X, y, INNER_W, 112, C'7,21,30', C'0,68,98');
-   Label(suffix + "TITLE", 30, y + 12, title, tone, FONT_SECTION);
-   string a, b, c;
-   ReasonLines3(reasonText, 58, a, b, c);
-   Label(suffix + "1", 42, y + 42, "- " + Clip(a, 58), clrWhite, FONT_BODY);
-   Label(suffix + "2", 42, y + 64, "- " + Clip(b, 58), clrSilver, FONT_BODY);
-   Label(suffix + "3", 42, y + 86, "- " + Clip(c, 58), clrSilver, FONT_BODY);
+   const int x = 14;
+   const int y = 16;
+   const int w = width - 28;
+   const int h = 104;
+   Card(x, y, w, h, C'7,20,30', C'0,80,110');
+
+   Text(x + 18, y + 12, "XAUUSD AI MASTER", clrDeepSkyBlue, 15);
+   TextRight(x + w - 18, y + 14, "FINAL v5", clrGold, 9);
+   Text(x + 18, y + 40, "Phase 7C | DEMO | READ ONLY", clrSilver, 9);
+   Text(x + 18, y + 62, "Mode: " + Clean(mode), ModeTone(mode, strategy), 10);
+   Text(x + 18, y + 82, "Regime: " + Clean(regime), RegimeTone(regime), 10);
+   TextRight(x + w - 18, y + 82, "Confidence: " + Clean(confidence) + "%", RegimeTone(regime), 10);
 }
 
-void DrawFooter(const int y)
+void DrawStateCard(const int width, const string title, const string stage, const string action, const color tone)
 {
-   Rectangle("FOOT", INNER_X, y, INNER_W, 58, C'6,18,26', C'0,68,98');
-   Label("FOOT1", 30, y + 8, "READ ONLY | DEMO | ORDER NONE", clrSilver, FONT_FOOTER);
-   Label("FOOT2", 30, y + 28, "BE +6 | PARTIAL +10 (1/3)", clrSilver, FONT_FOOTER);
-   Label("FOOT3", 390, y + 28, "NEW POSITIONS ONLY", clrSilver, FONT_FOOTER);
+   const int x = 14;
+   const int y = 128;
+   const int w = width - 28;
+   const int h = 68;
+   Card(x, y, w, h, C'9,24,34', tone);
+   Text(x + 18, y + 12, title, tone, 11);
+   Text(x + 18, y + 40, "Stage: " + Clean(stage), clrWhite, 9);
+   Text(x + 220, y + 40, action, clrSilver, 9);
 }
 
-void DrawWaiting(const string payload, const string stage, const string regime)
+void DrawReasons(const int width, const int y, const string title, const string r1, const string r2, const string r3, const color tone)
 {
-   Rectangle("STATE", INNER_X, 126, INNER_W, 64, C'10,24,34', C'190,120,25');
-   Label("STATE_TITLE", 30, 138, "BOT DANG CHO SETUP", clrOrange, FONT_STATUS);
-   Label("STATE_STAGE", 30, 164, "Stage: " + stage, clrWhite, FONT_BODY);
-   Label("STATE_ACTION", 250, 164, "Hanh dong: Khong mo lenh moi", clrSilver, FONT_BODY);
-
-   string reasons = Field(payload, "limitReason") + " | " + Field(payload, "decisionReason") + " | " + Field(payload, "entryReason");
-   DrawReasonCard("WAIT", 198, "LY DO CHUA VAO LENH", reasons, clrDeepSkyBlue);
-
-   Rectangle("GATE", INNER_X, 318, INNER_W, 124, C'7,21,30', C'0,68,98');
-   Label("GATE_TITLE", 30, 330, "BOT GATE / FILTER", clrAqua, FONT_SECTION);
-
-   string trendGate = (regime == "TREND") ? "Trend gate: DUOC XET" : "Trend gate: CHUA CHO PHEP";
-   string sidewayGate = Field(payload, "hasSupplyDemandRange") == "true" ? "Sideway range: CO RANGE" : "Sideway range: CHUA CO RANGE";
-   string reversalGate = regime == "REVERSAL" ? "Reversal filter: DANG CHAN" : "Reversal filter: KHONG CHAN";
-   string recommended = "Recommended: " + CleanValue(Field(payload, "recommendedMode"), "-");
-
-   Label("GATE1", 42, 358, "- " + Clip(trendGate, 60), clrWhite, FONT_BODY);
-   Label("GATE2", 42, 380, "- " + Clip(sidewayGate, 60), clrSilver, FONT_BODY);
-   Label("GATE3", 42, 402, "- " + Clip(reversalGate, 60), regime == "REVERSAL" ? clrOrange : clrSilver, FONT_BODY);
-   Label("GATE4", 42, 424, "- " + Clip(recommended, 60), clrSilver, FONT_BODY);
-
-   DrawFooter(450);
+   const int x = 14;
+   const int w = width - 28;
+   const int h = 120;
+   Card(x, y, w, h, C'7,21,30', C'0,72,102');
+   Text(x + 18, y + 12, title, tone, 10);
+   int max_text_width = w - 54;
+   string a = FitText(Clean(r1, "Chua co ly do tu engine"), max_text_width, 9);
+   string b = FitText(Clean(r2, ""), max_text_width, 9);
+   string c = FitText(Clean(r3, ""), max_text_width, 9);
+   Text(x + 28, y + 42, "- " + a, clrWhite, 9);
+   if(StringLen(b) > 0) Text(x + 28, y + 66, "- " + b, clrSilver, 9);
+   if(StringLen(c) > 0) Text(x + 28, y + 90, "- " + c, clrSilver, 9);
 }
 
-void DrawTradeBox(const string entry, const string stopLoss, const string tp)
+void DrawGateCard(const int width, const int y, const string trend, const string sideway, const string reversal, const string recommended)
 {
-   int y = 126;
-   int w = 178;
-   Rectangle("TRADE", INNER_X, y, INNER_W, 90, C'6,18,27', C'0,70,100');
-   Rectangle("ENTRY_BOX", 26, y + 14, w, 62, C'7,25,38', C'0,120,170');
-   Rectangle("SL_BOX", 221, y + 14, w, 62, C'30,14,22', C'150,45,60');
-   Rectangle("TP_BOX", 416, y + 14, w, 62, C'12,28,20', C'50,150,75');
+   const int x = 14;
+   const int w = width - 28;
+   const int h = 132;
+   Card(x, y, w, h, C'7,21,30', C'0,72,102');
+   Text(x + 18, y + 12, "BOT GATE / FILTER", clrAqua, 10);
 
-   Label("ENTRY_LABEL", 42, y + 22, "ENTRY", clrDeepSkyBlue, FONT_META);
-   Label("SL_LABEL", 242, y + 22, "STOPLOSS", clrTomato, FONT_META);
-   Label("TP_LABEL", 482, y + 22, "TP", clrLimeGreen, FONT_META);
-   Label("ENTRY_VALUE", 42, y + 47, Clip(entry, 18), clrWhite, FONT_VALUE);
-   Label("SL_VALUE", 242, y + 47, Clip(stopLoss, 18), clrWhite, FONT_VALUE);
-   Label("TP_VALUE", 452, y + 47, Clip(tp, 18), clrWhite, FONT_VALUE);
+   Text(x + 28, y + 42, "Trend", clrSilver, 9);
+   Text(x + 190, y + 42, GateText(trend), GateTone(trend), 9);
+   Text(x + 28, y + 64, "Sideway", clrSilver, 9);
+   Text(x + 190, y + 64, GateText(sideway), GateTone(sideway), 9);
+   Text(x + 28, y + 86, "Reversal filter", clrSilver, 9);
+   Text(x + 190, y + 86, reversal == "BLOCKING" ? "DANG CHAN" : "KHONG CHAN", reversal == "BLOCKING" ? clrOrange : clrLimeGreen, 9);
+   Text(x + 28, y + 108, "Recommended", clrSilver, 9);
+   Text(x + 190, y + 108, Clean(recommended), clrWhite, 9);
 }
 
-void DrawSetup(const string payload)
+void DrawFooter(const int width, const int y)
 {
-   string entry = CleanValue(Field(payload, "entry"), "-");
-   string stopLoss = CleanValue(Field(payload, "stopLoss"), "-");
-   string tp = CleanValue(Field(payload, "tp2"), CleanValue(Field(payload, "tp1"), "-"));
-
-   DrawTradeBox(entry, stopLoss, tp);
-
-   string reasons = Field(payload, "entryReason") + " | " + Field(payload, "decisionReason") + " | " + Field(payload, "engineReasons");
-   DrawReasonCard("SETUP", 224, "LY DO SETUP DUOC DUYET", reasons, clrLimeGreen);
-
-   Rectangle("RISK", INNER_X, 344, INNER_W, 92, C'7,21,30', C'0,68,98');
-   Label("RISK_TITLE", 30, 356, "LOT / RISK", clrAqua, FONT_SECTION);
-   Label("RISK1", 42, 386, "Side: " + CleanValue(Field(payload, "side"), "-"), clrWhite, FONT_BODY);
-   Label("RISK2", 250, 386, "Lot: " + CleanValue(Field(payload, "finalLot"), "-"), clrWhite, FONT_BODY);
-   Label("RISK3", 42, 410, "Risk: " + CleanValue(Field(payload, "estimatedRiskPercent"), "-") + "%", clrSilver, FONT_BODY);
-   Label("RISK4", 250, 410, "SL distance: " + CleanValue(Field(payload, "stopDistance"), "-"), clrSilver, FONT_BODY);
-
-   DrawFooter(444);
+   const int x = 14;
+   const int w = width - 28;
+   const int h = 62;
+   Card(x, y, w, h, C'6,18,26', C'0,72,102');
+   Text(x + 18, y + 12, "READ ONLY | DEMO | ORDER NONE", clrSilver, 8);
+   Text(x + 18, y + 34, "BE +6 | PARTIAL +10 (1/3) | NEW POSITIONS ONLY", clrSilver, 8);
 }
 
-void DrawManaging(const string payload)
+void DrawWaiting(const string payload, const int width)
 {
-   string entry = CleanValue(Field(payload, "positionEntry"), CleanValue(Field(payload, "entry"), "-"));
-   string stopLoss = CleanValue(Field(payload, "positionStopLoss"), CleanValue(Field(payload, "stopLoss"), "-"));
-   string tp = CleanValue(Field(payload, "positionTp2"), CleanValue(Field(payload, "positionTp1"), CleanValue(Field(payload, "tp2"), CleanValue(Field(payload, "tp1"), "-"))));
+   DrawStateCard(width, "BOT DANG CHO SETUP", Field(payload, "stage"), "Khong mo lenh moi", clrOrange);
+   DrawReasons(width, 204, "LY DO CHUA VAO LENH", Field(payload, "waitReason1"), Field(payload, "waitReason2"), Field(payload, "waitReason3"), clrDeepSkyBlue);
+   DrawGateCard(width, 332, Field(payload, "trendGate"), Field(payload, "sidewayGate"), Field(payload, "reversalFilter"), Field(payload, "recommendedMode"));
+   DrawFooter(width, 472);
+}
 
-   DrawTradeBox(entry, stopLoss, tp);
+void DrawTradePlan(const string payload, const int width, const bool managing)
+{
+   const int x = 14;
+   const int y = 128;
+   const int w = width - 28;
+   const int h = 88;
+   Card(x, y, w, h, C'6,18,27', C'0,72,102');
 
-   Rectangle("PROFIT", INNER_X, 224, INNER_W, 66, C'8,26,20', C'45,130,70');
-   Label("PROFIT_TITLE", 30, 238, "DANG GIU LENH", clrLimeGreen, FONT_SECTION);
-   Label("PROFIT_SIDE", 220, 238, CleanValue(Field(payload, "positionSide"), CleanValue(Field(payload, "side"), "-")), clrWhite, FONT_BODY);
-   Label("PROFIT_LINE", 30, 264, "Floating P/L: " + CleanValue(Field(payload, "floatingPnlUsd"), "-") + " USD", clrWhite, FONT_STATUS);
+   int gap = 8;
+   int box_w = (w - 36 - gap * 2) / 3;
+   int bx1 = x + 12;
+   int bx2 = bx1 + box_w + gap;
+   int bx3 = bx2 + box_w + gap;
+   string entry = managing ? Field(payload, "positionEntry") : Field(payload, "setupEntry");
+   string stop = managing ? Field(payload, "positionStopLoss") : Field(payload, "setupStopLoss");
+   string tp = managing ? Field(payload, "positionTp2") : Field(payload, "setupTp2");
+   if(EmptyValue(tp)) tp = managing ? Field(payload, "positionTp1") : Field(payload, "setupTp1");
 
-   DrawReasonCard("HOLD", 298, "LY DO GIU LENH", Field(payload, "holdReason"), clrDeepSkyBlue);
+   Card(bx1, y + 12, box_w, 62, C'7,25,38', C'0,120,170');
+   Card(bx2, y + 12, box_w, 62, C'30,14,22', C'150,45,60');
+   Card(bx3, y + 12, box_w, 62, C'12,28,20', C'50,150,75');
+   Text(bx1 + 12, y + 20, "ENTRY", clrDeepSkyBlue, 8);
+   Text(bx2 + 12, y + 20, "STOPLOSS", clrTomato, 8);
+   Text(bx3 + 12, y + 20, "TP", clrLimeGreen, 8);
+   Text(bx1 + 12, y + 42, FitText(Clean(entry), box_w - 24, 10), clrWhite, 10);
+   Text(bx2 + 12, y + 42, FitText(Clean(stop), box_w - 24, 10), clrWhite, 10);
+   Text(bx3 + 12, y + 42, FitText(Clean(tp), box_w - 24, 10), clrWhite, 10);
+}
 
-   Rectangle("MANAGE", INNER_X, 418, INNER_W, 74, C'7,21,30', C'0,68,98');
-   Label("MANAGE_TITLE", 30, 430, "QUAN TRI LENH", clrAqua, FONT_SECTION);
-   Label("MANAGE1", 42, 458, "BE trigger: +6", clrWhite, FONT_BODY);
-   Label("MANAGE2", 250, 458, "Partial: +10 -> dong 1/3", clrWhite, FONT_BODY);
+void DrawSetup(const string payload, const int width)
+{
+   DrawTradePlan(payload, width, false);
+   DrawReasons(width, 224, "LY DO SETUP DUOC DUYET", Field(payload, "entryReason1"), Field(payload, "entryReason2"), Field(payload, "entryReason3"), clrLimeGreen);
 
-   DrawFooter(500);
+   const int x = 14;
+   const int y = 352;
+   const int w = width - 28;
+   Card(x, y, w, 88, C'7,21,30', C'0,72,102');
+   Text(x + 18, y + 12, "LOT / RISK", clrAqua, 10);
+   Text(x + 28, y + 42, "Strategy: " + Clean(Field(payload, "setupStrategy")), clrWhite, 9);
+   Text(x + 260, y + 42, "Side: " + Clean(Field(payload, "setupSide")), clrWhite, 9);
+   Text(x + 28, y + 64, "Lot: " + Clean(Field(payload, "setupFinalLot")), clrSilver, 9);
+   Text(x + 260, y + 64, "Risk: " + Clean(Field(payload, "setupRiskPercent")) + "%", clrSilver, 9);
+   DrawFooter(width, 448);
+}
+
+void DrawManaging(const string payload, const int width)
+{
+   DrawTradePlan(payload, width, true);
+
+   const int x = 14;
+   const int w = width - 28;
+   Card(x, 224, w, 62, C'8,26,20', C'45,130,70');
+   Text(x + 18, 238, "DANG GIU LENH", clrLimeGreen, 10);
+   Text(x + 210, 238, "P/L: " + Clean(Field(payload, "floatingPnlUsd")) + " USD", clrWhite, 10);
+   Text(x + 18, 260, "Side: " + Clean(Field(payload, "positionSide")) + " | Lot: " + Clean(Field(payload, "positionVolume")), clrSilver, 8);
+
+   DrawReasons(width, 294, "LY DO GIU LENH", Field(payload, "holdReason1"), Field(payload, "holdReason2"), Field(payload, "holdReason3"), clrDeepSkyBlue);
+
+   Card(x, 422, w, 80, C'7,21,30', C'0,72,102');
+   Text(x + 18, 436, "QUAN TRI LENH", clrAqua, 10);
+   Text(x + 28, 466, "BE +6", clrWhite, 9);
+   Text(x + 150, 466, "Partial +10: chot 1/3", clrWhite, 9);
+   Text(x + 380, 466, "READ ONLY", clrSilver, 9);
+   DrawFooter(width, 510);
 }
 
 void RenderPanel(const string payload)
 {
-   string activeMode = CleanValue(Field(payload, "activeMode"), "Chua co");
-   string strategy = CleanValue(Field(payload, "effectiveStrategy"), activeMode);
-   string regime = CleanValue(Field(payload, "regime"), "Chua co");
-   string confidence = CleanValue(Field(payload, "confidence"), "-");
-   string stage = CleanValue(Field(payload, "stage"), "Chua co");
-   string approved = Field(payload, "approved");
-   string positionState = Field(payload, "positionState");
-   int positionCount = (int)StringToInteger(CleanValue(Field(payload, "positionCount"), "0"));
+   string ui_state = Clean(Field(payload, "uiState"), "WAITING");
+   int height = ui_state == "MANAGING" ? MANAGING_HEIGHT : (ui_state == "SETUP_READY" ? SETUP_HEIGHT : WAITING_HEIGHT);
+   int width = PanelWidth();
+   if(!EnsureCanvas(width, height))
+      return;
 
-   bool managing = positionCount > 0 || positionState == "MANAGING" || positionState == "UNMANAGED";
-   bool setupReady = !managing && approved == "true" && UsableValue(Field(payload, "entry")) && UsableValue(Field(payload, "stopLoss"));
+   BeginPanel(width, height);
+   DrawHeader(width,
+      Field(payload, "activeMode"),
+      Field(payload, "effectiveStrategy"),
+      Field(payload, "regime"),
+      Field(payload, "confidence"));
 
-   if(managing)
-   {
-      DrawBase(PANEL_HEIGHT_MANAGING);
-      DrawHeader(DisplayMode(activeMode, strategy), regime, confidence, ModeColor(activeMode, strategy));
-      DrawManaging(payload);
-   }
-   else if(setupReady)
-   {
-      DrawBase(PANEL_HEIGHT_SETUP);
-      DrawHeader(DisplayMode(activeMode, strategy), regime, confidence, ModeColor(activeMode, strategy));
-      DrawSetup(payload);
-   }
+   if(ui_state == "MANAGING")
+      DrawManaging(payload, width);
+   else if(ui_state == "SETUP_READY")
+      DrawSetup(payload, width);
    else
-   {
-      DrawBase(PANEL_HEIGHT_WAITING);
-      DrawHeader(DisplayMode(activeMode, strategy), regime, confidence, ModeColor(activeMode, strategy));
-      DrawWaiting(payload, stage, regime);
-   }
+      DrawWaiting(payload, width);
 
-   ChartRedraw();
+   g_canvas.Update(true);
 }
 
 void RenderError(const string title, const string message)
 {
-   DeletePanel();
-   Rectangle("BG", 0, 0, PANEL_WIDTH, 320, C'4,13,20', C'180,60,60');
-   Rectangle("TOP", 8, 6, PANEL_WIDTH - 16, 3, clrTomato, clrTomato);
-   Label("TITLE", 30, 24, "XAUUSD AI MASTER", clrDeepSkyBlue, FONT_TITLE);
-   Label("VER", 526, 28, "FINAL v4", clrGold, FONT_VERSION);
-   Label("ERR", 30, 70, title, clrTomato, FONT_STATUS);
-   Label("MSG", 30, 102, Clip(message, 70), clrWhite, FONT_BODY);
-   Label("HELP1", 30, 146, "1. Allow WebRequest: http://127.0.0.1:3711", clrSilver, FONT_BODY);
-   Label("HELP2", 30, 172, "2. Kiem tra Control API / MT5 Bridge", clrSilver, FONT_BODY);
-   Label("HELP3", 30, 198, "3. Attach lai EA panel neu can", clrSilver, FONT_BODY);
-   Label("FOOT", 30, 270, "READ ONLY | DEMO | ORDER PERMISSION = NONE", clrSilver, FONT_FOOTER);
-   ChartRedraw();
+   int width = PanelWidth();
+   if(!EnsureCanvas(width, 300))
+      return;
+   BeginPanel(width, 300);
+   Card(14, 16, width - 28, 266, C'12,18,26', C'180,60,60');
+   Text(32, 34, "XAUUSD AI MASTER", clrDeepSkyBlue, 15);
+   TextRight(width - 32, 36, "FINAL v5", clrGold, 9);
+   Text(32, 78, title, clrTomato, 11);
+   Text(32, 112, FitText(message, width - 64, 9), clrWhite, 9);
+   Text(32, 156, "1. Allow WebRequest: http://127.0.0.1:3711", clrSilver, 8);
+   Text(32, 180, "2. Kiem tra Control API/Bridge", clrSilver, 8);
+   Text(32, 204, "3. Attach lai EA panel neu can", clrSilver, 8);
+   Text(32, 250, "READ ONLY | DEMO | ORDER NONE", clrSilver, 8);
+   g_canvas.Update(true);
 }
 
 void RefreshPanel()
 {
    char request[];
    char response[];
-   string responseHeaders;
+   string response_headers;
    string headers = "Accept: text/plain\r\nCache-Control: no-store\r\n";
-
    ResetLastError();
-   int status = WebRequest("GET", InpApiUrl, headers, 5000, request, response, responseHeaders);
+   int status = WebRequest("GET", InpApiUrl, headers, 5000, request, response, response_headers);
    if(status == -1)
    {
       RenderError("KHONG GOI DUOC CONTROL API", "WebRequest error " + IntegerToString(GetLastError()));
       return;
    }
-
    if(status != 200)
    {
       RenderError("CONTROL API CHUA SAN SANG", "HTTP " + IntegerToString(status));
@@ -387,18 +386,17 @@ void RefreshPanel()
    }
 
    string payload = CharArrayToString(response, 0, -1, CP_UTF8);
-   if(Field(payload, "version") != "1")
+   if(Field(payload, "version") != "2")
    {
-      RenderError("DU LIEU PANEL KHONG HOP LE", "Decision monitor payload invalid");
+      RenderError("DU LIEU UI KHONG HOP LE", "Semantic UI contract version khong phai 2");
       return;
    }
-
    RenderPanel(payload);
 }
 
 int OnInit()
 {
-   DeletePanel();
+   DestroyCanvas();
    EventSetTimer((int)MathMax(1, InpRefreshSeconds));
    RefreshPanel();
    return INIT_SUCCEEDED;
@@ -407,7 +405,7 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    EventKillTimer();
-   DeletePanel();
+   DestroyCanvas();
    ChartRedraw();
 }
 
