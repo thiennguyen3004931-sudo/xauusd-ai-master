@@ -1,5 +1,9 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import {
+  getPhase7CAccountModeState,
+  type Phase7CAccountMode,
+} from "./phase7c-account-mode.service";
 
 export interface Phase7CLotSettingsState {
   version: 1;
@@ -12,6 +16,7 @@ export interface Phase7CLotSettingsState {
 
 export interface Phase7CActiveLotSettings {
   version: 1;
+  accountMode: Phase7CAccountMode;
   trendFixedLot: number;
   sidewayRiskPercent: number;
   sidewayMaxLot: number;
@@ -29,6 +34,7 @@ export interface Phase7CLotSettingsInput {
 export const PHASE7C_LOT_LIMITS = {
   minManagedLot: 0.03,
   maxDemoLot: 0.3,
+  maxManagedLot: 0.3,
   lotStep: 0.01,
   managedLotIncrement: 0.03,
   minRiskPercent: 0.01,
@@ -54,7 +60,7 @@ function defaultState(): Phase7CLotSettingsState {
 function isManagedLot(value: number): boolean {
   if (!Number.isFinite(value)) return false;
   if (value < PHASE7C_LOT_LIMITS.minManagedLot - 1e-9) return false;
-  if (value > PHASE7C_LOT_LIMITS.maxDemoLot + 1e-9) return false;
+  if (value > PHASE7C_LOT_LIMITS.maxManagedLot + 1e-9) return false;
   const units = value / PHASE7C_LOT_LIMITS.managedLotIncrement;
   return Math.abs(units - Math.round(units)) <= 1e-8;
 }
@@ -81,7 +87,7 @@ export function validatePhase7CLotSettings(
     sidewayRiskPercent < PHASE7C_LOT_LIMITS.minRiskPercent - 1e-9 ||
     sidewayRiskPercent > PHASE7C_LOT_LIMITS.maxRiskPercent + 1e-9
   ) {
-    throw new Error("Sideway risk percent must be between 0.01% and 1.00% in DEMO.");
+    throw new Error("Sideway risk percent must be between 0.01% and 1.00%.");
   }
 
   return {
@@ -115,7 +121,7 @@ function parseState(value: unknown): Phase7CLotSettingsState | null {
 
 function parseActive(value: unknown): Phase7CActiveLotSettings | null {
   if (!value || typeof value !== "object") return null;
-  const raw = value as Partial<Phase7CActiveLotSettings>;
+  const raw = value as Partial<Phase7CActiveLotSettings> & { accountMode?: unknown };
   try {
     const normalized = validatePhase7CLotSettings({
       trendFixedLot: Number(raw.trendFixedLot),
@@ -124,8 +130,11 @@ function parseActive(value: unknown): Phase7CActiveLotSettings | null {
     });
     const supervisorPid = Number(raw.supervisorPid);
     if (!Number.isInteger(supervisorPid) || supervisorPid <= 0) return null;
+    const accountModeText = String(raw.accountMode ?? "DEMO").trim().toUpperCase();
+    if (accountModeText !== "DEMO" && accountModeText !== "LIVE") return null;
     return {
       version: 1,
+      accountMode: accountModeText,
       ...normalized,
       armed: raw.armed === true,
       supervisorPid,
@@ -145,6 +154,13 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
+function writeJsonAtomic(filePath: string, value: unknown) {
+  mkdirSync(dirname(filePath), { recursive: true });
+  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  renameSync(temporaryPath, filePath);
+}
+
 export class Phase7CLotSettingsService {
   private readonly filePath: string;
   private readonly activeFilePath: string;
@@ -159,6 +175,10 @@ export class Phase7CLotSettingsService {
     this.activeFilePath = activeFilePath?.trim()
       ? resolve(activeFilePath)
       : resolve(process.cwd(), ".runtime", "phase7c-executors", "active-lot-settings.json");
+  }
+
+  private profilePath(accountMode: Phase7CAccountMode): string {
+    return resolve(dirname(this.filePath), `phase7c-lot-settings.${accountMode.toLowerCase()}.json`);
   }
 
   getState(): Phase7CLotSettingsState {
@@ -180,11 +200,14 @@ export class Phase7CLotSettingsService {
   get() {
     const state = this.getState();
     const active = this.getActive();
+    const accountModeState = getPhase7CAccountModeState();
     const activeAlive = active ? isProcessAlive(active.supervisorPid) : false;
     const restartRequired =
+      !accountModeState.valid ||
       !active ||
       !activeAlive ||
       !active.armed ||
+      active.accountMode !== accountModeState.accountMode ||
       active.trendFixedLot !== state.trendFixedLot ||
       active.sidewayRiskPercent !== state.sidewayRiskPercent ||
       active.sidewayMaxLot !== state.sidewayMaxLot;
@@ -194,9 +217,11 @@ export class Phase7CLotSettingsService {
       active,
       activeAlive,
       restartRequired,
+      accountMode: accountModeState,
       appliesTo: "NEW_POSITIONS_ONLY" as const,
       safety: {
-        demoOnly: true,
+        accountMode: accountModeState.accountMode,
+        demoOnly: accountModeState.accountMode === "DEMO",
         requiresPause: true,
         requiresZeroXauusdPositions: true,
         existingPositionMutation: false,
@@ -208,6 +233,10 @@ export class Phase7CLotSettingsService {
   }
 
   set(input: Phase7CLotSettingsInput, updatedBy = "operator") {
+    const accountModeState = getPhase7CAccountModeState();
+    if (!accountModeState.valid) {
+      throw new Error(`Account-mode state is invalid; lot settings fail closed. ${accountModeState.error ?? ""}`.trim());
+    }
     const normalized = validatePhase7CLotSettings(input);
     const state: Phase7CLotSettingsState = {
       version: 1,
@@ -216,10 +245,14 @@ export class Phase7CLotSettingsService {
       updatedBy: updatedBy.trim() || "operator",
     };
 
-    mkdirSync(dirname(this.filePath), { recursive: true });
-    const temporaryPath = `${this.filePath}.${process.pid}.tmp`;
-    writeFileSync(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-    renameSync(temporaryPath, this.filePath);
+    writeJsonAtomic(this.filePath, state);
+    writeJsonAtomic(this.profilePath(accountModeState.accountMode), {
+      ...state,
+      accountMode: accountModeState.accountMode,
+      appliesTo: "NEW_POSITIONS_ONLY",
+      martingale: false,
+      recoveryLotEscalation: false,
+    });
     return this.get();
   }
 }
