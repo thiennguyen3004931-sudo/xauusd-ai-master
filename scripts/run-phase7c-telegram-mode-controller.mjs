@@ -60,8 +60,8 @@ while (true) {
       }
       if (!initialPanelSent) {
         const startupNote = initial.mode === "PAUSE"
-          ? "Bot DEMO và Telegram vừa khởi động ở PAUSE; đang chờ xác minh an toàn trước khi cho phép AUTO."
-          : `Bot DEMO và Telegram vừa khởi động ở mode ${initial.mode}.`;
+          ? "Bot DEMO và Telegram vừa khởi động ở chế độ TẠM DỪNG; đang chờ xác minh an toàn trước khi cho phép TỰ ĐỘNG."
+          : `Bot DEMO và Telegram vừa khởi động ở chế độ ${modeVi(initial.mode)}.`;
         await sendPanel(initial.mode, startupNote);
         lastTelegramSuccessAt = Date.now();
         initialPanelSent = true;
@@ -158,7 +158,7 @@ async function syncExternalMode() {
   lastMode = current.mode;
   await sendPanel(
     current.mode,
-    `Web/API đã chuyển mode ${previousMode} → ${current.mode}. Bot DEMO và Telegram đang hoạt động.`,
+    `Web/API đã chuyển chế độ ${modeVi(previousMode)} → ${modeVi(current.mode)}. Bot DEMO và Telegram đang hoạt động.`,
   );
   console.log(`PHASE7C_MODE_CHANGED=${current.mode}|SOURCE=EXTERNAL_API`);
 }
@@ -176,22 +176,22 @@ async function handleCallback(callback) {
     const current = await getBotMode();
     lastApiSuccessAt = Date.now();
     lastMode = current.mode;
-    if (callbackId) await answerCallback(callbackId, `Mode hiện tại: ${current.mode}`);
+    if (callbackId) await answerCallback(callbackId, `Chế độ hiện tại: ${modeVi(current.mode)}`);
     await editPanel(callback.message, current.mode, "Đã làm mới trạng thái.");
     return;
   }
 
   const mode = data.startsWith("p7c:") ? data.slice(4).toUpperCase() : "";
   if (!validModes.has(mode)) {
-    if (callbackId) await answerCallback(callbackId, "Mode không hợp lệ.");
+    if (callbackId) await answerCallback(callbackId, "Chế độ không hợp lệ.");
     return;
   }
 
   const state = await setBotMode(mode, "telegram");
   lastApiSuccessAt = Date.now();
   lastMode = state.mode;
-  if (callbackId) await answerCallback(callbackId, `Đã chọn ${state.mode}`);
-  await editPanel(callback.message, state.mode, `Đã chuyển sang ${state.mode}.`);
+  if (callbackId) await answerCallback(callbackId, `Đã chọn ${modeVi(state.mode)}`);
+  await editPanel(callback.message, state.mode, `Đã chuyển sang ${modeVi(state.mode)}.`);
   console.log(`PHASE7C_MODE_CHANGED=${state.mode}|SOURCE=TELEGRAM`);
 }
 
@@ -202,14 +202,19 @@ async function handleMessage(message) {
   if (!raw) return;
   const command = raw.split(/\s+/)[0].toLowerCase().replace(/@[^\s]+$/, "");
 
+  // Keep legacy commands for compatibility and add Vietnamese aliases for operators.
   const commands = {
     "/trend": "TREND",
     "/sideway": "SIDEWAY",
     "/auto": "AUTO",
     "/pause": "PAUSE",
+    "/xuhuong": "TREND",
+    "/dingang": "SIDEWAY",
+    "/tudong": "AUTO",
+    "/tamdung": "PAUSE",
   };
 
-  if (command === "/mode" || command === "/bots") {
+  if (command === "/mode" || command === "/bots" || command === "/chedo" || command === "/bot") {
     const current = await getBotMode();
     lastApiSuccessAt = Date.now();
     lastMode = current.mode;
@@ -222,7 +227,7 @@ async function handleMessage(message) {
   const state = await setBotMode(mode, "telegram-command");
   lastApiSuccessAt = Date.now();
   lastMode = state.mode;
-  await sendPanel(state.mode, `Đã chuyển sang ${state.mode}.`);
+  await sendPanel(state.mode, `Đã chuyển sang ${modeVi(state.mode)}.`);
   console.log(`PHASE7C_MODE_CHANGED=${state.mode}|SOURCE=TELEGRAM_COMMAND`);
 }
 
@@ -259,22 +264,32 @@ async function editPanel(message, mode, note) {
   }
 }
 
+function modeVi(mode) {
+  return {
+    TREND: "Bot Trend",
+    SIDEWAY: "Bot Sideway",
+    AUTO: "TỰ ĐỘNG",
+    PAUSE: "TẠM DỪNG",
+    UNKNOWN: "KHÔNG XÁC ĐỊNH",
+  }[String(mode ?? "").toUpperCase()] ?? "KHÔNG XÁC ĐỊNH";
+}
+
 function panelText(mode, note) {
   const description = {
-    TREND: "Chỉ Trend Bot được phép tạo chiến lược mới.",
-    SIDEWAY: "Chỉ Sideway Bot (Supply/Demand mean-reversion) được phép tạo chiến lược mới.",
-    AUTO: "Regime Engine tự chọn bot; REVERSAL/UNCERTAIN sẽ khuyến nghị PAUSE.",
-    PAUSE: "Không bot nào được phép tạo plan giao dịch mới.",
+    TREND: "Chỉ Bot Trend được phép tạo chiến lược mới.",
+    SIDEWAY: "Chỉ Bot Sideway được phép tạo chiến lược mới theo vùng cung/cầu và hồi quy về trung bình.",
+    AUTO: "Bộ phân loại trạng thái thị trường tự chọn Bot Trend hoặc Bot Sideway; khi đảo chiều hoặc chưa rõ sẽ khuyến nghị TẠM DỪNG.",
+    PAUSE: "Không bot nào được phép tạo kế hoạch giao dịch mới.",
   }[mode] ?? "Trạng thái không xác định.";
 
   return [
-    "🎛 <b>XAUUSD AI MASTER · BOT MODE</b>",
+    "🎛 <b>XAUUSD AI MASTER · CHẾ ĐỘ BOT</b>",
     "",
-    `Mode hiện tại: <b>${escapeHtml(mode)}</b>`,
+    `Chế độ hiện tại: <b>${escapeHtml(modeVi(mode))}</b>`,
     escapeHtml(description),
     "",
     `ℹ️ ${escapeHtml(note)}`,
-    "🔒 Panel chỉ đổi mode qua API, không gửi lệnh trực tiếp tới MT5.",
+    "🔒 Bảng điều khiển chỉ đổi chế độ qua giao diện điều khiển nội bộ, không gửi lệnh trực tiếp tới MT5.",
   ].join("\n");
 }
 
@@ -285,8 +300,8 @@ function keyboard(activeMode) {
   });
   return {
     inline_keyboard: [
-      [button("TREND", "TREND"), button("SIDEWAY", "SIDEWAY")],
-      [button("AUTO", "AUTO"), button("PAUSE", "PAUSE")],
+      [button("Bot Trend", "TREND"), button("Bot Sideway", "SIDEWAY")],
+      [button("TỰ ĐỘNG", "AUTO"), button("TẠM DỪNG", "PAUSE")],
       [{ text: "🔄 Làm mới", callback_data: "p7c:REFRESH" }],
     ],
   };
