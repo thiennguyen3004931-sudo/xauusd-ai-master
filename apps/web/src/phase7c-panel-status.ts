@@ -2,6 +2,16 @@ export type Phase7CPanelStatus = Record<string, string>;
 export type Phase7CJson = Record<string, unknown>;
 export type TradeUiState = "WAITING" | "SETUP_READY" | "MANAGING";
 export type Phase7CUiGate = "ALLOWED" | "BLOCKED_BY_MODE" | "BLOCKED_BY_REGIME" | "PENDING";
+export type Phase7CEntryCheckStatus = "PASS" | "FAIL" | "WAIT" | "BLOCKED";
+
+export interface Phase7CEntryCheck {
+  code: string;
+  label: string;
+  status: Phase7CEntryCheckStatus;
+  actual: string;
+  required: string;
+  reason: string;
+}
 
 export interface Phase7CPerformanceTrade {
   id: string;
@@ -89,6 +99,10 @@ export interface Phase7CUiContract {
     stopMove?: string[];
     partial?: string[];
     exit: string[];
+  };
+  entryChecks?: {
+    trend: Phase7CEntryCheck[];
+    sideway: Phase7CEntryCheck[];
   };
   gates: {
     trend: Phase7CUiGate;

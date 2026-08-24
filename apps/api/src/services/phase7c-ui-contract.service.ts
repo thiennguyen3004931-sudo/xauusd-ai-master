@@ -3,6 +3,16 @@ import type { getPhase7CDecisionMonitor } from "./phase7c-decision-monitor.servi
 type Snapshot = Awaited<ReturnType<typeof getPhase7CDecisionMonitor>>;
 export type Phase7CUiState = "WAITING" | "SETUP_READY" | "MANAGING";
 export type Phase7CUiGate = "ALLOWED" | "BLOCKED_BY_MODE" | "BLOCKED_BY_REGIME" | "PENDING";
+export type Phase7CEntryCheckStatus = "PASS" | "FAIL" | "WAIT" | "BLOCKED";
+
+export interface Phase7CEntryCheck {
+  code: string;
+  label: string;
+  status: Phase7CEntryCheckStatus;
+  actual: string;
+  required: string;
+  reason: string;
+}
 
 export interface Phase7CUiContract {
   version: 2;
@@ -26,6 +36,10 @@ export interface Phase7CUiContract {
     stopMove: string[];
     partial: string[];
     exit: string[];
+  };
+  entryChecks: {
+    trend: Phase7CEntryCheck[];
+    sideway: Phase7CEntryCheck[];
   };
   gates: {
     trend: Phase7CUiGate;
@@ -252,6 +266,361 @@ function exitReasons(snapshot: Snapshot): string[] {
   return reasons;
 }
 
+function entryCheck(
+  code: string,
+  label: string,
+  status: Phase7CEntryCheckStatus,
+  actual: unknown,
+  required: string,
+  reason: string,
+): Phase7CEntryCheck {
+  const actualText = String(actual ?? "").trim();
+  return {
+    code,
+    label,
+    status,
+    actual: actualText || "—",
+    required,
+    reason,
+  };
+}
+
+function trendEntryChecks(snapshot: Snapshot): Phase7CEntryCheck[] {
+  const diagnostics = snapshot.entryDiagnostics?.trend ?? null;
+  const diagnosticError = snapshot.entryDiagnostics?.trendError ?? null;
+  const pattern = diagnostics?.pattern ?? null;
+  const side = pattern?.side ?? null;
+  const selected = String(pattern?.name ?? "");
+  const gate = gateFor(snapshot, "TREND");
+  const checks: Phase7CEntryCheck[] = [];
+
+  checks.push(entryCheck(
+    "TREND_MODE_REGIME",
+    "Mode / Regime",
+    gate === "ALLOWED" ? "PASS" : "BLOCKED",
+    `${snapshot.mode.active} → ${snapshot.engine.recommendedMode}`,
+    "TREND được phép mở entry",
+    gate === "ALLOWED"
+      ? "Mode/regime hiện cho phép Trend."
+      : "Mode hoặc AUTO regime hiện đang chặn Trend.",
+  ));
+
+  const priorities: string[] = [
+    "THREE_CANDLE_BODY_DOMINANCE",
+    "TWO_CANDLE_BODY_DOMINANCE",
+    "ENGULFING",
+  ];
+  const labels: Record<string, string> = {
+    THREE_CANDLE_BODY_DOMINANCE: "Mẫu 3 nến",
+    TWO_CANDLE_BODY_DOMINANCE: "Mẫu 2 nến",
+    ENGULFING: "Engulfing",
+  };
+  const selectedIndex = priorities.indexOf(selected);
+
+  priorities.forEach((code, index) => {
+    let status: Phase7CEntryCheckStatus = "WAIT";
+    let actual = "Chưa có diagnostics";
+    let reason = diagnosticError || "Chờ dữ liệu M15.";
+
+    if (diagnostics) {
+      if (!pattern?.matched) {
+        status = "FAIL";
+        actual = "Không match";
+        reason = "Pattern này không đạt trên nến M15 hiện tại.";
+      }
+      else if (selected === code) {
+        status = "PASS";
+        actual = `MATCH ${side ?? ""}`.trim();
+        reason = "Đây là pattern được chọn theo priority THREE → TWO → ENGULFING.";
+      }
+      else if (selectedIndex >= 0 && index < selectedIndex) {
+        status = "FAIL";
+        actual = "Không đạt";
+        reason = "Pattern ưu tiên cao hơn này không đạt.";
+      }
+      else {
+        status = "WAIT";
+        actual = "Không cần xét tiếp";
+        reason = "Pattern ưu tiên cao hơn đã đạt nên không cần dùng pattern này.";
+      }
+    }
+
+    checks.push(entryCheck(
+      `TREND_PATTERN_${code}`,
+      labels[code] ?? code,
+      status,
+      actual,
+      "Pattern M15 hợp lệ",
+      reason,
+    ));
+  });
+
+  const m15 = diagnostics?.trend?.m15Supertrend ?? null;
+  checks.push(entryCheck(
+    "TREND_SUPERTREND_M15",
+    "Supertrend M15",
+    !side ? "WAIT" : m15 === side ? "PASS" : "FAIL",
+    m15 ?? "—",
+    side ?? "Chờ pattern xác định hướng",
+    !side
+      ? "Chưa có pattern để xác định hướng Supertrend cần khớp."
+      : m15 === side
+        ? "Supertrend M15 10/3 cùng hướng pattern."
+        : "Supertrend M15 10/3 chưa cùng hướng pattern.",
+  ));
+
+  const m5 = diagnostics?.trend?.m5Supertrend ?? null;
+  checks.push(entryCheck(
+    "TREND_SUPERTREND_M5",
+    "Supertrend M5",
+    !side ? "WAIT" : m5 === side ? "PASS" : "FAIL",
+    m5 ?? "—",
+    side ?? "Chờ pattern xác định hướng",
+    !side
+      ? "Chưa có pattern để xác định hướng Supertrend cần khớp."
+      : m5 === side
+        ? "Supertrend M5 10/3 cùng hướng pattern."
+        : "Supertrend M5 10/3 chưa cùng hướng pattern.",
+  ));
+
+  const structuralRaw = diagnostics?.entry?.structuralStopDistance;
+  const structural = Number(structuralRaw);
+  const structuralValid = Number.isFinite(structural) && structural > 0;
+  const slStatus: Phase7CEntryCheckStatus = !side
+    ? "WAIT"
+    : !structuralValid
+      ? "FAIL"
+      : structural > 10
+        ? "WAIT"
+        : "PASS";
+
+  checks.push(entryCheck(
+    "TREND_STRUCTURE_SL",
+    "SL cấu trúc",
+    slStatus,
+    structuralValid ? `${structural.toFixed(2)} giá` : "—",
+    "0 < SL cấu trúc ≤ 10 giá",
+    !side
+      ? "Chờ pattern hợp lệ trước khi tính SL."
+      : !structuralValid
+        ? "Không tạo được khoảng SL cấu trúc hợp lệ."
+        : structural > 10
+          ? "SL lớn hơn 10 giá; chờ pullback rồi đánh giá lại."
+          : "SL cấu trúc hợp lệ; nếu nhỏ hơn 6 thì stop thực thi dùng tối thiểu 6 giá.",
+  ));
+
+  checks.push(entryCheck(
+    "TREND_ACCOUNT_GUARD",
+    "Account safety",
+    snapshot.safety.accountGuardValid ? "PASS" : "BLOCKED",
+    snapshot.safety.accountGuardValid ? "VALID" : "INVALID",
+    "Account-mode guard hợp lệ",
+    snapshot.safety.accountGuardValid
+      ? "Account runtime hợp lệ."
+      : "Account-mode guard đang fail-closed.",
+  ));
+
+  checks.push(entryCheck(
+    "TREND_FLAT_POSITION",
+    "XAUUSD flat",
+    snapshot.account.openXauusdPositions === 0 ? "PASS" : "BLOCKED",
+    `${snapshot.account.openXauusdPositions} position`,
+    "0 vị thế XAUUSD",
+    snapshot.account.openXauusdPositions === 0
+      ? "Không có vị thế XAUUSD đang mở."
+      : "Đang có vị thế XAUUSD; entry mới bị chặn.",
+  ));
+
+  checks.push(entryCheck(
+    "TREND_LOT_RUNTIME",
+    "Lot runtime",
+    snapshot.lotSettings.restartRequired ? "BLOCKED" : "PASS",
+    snapshot.lotSettings.restartRequired ? "RESTART REQUIRED" : "ACTIVE",
+    "Lot config đã active",
+    snapshot.lotSettings.restartRequired
+      ? "Cấu hình lot mới chưa active trong executor."
+      : "Lot runtime đang active.",
+  ));
+
+  return checks;
+}
+
+function sidewayEntryChecks(snapshot: Snapshot): Phase7CEntryCheck[] {
+  const gate = gateFor(snapshot, "SIDEWAY");
+  const latest = snapshot.recentDecisions.find((row) => row.strategy === "SIDEWAY") ?? null;
+  const event = String(latest?.event ?? "").toUpperCase();
+  const stage = String(latest?.stage ?? "").toUpperCase();
+  const latestReason = String(latest?.reason ?? "Chưa có Sideway decision mới.");
+  const hasRange = Boolean(snapshot.engine.supplyDemandRange);
+  const rangeReady =
+    snapshot.engine.regime === "RANGING" &&
+    snapshot.engine.recommendedMode === "SIDEWAY" &&
+    hasRange;
+
+  const afterLocation =
+    /(ENTRY_M5_CONFIRMATION_BLOCK|ENTRY_PLAN_BLOCK|ENTRY_FINAL_PLAN_BLOCK|ENTRY_FINAL_GATE_BLOCK|ENTRY_AUTO_LOT_BLOCK|ENTRY_SUBMIT|ENTRY_FILLED)/.test(event) ||
+    stage === "SUBMITTED";
+
+  const afterM5 =
+    /(ENTRY_PLAN_BLOCK|ENTRY_FINAL_PLAN_BLOCK|ENTRY_FINAL_GATE_BLOCK|ENTRY_AUTO_LOT_BLOCK|ENTRY_SUBMIT|ENTRY_FILLED)/.test(event) ||
+    stage === "SUBMITTED";
+
+  const afterFinal =
+    /(ENTRY_AUTO_LOT_BLOCK|ENTRY_SUBMIT|ENTRY_FILLED)/.test(event) ||
+    stage === "SUBMITTED";
+
+  const submitted =
+    /(ENTRY_SUBMIT|ENTRY_FILLED)/.test(event) ||
+    stage === "SUBMITTED";
+
+  const checks: Phase7CEntryCheck[] = [];
+
+  checks.push(entryCheck(
+    "SIDEWAY_MODE_REGIME",
+    "Mode / Regime",
+    gate === "ALLOWED" ? "PASS" : "BLOCKED",
+    `${snapshot.mode.active} → ${snapshot.engine.recommendedMode}`,
+    "SIDEWAY được phép mở entry",
+    gate === "ALLOWED"
+      ? "Mode/regime hiện cho phép Sideway."
+      : "Mode hoặc AUTO regime hiện đang chặn Sideway.",
+  ));
+
+  checks.push(entryCheck(
+    "SIDEWAY_RANGE",
+    "Range + Supply/Demand",
+    rangeReady ? "PASS" : "WAIT",
+    `${snapshot.engine.regime} · ${snapshot.engine.confidence}% · S/D ${hasRange ? "YES" : "NO"}`,
+    "RANGING + recommended SIDEWAY + Supply/Demand",
+    rangeReady
+      ? "Đã có corridor Supply/Demand hợp lệ cho Sideway."
+      : event === "ENTRY_REGIME_BLOCK"
+        ? latestReason
+        : "Chưa đủ điều kiện range/Supply-Demand để xét entry.",
+  ));
+
+  const locationStatus: Phase7CEntryCheckStatus =
+    !rangeReady
+      ? "WAIT"
+      : event === "ENTRY_LOCATION_BLOCK"
+        ? "WAIT"
+        : afterLocation
+          ? "PASS"
+          : "WAIT";
+
+  checks.push(entryCheck(
+    "SIDEWAY_LOCATION",
+    "Vị trí Supply/Demand",
+    locationStatus,
+    event === "ENTRY_LOCATION_BLOCK" ? "Giá chưa ở biên" : afterLocation ? "Đã qua location gate" : "Đang chờ",
+    "Giá ở demand/supply edge",
+    event === "ENTRY_LOCATION_BLOCK"
+      ? latestReason
+      : afterLocation
+        ? "Giá đã vượt qua location gate."
+        : "Chờ giá tới vùng demand/supply đủ gần.",
+  ));
+
+  const m5Status: Phase7CEntryCheckStatus =
+    event === "ENTRY_M5_CONFIRMATION_BLOCK"
+      ? "WAIT"
+      : afterM5
+        ? "PASS"
+        : "WAIT";
+
+  checks.push(entryCheck(
+    "SIDEWAY_M5_CONFIRMATION",
+    "Xác nhận M5",
+    m5Status,
+    event === "ENTRY_M5_CONFIRMATION_BLOCK" ? "Chưa xác nhận" : afterM5 ? "PASS" : "Đang chờ",
+    "M5 confirmation hợp lệ",
+    event === "ENTRY_M5_CONFIRMATION_BLOCK"
+      ? latestReason
+      : afterM5
+        ? "M5 confirmation đã đạt."
+        : "Chưa tới bước xác nhận M5.",
+  ));
+
+  const finalGateStatus: Phase7CEntryCheckStatus =
+    /(ENTRY_PLAN_BLOCK|ENTRY_FINAL_PLAN_BLOCK|ENTRY_FINAL_GATE_BLOCK)/.test(event)
+      ? "FAIL"
+      : afterFinal
+        ? "PASS"
+        : "WAIT";
+
+  checks.push(entryCheck(
+    "SIDEWAY_FINAL_GATE",
+    "Final entry gate",
+    finalGateStatus,
+    /(ENTRY_PLAN_BLOCK|ENTRY_FINAL_PLAN_BLOCK|ENTRY_FINAL_GATE_BLOCK)/.test(event)
+      ? event
+      : afterFinal
+        ? "PASS"
+        : "Đang chờ",
+    "Plan + quote + regime + side vẫn hợp lệ",
+    /(ENTRY_PLAN_BLOCK|ENTRY_FINAL_PLAN_BLOCK|ENTRY_FINAL_GATE_BLOCK)/.test(event)
+      ? latestReason
+      : afterFinal
+        ? "Final gate đã đạt ngay trước bước Auto Lot/order."
+        : "Chưa tới final gate.",
+  ));
+
+  const autoLotStatus: Phase7CEntryCheckStatus =
+    event === "ENTRY_AUTO_LOT_BLOCK"
+      ? "FAIL"
+      : submitted
+        ? "PASS"
+        : "WAIT";
+
+  checks.push(entryCheck(
+    "SIDEWAY_AUTO_LOT",
+    "Auto Lot",
+    autoLotStatus,
+    event === "ENTRY_AUTO_LOT_BLOCK" ? "BLOCK" : submitted ? "PASS" : "Đang chờ",
+    "Auto Lot snapshot hợp lệ",
+    event === "ENTRY_AUTO_LOT_BLOCK"
+      ? latestReason
+      : submitted
+        ? "Auto Lot đã được xác nhận trước submit."
+        : "Auto Lot chỉ được tính sau final gate.",
+  ));
+
+  checks.push(entryCheck(
+    "SIDEWAY_ACCOUNT_GUARD",
+    "Account safety",
+    snapshot.safety.accountGuardValid ? "PASS" : "BLOCKED",
+    snapshot.safety.accountGuardValid ? "VALID" : "INVALID",
+    "Account-mode guard hợp lệ",
+    snapshot.safety.accountGuardValid
+      ? "Account runtime hợp lệ."
+      : "Account-mode guard đang fail-closed.",
+  ));
+
+  checks.push(entryCheck(
+    "SIDEWAY_FLAT_POSITION",
+    "XAUUSD flat",
+    snapshot.account.openXauusdPositions === 0 ? "PASS" : "BLOCKED",
+    `${snapshot.account.openXauusdPositions} position`,
+    "0 vị thế XAUUSD",
+    snapshot.account.openXauusdPositions === 0
+      ? "Không có vị thế XAUUSD đang mở."
+      : "Đang có vị thế XAUUSD; entry mới bị chặn.",
+  ));
+
+  checks.push(entryCheck(
+    "SIDEWAY_LOT_RUNTIME",
+    "Lot runtime",
+    snapshot.lotSettings.restartRequired ? "BLOCKED" : "PASS",
+    snapshot.lotSettings.restartRequired ? "RESTART REQUIRED" : "ACTIVE",
+    "Lot config đã active",
+    snapshot.lotSettings.restartRequired
+      ? "Cấu hình lot mới chưa active trong executor."
+      : "Lot/risk runtime đang active.",
+  ));
+
+  return checks;
+}
+
 export function buildPhase7CUiContract(snapshot: Snapshot): Phase7CUiContract {
   const state = uiState(snapshot);
   const accountMode: "DEMO" | "LIVE" = snapshot.account.accountMode === "real" ? "LIVE" : "DEMO";
@@ -260,6 +629,8 @@ export function buildPhase7CUiContract(snapshot: Snapshot): Phase7CUiContract {
   const auto = autoReasons(snapshot);
   const trendWait = strategyWaitReasons(snapshot, "TREND");
   const sidewayWait = strategyWaitReasons(snapshot, "SIDEWAY");
+  const trendChecks = trendEntryChecks(snapshot);
+  const sidewayChecks = sidewayEntryChecks(snapshot);
   const setup = state === "SETUP_READY" ? {
     strategy: snapshot.preTrade.strategy,
     side: snapshot.preTrade.side,
@@ -307,6 +678,10 @@ export function buildPhase7CUiContract(snapshot: Snapshot): Phase7CUiContract {
       stopMove: managementReasons(snapshot, "STOP"),
       partial: managementReasons(snapshot, "PARTIAL"),
       exit: exitReasons(snapshot),
+    },
+    entryChecks: {
+      trend: trendChecks,
+      sideway: sidewayChecks,
     },
     gates: {
       trend: trendGate,
@@ -422,5 +797,25 @@ export function formatPhase7CUiContractForMt5(ui: Phase7CUiContract): string {
     ["recoveryLotEscalation", ui.safety.recoveryLotEscalation],
     ["mt5OrderPermission", ui.safety.orderPermission],
   ];
+
+  for (let index = 0; index < 10; index += 1) {
+    const trendCheck = ui.entryChecks.trend[index];
+    const sidewayCheck = ui.entryChecks.sideway[index];
+    const number = index + 1;
+
+    lines.push(
+      [`trendCheck${number}Status`, trendCheck?.status],
+      [`trendCheck${number}Label`, trendCheck?.label],
+      [`trendCheck${number}Actual`, trendCheck?.actual],
+      [`trendCheck${number}Required`, trendCheck?.required],
+      [`trendCheck${number}Reason`, trendCheck?.reason],
+      [`sidewayCheck${number}Status`, sidewayCheck?.status],
+      [`sidewayCheck${number}Label`, sidewayCheck?.label],
+      [`sidewayCheck${number}Actual`, sidewayCheck?.actual],
+      [`sidewayCheck${number}Required`, sidewayCheck?.required],
+      [`sidewayCheck${number}Reason`, sidewayCheck?.reason],
+    );
+  }
+
   return `${lines.map(([key, value]) => `${key}=${lineValue(value)}`).join("\n")}\n`;
 }

@@ -34,6 +34,29 @@ for (const key of ["auto", "trendWait", "sidewayWait", "stopMove", "partial", "e
 requireText(semantic, "AUTO: regime", "AUTO selector reason");
 requireText(semantic, "Trend: chưa xuất hiện một trong 3 mẫu nến M15 hợp lệ", "Trend wait reason");
 requireText(semantic, "Sideway: chưa có xác nhận M5 hợp lệ", "Sideway wait reason");
+requireText(semantic, "entryChecks:", "structured entry-check contract");
+requireText(semantic, '"THREE_CANDLE_BODY_DOMINANCE"', "Trend three-candle check");
+requireText(semantic, '"TWO_CANDLE_BODY_DOMINANCE"', "Trend two-candle check");
+requireText(semantic, '"ENGULFING"', "Trend engulfing check");
+requireText(semantic, "TREND_SUPERTREND_M15", "Trend M15 Supertrend check");
+requireText(semantic, "TREND_SUPERTREND_M5", "Trend M5 Supertrend check");
+requireText(semantic, "SIDEWAY_M5_CONFIRMATION", "Sideway M5 check");
+requireText(semantic, "SIDEWAY_FINAL_GATE", "Sideway final gate check");
+
+const decisionMonitor = read("apps/api/src/services/phase7c-decision-monitor.service.ts");
+requireText(decisionMonitor, "entryDiagnostics:", "decision diagnostics exposure");
+requireText(decisionMonitor, "supplyDemandRange: input.regime.supplyDemandRange", "Sideway range exposure");
+
+const signalPage = read("apps/web/src/pages/Phase7BPatternCheckPage.tsx");
+requireText(signalPage, "TREND — ĐIỀU KIỆN ENTRY", "Trend entry checklist");
+requireText(signalPage, "SIDEWAY — ĐIỀU KIỆN ENTRY", "Sideway entry checklist");
+requireText(signalPage, "EntryCheckList", "entry checklist renderer");
+
+const mt5Panel = read("mt5/XAUUSD_AI_Master_Decision_Panel.mq5");
+requireText(mt5Panel, "ĐIỀU KIỆN CHẶN ENTRY", "MT5 compact entry blocker");
+requireText(mt5Panel, "FirstEntryBlocker", "MT5 blocker selection");
+requireText(mt5Panel, '"trend"', "MT5 Trend checklist source");
+requireText(mt5Panel, '"sideway"', "MT5 Sideway checklist source");
 
 const shell = read("apps/web/src/ui/DashboardLayout.tsx");
 requireText(shell, "Vận hành {runtime}", "runtime-aware sidebar");

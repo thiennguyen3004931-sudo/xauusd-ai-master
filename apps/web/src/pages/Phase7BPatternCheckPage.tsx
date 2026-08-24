@@ -19,6 +19,7 @@ import {
   raw,
   stageTone,
   value,
+  type Phase7CEntryCheck,
   type Phase7CUiGate,
 } from "../phase7c-panel-status";
 
@@ -65,6 +66,62 @@ function ReasonList({ items, empty }: { items: string[]; empty: string }) {
     <Stack spacing={1}>
       {items.slice(0, 6).map((item, index) => (
         <Typography key={`${index}-${item}`} variant="body2" lineHeight={1.55}>• {item}</Typography>
+      ))}
+    </Stack>
+  );
+}
+
+function entryCheckTone(status: Phase7CEntryCheck["status"]): "success" | "error" | "warning" | "default" {
+  if (status === "PASS") return "success";
+  if (status === "FAIL" || status === "BLOCKED") return "error";
+  if (status === "WAIT") return "warning";
+  return "default";
+}
+
+function entryCheckLabel(status: Phase7CEntryCheck["status"]) {
+  if (status === "PASS") return "PASS";
+  if (status === "FAIL") return "FAIL";
+  if (status === "BLOCKED") return "BLOCKED";
+  return "WAIT";
+}
+
+function EntryCheckList({ checks }: { checks: Phase7CEntryCheck[] }) {
+  if (checks.length === 0) {
+    return <Typography variant="body2" color="text.secondary">Chưa có diagnostics structured.</Typography>;
+  }
+
+  return (
+    <Stack spacing={1}>
+      {checks.map((check) => (
+        <Box
+          key={check.code}
+          sx={{
+            px: 1.3,
+            py: 1,
+            borderRadius: 2.2,
+            border: "1px solid rgba(148,163,184,.10)",
+            bgcolor: "rgba(15,23,42,.34)",
+          }}
+        >
+          <Stack direction="row" justifyContent="space-between" gap={1.5} alignItems="flex-start">
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="body2" fontWeight={900}>{check.label}</Typography>
+              <Typography variant="caption" color="text.secondary" display="block" mt={0.25}>
+                Hiện tại: {check.actual} · Yêu cầu: {check.required}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" display="block" mt={0.25}>
+                {check.reason}
+              </Typography>
+            </Box>
+            <Chip
+              label={entryCheckLabel(check.status)}
+              size="small"
+              color={entryCheckTone(check.status)}
+              variant={check.status === "PASS" ? "outlined" : "filled"}
+              sx={{ fontWeight: 950, minWidth: 74 }}
+            />
+          </Stack>
+        </Box>
       ))}
     </Stack>
   );
@@ -117,6 +174,8 @@ export function Phase7BPatternCheckPage() {
 
   const setup = ui?.setup;
   const position = ui?.position;
+  const trendChecks = ui?.entryChecks?.trend ?? [];
+  const sidewayChecks = ui?.entryChecks?.sideway ?? [];
   const currentReasonTitle = uiState === "WAITING" ? "LÝ DO CHƯA VÀO LỆNH" : uiState === "SETUP_READY" ? "LÝ DO SETUP ĐƯỢC DUYỆT" : "LÝ DO LỆNH ĐANG ĐƯỢC QUẢN LÝ";
   const currentReasons = uiState === "WAITING" ? waitReasons : uiState === "SETUP_READY" ? entryReasons : holdReasons;
 
@@ -189,6 +248,25 @@ export function Phase7BPatternCheckPage() {
         <Grid size={{ xs: 12, lg: 7 }}>
           <PanelCard title={currentReasonTitle} subtitle="Ưu tiên semantic reason từ engine/decision layer.">
             <ReasonList items={currentReasons} empty="Chưa có reason runtime để hiển thị." />
+          </PanelCard>
+        </Grid>
+      </Grid>
+
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12, xl: 6 }}>
+          <PanelCard
+            title="TREND — ĐIỀU KIỆN ENTRY"
+            subtitle="PASS xanh · FAIL/BLOCKED đỏ · WAIT vàng. Dữ liệu read-only từ diagnostics canonical."
+          >
+            <EntryCheckList checks={trendChecks} />
+          </PanelCard>
+        </Grid>
+        <Grid size={{ xs: 12, xl: 6 }}>
+          <PanelCard
+            title="SIDEWAY — ĐIỀU KIỆN ENTRY"
+            subtitle="Theo dõi lần lượt mode/regime → range → location → M5 → final gate → Auto Lot."
+          >
+            <EntryCheckList checks={sidewayChecks} />
           </PanelCard>
         </Grid>
       </Grid>
