@@ -35,6 +35,16 @@ for (const key of [
 ]) {
   requireText(semantic, `["${key}"`, `MT5 formatter key ${key}`);
 }
+for (const marker of [
+  "trendCheck${number}Status",
+  "trendCheck${number}Label",
+  "trendCheck${number}Actual",
+  "sidewayCheck${number}Status",
+  "sidewayCheck${number}Label",
+  "sidewayCheck${number}Actual",
+]) {
+  requireText(semantic, marker, `MT5 structured entry-check formatter ${marker}`);
+}
 
 for (const title of [
   "AUTO / REGIME — LÝ DO CHỌN STRATEGY",
@@ -56,8 +66,7 @@ requireText(mt5, "RuntimeMatchesTerminal", "MT5 runtime/terminal mismatch guard"
 requireText(mt5, 'Field(payload, "accountMode")', "MT5 runtime account label");
 for (const key of [
   "autoReason1",
-  "trendWaitReason1",
-  "sidewayWaitReason1",
+  "waitReason1",
   "entryReason1",
   "holdReason1",
   "stopMoveReason1",
@@ -66,11 +75,22 @@ for (const key of [
 ]) {
   requireText(mt5, `Field(payload, "${key}")`, `MT5 semantic reason ${key}`);
 }
+for (const marker of [
+  "FirstEntryBlocker",
+  'prefix + "Check" + suffix + "Status"',
+  'prefix + "Check" + suffix + "Label"',
+  'prefix + "Check" + suffix + "Actual"',
+  'DrawEntryCheckSummary(payload, width, 222)',
+]) {
+  requireText(mt5, marker, `MT5 structured entry-check binding ${marker}`);
+}
 for (const label of [
   "LÝ DO QUYẾT ĐỊNH",
+  "ĐIỀU KIỆN CHẶN ENTRY",
   "AUTO/REGIME",
   "TREND",
   "SIDEWAY",
+  "KẾT LUẬN",
   "VÀO LỆNH",
   "GIỮ LỆNH",
   "DỜI SL",
