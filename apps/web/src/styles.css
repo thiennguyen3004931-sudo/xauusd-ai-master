@@ -1,11 +1,20 @@
-:root { color-scheme: dark; }
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI Variable", "Segoe UI", "Noto Sans", Arial, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
 html, body, #root { margin: 0; min-height: 100%; width: 100%; }
 body {
+  font-family: inherit;
   background:
     radial-gradient(circle at 15% -10%, rgba(233,185,73,.08), transparent 34%),
     radial-gradient(circle at 100% 0%, rgba(59,130,246,.07), transparent 28%),
     linear-gradient(180deg, #07101c 0%, #060b14 55%, #050911 100%);
 }
+button, input, select, textarea { font: inherit; }
 * { box-sizing: border-box; }
 .brand-mark { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; border: 1px solid rgba(233,185,73,.22); background: rgba(233,185,73,.10); color: #e9b949; font-weight: 900; }
 .guard-card, .mini-card { border: 1px solid rgba(148,163,184,.12); background: rgba(255,255,255,.025); border-radius: 14px; padding: 14px; }
