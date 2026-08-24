@@ -33,7 +33,6 @@ function Test-ForbiddenPortablePath([string]$RelativePath) {
 }
 
 Push-Location $ProjectRoot
-$tempRoot = $null
 try {
   Write-Host "PHASE7C_PORTABLE_PACKAGE=START"
 
@@ -80,10 +79,6 @@ try {
   $finalZip = Join-Path $OutputDir "$baseName.zip"
   $shaFile = Join-Path $OutputDir "$baseName.sha256.txt"
 
-  $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("xauusd-portable-" + [guid]::NewGuid().ToString('N'))
-  [System.IO.Directory]::CreateDirectory($tempRoot) | Out-Null
-  $manifestPath = Join-Path $tempRoot 'PORTABLE-RELEASE-MANIFEST.json'
-
   $manifest = [ordered]@{
     schemaVersion = 1
     project = 'XAUUSD_AI_MASTER'
@@ -106,7 +101,7 @@ try {
       portablePackageIsSourceOnly = $true
     }
   }
-  $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+  $manifestJson = $manifest | ConvertTo-Json -Depth 6
 
   if (Test-Path -LiteralPath $finalZip) { Remove-Item -LiteralPath $finalZip -Force }
   & git archive --format=zip --output=$finalZip $commit
@@ -114,8 +109,28 @@ try {
     throw "git archive failed."
   }
 
-  Compress-Archive -LiteralPath $manifestPath -DestinationPath $finalZip -Update
-  if (-not (Test-Path -LiteralPath $finalZip)) { throw "Portable ZIP was not created." }
+  Add-Type -AssemblyName System.IO.Compression
+  $stream = [System.IO.File]::Open($finalZip, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+  try {
+    $archive = New-Object System.IO.Compression.ZipArchive($stream, [System.IO.Compression.ZipArchiveMode]::Update, $false)
+    try {
+      $existing = $archive.GetEntry('PORTABLE-RELEASE-MANIFEST.json')
+      if ($null -ne $existing) { $existing.Delete() }
+      $entry = $archive.CreateEntry('PORTABLE-RELEASE-MANIFEST.json', [System.IO.Compression.CompressionLevel]::Optimal)
+      $entryStream = $entry.Open()
+      try {
+        $encoding = New-Object System.Text.UTF8Encoding($false)
+        $writer = New-Object System.IO.StreamWriter($entryStream, $encoding)
+        try { $writer.Write($manifestJson) } finally { $writer.Dispose() }
+      } finally {
+        if ($null -ne $entryStream) { $entryStream.Dispose() }
+      }
+    } finally {
+      if ($null -ne $archive) { $archive.Dispose() }
+    }
+  } finally {
+    if ($null -ne $stream) { $stream.Dispose() }
+  }
 
   $hash = Get-FileHash -LiteralPath $finalZip -Algorithm SHA256
   "$($hash.Hash.ToLowerInvariant())  $([System.IO.Path]::GetFileName($finalZip))" | Set-Content -LiteralPath $shaFile -Encoding ASCII
@@ -130,8 +145,5 @@ try {
   Write-Host "PHASE7C_PORTABLE_PACKAGE=PASS"
 }
 finally {
-  if ($tempRoot -and (Test-Path -LiteralPath $tempRoot)) {
-    Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
-  }
   Pop-Location
 }
