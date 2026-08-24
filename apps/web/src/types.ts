@@ -152,7 +152,13 @@ export interface Mt5TelemetryHealth {
   tradingEnabled: boolean;
   terminalTradeAllowed: boolean;
   expertTradeAllowed: boolean;
+  accountLogin?: number;
   accountMode?: "demo" | "contest" | "real";
+  accountCurrency?: string;
+  accountBalance?: number;
+  accountEquity?: number;
+  accountFreeMargin?: number;
+  accountProfit?: number;
   server?: string;
   terminalVersion?: string;
   lastError?: string | null;
@@ -268,14 +274,21 @@ export interface Mt5PerformanceRecommendation {
 }
 
 export interface Mt5PerformanceSnapshot {
-  source: "MT5_DEMO_READ_ONLY";
+  source: "MT5_ACCOUNT_READ_ONLY";
   symbol: string;
   currency: string;
   days: number;
   generatedAt: number;
+  account: {
+    accountMode: "DEMO" | "LIVE";
+    brokerMode: "demo" | "real";
+    login: number | null;
+    server: string | null;
+  };
   safety: {
-    accountMode: "demo";
+    accountMode: "DEMO" | "LIVE";
     bridgeTradingEnabled: boolean;
+    readOnly: true;
     strategyAutoChange: false;
     liveUnlockAvailable: false;
   };
