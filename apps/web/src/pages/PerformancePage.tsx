@@ -94,11 +94,7 @@ function BreakdownTable({ title, rows, currency, minimumSample }: { title: strin
                         size="small"
                         variant="outlined"
                         color={row.totalTrades >= minimumSample ? "success" : "warning"}
-                        label={
-                          row.totalTrades >= minimumSample
-                            ? "ĐỦ MẪU"
-                            : `${row.totalTrades}/${minimumSample}`
-                        }
+                        label={row.totalTrades >= minimumSample ? "ĐỦ MẪU" : `${row.totalTrades}/${minimumSample}`}
                       />
                     </TableCell>
                   ) : null}
@@ -125,16 +121,24 @@ export function PerformancePage() {
   const all = data.accountWide.metrics;
   const system = data.systemOwned.metrics;
   const curve = data.accountWide.equityCurve;
+  const accountMode = data.account.accountMode;
+  const accountSummary = [
+    data.account.login ? `#${data.account.login}` : null,
+    data.account.server,
+  ].filter(Boolean).join(" · ");
 
   return (
     <Stack spacing={2}>
       <Box>
         <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2}>
           <Box>
-            <Typography variant="overline" color="primary" fontWeight={800}>MT5 DEMO · CHỈ ĐỌC</Typography>
+            <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+              <Typography variant="overline" color="primary" fontWeight={800}>MT5 {accountMode} · CHỈ ĐỌC</Typography>
+              <Chip size="small" label={accountMode} color={accountMode === "LIVE" ? "warning" : "success"} variant="outlined" />
+            </Stack>
             <Typography variant="h5" fontWeight={800}>Hiệu suất chiến lược</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              Lịch sử deal MT5 read-only. Tách riêng hiệu quả TREND, SIDEWAY, hướng BUY/SELL và phiên giao dịch để đánh giá Bot.
+              Lịch sử deal của tài khoản MT5 đang được chọn{accountSummary ? ` · ${accountSummary}` : ""}. Tách riêng TREND, SIDEWAY, BUY/SELL và phiên giao dịch để đánh giá Bot.
             </Typography>
           </Box>
 
@@ -144,9 +148,11 @@ export function PerformancePage() {
         </Stack>
       </Box>
 
-      <Alert severity="info">Không tự thay đổi chiến lược từ trang này · tài khoản thật bị khóa · dữ liệu chỉ dùng để đánh giá.</Alert>
+      <Alert severity={accountMode === "LIVE" ? "warning" : "info"}>
+        Trang hiệu suất chỉ đọc lịch sử của tài khoản {accountMode} hiện tại. Không đổi chiến lược, không gửi order và không mutate position từ trang này.
+      </Alert>
 
-      <Typography fontWeight={800}>Toàn bộ tài khoản MT5</Typography>
+      <Typography fontWeight={800}>Toàn bộ tài khoản MT5 {accountMode}</Typography>
       <MetricGrid metrics={all} currency={data.currency} />
 
       <Grid container spacing={2}>
@@ -193,7 +199,7 @@ export function PerformancePage() {
 
       <Card>
         <CardContent>
-          <Typography fontWeight={800}>Lịch sử lệnh MT5</Typography>
+          <Typography fontWeight={800}>Lịch sử lệnh MT5 {accountMode}</Typography>
           <TableContainer sx={{ mt: 1, maxHeight: 560 }}>
             <Table size="small" stickyHeader>
               <TableHead>

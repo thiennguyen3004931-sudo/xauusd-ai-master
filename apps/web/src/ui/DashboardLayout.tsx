@@ -20,11 +20,13 @@ import TuneRounded from "@mui/icons-material/TuneRounded";
 import InsightsRounded from "@mui/icons-material/InsightsRounded";
 import MenuRounded from "@mui/icons-material/MenuRounded";
 import LockRounded from "@mui/icons-material/LockRounded";
+import { useMt5Telemetry } from "../hooks";
 import { StatusChip } from "./StatusChip";
 
 const drawerWidth = 220;
 
 type LinkRow = readonly [string, string, typeof SmartToyRounded];
+type RuntimeLabel = "DEMO" | "LIVE" | "MT5 CHECK";
 
 const links: readonly LinkRow[] = [
   ["/", "Bảng điều khiển", SmartToyRounded],
@@ -34,7 +36,13 @@ const links: readonly LinkRow[] = [
   ["/performance", "Hiệu suất", InsightsRounded],
 ] as const;
 
-function Navigation({ onNavigate }: { onNavigate?: () => void }) {
+function runtimeLabel(accountMode: string | undefined): RuntimeLabel {
+  if (accountMode === "real") return "LIVE";
+  if (accountMode === "demo") return "DEMO";
+  return "MT5 CHECK";
+}
+
+function Navigation({ runtime, onNavigate }: { runtime: RuntimeLabel; onNavigate?: () => void }) {
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", p: 1.6 }}>
       <Stack direction="row" spacing={1.25} alignItems="center" sx={{ px: 0.8, py: 1.3 }}>
@@ -46,7 +54,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
       </Stack>
 
       <Typography variant="caption" color="text.disabled" sx={{ px: 1.2, mt: 1.2, letterSpacing: ".12em", fontWeight: 800 }}>
-        Vận hành DEMO
+        Vận hành {runtime}
       </Typography>
       <List dense sx={{ pt: 0.7 }}>
         {links.map(([href, label, Icon]) => (
@@ -77,10 +85,10 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
       <Box sx={{ mt: "auto", p: 1.6, borderRadius: 3, border: "1px solid rgba(148,163,184,.12)", bgcolor: "rgba(255,255,255,.02)" }}>
         <Stack direction="row" spacing={0.8} alignItems="center">
           <LockRounded fontSize="small" color="primary" />
-          <Typography variant="caption" fontWeight={900}>Chỉ tài khoản DEMO</Typography>
+          <Typography variant="caption" fontWeight={900}>MT5 PANEL · CHỈ ĐỌC</Typography>
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.9, lineHeight: 1.5 }}>
-          Bảng MT5 chỉ đọc, không có quyền đặt lệnh. Khối lượng/rủi ro chỉ áp dụng cho lệnh mới trong môi trường DEMO.
+          Runtime hiện tại: {runtime}. Web không có quyền đặt lệnh hoặc chuyển tài khoản. Chuyển DEMO/LIVE chỉ qua quy trình PowerShell Admin đã kiểm tra an toàn.
         </Typography>
       </Box>
     </Box>
@@ -90,21 +98,23 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
 export function DashboardLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
+  const telemetry = useMt5Telemetry();
+  const runtime = runtimeLabel(telemetry.data?.health?.accountMode);
 
-  let headerTitle = "Bảng điều khiển vận hành DEMO";
+  let headerTitle = `Bảng điều khiển vận hành ${runtime}`;
   let headerSubtitle = "XAUUSD · AUTO/PAUSE · trạng thái thị trường · tài khoản · rủi ro · hệ thống";
   if (location.pathname.startsWith("/phase7b-pattern-check")) {
     headerTitle = "Tín hiệu & quyết định";
-    headerSubtitle = "Điều kiện tín hiệu · lý do vận hành · điều kiện vào lệnh";
+    headerSubtitle = `Điều kiện tín hiệu · lý do vận hành · điều kiện vào lệnh · ${runtime}`;
   } else if (location.pathname.startsWith("/phase7b-ops")) {
     headerTitle = "Tài khoản & rủi ro";
-    headerSubtitle = "Tài khoản MT5 · khối lượng/rủi ro · an toàn · vận hành";
+    headerSubtitle = `Tài khoản MT5 · khối lượng/rủi ro · an toàn · vận hành ${runtime}`;
   } else if (location.pathname.startsWith("/phase7c-control-center")) {
     headerTitle = "Trung tâm điều khiển";
-    headerSubtitle = "MT5 · bot · Telegram · quyết định giao dịch · khối lượng/rủi ro đồng bộ";
+    headerSubtitle = `MT5 · bot · Telegram · quyết định giao dịch · khối lượng/rủi ro · ${runtime}`;
   } else if (location.pathname.startsWith("/performance")) {
     headerTitle = "Hiệu suất";
-    headerSubtitle = "Kết quả giao dịch XAUUSD do hệ thống thực hiện";
+    headerSubtitle = `Kết quả giao dịch XAUUSD của tài khoản ${runtime} hiện tại`;
   }
 
   return (
@@ -121,7 +131,7 @@ export function DashboardLayout() {
           },
         }}
       >
-        <Navigation />
+        <Navigation runtime={runtime} />
       </Drawer>
       <Drawer
         open={mobileOpen}
@@ -131,7 +141,7 @@ export function DashboardLayout() {
           "& .MuiDrawer-paper": { width: drawerWidth, bgcolor: "#08111f" },
         }}
       >
-        <Navigation onNavigate={() => setMobileOpen(false)} />
+        <Navigation runtime={runtime} onNavigate={() => setMobileOpen(false)} />
       </Drawer>
 
       <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -150,7 +160,7 @@ export function DashboardLayout() {
               <Typography variant="subtitle2" fontWeight={900}>{headerTitle}</Typography>
               <Typography variant="caption" color="text.secondary">{headerSubtitle}</Typography>
             </Box>
-            <StatusChip value="Chỉ DEMO" />
+            <StatusChip value={runtime} />
           </Toolbar>
         </AppBar>
         <Box component="main" sx={{ p: { xs: 1.5, md: 2.2 }, maxWidth: 1780, mx: "auto", width: "100%" }}>
