@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/phase7c-dual-account-mode
+      - fix/phase7c-activation-safety-regression
     paths:
       - ".gitignore"
       - "PHASE7C-DUAL-ACCOUNT-MODE.md"
@@ -19,6 +20,7 @@ on:
       - "packages/mt5-broker/bridge/.env.phase7b-live.example"
       - "packages/mt5-broker/bridge/mt5_bridge/app.py"
       - "packages/mt5-broker/bridge/mt5_bridge/broker_time.py"
+      - "scripts/activate-phase7c-local.ps1"
       - "scripts/lib/phase7c-account-mode.ps1"
       - "scripts/phase7c-account-runtime-guard.mjs"
       - "scripts/phase7c-live-source-adapters.mjs"
@@ -34,6 +36,7 @@ on:
       - "scripts/set-phase7c-account-risk-profile-local.ps1"
       - "scripts/smoke-phase7c-account-runtime-local.ps1"
       - "scripts/switch-phase7c-account-mode-local.ps1"
+      - "scripts/test-phase7c-activation-safety-source.ps1"
       - "scripts/test-phase7c-broker-time-normalization.py"
       - "scripts/test-phase7c-dual-account-mode-local.ps1"
       - "scripts/test-phase7c-dual-account-mode-source.ps1"
@@ -58,6 +61,7 @@ on:
       - "packages/mt5-broker/bridge/.env.phase7b-live.example"
       - "packages/mt5-broker/bridge/mt5_bridge/app.py"
       - "packages/mt5-broker/bridge/mt5_bridge/broker_time.py"
+      - "scripts/activate-phase7c-local.ps1"
       - "scripts/lib/phase7c-account-mode.ps1"
       - "scripts/phase7c-account-runtime-guard.mjs"
       - "scripts/phase7c-live-source-adapters.mjs"
@@ -73,6 +77,7 @@ on:
       - "scripts/set-phase7c-account-risk-profile-local.ps1"
       - "scripts/smoke-phase7c-account-runtime-local.ps1"
       - "scripts/switch-phase7c-account-mode-local.ps1"
+      - "scripts/test-phase7c-activation-safety-source.ps1"
       - "scripts/test-phase7c-broker-time-normalization.py"
       - "scripts/test-phase7c-dual-account-mode-local.ps1"
       - "scripts/test-phase7c-dual-account-mode-source.ps1"
@@ -117,6 +122,14 @@ jobs:
       - name: Static source safety assertions
         shell: pwsh
         run: .\scripts\test-phase7c-dual-account-mode-source.ps1
+
+      - name: Activation safety assertions with PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-activation-safety-source.ps1
+
+      - name: Activation safety assertions with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-activation-safety-source.ps1
 
       - name: Dual account tests with PowerShell 7
         shell: pwsh
