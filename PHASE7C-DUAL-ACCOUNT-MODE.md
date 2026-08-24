@@ -69,9 +69,47 @@ For LIVE, this identity configuration command intentionally writes `MT5_TRADING_
 
 Configure DEMO separately with `-AccountMode DEMO` and the DEMO terminal identity.
 
+## First LIVE connection: isolated read-only probe
+
+Before enabling any LIVE execution capability or switching the selected runtime away from DEMO, use the isolated read-only probe:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\probe-phase7c-live-readonly-local.ps1 `
+  -WorkDir .runtime
+```
+
+The probe is intentionally separate from `switch-phase7c-account-mode-local.ps1`. It does **not** change `.runtime/phase7c-account-mode.json`, does not stop/start the normal Phase7C scheduled tasks, does not start executors and does not send any REST mutation.
+
+The probe requires:
+
+- Administrator PowerShell;
+- selected runtime remains `DEMO`;
+- bot mode remains `PAUSE`;
+- current guarded DEMO bridge is healthy;
+- DEMO and LIVE `terminal64.exe` paths are different;
+- LIVE identity/login/server/allowlist are configured;
+- `MT5_TRADING_ENABLED=false`;
+- `XAUUSD_PHASE7C_ALLOW_LIVE_TRADING=false`;
+- LIVE risk profile is present and bound to the exact LIVE terminal fingerprint.
+
+It then creates a temporary localhost-only bridge on a free ephemeral port, forces `MT5_TRADING_ENABLED=false`, forces the compatibility gate off, uses a temporary ledger, configures the bridge as `LIVE`, and performs only read-only checks (`/health`, XAUUSD positions and XAUUSD pending orders).
+
+PASS requires the temporary bridge to prove:
+
+- connected broker mode is `real`;
+- configured bridge mode is `LIVE`;
+- actual login/server match the configured LIVE profile;
+- bridge reports `tradingEnabled=false`;
+- bridge reports `liveExecutionArmed=false` and `liveArmStatus=DISARMED`.
+
+After the probe, the temporary bridge process tree is terminated, temporary env/ledger files are removed, LIVE arm state is cleared again, and the script proves the original DEMO `bridgeSessionId`, DEMO login, selected account mode and bot `PAUSE` state were unchanged.
+
+This is the required first-connect verification path for a new LIVE terminal. It is safe to run while LIVE execution capability remains disabled.
+
 ## Select DEMO or LIVE
 
-Use the existing Administrator account switcher. The legacy `-ConfirmLiveExecution` switch is only an explicit confirmation that the operator intends to connect/select the LIVE account; it is **not** a LIVE arm.
+Use the existing Administrator account switcher only after the read-only LIVE probe has passed and after LIVE capability is deliberately enabled. The legacy `-ConfirmLiveExecution` switch is only an explicit confirmation that the operator intends to connect/select the LIVE account; it is **not** a LIVE arm.
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
