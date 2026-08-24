@@ -168,6 +168,11 @@ function autoReasons(snapshot: Snapshot): string[] {
 
 function canonicalEntryWaitReason(strategy: "TREND" | "SIDEWAY", event: string, rawReason: unknown): string {
   const upper = event.toUpperCase();
+
+  if (upper === "CYCLE_ERROR") {
+    return `${strategy}: chưa lấy được dữ liệu trong chu kỳ gần nhất; bot đang chờ dữ liệu mới.`;
+  }
+
   if (strategy === "TREND") {
     if (upper === "M15_NO_ENTRY_SIGNAL") return "Trend: chưa xuất hiện một trong 3 mẫu nến M15 hợp lệ để xét entry.";
     if (upper === "WAIT_PULLBACK" || upper === "ENTRY_DISTANCE_REGRESSION_WAIT") return "Trend: SL cấu trúc đang lớn hơn 10 giá; chờ pullback để SL trở về vùng 6–10 giá.";
@@ -202,6 +207,11 @@ function strategyWaitReasons(snapshot: Snapshot, strategy: "TREND" | "SIDEWAY"):
     if (row.strategy !== strategy) continue;
     const event = String(row.event ?? "");
     if (!event) continue;
+
+    // Submission lifecycle events are not reasons why a strategy is waiting.
+    // They belong to execution history, not the "why no entry" checklist.
+    if (/^(?:ENTRY_SUBMIT|ENTRY_SUBMITTED)$/i.test(event)) continue;
+
     if (/(?:EXIT|CLOSE|CLOSED|TAKE_PROFIT|STOP_LOSS|POSITION_GONE|PLUS6|PLUS10|STRUCTURAL_SL|FVG_HOLD|MANAGEMENT_)/i.test(event)) continue;
     pushUnique(reasons, canonicalEntryWaitReason(strategy, event, row.reason));
     if (reasons.length >= 3) break;
