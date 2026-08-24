@@ -3,8 +3,9 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Preflight = Join-Path $PSScriptRoot "preflight-phase7c-live-switch-local.ps1"
 $Recovery = Join-Path $PSScriptRoot "recover-phase7c-demo-after-failed-switch-local.ps1"
 $GuardedSwitch = Join-Path $PSScriptRoot "switch-phase7c-live-guarded-local.ps1"
+$ExecutorStopper = Join-Path $PSScriptRoot "stop-phase7c-executors-local.ps1"
 
-foreach ($target in @($Preflight, $Recovery, $GuardedSwitch)) {
+foreach ($target in @($Preflight, $Recovery, $GuardedSwitch, $ExecutorStopper)) {
   if (-not (Test-Path -LiteralPath $target)) { throw "Required source file missing: $target" }
   $tokens = $null
   $errors = $null
@@ -15,6 +16,7 @@ foreach ($target in @($Preflight, $Recovery, $GuardedSwitch)) {
 $preflight = Get-Content -LiteralPath $Preflight -Raw
 $recovery = Get-Content -LiteralPath $Recovery -Raw
 $guarded = Get-Content -LiteralPath $GuardedSwitch -Raw
+$stopper = Get-Content -LiteralPath $ExecutorStopper -Raw
 
 function Require([string]$Text, [string]$Pattern, [string]$Message) {
   if ($Text -notmatch $Pattern) { throw $Message }
@@ -61,6 +63,10 @@ Require $guarded 'PHASE7C_GUARDED_LIVE_SWITCH_LIVE_ARM=DISARMED' "Guarded switch
 Require $guarded 'EXPLICIT_LIVE_ARM_APPROVAL_REQUIRED' "Guarded switch must preserve separate ARM approval boundary."
 Forbid $guarded 'arm-phase7c-live-local\.ps1|Write-Phase7CLiveArmState' "Guarded switch must never arm LIVE."
 Forbid $guarded 'order_send|/v1/orders/place|/v1/positions/close|/v1/positions/modify' "Guarded switch must not directly contain broker mutation paths."
+
+Require $stopper 'PHASE7C_EXECUTOR_STOP=PASS' "Executor stopper PASS marker is missing."
+Require $stopper '(?ms)PHASE7C_EXECUTOR_STOP=PASS.*?exit 0' "Executor stopper must explicitly return exit code 0 after successful cleanup so callers do not inherit stale native LASTEXITCODE values."
+Require $stopper 'PHASE7C_EXECUTOR_STOP=FAIL.+exit 1' "Executor stopper must retain explicit failure exit code 1."
 
 $preflightIndex = $guarded.IndexOf('& $Preflight')
 $switchIndex = $guarded.IndexOf('& $Switcher')
