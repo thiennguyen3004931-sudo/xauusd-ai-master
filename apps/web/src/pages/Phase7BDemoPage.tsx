@@ -67,12 +67,12 @@ function HeaderChip({ label, valueText, color = "default" }: { label: string; va
   );
 }
 
-function ReasonBox({ title, items, accent = "cyan" }: { title: string; items: string[]; accent?: "cyan" | "purple" | "orange" | "green" }) {
+function ReasonBox({ title, items, accent = "cyan", emptyText = "Chưa có dữ liệu từ engine." }: { title: string; items: string[]; accent?: "cyan" | "purple" | "orange" | "green"; emptyText?: string }) {
   return (
     <PanelCard title={title} accent={accent}>
       <Stack spacing={0.9}>
         {items.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">Chưa có dữ liệu từ engine.</Typography>
+          <Typography variant="body2" color="text.secondary">{emptyText}</Typography>
         ) : items.map((item, index) => (
           <Typography key={`${title}-${index}`} variant="body2" lineHeight={1.5}>• {item}</Typography>
         ))}
@@ -120,6 +120,15 @@ function price(input: number) {
   return Number.isFinite(input) ? input.toFixed(2) : "—";
 }
 
+function normalizeAccountMode(...candidates: unknown[]): "DEMO" | "LIVE" | "CHECK" {
+  for (const candidate of candidates) {
+    const text = String(candidate ?? "").trim().toUpperCase();
+    if (text === "LIVE" || text === "REAL") return "LIVE";
+    if (text === "DEMO") return "DEMO";
+  }
+  return "CHECK";
+}
+
 function RecentTradeJournal({ trades, currency, loading, error }: { trades: Phase7CPerformanceTrade[]; currency: string; loading: boolean; error?: string }) {
   const recent = trades.slice(0, 6);
   return (
@@ -157,14 +166,14 @@ function RecentTradeJournal({ trades, currency, loading, error }: { trades: Phas
 
 export function Phase7BDemoPage() {
   const query = useQuery({
-    queryKey: ["phase7c-web-final-dashboard-v5-no-chart"],
+    queryKey: ["phase7c-web-final-dashboard-v6-account-aware"],
     queryFn: fetchPhase7CWebStatus,
     refetchInterval: 3_000,
     retry: false,
     placeholderData: (previous) => previous,
   });
   const performanceQuery = useQuery({
-    queryKey: ["phase7c-web-mt5-performance-90d"],
+    queryKey: ["phase7c-web-mt5-performance-selected-account-90d"],
     queryFn: fetchPhase7CPerformance,
     refetchInterval: 30_000,
     retry: false,
@@ -184,6 +193,7 @@ export function Phase7BDemoPage() {
   const bridge = asRecord(lifecycle.bridge);
   const processes = asRecord(lifecycle.processes);
   const lotRuntime = asRecord(lifecycle.lotSettings);
+  const accountMode = normalizeAccountMode(ui?.safety.accountMode, raw(panel, "configuredAccountMode"), raw(panel, "accountMode"), account.accountMode, bridge.accountMode, performanceQuery.data?.account?.accountMode);
   const currency = clean(account.accountCurrency, performanceQuery.data?.currency ?? "USD");
   const activeMode = clean(ui?.mode, value(panel, "activeMode", "—"));
   const effectiveStrategy = clean(ui?.effectiveStrategy, value(panel, "effectiveStrategy", "—"));
@@ -195,13 +205,23 @@ export function Phase7BDemoPage() {
   const hasPosition = uiState === "MANAGING";
   const setupReady = uiState === "SETUP_READY";
 
-  const fallbackWaitReasons = compactReason(
-    [raw(panel, "limitReason"), raw(panel, "decisionReason"), raw(panel, "entryReason")].filter(Boolean).join(" | "),
-    "Chưa có setup hợp lệ.",
-  );
-  const waitReasons = ui?.reasons.wait?.length ? ui.reasons.wait : fallbackWaitReasons;
-  const entryReasons = ui?.reasons.entry?.length ? ui.reasons.entry : compactReason(raw(panel, "entryReason") || raw(panel, "decisionReason"), "Engine chưa trả lý do vào lệnh.");
-  const holdReasons = ui?.reasons.hold?.length ? ui.reasons.hold : compactReason(raw(panel, "holdReason"), "Engine chưa trả lý do giữ lệnh.");
+  const autoReasons = ui?.reasons.auto?.length
+    ? ui.reasons.auto
+    : compactReason(raw(panel, "decisionReason"), "AUTO/Regime engine chưa trả lý do chọn strategy.");
+  const trendWaitReasons = ui?.reasons.trendWait?.length
+    ? ui.reasons.trendWait
+    : ["Chưa có Trend decision mới từ canonical journal."];
+  const sidewayWaitReasons = ui?.reasons.sidewayWait?.length
+    ? ui.reasons.sidewayWait
+    : ["Chưa có Sideway decision mới từ canonical journal."];
+  const entryReasons = ui?.reasons.entry?.length
+    ? ui.reasons.entry
+    : compactReason(raw(panel, "entryReason"), "Engine chưa trả lý do vào lệnh.");
+  const holdReasons = ui?.reasons.hold?.length
+    ? ui.reasons.hold
+    : compactReason(raw(panel, "holdReason"), "Engine chưa trả lý do giữ lệnh.");
+  const stopMoveReasons = ui?.reasons.stopMove ?? [];
+  const partialReasons = ui?.reasons.partial ?? [];
   const exitReasons = ui?.reasons.exit ?? [];
   const setup = ui?.setup;
   const position = ui?.position;
@@ -219,8 +239,9 @@ export function Phase7BDemoPage() {
               <Chip label="PHASE7C" color="secondary" size="small" sx={{ fontWeight: 950 }} />
               {ui && <Chip label="SEMANTIC UI v2" size="small" variant="outlined" color="info" sx={{ fontWeight: 900 }} />}
               {performanceQuery.data && <Chip label="MT5 JOURNAL" size="small" variant="outlined" color="success" sx={{ fontWeight: 900 }} />}
+              <Chip label={accountMode} size="small" color={accountMode === "LIVE" ? "warning" : accountMode === "DEMO" ? "success" : "default"} sx={{ fontWeight: 950 }} />
             </Stack>
-            <Typography variant="body2" color="text.secondary" mt={0.5}>MT5 DASHBOARD · LIVE DATA · DEMO ONLY · READ ONLY</Typography>
+            <Typography variant="body2" color="text.secondary" mt={0.5}>MT5 DASHBOARD · LIVE DATA · {accountMode} · PANEL READ ONLY</Typography>
           </Box>
           <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
             <HeaderChip label="CHẾ ĐỘ BOT" valueText={mode} color={effectiveStrategy === "PAUSE" ? "warning" : "success"} />
@@ -238,9 +259,9 @@ export function Phase7BDemoPage() {
         <Grid size={{ xs: 12, lg: 3 }}>
           <Stack spacing={2}>
             <PanelCard title="TÀI KHOẢN" accent="cyan">
-              <InfoRow label="Server" valueText={pickText(account.server, bridge.server)} />
-              <InfoRow label="Account" valueText={pickText(account.accountLogin, bridge.accountLogin)} />
-              <InfoRow label="Mode" valueText={pickText(raw(panel, "accountMode"), account.accountMode, bridge.accountMode)} tone="success" />
+              <InfoRow label="Server" valueText={pickText(account.server, bridge.server, performanceQuery.data?.account?.server)} />
+              <InfoRow label="Account" valueText={pickText(account.accountLogin, bridge.accountLogin, performanceQuery.data?.account?.login)} />
+              <InfoRow label="Mode" valueText={accountMode} tone={accountMode === "LIVE" ? "warning" : "success"} />
               <InfoRow label="Balance" valueText={money(account.accountBalance, currency)} />
               <InfoRow label="Equity" valueText={money(account.accountEquity, currency)} />
               <InfoRow label="Free Margin" valueText={money(account.accountFreeMargin, currency)} />
@@ -250,7 +271,7 @@ export function Phase7BDemoPage() {
             <PanelCard title="CẤU HÌNH LOT" accent="green">
               <InfoRow label="Trend Fixed Lot" valueText={pickText(config.configuredTrendFixedLot, "0.12")} />
               <InfoRow label="Sideway Risk %" valueText={`${pickText(config.configuredSidewayRiskPercent, "1")}%`} />
-              <InfoRow label="Sideway Max Lot" valueText={pickText(config.configuredSidewayMaxLot, "0.30")} />
+              <InfoRow label="Sideway Max Lot" valueText={pickText(config.configuredSidewayMaxLot, accountMode === "LIVE" ? "0.12" : "0.30")} />
               <InfoRow label="Auto Lot Mode" valueText="AUTO_LOT_SHADOW" />
               <InfoRow label="Áp dụng" valueText="NEW_POSITIONS_ONLY" />
             </PanelCard>
@@ -286,9 +307,11 @@ export function Phase7BDemoPage() {
               <>
                 <PanelCard title="TRẠNG THÁI GIAO DỊCH" accent="orange">
                   <Typography variant="body2">Không có vị thế XAUUSD đang mở.</Typography>
-                  <Typography variant="body2" color="text.secondary" mt={0.8}>Bot đang chờ setup hợp lệ. Entry / SL / TP được ẩn cho tới khi engine duyệt setup.</Typography>
+                  <Typography variant="body2" color="text.secondary" mt={0.8}>Bot đang chờ setup hợp lệ. Entry / SL / TP được ẩn cho tới khi strategy tương ứng duyệt setup.</Typography>
                 </PanelCard>
-                <ReasonBox title="LÝ DO CHƯA VÀO LỆNH" items={waitReasons} accent="cyan" />
+                <ReasonBox title="AUTO / REGIME — LÝ DO CHỌN STRATEGY" items={autoReasons} accent="orange" />
+                <ReasonBox title="TREND — LÝ DO CHƯA VÀO LỆNH" items={trendWaitReasons} accent="purple" />
+                <ReasonBox title="SIDEWAY — LÝ DO CHƯA VÀO LỆNH" items={sidewayWaitReasons} accent="cyan" />
                 <PanelCard title="BOT GATE / FILTER" accent={regime === "REVERSAL" ? "orange" : "cyan"}>
                   <InfoRow label="Trend gate" valueText={gateLabel(ui?.gates.trend)} tone={gateTone(ui?.gates.trend)} />
                   <InfoRow label="Sideway gate" valueText={gateLabel(ui?.gates.sideway)} tone={gateTone(ui?.gates.sideway)} />
@@ -312,6 +335,7 @@ export function Phase7BDemoPage() {
                   <InfoRow label="Risk %" valueText={clean(setup?.estimatedRiskPercent, value(panel, "estimatedRiskPercent", "—"))} />
                 </PanelCard>
                 <ReasonBox title="LÝ DO SETUP ĐƯỢC DUYỆT" items={entryReasons} accent="green" />
+                <ReasonBox title="AUTO / REGIME — LÝ DO CHỌN STRATEGY" items={autoReasons} accent="orange" />
               </>
             )}
 
@@ -329,7 +353,9 @@ export function Phase7BDemoPage() {
                 </PanelCard>
                 <ReasonBox title="LÝ DO VÀO LỆNH" items={entryReasons} accent="cyan" />
                 <ReasonBox title="LÝ DO GIỮ LỆNH" items={holdReasons} accent="purple" />
-                <ReasonBox title="LÝ DO CHỐT LỆNH" items={exitReasons} accent="orange" />
+                <ReasonBox title="LÝ DO DỜI STOP LOSS" items={stopMoveReasons} accent="green" emptyText="Chưa phát sinh lần dời SL nào trong lệnh hiện tại." />
+                <ReasonBox title="LÝ DO CHỐT 1/3" items={partialReasons} accent="green" emptyText="Chưa đạt mốc +10 hoặc chưa phát sinh partial." />
+                <ReasonBox title="LÝ DO ĐÓNG TOÀN BỘ" items={exitReasons} accent="orange" emptyText="Chưa phát sinh điều kiện đóng toàn bộ vị thế." />
                 <PanelCard title="PROFIT" accent={Number(profit) >= 0 ? "green" : "red"}>
                   <Typography variant="h4" fontWeight={950} color={Number(profit) >= 0 ? "success.main" : "error.main"}>{profitText}</Typography>
                   {position?.floatingPnlPercent !== null && position?.floatingPnlPercent !== undefined && (
@@ -346,10 +372,10 @@ export function Phase7BDemoPage() {
         <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1.5}>
           <Typography variant="body2">UI STATE: <b>{uiState}</b></Typography>
           <Typography variant="body2">EXECUTORS: TREND {asRecord(processes.trend).alive ? "✓" : "—"} | SIDEWAY {asRecord(processes.sideway).alive ? "✓" : "—"}</Typography>
-          <Typography variant="body2">RISK MODE: DEMO ONLY</Typography>
+          <Typography variant="body2">RISK MODE: {accountMode}</Typography>
           <Typography variant="body2">TELEGRAM: {lifecycle.telegramReady ? "READY" : "CHECK"}</Typography>
           <Typography variant="body2">MT5 JOURNAL: {performanceQuery.data ? "READY" : "CHECK"}</Typography>
-          <Typography variant="body2">ORDER PERMISSION: NONE</Typography>
+          <Typography variant="body2">PANEL ORDER PERMISSION: NONE</Typography>
         </Stack>
       </Box>
     </Stack>
