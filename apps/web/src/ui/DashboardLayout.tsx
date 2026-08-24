@@ -27,10 +27,10 @@ const drawerWidth = 220;
 type LinkRow = readonly [string, string, typeof SmartToyRounded];
 
 const links: readonly LinkRow[] = [
-  ["/", "Dashboard", SmartToyRounded],
+  ["/", "Bảng điều khiển", SmartToyRounded],
   ["/phase7b-pattern-check", "Tín hiệu", CandlestickChartRounded],
-  ["/phase7b-ops", "Tài khoản & Risk", PowerSettingsNewRounded],
-  ["/phase7c-control-center", "Control Center", TuneRounded],
+  ["/phase7b-ops", "Tài khoản & rủi ro", PowerSettingsNewRounded],
+  ["/phase7c-control-center", "Trung tâm điều khiển", TuneRounded],
   ["/performance", "Hiệu suất", InsightsRounded],
 ] as const;
 
@@ -46,7 +46,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
       </Stack>
 
       <Typography variant="caption" color="text.disabled" sx={{ px: 1.2, mt: 1.2, letterSpacing: ".12em", fontWeight: 800 }}>
-        VẬN HÀNH DEMO
+        Vận hành DEMO
       </Typography>
       <List dense sx={{ pt: 0.7 }}>
         {links.map(([href, label, Icon]) => (
@@ -77,10 +77,10 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
       <Box sx={{ mt: "auto", p: 1.6, borderRadius: 3, border: "1px solid rgba(148,163,184,.12)", bgcolor: "rgba(255,255,255,.02)" }}>
         <Stack direction="row" spacing={0.8} alignItems="center">
           <LockRounded fontSize="small" color="primary" />
-          <Typography variant="caption" fontWeight={900}>CHỈ TÀI KHOẢN DEMO</Typography>
+          <Typography variant="caption" fontWeight={900}>Chỉ tài khoản DEMO</Typography>
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.9, lineHeight: 1.5 }}>
-          MT5 panel chỉ đọc, ORDER NONE. Lot/Risk chỉ áp dụng cho lệnh mới trong môi trường demo.
+          Bảng MT5 chỉ đọc, không có quyền đặt lệnh. Khối lượng/rủi ro chỉ áp dụng cho lệnh mới trong môi trường DEMO.
         </Typography>
       </Box>
     </Box>
@@ -91,17 +91,17 @@ export function DashboardLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
 
-  let headerTitle = "Dashboard vận hành DEMO";
-  let headerSubtitle = "XAUUSD · AUTO/PAUSE · Regime · tài khoản · risk · hệ thống";
+  let headerTitle = "Bảng điều khiển vận hành DEMO";
+  let headerSubtitle = "XAUUSD · AUTO/PAUSE · trạng thái thị trường · tài khoản · rủi ro · hệ thống";
   if (location.pathname.startsWith("/phase7b-pattern-check")) {
     headerTitle = "Tín hiệu & quyết định";
-    headerSubtitle = "Semantic gates, reason runtime và entry contract";
+    headerSubtitle = "Điều kiện tín hiệu · lý do vận hành · điều kiện vào lệnh";
   } else if (location.pathname.startsWith("/phase7b-ops")) {
-    headerTitle = "Tài khoản & Risk";
-    headerSubtitle = "Tài khoản MT5 · lot/risk · safety · runtime";
+    headerTitle = "Tài khoản & rủi ro";
+    headerSubtitle = "Tài khoản MT5 · khối lượng/rủi ro · an toàn · vận hành";
   } else if (location.pathname.startsWith("/phase7c-control-center")) {
-    headerTitle = "Control Center";
-    headerSubtitle = "MT5 · Bot · Telegram · quyết định giao dịch và Risk/Lot đồng bộ";
+    headerTitle = "Trung tâm điều khiển";
+    headerSubtitle = "MT5 · bot · Telegram · quyết định giao dịch · khối lượng/rủi ro đồng bộ";
   } else if (location.pathname.startsWith("/performance")) {
     headerTitle = "Hiệu suất";
     headerSubtitle = "Kết quả giao dịch XAUUSD do hệ thống thực hiện";
@@ -150,7 +150,7 @@ export function DashboardLayout() {
               <Typography variant="subtitle2" fontWeight={900}>{headerTitle}</Typography>
               <Typography variant="caption" color="text.secondary">{headerSubtitle}</Typography>
             </Box>
-            <StatusChip value="CHỈ DEMO" />
+            <StatusChip value="Chỉ DEMO" />
           </Toolbar>
         </AppBar>
         <Box component="main" sx={{ p: { xs: 1.5, md: 2.2 }, maxWidth: 1780, mx: "auto", width: "100%" }}>
