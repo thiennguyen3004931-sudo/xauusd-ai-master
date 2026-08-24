@@ -23,11 +23,24 @@ export interface Phase7CPerformanceTrade {
 }
 
 export interface Phase7CPerformanceSnapshot {
-  source: "MT5_DEMO_READ_ONLY";
+  source: "MT5_ACCOUNT_READ_ONLY" | "MT5_DEMO_READ_ONLY";
   symbol: string;
   currency: string;
   days: number;
   generatedAt: number;
+  account?: {
+    accountMode: "DEMO" | "LIVE";
+    brokerMode: "demo" | "real";
+    login: number | null;
+    server: string | null;
+  };
+  safety?: {
+    accountMode: "DEMO" | "LIVE" | "demo";
+    bridgeTradingEnabled: boolean;
+    readOnly?: true;
+    strategyAutoChange: false;
+    liveUnlockAvailable: false;
+  };
   accountWide: {
     metrics: {
       totalTrades: number;
@@ -67,9 +80,14 @@ export interface Phase7CUiContract {
   approved: boolean;
   recommendedMode: string;
   reasons: {
+    auto?: string[];
+    trendWait?: string[];
+    sidewayWait?: string[];
     wait: string[];
     entry: string[];
     hold: string[];
+    stopMove?: string[];
+    partial?: string[];
     exit: string[];
   };
   gates: {
@@ -102,7 +120,8 @@ export interface Phase7CUiContract {
     floatingPnlPercent: number | null;
   };
   safety: {
-    demoOnly: true;
+    accountMode: "DEMO" | "LIVE";
+    demoOnly: boolean;
     readOnly: true;
     orderPermission: "NONE";
     newPositionsOnly: true;
@@ -148,14 +167,9 @@ async function fetchTextWithFallback(relativeUrl: string, label: string): Promis
 
   for (let index = 0; index < urls.length; index++) {
     try {
-      const response = await fetch(urls[index], {
-        cache: "no-store",
-        headers: { accept: "text/plain" },
-      });
+      const response = await fetch(urls[index], { cache: "no-store", headers: { accept: "text/plain" } });
       const text = await response.text();
-      if (response.ok && text.trim()) {
-        return { payload: text, usedDirectFallback: index === 1 };
-      }
+      if (response.ok && text.trim()) return { payload: text, usedDirectFallback: index === 1 };
       errors.push(response.ok ? `${label} trả dữ liệu rỗng.` : friendlyHttpMessage(response.status, label));
     } catch (error) {
       errors.push(`${label}: ${error instanceof Error ? error.message : "không kết nối được"}`);
@@ -171,10 +185,7 @@ async function fetchJsonWithFallback<T>(relativeUrl: string, label: string): Pro
 
   for (let index = 0; index < urls.length; index++) {
     try {
-      const response = await fetch(urls[index], {
-        cache: "no-store",
-        headers: { accept: "application/json" },
-      });
+      const response = await fetch(urls[index], { cache: "no-store", headers: { accept: "application/json" } });
       const text = await response.text();
       if (!response.ok) {
         errors.push(friendlyHttpMessage(response.status, label));
@@ -214,16 +225,14 @@ function validSemanticUi(payload: Phase7CUiContract | undefined) {
 export async function fetchPhase7CPanelStatus(): Promise<Phase7CPanelStatus> {
   const result = await fetchTextWithFallback(PANEL_STATUS_URL, "Decision Monitor");
   const payload = parsePanelStatus(result.payload);
-  if (payload.version !== "1") {
-    throw new Error("Decision Monitor trả payload chưa hợp lệ. Trang sẽ tự thử lại.");
-  }
+  if (payload.version !== "1") throw new Error("Decision Monitor trả payload chưa hợp lệ. Trang sẽ tự thử lại.");
   return payload;
 }
 
 export async function fetchPhase7CPerformance(): Promise<Phase7CPerformanceSnapshot> {
   const result = await fetchJsonWithFallback<Phase7CPerformanceSnapshot>(PERFORMANCE_URL, "Lịch sử MT5");
   const payload = result.payload;
-  if (payload.source !== "MT5_DEMO_READ_ONLY" || !Array.isArray(payload.trades)) {
+  if (!(["MT5_ACCOUNT_READ_ONLY", "MT5_DEMO_READ_ONLY"] as string[]).includes(payload.source) || !Array.isArray(payload.trades)) {
     throw new Error("Lịch sử MT5 trả payload chưa hợp lệ.");
   }
   return payload;
@@ -248,45 +257,31 @@ export async function fetchPhase7CWebStatus(): Promise<Phase7CWebStatus> {
 
   if (panelResult.status === "fulfilled") {
     panel = parsePanelStatus(panelResult.value.payload);
-    usedDirectFallback = usedDirectFallback || panelResult.value.usedDirectFallback;
-  } else {
-    errors.push(panelResult.reason instanceof Error ? panelResult.reason.message : "Không đọc được Decision Monitor.");
-  }
+    usedDirectFallback ||= panelResult.value.usedDirectFallback;
+  } else errors.push(panelResult.reason instanceof Error ? panelResult.reason.message : "Không đọc được Decision Monitor.");
 
   if (uiResult.status === "fulfilled" && validSemanticUi(uiResult.value.payload)) {
     ui = uiResult.value.payload;
-    usedDirectFallback = usedDirectFallback || uiResult.value.usedDirectFallback;
-  } else if (uiResult.status === "rejected") {
-    errors.push(uiResult.reason instanceof Error ? uiResult.reason.message : "Không đọc được Semantic UI.");
-  } else {
-    errors.push("Semantic UI trả contract chưa hợp lệ.");
-  }
+    usedDirectFallback ||= uiResult.value.usedDirectFallback;
+  } else if (uiResult.status === "rejected") errors.push(uiResult.reason instanceof Error ? uiResult.reason.message : "Không đọc được Semantic UI.");
+  else errors.push("Semantic UI trả contract chưa hợp lệ.");
 
   if (lifecycleResult.status === "fulfilled") {
     lifecycle = lifecycleResult.value.payload;
-    usedDirectFallback = usedDirectFallback || lifecycleResult.value.usedDirectFallback;
-  } else {
-    errors.push(lifecycleResult.reason instanceof Error ? lifecycleResult.reason.message : "Không đọc được Runtime.");
-  }
+    usedDirectFallback ||= lifecycleResult.value.usedDirectFallback;
+  } else errors.push(lifecycleResult.reason instanceof Error ? lifecycleResult.reason.message : "Không đọc được Runtime.");
 
   if (accountRiskResult.status === "fulfilled") {
     accountRisk = accountRiskResult.value.payload;
-    usedDirectFallback = usedDirectFallback || accountRiskResult.value.usedDirectFallback;
-  } else {
-    errors.push(accountRiskResult.reason instanceof Error ? accountRiskResult.reason.message : "Không đọc được Tài khoản & Risk.");
-  }
+    usedDirectFallback ||= accountRiskResult.value.usedDirectFallback;
+  } else errors.push(accountRiskResult.reason instanceof Error ? accountRiskResult.reason.message : "Không đọc được Tài khoản & Risk.");
 
   if (lotSettingsResult.status === "fulfilled") {
     lotSettings = lotSettingsResult.value.payload;
-    usedDirectFallback = usedDirectFallback || lotSettingsResult.value.usedDirectFallback;
-  } else {
-    errors.push(lotSettingsResult.reason instanceof Error ? lotSettingsResult.reason.message : "Không đọc được Lot settings.");
-  }
+    usedDirectFallback ||= lotSettingsResult.value.usedDirectFallback;
+  } else errors.push(lotSettingsResult.reason instanceof Error ? lotSettingsResult.reason.message : "Không đọc được Lot settings.");
 
-  if (!panel && !ui && !lifecycle && !accountRisk && !lotSettings) {
-    throw new Error(unique(errors).join(" "));
-  }
-
+  if (!panel && !ui && !lifecycle && !accountRisk && !lotSettings) throw new Error(unique(errors).join(" "));
   return { panel, ui, lifecycle, accountRisk, lotSettings, errors: unique(errors), usedDirectFallback };
 }
 
@@ -294,8 +289,8 @@ export function raw(status: Phase7CPanelStatus | undefined, key: string) {
   return status?.[key]?.trim() ?? "";
 }
 
-export function isUsablePanelValue(value: string) {
-  const normalized = value.trim().toLowerCase();
+export function isUsablePanelValue(input: string) {
+  const normalized = input.trim().toLowerCase();
   return Boolean(normalized) && !["n/a", "null", "undefined", "—", "-"].includes(normalized);
 }
 
@@ -306,14 +301,13 @@ export function getTradeUiState(status: Phase7CPanelStatus | undefined, ui?: Pha
   const approved = raw(status, "approved") === "true";
   const entry = raw(status, "entry");
   const stopLoss = raw(status, "stopLoss");
-
   if (positionCount > 0 || positionState === "MANAGING" || positionState === "UNMANAGED") return "MANAGING";
   if (approved && isUsablePanelValue(entry) && isUsablePanelValue(stopLoss)) return "SETUP_READY";
   return "WAITING";
 }
 
-export function clean(value: unknown, fallback = "—") {
-  const text = value === null || value === undefined ? "" : String(value).trim();
+export function clean(input: unknown, fallback = "—") {
+  const text = input === null || input === undefined ? "" : String(input).trim();
   if (!text || text === "n/a" || text === "N/A" || text === "null" || text === "undefined") return fallback;
   if (text === "true") return "Có";
   if (text === "false") return "Chưa";
@@ -332,14 +326,14 @@ export function pickText(...values: unknown[]) {
   return "—";
 }
 
-export function boolText(value: unknown) {
-  if (value === true || value === "true") return "Yes";
-  if (value === false || value === "false") return "No";
-  return clean(value, "—");
+export function boolText(input: unknown) {
+  if (input === true || input === "true") return "Yes";
+  if (input === false || input === "false") return "No";
+  return clean(input, "—");
 }
 
-export function money(value: unknown, currency = "USD") {
-  const text = clean(value, "");
+export function money(input: unknown, currency = "USD") {
+  const text = clean(input, "");
   const numberValue = Number(text);
   if (!Number.isFinite(numberValue)) return "—";
   return `${numberValue.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${currency || "USD"}`;
@@ -366,11 +360,7 @@ export function compactReason(input: string, fallback: string) {
     .replaceAll("; ", "\n")
     .replaceAll(" • ", "\n")
     .replaceAll("•", "\n");
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, 4);
+  return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 4);
 }
 
 export function stageTone(stage: string): "success" | "warning" | "error" | "default" {
