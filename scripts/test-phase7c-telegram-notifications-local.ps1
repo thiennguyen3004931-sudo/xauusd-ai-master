@@ -30,6 +30,14 @@ function Read-DotEnv([string]$Path) {
   return $map
 }
 
+function First-Configured([hashtable]$Config, [string[]]$Names) {
+  foreach ($name in $Names) {
+    $value = [string]$Config[$name]
+    if (-not [string]::IsNullOrWhiteSpace($value) -and $value -notmatch 'REPLACE_WITH') { return $value }
+  }
+  return ''
+}
+
 function Send-TestMessage([string]$Token, [string]$ChatId, [string]$ThreadId, [string]$Text) {
   $uri = "https://api.telegram.org/bot$Token/sendMessage"
   $body = @{ chat_id = $ChatId; text = $Text; disable_web_page_preview = 'true' }
@@ -39,16 +47,17 @@ function Send-TestMessage([string]$Token, [string]$ChatId, [string]$ThreadId, [s
 }
 
 $config = Read-DotEnv -Path $EnvFile
-$token = [string]$config['ZIQ_TELEGRAM_BOT_TOKEN']
-$chatId = [string]$config['ZIQ_TELEGRAM_CHAT_ID']
-$threadId = [string]$config['ZIQ_TELEGRAM_MESSAGE_THREAD_ID']
+$token = First-Configured $config @('ZIQ_TELEGRAM_TRADE_BOT_TOKEN', 'ZIQ_TELEGRAM_BOT_TOKEN')
+$chatId = First-Configured $config @('ZIQ_TELEGRAM_TRADE_CHAT_ID', 'ZIQ_TELEGRAM_CHAT_ID')
+$threadId = First-Configured $config @('ZIQ_TELEGRAM_TRADE_MESSAGE_THREAD_ID', 'ZIQ_TELEGRAM_MESSAGE_THREAD_ID')
 $symbol = [string]$config['ZIQ_TELEGRAM_SYMBOL']
 if ([string]::IsNullOrWhiteSpace($symbol)) { $symbol = 'XAUUSD' }
-if ([string]::IsNullOrWhiteSpace($token) -or $token -match 'REPLACE_WITH') { throw 'ZIQ_TELEGRAM_BOT_TOKEN is missing/not configured.' }
-if ([string]::IsNullOrWhiteSpace($chatId) -or $chatId -match 'REPLACE_WITH') { throw 'ZIQ_TELEGRAM_CHAT_ID is missing/not configured.' }
+if ([string]::IsNullOrWhiteSpace($token)) { throw 'Telegram trade/fallback bot token is missing/not configured.' }
+if ([string]::IsNullOrWhiteSpace($chatId)) { throw 'Telegram trade/fallback chat ID is missing/not configured.' }
 
 Write-Host 'PHASE7C_TELEGRAM_NOTIFICATION_TEST=START'
 Write-Host "PHASE7C_TELEGRAM_NOTIFICATION_TEST_SYMBOL=$symbol"
+Write-Host 'PHASE7C_TELEGRAM_NOTIFICATION_TEST_CHANNEL=TRADE_WITH_FALLBACK'
 Write-Host 'PHASE7C_TELEGRAM_NOTIFICATION_TEST_TOKEN=CONFIGURED_NOT_PRINTED'
 Write-Host 'PHASE7C_TELEGRAM_NOTIFICATION_TEST_CHAT_ID=CONFIGURED_NOT_PRINTED'
 
