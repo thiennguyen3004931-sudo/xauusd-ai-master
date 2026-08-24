@@ -1,6 +1,6 @@
 param(
   [string]$EnvFile = ".env",
-  [ValidateSet("DEMO", "LIVE", "")] [string]$AccountMode = "",
+  [ValidateSet("DEMO", "LIVE")] [string]$AccountMode = "DEMO",
   [string]$LiveArmStatePath = ""
 )
 
@@ -36,13 +36,13 @@ Get-Content $EnvFile | ForEach-Object {
 }
 
 # Account selection is supplied by the trusted Phase7C bridge runner, not by
-# the local env file. A direct/legacy bridge start therefore defaults to DEMO
-# in Settings.from_env() and cannot accidentally authorize a REAL mutation.
-if (-not [string]::IsNullOrWhiteSpace($AccountMode)) {
-  [Environment]::SetEnvironmentVariable("MT5_ACCOUNT_MODE", $AccountMode.ToUpperInvariant(), 'Process')
-}
+# the local env file. Direct/legacy launches default to DEMO and therefore
+# cannot accidentally authorize a REAL mutation.
+[Environment]::SetEnvironmentVariable("MT5_ACCOUNT_MODE", $AccountMode.ToUpperInvariant(), 'Process')
 if (-not [string]::IsNullOrWhiteSpace($LiveArmStatePath)) {
   [Environment]::SetEnvironmentVariable("MT5_LIVE_ARM_STATE_PATH", $LiveArmStatePath, 'Process')
+} else {
+  [Environment]::SetEnvironmentVariable("MT5_LIVE_ARM_STATE_PATH", "", 'Process')
 }
 
 Write-Host "MT5_BRIDGE_ENV_FILE=$EnvFile"
