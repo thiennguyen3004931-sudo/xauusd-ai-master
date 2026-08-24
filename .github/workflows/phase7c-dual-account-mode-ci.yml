@@ -5,6 +5,7 @@ on:
     branches:
       - feature/phase7c-dual-account-mode
       - fix/phase7c-activation-safety-regression
+      - feat/phase7c-compact-mt5-dashboard
     paths:
       - ".gitignore"
       - "PHASE7C-DUAL-ACCOUNT-MODE.md"
@@ -17,6 +18,7 @@ on:
       - "apps/api/src/services/phase7c-lot-settings.service.ts"
       - "apps/api/src/services/phase7c-risk-view.service.ts"
       - "apps/api/src/services/phase7c-ui-contract.service.ts"
+      - "mt5/XAUUSD_AI_Master_Decision_Panel.mq5"
       - "packages/mt5-broker/bridge/.env.phase7b-live.example"
       - "packages/mt5-broker/bridge/mt5_bridge/app.py"
       - "packages/mt5-broker/bridge/mt5_bridge/broker_time.py"
@@ -38,6 +40,7 @@ on:
       - "scripts/switch-phase7c-account-mode-local.ps1"
       - "scripts/test-phase7c-activation-safety-source.ps1"
       - "scripts/test-phase7c-broker-time-normalization.py"
+      - "scripts/test-phase7c-compact-mt5-dashboard-source.ps1"
       - "scripts/test-phase7c-dual-account-mode-local.ps1"
       - "scripts/test-phase7c-dual-account-mode-source.ps1"
       - "scripts/test-phase7c-dual-account-mode.mjs"
@@ -58,6 +61,7 @@ on:
       - "apps/api/src/services/phase7c-lot-settings.service.ts"
       - "apps/api/src/services/phase7c-risk-view.service.ts"
       - "apps/api/src/services/phase7c-ui-contract.service.ts"
+      - "mt5/XAUUSD_AI_Master_Decision_Panel.mq5"
       - "packages/mt5-broker/bridge/.env.phase7b-live.example"
       - "packages/mt5-broker/bridge/mt5_bridge/app.py"
       - "packages/mt5-broker/bridge/mt5_bridge/broker_time.py"
@@ -79,6 +83,7 @@ on:
       - "scripts/switch-phase7c-account-mode-local.ps1"
       - "scripts/test-phase7c-activation-safety-source.ps1"
       - "scripts/test-phase7c-broker-time-normalization.py"
+      - "scripts/test-phase7c-compact-mt5-dashboard-source.ps1"
       - "scripts/test-phase7c-dual-account-mode-local.ps1"
       - "scripts/test-phase7c-dual-account-mode-source.ps1"
       - "scripts/test-phase7c-dual-account-mode.mjs"
@@ -130,6 +135,14 @@ jobs:
       - name: Activation safety assertions with Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-activation-safety-source.ps1
+
+      - name: Compact MT5 dashboard assertions with PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-compact-mt5-dashboard-source.ps1
+
+      - name: Compact MT5 dashboard assertions with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-compact-mt5-dashboard-source.ps1
 
       - name: Dual account tests with PowerShell 7
         shell: pwsh
