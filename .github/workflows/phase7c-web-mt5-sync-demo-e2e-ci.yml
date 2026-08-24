@@ -8,6 +8,7 @@ on:
       - "mt5/XAUUSD_AI_Master_Decision_Panel.mq5"
       - "scripts/install-phase7c-mt5-decision-panel-local.ps1"
       - "scripts/install-phase7c-mt5-decision-panel-both-accounts-local.ps1"
+      - "scripts/deploy-phase7c-web-mt5-sync-local.ps1"
       - "scripts/run-phase7c-demo-e2e-local.ps1"
       - "scripts/test-phase7c-web-mt5-sync-source.mjs"
       - "apps/api/src/services/phase7c-ui-contract.service.ts"
@@ -61,6 +62,7 @@ jobs:
         run: |
           [void][scriptblock]::Create((Get-Content .\scripts\install-phase7c-mt5-decision-panel-local.ps1 -Raw))
           [void][scriptblock]::Create((Get-Content .\scripts\install-phase7c-mt5-decision-panel-both-accounts-local.ps1 -Raw))
+          [void][scriptblock]::Create((Get-Content .\scripts\deploy-phase7c-web-mt5-sync-local.ps1 -Raw))
           [void][scriptblock]::Create((Get-Content .\scripts\run-phase7c-demo-e2e-local.ps1 -Raw))
           Write-Host "PHASE7C_WEB_MT5_SYNC_PWSH_PARSE=PASS"
 
@@ -69,5 +71,6 @@ jobs:
         run: |
           [void][scriptblock]::Create((Get-Content .\scripts\install-phase7c-mt5-decision-panel-local.ps1 -Raw))
           [void][scriptblock]::Create((Get-Content .\scripts\install-phase7c-mt5-decision-panel-both-accounts-local.ps1 -Raw))
+          [void][scriptblock]::Create((Get-Content .\scripts\deploy-phase7c-web-mt5-sync-local.ps1 -Raw))
           [void][scriptblock]::Create((Get-Content .\scripts\run-phase7c-demo-e2e-local.ps1 -Raw))
           Write-Host "PHASE7C_WEB_MT5_SYNC_WINPS_PARSE=PASS"
