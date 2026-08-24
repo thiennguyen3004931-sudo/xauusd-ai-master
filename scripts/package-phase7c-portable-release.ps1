@@ -16,12 +16,6 @@ function Invoke-Git([string[]]$Arguments) {
   return $output
 }
 
-function Get-RelativePathCompat([string]$BasePath, [string]$FullPath) {
-  $base = New-Object System.Uri(($BasePath.TrimEnd('\') + '\'))
-  $item = New-Object System.Uri($FullPath)
-  return [System.Uri]::UnescapeDataString($base.MakeRelativeUri($item).ToString()).Replace('/', '\')
-}
-
 function Test-ForbiddenPortablePath([string]$RelativePath) {
   $normalized = $RelativePath.Replace('\', '/').TrimStart('/')
   $segments = @($normalized.Split('/') | Where-Object { $_ -ne '' })
@@ -65,6 +59,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "HEAD does not contain required commit: $RequiredCommit" }
   }
 
+  $trackedPaths = @(Invoke-Git @('ls-tree', '-r', '--name-only', $commit))
+  $forbidden = @($trackedPaths | Where-Object { Test-ForbiddenPortablePath ([string]$_) })
+  if ($forbidden.Count -gt 0) {
+    throw "Tracked source contains forbidden runtime/secret artifacts: $($forbidden -join ', ')"
+  }
+  Write-Host "PHASE7C_PORTABLE_PACKAGE_SECRETS_EXCLUDED=PASS"
+  Write-Host "PHASE7C_PORTABLE_PACKAGE_RUNTIME_EXCLUDED=PASS"
+
   if (-not [System.IO.Path]::IsPathRooted($OutputDir)) {
     $OutputDir = Join-Path $ProjectRoot $OutputDir
   }
@@ -79,24 +81,8 @@ try {
   $shaFile = Join-Path $OutputDir "$baseName.sha256.txt"
 
   $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("xauusd-portable-" + [guid]::NewGuid().ToString('N'))
-  $staging = Join-Path $tempRoot 'staging'
-  $sourceZip = Join-Path $tempRoot 'source.zip'
-  [System.IO.Directory]::CreateDirectory($staging) | Out-Null
-
-  & git archive --format=zip --output=$sourceZip $commit
-  if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $sourceZip)) {
-    throw "git archive failed."
-  }
-  Expand-Archive -LiteralPath $sourceZip -DestinationPath $staging -Force
-
-  $forbidden = @()
-  foreach ($file in @(Get-ChildItem -LiteralPath $staging -Recurse -File -Force)) {
-    $relative = Get-RelativePathCompat -BasePath $staging -FullPath $file.FullName
-    if (Test-ForbiddenPortablePath $relative) { $forbidden += $relative }
-  }
-  if ($forbidden.Count -gt 0) {
-    throw "Portable package contains forbidden runtime/secret artifacts: $($forbidden -join ', ')"
-  }
+  [System.IO.Directory]::CreateDirectory($tempRoot) | Out-Null
+  $manifestPath = Join-Path $tempRoot 'PORTABLE-RELEASE-MANIFEST.json'
 
   $manifest = [ordered]@{
     schemaVersion = 1
@@ -120,17 +106,20 @@ try {
       portablePackageIsSourceOnly = $true
     }
   }
-  $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $staging 'PORTABLE-RELEASE-MANIFEST.json') -Encoding UTF8
+  $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
   if (Test-Path -LiteralPath $finalZip) { Remove-Item -LiteralPath $finalZip -Force }
-  Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $finalZip -CompressionLevel Optimal
+  & git archive --format=zip --output=$finalZip $commit
+  if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $finalZip)) {
+    throw "git archive failed."
+  }
+
+  Compress-Archive -LiteralPath $manifestPath -DestinationPath $finalZip -Update
   if (-not (Test-Path -LiteralPath $finalZip)) { throw "Portable ZIP was not created." }
 
   $hash = Get-FileHash -LiteralPath $finalZip -Algorithm SHA256
   "$($hash.Hash.ToLowerInvariant())  $([System.IO.Path]::GetFileName($finalZip))" | Set-Content -LiteralPath $shaFile -Encoding ASCII
 
-  Write-Host "PHASE7C_PORTABLE_PACKAGE_SECRETS_EXCLUDED=PASS"
-  Write-Host "PHASE7C_PORTABLE_PACKAGE_RUNTIME_EXCLUDED=PASS"
   Write-Host "PHASE7C_PORTABLE_PACKAGE_SOURCE_COMMIT=$commit"
   Write-Host "PHASE7C_PORTABLE_PACKAGE_SOURCE_BRANCH=$branch"
   Write-Host "PHASE7C_PORTABLE_PACKAGE_ZIP=$finalZip"
