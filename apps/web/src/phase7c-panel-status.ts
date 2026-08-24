@@ -3,16 +3,6 @@ export type Phase7CJson = Record<string, unknown>;
 export type TradeUiState = "WAITING" | "SETUP_READY" | "MANAGING";
 export type Phase7CUiGate = "ALLOWED" | "BLOCKED_BY_MODE" | "BLOCKED_BY_REGIME" | "PENDING";
 
-export interface Phase7CCandle {
-  openTime: number;
-  closeTime: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume?: number;
-}
-
 export interface Phase7CPerformanceTrade {
   id: string;
   symbol: string;
@@ -127,7 +117,6 @@ export interface Phase7CWebStatus {
   lifecycle?: Phase7CJson;
   accountRisk?: Phase7CJson;
   lotSettings?: Phase7CJson;
-  candles?: Phase7CCandle[];
   errors: string[];
   usedDirectFallback: boolean;
 }
@@ -138,7 +127,6 @@ const SEMANTIC_UI_URL = "/api/v1/phase7c-ui?symbol=XAUUSD";
 const LIFECYCLE_URL = "/api/v1/phase7c/lifecycle";
 const ACCOUNT_RISK_URL = "/api/v1/phase7c/account-risk?riskPercent=1&maxLot=0.3";
 const LOT_SETTINGS_URL = "/api/v1/phase7c/lot-settings";
-const CANDLES_URL = "/api/v1/phase7c-chart/candles?symbol=XAUUSD&count=240";
 const PERFORMANCE_URL = "/api/v1/mt5/performance?days=90&symbol=XAUUSD";
 
 type FetchResult<T> = { payload: T; usedDirectFallback: boolean };
@@ -219,30 +207,6 @@ export function parsePanelStatus(text: string): Phase7CPanelStatus {
   return result;
 }
 
-function toCandles(payload: Phase7CJson): Phase7CCandle[] {
-  const rawCandles = Array.isArray(payload.candles) ? payload.candles : [];
-  return rawCandles
-    .map((item) => {
-      if (!item || typeof item !== "object") return null;
-      const row = item as Record<string, unknown>;
-      const candle: Phase7CCandle = {
-        openTime: Number(row.openTime),
-        closeTime: Number(row.closeTime),
-        open: Number(row.open),
-        high: Number(row.high),
-        low: Number(row.low),
-        close: Number(row.close),
-        volume: row.volume === undefined ? undefined : Number(row.volume),
-      };
-      if (![candle.openTime, candle.closeTime, candle.open, candle.high, candle.low, candle.close].every(Number.isFinite)) {
-        return null;
-      }
-      return candle;
-    })
-    .filter((item): item is Phase7CCandle => item !== null)
-    .sort((a, b) => a.openTime - b.openTime);
-}
-
 function validSemanticUi(payload: Phase7CUiContract | undefined) {
   return payload?.version === 2 && ["WAITING", "SETUP_READY", "MANAGING"].includes(payload.uiState);
 }
@@ -266,13 +230,12 @@ export async function fetchPhase7CPerformance(): Promise<Phase7CPerformanceSnaps
 }
 
 export async function fetchPhase7CWebStatus(): Promise<Phase7CWebStatus> {
-  const [panelResult, uiResult, lifecycleResult, accountRiskResult, lotSettingsResult, candlesResult] = await Promise.allSettled([
+  const [panelResult, uiResult, lifecycleResult, accountRiskResult, lotSettingsResult] = await Promise.allSettled([
     fetchTextWithFallback(PANEL_STATUS_URL, "Decision Monitor"),
     fetchJsonWithFallback<Phase7CUiContract>(SEMANTIC_UI_URL, "Semantic UI"),
     fetchJsonWithFallback<Phase7CJson>(LIFECYCLE_URL, "Runtime"),
     fetchJsonWithFallback<Phase7CJson>(ACCOUNT_RISK_URL, "Tài khoản & Risk"),
     fetchJsonWithFallback<Phase7CJson>(LOT_SETTINGS_URL, "Lot settings"),
-    fetchJsonWithFallback<Phase7CJson>(CANDLES_URL, "Chart M15"),
   ]);
 
   const errors: string[] = [];
@@ -282,7 +245,6 @@ export async function fetchPhase7CWebStatus(): Promise<Phase7CWebStatus> {
   let lifecycle: Phase7CJson | undefined;
   let accountRisk: Phase7CJson | undefined;
   let lotSettings: Phase7CJson | undefined;
-  let candles: Phase7CCandle[] | undefined;
 
   if (panelResult.status === "fulfilled") {
     panel = parsePanelStatus(panelResult.value.payload);
@@ -321,19 +283,11 @@ export async function fetchPhase7CWebStatus(): Promise<Phase7CWebStatus> {
     errors.push(lotSettingsResult.reason instanceof Error ? lotSettingsResult.reason.message : "Không đọc được Lot settings.");
   }
 
-  if (candlesResult.status === "fulfilled") {
-    candles = toCandles(candlesResult.value.payload);
-    usedDirectFallback = usedDirectFallback || candlesResult.value.usedDirectFallback;
-    if (candles.length < 2) errors.push("Chart M15 chưa có đủ dữ liệu nến.");
-  } else {
-    errors.push(candlesResult.reason instanceof Error ? candlesResult.reason.message : "Không đọc được Chart M15.");
-  }
-
-  if (!panel && !ui && !lifecycle && !accountRisk && !lotSettings && !candles) {
+  if (!panel && !ui && !lifecycle && !accountRisk && !lotSettings) {
     throw new Error(unique(errors).join(" "));
   }
 
-  return { panel, ui, lifecycle, accountRisk, lotSettings, candles, errors: unique(errors), usedDirectFallback };
+  return { panel, ui, lifecycle, accountRisk, lotSettings, errors: unique(errors), usedDirectFallback };
 }
 
 export function raw(status: Phase7CPanelStatus | undefined, key: string) {
