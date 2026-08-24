@@ -63,14 +63,21 @@ export interface Mt5PerformanceRecommendation {
 }
 
 export interface Mt5PerformanceSnapshot {
-  source: "MT5_DEMO_READ_ONLY";
+  source: "MT5_ACCOUNT_READ_ONLY";
   symbol: string;
   currency: string;
   days: number;
   generatedAt: number;
+  account: {
+    accountMode: "DEMO" | "LIVE";
+    brokerMode: "demo" | "real";
+    login: number | null;
+    server: string | null;
+  };
   safety: {
-    accountMode: "demo";
+    accountMode: "DEMO" | "LIVE";
     bridgeTradingEnabled: boolean;
+    readOnly: true;
     strategyAutoChange: false;
     liveUnlockAvailable: false;
   };
@@ -132,24 +139,9 @@ function strategyOf(
   if (magic === sidewayMagic) return "SIDEWAY";
   if (magic === trendMagic) return "TREND";
 
-  const comment =
-    String(opening.comment ?? "")
-      .toLowerCase();
-
-  if (
-    comment.includes("phase7c-sideway") ||
-    comment.includes("p7c-sideway")
-  ) {
-    return "SIDEWAY";
-  }
-
-  if (
-    comment.includes("phase7b-demo") ||
-    comment.includes("p7b-")
-  ) {
-    return "TREND";
-  }
-
+  const comment = String(opening.comment ?? "").toLowerCase();
+  if (comment.includes("phase7c-sideway") || comment.includes("p7c-sideway")) return "SIDEWAY";
+  if (comment.includes("phase7b-demo") || comment.includes("p7b-")) return "TREND";
   return "OTHER";
 }
 
@@ -158,21 +150,8 @@ function ownershipOf(
   trendMagic: number,
   sidewayMagic: number,
 ): Mt5PerformanceTrade["ownership"] {
-  if (
-    validationComment(
-      opening.comment ?? "",
-    )
-  ) {
-    return "VALIDATION";
-  }
-
-  return strategyOf(
-    opening,
-    trendMagic,
-    sidewayMagic,
-  ) === "OTHER"
-    ? "OTHER"
-    : "SYSTEM";
+  if (validationComment(opening.comment ?? "")) return "VALIDATION";
+  return strategyOf(opening, trendMagic, sidewayMagic) === "OTHER" ? "OTHER" : "SYSTEM";
 }
 
 function sessionFromHour(hour: number): string {
@@ -198,13 +177,10 @@ function reconstructTrades(
   }
 
   const trades: Mt5PerformanceTrade[] = [];
-
   for (const [positionId, group] of groups) {
     group.sort((left, right) => left.timestamp - right.timestamp);
     const opens = group.filter((deal) => deal.entry === "IN" && deal.side !== null);
-    const closes = group.filter(
-      (deal) => deal.entry === "OUT" || deal.entry === "OUT_BY" || deal.entry === "INOUT",
-    );
+    const closes = group.filter((deal) => deal.entry === "OUT" || deal.entry === "OUT_BY" || deal.entry === "INOUT");
     const firstOpen = opens.at(0);
     const lastClose = closes.at(-1);
     if (!firstOpen || !lastClose || firstOpen.side === null) continue;
@@ -218,21 +194,13 @@ function reconstructTrades(
     const netPnl = group.reduce((sum, deal) => sum + deal.netPnl, 0);
     const hour = new Date(firstOpen.timestamp).getUTCHours();
     const day = new Date(firstOpen.timestamp).getUTCDay();
-    const strategy = strategyOf(
-      firstOpen,
-      trendMagic,
-      sidewayMagic,
-    );
+    const strategy = strategyOf(firstOpen, trendMagic, sidewayMagic);
 
     trades.push({
       id: `mt5-${positionId}`,
       symbol: firstOpen.symbol || "XAUUSD",
       side: firstOpen.side,
-      ownership: ownershipOf(
-        firstOpen,
-        trendMagic,
-        sidewayMagic,
-      ),
+      ownership: ownershipOf(firstOpen, trendMagic, sidewayMagic),
       strategy,
       openedAt: firstOpen.timestamp,
       closedAt: lastClose.timestamp,
@@ -284,10 +252,7 @@ function calculateMetrics(
       peak = Math.max(peak, balance);
       const drawdown = peak - balance;
       maxDrawdown = Math.max(maxDrawdown, drawdown);
-      maxDrawdownPercent = Math.max(
-        maxDrawdownPercent,
-        peak > 0 ? (drawdown / peak) * 100 : 0,
-      );
+      maxDrawdownPercent = Math.max(maxDrawdownPercent, peak > 0 ? (drawdown / peak) * 100 : 0);
     }
   }
 
@@ -358,13 +323,14 @@ function bucket(
 
 function recommendations(
   systemTrades: readonly Mt5PerformanceTrade[],
+  accountMode: "DEMO" | "LIVE",
 ): Mt5PerformanceRecommendation[] {
   if (systemTrades.length < MIN_RECOMMENDATION_SAMPLE) {
     return [{
       severity: "INFO",
-      title: "Đang thu thập mẫu Phase 7B DEMO",
-      evidence: `Mới có ${systemTrades.length}/${MIN_RECOMMENDATION_SAMPLE} system-owned trade đã đóng.`,
-      suggestion: "Tiếp tục forward DEMO và giữ nguyên rule Phase 7B. Chưa đề xuất retune trong giai đoạn thu mẫu.",
+      title: `Đang thu thập mẫu ${accountMode}`,
+      evidence: `Mới có ${systemTrades.length}/${MIN_RECOMMENDATION_SAMPLE} system-owned trade đã đóng trên tài khoản hiện tại.`,
+      suggestion: "Tiếp tục thu thập dữ liệu; chưa retune và không tự động thay đổi chiến lược từ trang hiệu suất.",
       autoApply: false,
     }];
   }
@@ -379,7 +345,7 @@ function recommendations(
       severity: "WATCH",
       title: "Forward sample đang yếu",
       evidence: `PF ${String(all.profitFactor ?? "∞")} · Win rate ${all.winRatePercent.toFixed(1)}% · ${all.totalTrades} trades.`,
-      suggestion: "Sau khi đủ mẫu, review riêng Pattern + MA20/50/200 + FVG và quản lý +6/+10; không tự động thay đổi tham số.",
+      suggestion: "Review riêng Pattern + Supertrend + quản lý +6/+10 sau khi đủ mẫu; không tự động thay đổi tham số.",
       autoApply: false,
     });
   }
@@ -393,7 +359,7 @@ function recommendations(
         severity: "WATCH",
         title: `${weak} đang yếu hơn trong forward sample`,
         evidence: `BUY ${buyMetrics.winRatePercent.toFixed(1)}% vs SELL ${sellMetrics.winRatePercent.toFixed(1)}%.`,
-        suggestion: `Giữ nguyên rule trong lúc thu mẫu; đánh dấu ${weak} để review sau khi hoàn tất forward DEMO.`,
+        suggestion: `Giữ nguyên rule trong lúc thu mẫu; đánh dấu ${weak} để review sau.`,
         autoApply: false,
       });
     }
@@ -402,14 +368,20 @@ function recommendations(
   if (output.length === 0) {
     output.push({
       severity: "INFO",
-      title: "Chưa có lý do thay đổi Phase 7B",
+      title: "Chưa có lý do thay đổi chiến lược",
       evidence: `${all.totalTrades} system-owned trades chưa kích hoạt cảnh báo review.`,
-      suggestion: "Tiếp tục DEMO, không auto-fit và không tự động đổi chiến lược.",
+      suggestion: "Tiếp tục theo dõi; không auto-fit và không tự động đổi chiến lược.",
       autoApply: false,
     });
   }
 
   return output;
+}
+
+function resolveAccountMode(brokerMode: unknown): { accountMode: "DEMO" | "LIVE"; brokerMode: "demo" | "real" } {
+  if (brokerMode === "demo") return { accountMode: "DEMO", brokerMode: "demo" };
+  if (brokerMode === "real") return { accountMode: "LIVE", brokerMode: "real" };
+  throw new Error(`MT5 performance analytics supports DEMO or LIVE only. Actual=${String(brokerMode ?? "unknown")}`);
 }
 
 export async function getMt5PerformanceSnapshot(
@@ -429,12 +401,11 @@ export async function getMt5PerformanceSnapshot(
   if (!telemetry.reachable || !telemetry.health?.connected) {
     throw new Error(`MT5 telemetry unavailable: ${telemetry.message}`);
   }
-  if (telemetry.health.accountMode !== "demo") {
-    throw new Error("MT5 performance analytics is DEMO-only.");
-  }
 
-  // Read-only analytics is safe while the separate Phase 7B controller has
-  // bridge trading enabled. apps/api itself still exposes no execution route.
+  const account = resolveAccountMode(telemetry.health.accountMode);
+
+  // This endpoint only reads telemetry/deal history. It never exposes order or
+  // position mutation routes, including while the selected runtime is LIVE.
   const bridgeTradingEnabled = Boolean(telemetry.health.tradingEnabled);
   const brokerNow = telemetry.quote?.timestamp ?? Date.now();
   const fromMs = Math.max(0, brokerNow - days * DAY_MS);
@@ -443,45 +414,20 @@ export async function getMt5PerformanceSnapshot(
     await getMt5DealHistory(fromMs, brokerNow, normalizedSymbol)
   ).filter((deal) => deal.isTradingDeal && deal.symbol === normalizedSymbol);
 
-  const trendMagic = Number(
-    process.env.MT5_MAGIC_NUMBER ??
-      defaultMt5BrokerConfig.magicNumber,
-  );
+  const trendMagic = Number(process.env.MT5_MAGIC_NUMBER ?? defaultMt5BrokerConfig.magicNumber);
+  const sidewayMagic = Number(process.env.ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER ?? 270714);
 
-  const sidewayMagic = Number(
-    process.env.ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER ??
-      270714,
-  );
-
-  if (
-    !Number.isInteger(trendMagic) ||
-    trendMagic <= 0
-  ) {
-    throw new Error(
-      "Configured Trend magic is invalid.",
-    );
+  if (!Number.isInteger(trendMagic) || trendMagic <= 0) {
+    throw new Error("Configured Trend magic is invalid.");
   }
-
-  if (
-    !Number.isInteger(sidewayMagic) ||
-    sidewayMagic <= 0
-  ) {
-    throw new Error(
-      "Configured Sideway magic is invalid.",
-    );
+  if (!Number.isInteger(sidewayMagic) || sidewayMagic <= 0) {
+    throw new Error("Configured Sideway magic is invalid.");
   }
-
   if (trendMagic === sidewayMagic) {
-    throw new Error(
-      "Trend and Sideway magic numbers must be distinct.",
-    );
+    throw new Error("Trend and Sideway magic numbers must be distinct.");
   }
 
-  const trades = reconstructTrades(
-    deals,
-    trendMagic,
-    sidewayMagic,
-  );
+  const trades = reconstructTrades(deals, trendMagic, sidewayMagic);
   const currentBalance = telemetry.health.accountBalance;
   const accountWindowPnl = trades.reduce((sum, trade) => sum + trade.netPnl, 0);
   const startingBalance =
@@ -495,14 +441,21 @@ export async function getMt5PerformanceSnapshot(
   const previous20 = systemTrades.length >= 40 ? calculateMetrics(systemTrades.slice(20, 40)) : null;
 
   return {
-    source: "MT5_DEMO_READ_ONLY",
+    source: "MT5_ACCOUNT_READ_ONLY",
     symbol: normalizedSymbol,
     currency: telemetry.health.accountCurrency ?? "USD",
     days,
     generatedAt: brokerNow,
+    account: {
+      accountMode: account.accountMode,
+      brokerMode: account.brokerMode,
+      login: Number.isFinite(Number(telemetry.health.accountLogin)) ? Number(telemetry.health.accountLogin) : null,
+      server: telemetry.health.server ?? null,
+    },
     safety: {
-      accountMode: "demo",
+      accountMode: account.accountMode,
       bridgeTradingEnabled,
+      readOnly: true,
       strategyAutoChange: false,
       liveUnlockAvailable: false,
     },
@@ -523,39 +476,25 @@ export async function getMt5PerformanceSnapshot(
       session: bucket(trades, (trade) => trade.session),
       weekday: bucket(trades, (trade) => trade.weekday),
       hour: bucket(trades, (trade) => `${String(trade.brokerHour).padStart(2, "0")}:00`),
-      strategy: (["TREND", "SIDEWAY"] as const).map(
-        (strategy) => {
-          const metrics =
-            calculateMetrics(
-              systemTrades.filter(
-                (trade) =>
-                  trade.strategy === strategy,
-              ),
-            );
-
-          return {
-            key: strategy,
-            label: strategy,
-            totalTrades:
-              metrics.totalTrades,
-            netPnl:
-              metrics.netPnl,
-            winRatePercent:
-              metrics.winRatePercent,
-            profitFactor:
-              metrics.profitFactor,
-          };
-        },
-      ),
+      strategy: (["TREND", "SIDEWAY"] as const).map((strategy) => {
+        const metrics = calculateMetrics(systemTrades.filter((trade) => trade.strategy === strategy));
+        return {
+          key: strategy,
+          label: strategy,
+          totalTrades: metrics.totalTrades,
+          netPnl: metrics.netPnl,
+          winRatePercent: metrics.winRatePercent,
+          profitFactor: metrics.profitFactor,
+        };
+      }),
       ownership: bucket(trades, (trade) => trade.ownership),
     },
-    recommendations: recommendations(systemTrades),
+    recommendations: recommendations(systemTrades, account.accountMode),
     notes: [
-      "Account-wide metrics may include manual/external/validation trades.",
-      `SYSTEM ownership uses Trend magic ${trendMagic} and Sideway magic ${sidewayMagic}.`,
-      "Phase 7B forward review waits for at least 30 closed system-owned trades before recommendations are considered sample-ready.",
-      "Bridge trading may be enabled for the separate Phase 7B DEMO controller; this analytics endpoint remains read-only.",
-      "Recommendations are advisory only; no strategy parameter is changed automatically.",
+      `Đang đọc lịch sử tài khoản ${account.accountMode} hiện tại theo chế độ read-only.`,
+      "Account-wide metrics có thể gồm lệnh manual/external/validation.",
+      `SYSTEM ownership dùng Trend magic ${trendMagic} và Sideway magic ${sidewayMagic}.`,
+      "Khuyến nghị chỉ mang tính quan sát; trang hiệu suất không đổi strategy, không gửi order và không mutate position.",
     ],
   };
 }
