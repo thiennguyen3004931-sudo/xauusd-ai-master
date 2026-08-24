@@ -15,6 +15,14 @@ const queryClient = new QueryClient({
   },
 });
 
+const vietnameseFontFamily = [
+  '"Segoe UI Variable"',
+  '"Segoe UI"',
+  '"Noto Sans"',
+  'Arial',
+  'sans-serif',
+].join(", ");
+
 const theme = createTheme({
   palette: {
     mode: "dark",
@@ -33,9 +41,18 @@ const theme = createTheme({
   },
   shape: { borderRadius: 16 },
   typography: {
-    fontFamily: "Inter, Segoe UI, Arial, sans-serif",
+    fontFamily: vietnameseFontFamily,
   },
   components: {
+    MuiCssBaseline: {
+      styleOverrides: {
+        body: {
+          fontFamily: vietnameseFontFamily,
+          fontSynthesis: "none",
+          textRendering: "optimizeLegibility",
+        },
+      },
+    },
     MuiCard: {
       styleOverrides: {
         root: {

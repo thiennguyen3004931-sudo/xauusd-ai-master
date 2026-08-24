@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  // Lớp Việt hóa cuối cùng chỉ tác động phần hiển thị. Không đổi giá trị máy/API.
+  // Final presentation-only Vietnamese normalization. Machine/API values remain unchanged.
   const exact = new Map([
     ["Bot Trend", "bot Trend"],
     ["BOT TREND", "bot Trend"],
@@ -9,7 +9,7 @@
     ["Bot Sideway", "bot Sideway"],
     ["BOT SIDEWAY", "bot Sideway"],
     ["Sideway Bot", "bot Sideway"],
-    ["FINAL", "BẢN HOÀN THIỆN"],
+    ["FINAL", "Bản hoàn thiện"],
     ["Mode", "Chế độ"],
     ["Effective", "Đang áp dụng"],
     ["Recommended", "Khuyến nghị"],
@@ -21,9 +21,12 @@
     ["Stop Loss", "Cắt lỗ"],
     ["Risk", "Rủi ro"],
     ["Read only", "Chỉ đọc"],
-    ["READ ONLY", "CHỈ ĐỌC"],
+    ["READ ONLY", "Chỉ đọc"],
     ["Order none", "Không có quyền đặt lệnh"],
-    ["ORDER NONE", "KHÔNG CÓ QUYỀN ĐẶT LỆNH"],
+    ["ORDER NONE", "Không có quyền đặt lệnh"],
+    ["RỦI RO percent", "Tỷ lệ rủi ro"],
+    ["RỦI RO PERCENT", "Tỷ lệ rủi ro"],
+    ["MT5 CHO PHÉP GIAO DỊCH", "MT5 cho phép giao dịch"],
   ]);
 
   const phrases = [
@@ -44,6 +47,7 @@
     [/\bFinal lot\b/gi, "khối lượng cuối cùng"],
     [/\bMax lot\b/gi, "khối lượng tối đa"],
     [/\bRisk percent\b/gi, "tỷ lệ rủi ro"],
+    [/RỦI RO\s+percent/gi, "Tỷ lệ rủi ro"],
     [/\bCurrent price\b/gi, "giá hiện tại"],
     [/\bOpen positions?\b/gi, "vị thế đang mở"],
     [/\bEntry reason\b/gi, "lý do vào lệnh"],
@@ -64,17 +68,78 @@
     [/\bDisconnected\b/gi, "mất kết nối"],
   ];
 
+  const technicalTerms = [
+    "XAUUSD",
+    "MT5",
+    "M15",
+    "M5",
+    "FVG",
+    "AI",
+    "AUTO",
+    "PAUSE",
+    "DEMO",
+    "LIVE",
+    "SL",
+    "TP",
+    "API",
+    "PnL",
+  ];
+
+  function protectTechnicalTerms(value) {
+    const replacements = [];
+    let out = value;
+    for (const term of technicalTerms) {
+      const pattern = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi");
+      out = out.replace(pattern, () => {
+        const token = `§${replacements.length}§`;
+        replacements.push([token, term === "PnL" ? "PnL" : term.toUpperCase()]);
+        return token;
+      });
+    }
+    return { out, replacements };
+  }
+
+  function restoreTechnicalTerms(value, replacements) {
+    let out = value;
+    for (const [token, term] of replacements) out = out.split(token).join(term);
+    return out;
+  }
+
+  function normalizeAllCapsVietnamese(value) {
+    const trimmed = value.trim();
+    if (!trimmed || !/[^\x00-\x7F]/u.test(trimmed)) return value;
+
+    const uppercaseLetters = trimmed.match(/\p{Lu}/gu) || [];
+    const lowercaseLetters = trimmed.match(/\p{Ll}/gu) || [];
+    if (uppercaseLetters.length < 2 || lowercaseLetters.length > 0) return value;
+
+    const { out: protectedValue, replacements } = protectTechnicalTerms(trimmed);
+    let normalized = protectedValue.toLocaleLowerCase("vi-VN");
+    normalized = normalized.replace(/\p{L}/u, (char) => char.toLocaleUpperCase("vi-VN"));
+    normalized = restoreTechnicalTerms(normalized, replacements);
+    return value.replace(trimmed, normalized);
+  }
+
   function translate(value) {
     if (!value || typeof value !== "string") return value;
     const trimmed = value.trim();
-    if (exact.has(trimmed)) return value.replace(trimmed, exact.get(trimmed));
-    let out = value;
+    let out = exact.has(trimmed) ? value.replace(trimmed, exact.get(trimmed)) : value;
     for (const [pattern, replacement] of phrases) out = out.replace(pattern, replacement);
-    return out;
+    out = out
+      .replace(/\bbot\s+trend\b/gi, "bot Trend")
+      .replace(/\bbot\s+sideway\b/gi, "bot Sideway");
+    return normalizeAllCapsVietnamese(out);
+  }
+
+  function shouldSkip(node) {
+    const parent = node.parentElement;
+    if (!parent) return true;
+    return Boolean(parent.closest("script,style,code,pre,textarea,[data-no-vi-localize]"));
   }
 
   function translateElement(element) {
     if (!(element instanceof Element)) return;
+    if (element.matches("script,style,code,pre,textarea,[data-no-vi-localize]")) return;
     for (const attribute of ["title", "placeholder", "aria-label", "alt"]) {
       if (!element.hasAttribute(attribute)) continue;
       const before = element.getAttribute(attribute) || "";
@@ -83,16 +148,19 @@
     }
   }
 
+  function translateTextNode(node) {
+    if (shouldSkip(node)) return;
+    const before = node.nodeValue || "";
+    const after = translate(before);
+    if (after !== before) node.nodeValue = after;
+  }
+
   function scan(root) {
+    if (!root) return;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     const nodes = [];
     while (walker.nextNode()) nodes.push(walker.currentNode);
-    for (const node of nodes) {
-      if (node.parentElement && ["SCRIPT", "STYLE", "CODE", "PRE"].includes(node.parentElement.tagName)) continue;
-      const before = node.nodeValue || "";
-      const after = translate(before);
-      if (after !== before) node.nodeValue = after;
-    }
+    for (const node of nodes) translateTextNode(node);
     if (root instanceof Element) translateElement(root);
     if (root.querySelectorAll) root.querySelectorAll("*").forEach(translateElement);
   }
@@ -102,24 +170,23 @@
     scan(document.body || document.documentElement);
   }
 
+  let queued = false;
   const observer = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      if (mutation.type === "characterData") {
-        const node = mutation.target;
-        const before = node.nodeValue || "";
-        const after = translate(before);
-        if (after !== before) node.nodeValue = after;
-      }
-      for (const node of mutation.addedNodes) {
-        if (node.nodeType === Node.TEXT_NODE) {
-          const before = node.nodeValue || "";
-          const after = translate(before);
-          if (after !== before) node.nodeValue = after;
-        } else if (node.nodeType === Node.ELEMENT_NODE) {
-          scan(node);
+    if (queued) return;
+    queued = true;
+    queueMicrotask(() => {
+      queued = false;
+      for (const mutation of mutations) {
+        if (mutation.type === "characterData") {
+          translateTextNode(mutation.target);
+          continue;
+        }
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType === Node.TEXT_NODE) translateTextNode(node);
+          else if (node.nodeType === Node.ELEMENT_NODE) scan(node);
         }
       }
-    }
+    });
   });
 
   if (document.readyState === "loading") {
