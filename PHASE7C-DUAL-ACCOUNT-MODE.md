@@ -107,9 +107,32 @@ After the probe, the temporary bridge process tree is terminated, temporary env/
 
 This is the required first-connect verification path for a new LIVE terminal. It is safe to run while LIVE execution capability remains disabled.
 
+## LIVE activation preflight before any capability change
+
+After the first read-only probe and explicit LIVE risk configuration have passed, run the activation preflight **before** changing either LIVE capability flag:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\preflight-phase7c-live-activation-local.ps1 `
+  -WorkDir .runtime
+```
+
+The activation preflight is still fail-closed and intentionally stops at the operator approval boundary. It requires the selected runtime to remain `DEMO`, bot mode `PAUSE`, current DEMO broker state flat, LIVE durable state flat, no execution lock, separate verified terminal paths, exact LIVE risk binding, verified Scheduled Task ownership, `MT5_TRADING_ENABLED=false`, and `XAUUSD_PHASE7C_ALLOW_LIVE_TRADING=false`.
+
+It re-runs the isolated LIVE read-only proof immediately before reporting readiness and then confirms the original DEMO `bridgeSessionId`, DEMO login, account selection and bot mode did not change. The preflight does not invoke the account switcher, does not arm LIVE, does not start/stop project Scheduled Tasks, does not enable either LIVE capability flag and does not send an order.
+
+A successful preflight ends with:
+
+```text
+PHASE7C_LIVE_ACTIVATION_PREFLIGHT_STATUS=PASS
+PHASE7C_LIVE_ACTIVATION_PREFLIGHT_NEXT=EXPLICIT_OPERATOR_APPROVAL_REQUIRED
+```
+
+That final marker is deliberate. Capability enablement is a separate operator decision and must not occur as a side effect of preparation or verification.
+
 ## Select DEMO or LIVE
 
-Use the existing Administrator account switcher only after the read-only LIVE probe has passed and after LIVE capability is deliberately enabled. The legacy `-ConfirmLiveExecution` switch is only an explicit confirmation that the operator intends to connect/select the LIVE account; it is **not** a LIVE arm.
+Use the existing Administrator account switcher only after the read-only LIVE probe and activation preflight have passed and after LIVE capability is deliberately enabled. The legacy `-ConfirmLiveExecution` switch is only an explicit confirmation that the operator intends to connect/select the LIVE account; it is **not** a LIVE arm.
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
