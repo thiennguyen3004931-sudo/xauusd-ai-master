@@ -17,15 +17,15 @@ from .broker_time import (
 from .config import Settings
 from .errors import BridgeError
 from .forming_candles import candles_with_forming
+from .guarded_gateway import GuardedMt5Gateway
 from .historical_candles import historical_candles
 from .ledger import IdempotencyLedger
 from .models import CloseRequest, ModifyRequest, OrderRequest
-from .mt5_gateway import Mt5Gateway
 
 settings = Settings.from_env()
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 ledger = IdempotencyLedger(settings.ledger_path)
-gateway = Mt5Gateway(settings, ledger)
+gateway = GuardedMt5Gateway(settings, ledger)
 verify_api_key = api_key_dependency(settings)
 
 
@@ -111,6 +111,11 @@ def deal_history(fromMs: int, toMs: int, symbol: str | None = None):
 @app.get("/v1/positions", dependencies=[Depends(verify_api_key)])
 def positions(symbol: str | None = Query(default=None)):
     return normalize_positions(gateway.positions(symbol))
+
+
+@app.get("/v1/orders", dependencies=[Depends(verify_api_key)])
+def pending_orders(symbol: str | None = Query(default=None)):
+    return gateway.pending_orders(symbol)
 
 
 @app.post("/v1/orders", dependencies=[Depends(verify_api_key)])

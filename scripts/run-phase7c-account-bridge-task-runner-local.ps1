@@ -22,14 +22,15 @@ foreach ($required in @($AccountLibrary, $BridgeRunner, $AccountStatePath)) {
 if ($RestartDelaySeconds -lt 5 -or $RestartDelaySeconds -gt 300) { throw "RestartDelaySeconds must be between 5 and 300." }
 . $AccountLibrary
 New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
+$LiveArmStatePath = Get-Phase7CLiveArmPath $RuntimeRoot
 
 function Read-AccountState {
   $state = Get-Content -LiteralPath $AccountStatePath -Raw | ConvertFrom-Json
   if ([int]$state.version -ne 1) { throw "Unsupported Phase7C account-mode state version." }
   $mode = ConvertTo-Phase7CAccountMode ([string]$state.accountMode)
   $liveEnabled = if ($null -ne $state.PSObject.Properties["liveExecutionEnabled"]) { [bool]$state.liveExecutionEnabled } else { $false }
-  if ($mode -eq "DEMO" -and $liveEnabled) { throw "DEMO account state cannot enable LIVE execution." }
-  if ($mode -eq "LIVE" -and -not $liveEnabled) { throw "LIVE account state requires liveExecutionEnabled=true." }
+  if ($mode -eq "DEMO" -and $liveEnabled) { throw "DEMO account state cannot enable LIVE capability." }
+  if ($mode -eq "LIVE" -and -not $liveEnabled) { throw "LIVE account state requires the legacy LIVE capability gate; explicit arm is still separate." }
   $envFile = [string]$state.envFile
   if ([string]::IsNullOrWhiteSpace($envFile)) { throw "Account-mode state envFile is missing." }
   if (-not [System.IO.Path]::IsPathRooted($envFile)) { $envFile = Join-Path $ProjectRoot $envFile }
@@ -62,15 +63,23 @@ try {
   while ($true) {
     $attempt++
     $process = $null
+    $state = $null
     try {
       $state = Read-AccountState
       $mode = $state.mode
       $envFile = $state.envInfo.envFile
+
+      # A bridge process restart creates a new bridgeSessionId. Any previous
+      # LIVE arm is therefore invalid and is proactively deleted before launch.
+      Clear-Phase7CLiveArmState -WorkDir $RuntimeRoot -Reason "bridge-process-launch"
+
       $arguments = @(
         "-NoProfile",
         "-ExecutionPolicy", "Bypass",
         "-File", ('"{0}"' -f $BridgeRunner),
-        "-EnvFile", ('"{0}"' -f $envFile)
+        "-EnvFile", ('"{0}"' -f $envFile),
+        "-AccountMode", $mode,
+        "-LiveArmStatePath", ('"{0}"' -f $LiveArmStatePath)
       )
       $starting = [pscustomobject]@{
         version = 1
@@ -78,6 +87,7 @@ try {
         runnerPid = $PID
         bridgeProcessPid = $null
         accountMode = $mode
+        liveArmStatePath = $LiveArmStatePath
         envFile = $envFile
         attempt = $attempt
         updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
@@ -92,7 +102,7 @@ try {
         -RedirectStandardError $StdErr `
         -PassThru
 
-      Write-Host "PHASE7C_ACCOUNT_BRIDGE_RUNNER=RUNNING|MODE=$mode|PID=$($process.Id)"
+      Write-Host "PHASE7C_ACCOUNT_BRIDGE_RUNNER=RUNNING|MODE=$mode|PID=$($process.Id)|LIVE_ARM=DISARMED"
       while (-not $process.HasExited) {
         $running = [pscustomobject]@{
           version = 1
@@ -100,6 +110,7 @@ try {
           runnerPid = $PID
           bridgeProcessPid = $process.Id
           accountMode = $mode
+          liveArmStatePath = $LiveArmStatePath
           envFile = $envFile
           attempt = $attempt
           updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
@@ -112,7 +123,7 @@ try {
       Add-Content -LiteralPath $ErrorLog -Value "[$([DateTimeOffset]::Now.ToString('o'))] $message" -Encoding utf8
       Write-Phase7CAccountJsonAtomic -Path $StatusPath -Value ([pscustomobject]@{
         version = 1; status = "ERROR_RETRYING"; runnerPid = $PID; bridgeProcessPid = $process.Id;
-        accountMode = $mode; envFile = $envFile; attempt = $attempt; exitCode = $process.ExitCode;
+        accountMode = $mode; liveArmStatePath = $LiveArmStatePath; envFile = $envFile; attempt = $attempt; exitCode = $process.ExitCode;
         message = $message; updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
       }) -Depth 5
     } catch {
@@ -122,7 +133,7 @@ try {
         version = 1; status = "ERROR_RETRYING"; runnerPid = $PID;
         bridgeProcessPid = if ($null -ne $process) { $process.Id } else { $null };
         accountMode = if ($null -ne $state) { $state.mode } else { "UNKNOWN" };
-        attempt = $attempt; message = $message; updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        liveArmStatePath = $LiveArmStatePath; attempt = $attempt; message = $message; updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
       }) -Depth 5
     }
     Start-Sleep -Seconds $RestartDelaySeconds

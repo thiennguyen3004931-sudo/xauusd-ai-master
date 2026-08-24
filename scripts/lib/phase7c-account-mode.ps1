@@ -164,3 +164,80 @@ function Write-Phase7CAccountJsonAtomic([string]$Path, $Value, [int]$Depth = 8) 
     }
   }
 }
+
+function Get-Phase7CLiveArmPath([string]$WorkDir) {
+  Set-StrictMode -Version Latest
+  if ([string]::IsNullOrWhiteSpace($WorkDir)) { throw "WorkDir is required for LIVE arm state." }
+  return Join-Path $WorkDir "phase7c-live-arm.json"
+}
+
+function Read-Phase7CLiveArmState([string]$WorkDir) {
+  Set-StrictMode -Version Latest
+  $path = Get-Phase7CLiveArmPath $WorkDir
+  if (-not (Test-Path -LiteralPath $path)) { return $null }
+  try {
+    return Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+  } catch {
+    throw "LIVE arm state is unreadable or invalid JSON: $path"
+  }
+}
+
+function Clear-Phase7CLiveArmState([string]$WorkDir, [string]$Reason = "operator-disarm") {
+  Set-StrictMode -Version Latest
+  $path = Get-Phase7CLiveArmPath $WorkDir
+  if (Test-Path -LiteralPath $path) {
+    Remove-Item -LiteralPath $path -Force
+  }
+  Write-Host "PHASE7C_LIVE_ARM=DISARMED|REASON=$Reason"
+}
+
+function Get-Phase7CLiveProfileFingerprint(
+  [long]$Login,
+  [string]$Server,
+  [string]$TerminalPath
+) {
+  Set-StrictMode -Version Latest
+  if ($Login -le 0) { throw "LIVE profile fingerprint requires a positive login." }
+  if ([string]::IsNullOrWhiteSpace($Server)) { throw "LIVE profile fingerprint requires server." }
+  if ([string]::IsNullOrWhiteSpace($TerminalPath)) { throw "LIVE profile fingerprint requires terminal path." }
+  $terminal = ([string]$TerminalPath).Trim().Replace('/', '\').ToLowerInvariant()
+  $serverValue = ([string]$Server).Trim().ToLowerInvariant()
+  $payload = "LIVE|$Login|$serverValue|$terminal"
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
+    $hash = $sha.ComputeHash($bytes)
+    return ([System.BitConverter]::ToString($hash)).Replace('-', '').ToLowerInvariant()
+  } finally {
+    $sha.Dispose()
+  }
+}
+
+function Write-Phase7CLiveArmState(
+  [string]$WorkDir,
+  [string]$BridgeSessionId,
+  [long]$Login,
+  [string]$Server,
+  [string]$TerminalPath,
+  [int]$ArmMinutes = 120,
+  [string]$ArmedBy = "local-operator"
+) {
+  Set-StrictMode -Version Latest
+  if ([string]::IsNullOrWhiteSpace($BridgeSessionId)) { throw "BridgeSessionId is required to arm LIVE." }
+  if ($ArmMinutes -lt 1 -or $ArmMinutes -gt 480) { throw "ArmMinutes must be between 1 and 480." }
+  $now = [DateTimeOffset]::UtcNow
+  $state = [pscustomobject]@{
+    version = 1
+    armed = $true
+    accountMode = "LIVE"
+    bridgeSessionId = $BridgeSessionId
+    accountLogin = $Login
+    server = $Server
+    profileFingerprint = Get-Phase7CLiveProfileFingerprint -Login $Login -Server $Server -TerminalPath $TerminalPath
+    armedAt = $now.ToUnixTimeMilliseconds()
+    expiresAt = $now.AddMinutes($ArmMinutes).ToUnixTimeMilliseconds()
+    armedBy = $ArmedBy
+  }
+  Write-Phase7CAccountJsonAtomic -Path (Get-Phase7CLiveArmPath $WorkDir) -Value $state -Depth 5
+  return $state
+}

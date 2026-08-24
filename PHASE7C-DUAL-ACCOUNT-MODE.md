@@ -1,66 +1,142 @@
-# Phase7C Dual Account Mode
+# Phase7C Dual Account / Dual Terminal Mode
 
-Phase7C now separates **account mode** from **strategy mode**.
+Phase7C separates **account/terminal selection** from **strategy mode** and from **LIVE execution arm state**.
 
 - Account mode: `DEMO` or `LIVE`.
 - Strategy mode: `AUTO`, `TREND`, `SIDEWAY`, or `PAUSE`.
+- LIVE arm: `ARMED` or `DISARMED`.
 - MT5 Decision Panel remains read-only in both account modes: `ORDER_PERMISSION=NONE`.
-- Strategy rules, stop policy, partial management, martingale prohibition, and recovery-lot prohibition are unchanged.
+- Strategy rules, stop policy, partial management, martingale prohibition, recovery-lot prohibition and risk profiles are unchanged by this feature.
 
 ## Safety model
 
-LIVE is fail-closed and cannot be enabled by a normal web cold-start. A local Administrator switch must:
+LIVE is fail-closed. Selecting a LIVE terminal/account is **not** permission to mutate the account.
 
-1. Set strategy mode to `PAUSE`.
-2. Verify the current broker account matches the persisted account-mode state.
-3. Require zero open XAUUSD positions and no managed/pending executor state or execution lock.
-4. Stop the verified executor and bridge task runners, waiting for their singleton locks to release.
-5. Load the target account environment and the target account's independent risk profile.
-6. Start the target bridge and verify `demo` or `real` account mode plus the configured login allowlist.
-7. Start executors and run the strict account-aware verifier and runtime smoke test.
-8. Finish in `PAUSE`.
+A REAL mutation is accepted by the MT5 bridge only when all existing bridge checks pass **and** the current process has an exact, unexpired LIVE arm bound to:
 
-A separate operator action is required to change strategy mode from `PAUSE` to `AUTO`, `TREND`, or `SIDEWAY`.
+- selected account mode `LIVE`;
+- the current bridge process `bridgeSessionId`;
+- the connected MT5 login;
+- the connected MT5 server;
+- the configured LIVE `terminal64.exe` profile fingerprint.
+
+`MT5_ALLOW_REAL_ACCOUNT=true`, `MT5_TRADING_ENABLED=true`, an allow-listed login, and `XAUUSD_PHASE7C_ALLOW_LIVE_TRADING=1` are capability prerequisites only. They never arm LIVE by themselves.
+
+Missing, unreadable, corrupt, expired, stale-session or mismatched arm state rejects REAL mutation before `order_send`.
+
+## Automatic DISARM rules
+
+LIVE arm is deliberately ephemeral.
+
+- Every Phase7C account bridge child launch/restart deletes the previous arm state before creating a new bridge process.
+- A bridge restart creates a new `bridgeSessionId`, so an old arm cannot be reused even if a stale file survived unexpectedly.
+- Account switching restarts the trusted account bridge runner and therefore finishes with LIVE DISARMED.
+- Changing a local terminal identity profile explicitly clears the LIVE arm.
+- Operator DISARM is idempotent.
+
+A successful LIVE account switch still finishes with strategy mode `PAUSE`. The operator must separately run the explicit arm command and then separately change strategy mode when appropriate.
 
 ## Local files
 
-Secrets remain local and are not committed.
+Secrets and machine/account identity values remain local and are not committed.
 
 - DEMO env: `packages/mt5-broker/bridge/.env.phase7b-demo`
 - LIVE env: `packages/mt5-broker/bridge/.env.phase7b-live`
 - LIVE template: `packages/mt5-broker/bridge/.env.phase7b-live.example`
 - Account state: `.runtime/phase7c-account-mode.json`
+- Session-bound arm: `.runtime/phase7c-live-arm.json`
 - DEMO risk profile: `.runtime/phase7c-lot-settings.demo.json`
 - LIVE risk profile: `.runtime/phase7c-lot-settings.live.json`
 - Active selected profile: `.runtime/phase7c-lot-settings.json`
 
-DEMO and LIVE are required to use the same local bridge host, bridge port, and API key so the already-running local API retains a stable read-only bridge credential while the MT5 account connection changes.
+DEMO and LIVE are expected to use separate MT5 terminal installations/profiles. The local account bridge still uses a stable localhost host/port/API credential so the API can remain read-only while account selection changes.
+
+## Configure terminal identity safely
+
+The repository does not contain a real terminal path, login, password or server. Configure those only on the Windows machine:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\configure-phase7c-mt5-terminal-profile-local.ps1 `
+  -AccountMode LIVE `
+  -TerminalPath "<LIVE terminal64.exe>" `
+  -Login <LIVE_LOGIN> `
+  -Server "<LIVE_SERVER>" `
+  -PromptForPassword
+```
+
+For LIVE, this identity configuration command intentionally writes `MT5_TRADING_ENABLED=false` and `XAUUSD_PHASE7C_ALLOW_LIVE_TRADING=false`. It never enables execution as a side effect and never changes risk/lot settings.
+
+Configure DEMO separately with `-AccountMode DEMO` and the DEMO terminal identity.
+
+## Select DEMO or LIVE
+
+Use the existing Administrator account switcher. The legacy `-ConfirmLiveExecution` switch is only an explicit confirmation that the operator intends to connect/select the LIVE account; it is **not** a LIVE arm.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\switch-phase7c-account-mode-local.ps1 `
+  -TargetMode LIVE `
+  -ConfirmLiveExecution
+```
+
+The switcher pauses the bot, verifies the current account is flat, isolates runtime state/risk profiles, restarts the selected bridge/executors, verifies the selected broker account and finishes in `PAUSE`. The trusted bridge runner automatically DISARMs LIVE before its bridge child starts.
+
+## Explicit LIVE ARM
+
+Before arming, the local LIVE env must deliberately enable the two capability prerequisites:
+
+```text
+MT5_TRADING_ENABLED=true
+XAUUSD_PHASE7C_ALLOW_LIVE_TRADING=1
+```
+
+This still does **not** authorize an order. To arm the current bridge session:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\arm-phase7c-live-local.ps1
+```
+
+The arm command sends no order. It requires Administrator PowerShell and verifies immediately before writing arm state:
+
+1. selected account mode is `LIVE`;
+2. connected broker mode is `real`;
+3. exact configured terminal path, login and server are present;
+4. actual login/server match the LIVE profile and allowlist;
+5. bridge health contains the current `bridgeSessionId`;
+6. bot strategy mode is `PAUSE`;
+7. zero open XAUUSD positions;
+8. zero broker pending XAUUSD orders;
+9. no managed/pending Trend or Sideway durable state;
+10. no Phase7C execution lock;
+11. bridge session/account identity is unchanged on the final recheck.
+
+The arm is time-limited and defaults to 120 minutes. A bridge restart immediately invalidates it.
+
+## DISARM and status
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\disarm-phase7c-live-local.ps1
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\get-phase7c-live-arm-local.ps1
+```
+
+The status command reports selected mode, connected broker mode/login/server, current bridge session and bridge-confirmed `ARMED`, `DISARMED` or `NOT_REQUIRED`. It never prints the MT5 password or API key.
 
 ## Broker symbol mapping
 
-The strategy and APIs continue to use the canonical symbol `XAUUSD`. Each account environment maps that canonical symbol to the broker-specific symbol exposed by the selected MT5 account/terminal.
+The strategy and APIs continue to use canonical `XAUUSD`. Configure `MT5_SYMBOL_MAP_JSON` only in each local terminal env if the broker uses a suffix/prefix. The source LIVE template intentionally contains no broker-account-specific symbol mapping.
 
-For the current broker setup:
+## Risk isolation
 
-- DEMO: `MT5_SYMBOL_MAP_JSON={"XAUUSD":"XAUUSD"}`
-- LIVE: `MT5_SYMBOL_MAP_JSON={"XAUUSD":"XAUUSD.G"}`
-
-Do not change strategy code, routes, state keys, or decision-monitor requests to `XAUUSD.G`; only the LIVE bridge env performs this broker-symbol translation.
-
-## LIVE prerequisites
-
-The local LIVE env must explicitly set:
-
-- `MT5_TRADING_ENABLED=true`
-- `MT5_ALLOW_REAL_ACCOUNT=true`
-- a non-empty `MT5_ALLOWED_LOGINS` containing only the intended LIVE login(s)
-- `MT5_SYMBOL_MAP_JSON={"XAUUSD":"XAUUSD.G"}` for the current LIVE broker account
-
-The switch command additionally requires `-ConfirmLiveExecution`. The repository does not provide a default LIVE risk profile; it must be configured deliberately before a LIVE switch.
+DEMO and LIVE risk profiles remain independent. This terminal/arm feature does not create or copy a LIVE risk profile and does not import DEMO lot/risk values into LIVE. LIVE risk must be configured deliberately using the existing account-risk tooling before LIVE operation.
 
 ## Runtime isolation
 
-DEMO and LIVE keep separate Trend/Sideway durable states and separate decision journals. The final new-order gate rechecks bridge health, account mode, trading permissions, and login allowlist immediately before an order is allowed through. Sideway performs that recheck while the shared execution lock is held. Trend's account-order guard is nested inside the Trend execution lock/mode gate.
+DEMO and LIVE keep separate Trend/Sideway durable states and separate decision journals. The final strategy account-order gate remains in place. The MT5 bridge now adds a second independent REAL-mutation boundary, so upstream bugs or direct calls cannot bypass the session-bound LIVE arm requirement.
 
 ## Unchanged trading rules
 
