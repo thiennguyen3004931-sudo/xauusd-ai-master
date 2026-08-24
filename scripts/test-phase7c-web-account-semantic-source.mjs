@@ -37,7 +37,10 @@ requireText(semantic, "Sideway: chưa có xác nhận M5 hợp lệ", "Sideway w
 
 const shell = read("apps/web/src/ui/DashboardLayout.tsx");
 requireText(shell, "Vận hành {runtime}", "runtime-aware sidebar");
-requireText(shell, "Web không có quyền đặt lệnh hoặc chuyển tài khoản", "web account switch boundary");
+requireText(shell, "Web không có quyền đặt lệnh.", "read-only order boundary");
+requireText(shell, "Guarded Account Switch", "guarded account-switch guidance");
+requireText(shell, "LIVE ARM vẫn là thao tác riêng", "separate LIVE ARM boundary");
+forbidText(shell, "Web không có quyền đặt lệnh hoặc chuyển tài khoản", "obsolete account-switch boundary");
 forbidText(shell, "Bảng điều khiển vận hành DEMO", "hard-coded dashboard mode");
 forbidText(shell, "Chỉ tài khoản DEMO", "hard-coded dashboard mode");
 
@@ -49,6 +52,17 @@ requireText(dashboard, "LÝ DO DỜI STOP LOSS", "stop move section");
 requireText(dashboard, "LÝ DO CHỐT 1/3", "partial section");
 requireText(dashboard, "LÝ DO ĐÓNG TOÀN BỘ", "exit section");
 forbidText(dashboard, "DEMO ONLY", "hard-coded dashboard runtime");
+
+const accountRiskPage = read("apps/web/src/pages/Phase7BOpsPage.tsx");
+requireText(accountRiskPage, 'accountModeKey === "real" || accountModeKey === "live"', "LIVE account normalization");
+requireText(accountRiskPage, 'label={`Tài khoản ${accountMode}`}', "runtime-aware account chip");
+requireText(accountRiskPage, 'subtitle={`Tài khoản ${accountMode} đang kết nối với MT5.`}', "runtime-aware account subtitle");
+requireText(accountRiskPage, 'subtitle={`Các khóa an toàn bắt buộc cho runtime ${accountMode}.`}', "runtime-aware safety subtitle");
+requireText(accountRiskPage, 'label="Runtime account" valueText={accountMode}', "runtime account safety row");
+requireText(accountRiskPage, 'label="LIVE execution capability"', "LIVE capability safety row");
+forbidText(accountRiskPage, "Tài khoản demo đang kết nối với MT5.", "hard-coded account subtitle");
+forbidText(accountRiskPage, "Các khóa an toàn bắt buộc của DEMO.", "hard-coded safety subtitle");
+forbidText(accountRiskPage, 'label="Demo only"', "hard-coded DEMO safety row");
 
 const performancePage = read("apps/web/src/pages/PerformancePage.tsx");
 requireText(performancePage, "MT5 {accountMode} · CHỈ ĐỌC", "performance runtime label");

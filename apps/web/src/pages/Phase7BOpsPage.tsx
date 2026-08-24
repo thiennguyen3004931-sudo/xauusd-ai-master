@@ -169,6 +169,7 @@ export function Phase7BOpsPage() {
   const spec = asRecord(accountRisk.spec);
   const lifecycle = asRecord(data?.lifecycle);
   const bridge = asRecord(lifecycle.bridge);
+  const lifecycleSafety = asRecord(lifecycle.safety);
   const processes = asRecord(lifecycle.processes);
   const supervisor = asRecord(processes.supervisor);
   const trend = asRecord(processes.trend);
@@ -179,7 +180,14 @@ export function Phase7BOpsPage() {
   const mode = asRecord(lifecycle.mode);
   const configuredLot = asRecord(data?.lotSettings);
   const currency = clean(account.accountCurrency, "USD");
-  const accountMode = pickText(raw(panel, "accountMode"), account.accountMode, bridge.accountMode);
+  const accountModeRaw = pickText(raw(panel, "accountMode"), account.accountMode, bridge.accountMode);
+  const accountModeKey = accountModeRaw.trim().toLowerCase();
+  const accountMode = accountModeKey === "real" || accountModeKey === "live"
+    ? "LIVE"
+    : accountModeKey === "demo"
+      ? "DEMO"
+      : clean(accountModeRaw, "—");
+  const isLiveAccount = accountMode === "LIVE";
   const activeMode = clean(ui?.mode, clean(mode.mode, value(panel, "activeMode", "—")));
   const openPositions = pickText(bridge.openXauusdPositions, raw(panel, "positionCount"));
   const canSafelyApply = activeMode === "PAUSE" && Number(openPositions) === 0;
@@ -241,7 +249,7 @@ export function Phase7BOpsPage() {
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
             <Chip label={`Mode ${activeMode}`} color={activeMode === "PAUSE" ? "warning" : "success"} variant="outlined" sx={{ fontWeight: 900 }} />
             <Chip label={`Positions ${openPositions}`} color={Number(openPositions) === 0 ? "success" : "warning"} variant="outlined" sx={{ fontWeight: 900 }} />
-            <Chip label={`Account ${accountMode}`} color={accountMode.toLowerCase().includes("demo") ? "success" : "error"} variant="outlined" sx={{ fontWeight: 900 }} />
+            <Chip label={`Tài khoản ${accountMode}`} color={isLiveAccount ? "warning" : "success"} variant="outlined" sx={{ fontWeight: 900 }} />
             <Chip label="ORDER NONE" color="success" variant="outlined" sx={{ fontWeight: 900 }} />
           </Stack>
         </Stack>
@@ -267,7 +275,7 @@ export function Phase7BOpsPage() {
 
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, lg: 4 }}>
-          <SectionCard title="Tài khoản giao dịch" subtitle="Tài khoản demo đang kết nối với MT5.">
+          <SectionCard title="Tài khoản giao dịch" subtitle={`Tài khoản ${accountMode} đang kết nối với MT5.`}>
             <InfoRow label="Login" valueText={pickText(account.accountLogin, bridge.accountLogin)} strong />
             <InfoRow label="Server" valueText={pickText(account.server, bridge.server)} />
             <InfoRow label="Mode" valueText={accountMode} />
@@ -377,13 +385,14 @@ export function Phase7BOpsPage() {
           </SectionCard>
         </Grid>
         <Grid size={{ xs: 12, lg: 4 }}>
-          <SectionCard title="Safety" subtitle="Các khóa an toàn bắt buộc của DEMO.">
-            <InfoRow label="Demo only" valueText={ui?.safety.demoOnly ? "Yes" : "Yes"} strong />
+          <SectionCard title="Safety" subtitle={`Các khóa an toàn bắt buộc cho runtime ${accountMode}.`}>
+            <InfoRow label="Runtime account" valueText={accountMode} strong />
             <InfoRow label="Read only panel" valueText={ui?.safety.readOnly ? "Yes" : "Yes"} />
             <InfoRow label="Order permission" valueText={clean(ui?.safety.orderPermission, pickText(raw(panel, "mt5OrderPermission"), "NONE"))} />
             <InfoRow label="New positions only" valueText={ui?.safety.newPositionsOnly ? "Yes" : "Yes"} />
             <InfoRow label="Martingale" valueText={ui?.safety.martingale === false ? "No" : "No"} />
             <InfoRow label="Recovery escalation" valueText={ui?.safety.recoveryLotEscalation === false ? "No" : "No"} />
+            <InfoRow label="LIVE execution capability" valueText={isLiveAccount ? (lifecycleSafety.realAccountAllowed ? "Được cấu hình" : "Bị khóa") : "Không áp dụng"} />
             <InfoRow label="Execution mutation" valueText={boolText(asRecord(accountRisk.safety).executionMutation)} />
             <InfoRow label="Phase7B fixed volume unchanged" valueText={boolText(asRecord(accountRisk.safety).phase7bFixedVolumeUnchanged)} />
             <InfoRow label="Lot binding active" valueText={lotRuntime.activeAlive ? "Active" : "—"} />

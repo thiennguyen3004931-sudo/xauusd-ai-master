@@ -10,6 +10,7 @@ on:
       - "apps/api/src/services/phase7c-ui-contract.service.ts"
       - "apps/web/src/pages/PerformancePage.tsx"
       - "apps/web/src/pages/Phase7BDemoPage.tsx"
+      - "apps/web/src/pages/Phase7BOpsPage.tsx"
       - "apps/web/src/phase7c-panel-status.ts"
       - "apps/web/src/types.ts"
       - "apps/web/src/ui/DashboardLayout.tsx"
