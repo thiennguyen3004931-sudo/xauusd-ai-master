@@ -14,9 +14,9 @@ const string LEGACY_PREFIX = "XAU_AI_P7C_";
 const string CANVAS_NAME = "XAU_AI_P7C_CANVAS_V7";
 const int PANEL_MIN_WIDTH = 500;
 const int PANEL_MAX_WIDTH = 620;
-const int WAITING_HEIGHT = 585;
-const int SETUP_HEIGHT = 505;
-const int MANAGING_HEIGHT = 710;
+const int WAITING_HEIGHT = 420;
+const int SETUP_HEIGHT = 425;
+const int MANAGING_HEIGHT = 505;
 // Required installer safety marker: READ ONLY | DEMO/LIVE | ORDER PERMISSION = NONE
 
 CCanvas g_canvas;
@@ -318,29 +318,43 @@ void DrawStateStrip(const string payload, const int width, const string title, c
    Text(x + 14, y + 26, "Khuyến nghị: " + ModeVi(Field(payload, "recommendedMode")), clrSilver, 8);
 }
 
-void DrawReasonCard(const int width, const int y, const int height, const string title, const string r1, const string r2, const color tone, const string fallback)
+void DrawReasonLine(const int x, const int y, const int max_width, const string label, const string reason, const color tone, const string fallback)
+{
+   Text(x, y, label, tone, 7);
+   Text(x + 112, y, FitText(ReasonVi(reason, fallback), max_width - 112, 7), clrWhite, 7);
+}
+
+void DrawReasonSummary(const string payload, const int width, const int y, const string state)
 {
    const int x = 10;
    const int w = width - 20;
-   Card(x, y, w, height, C'7,21,30', C'0,72,102');
-   Text(x + 14, y + 8, title, tone, 9);
-   int max_text_width = w - 38;
-   Text(x + 20, y + 30, FitText(ReasonVi(r1, fallback), max_text_width, 8), clrWhite, 8);
-   if(!EmptyValue(r2))
-      Text(x + 20, y + 50, FitText(ReasonVi(r2), max_text_width, 8), clrSilver, 8);
-}
+   int h = state == "MANAGING" ? 176 : (state == "SETUP_READY" ? 104 : 190);
+   Card(x, y, w, h, C'7,21,30', C'0,72,102');
+   Text(x + 14, y + 8, "LÝ DO QUYẾT ĐỊNH", clrAqua, 9);
+   int line_x = x + 18;
+   int max_width = w - 36;
+   int line_y = y + 31;
 
-void DrawExitReason(const string payload, const int width, const int y)
-{
-   DrawReasonCard(
-      width,
-      y,
-      64,
-      "LÝ DO ĐÓNG TOÀN BỘ",
-      Field(payload, "exitReason1"),
-      Field(payload, "exitReason2"),
-      clrGold,
-      "Chưa phát sinh điều kiện đóng toàn bộ.");
+   if(state == "WAITING")
+   {
+      DrawReasonLine(line_x, line_y, max_width, "AUTO/REGIME", Field(payload, "autoReason1"), clrOrange, "AUTO chưa có dữ liệu chọn strategy.");
+      DrawReasonLine(line_x, line_y + 36, max_width, "TREND", Field(payload, "trendWaitReason1"), clrDeepSkyBlue, "Trend chưa có setup hợp lệ.");
+      DrawReasonLine(line_x, line_y + 72, max_width, "SIDEWAY", Field(payload, "sidewayWaitReason1"), clrAqua, "Sideway chưa có setup hợp lệ.");
+      DrawReasonLine(line_x, line_y + 108, max_width, "ĐÓNG TOÀN BỘ", Field(payload, "exitReason1"), clrGold, "Chưa có điều kiện đóng toàn bộ gần đây.");
+   }
+   else if(state == "SETUP_READY")
+   {
+      DrawReasonLine(line_x, line_y, max_width, "VÀO LỆNH", Field(payload, "entryReason1"), clrLimeGreen, "Setup đã được duyệt.");
+      DrawReasonLine(line_x, line_y + 36, max_width, "AUTO/REGIME", Field(payload, "autoReason1"), clrOrange, "Không có dữ liệu AUTO/Regime.");
+   }
+   else
+   {
+      DrawReasonLine(line_x, line_y, max_width, "VÀO LỆNH", Field(payload, "entryReason1"), clrLimeGreen, "Không có dữ liệu lý do vào lệnh.");
+      DrawReasonLine(line_x, line_y + 28, max_width, "GIỮ LỆNH", Field(payload, "holdReason1"), clrDeepSkyBlue, "Không có dữ liệu lý do giữ lệnh.");
+      DrawReasonLine(line_x, line_y + 56, max_width, "DỜI SL", Field(payload, "stopMoveReason1"), clrLimeGreen, "Chưa phát sinh dời SL.");
+      DrawReasonLine(line_x, line_y + 84, max_width, "CHỐT 1/3", Field(payload, "partialReason1"), clrAqua, "Chưa phát sinh partial.");
+      DrawReasonLine(line_x, line_y + 112, max_width, "ĐÓNG TOÀN BỘ", Field(payload, "exitReason1"), clrGold, "Chưa phát sinh điều kiện đóng toàn bộ.");
+   }
 }
 
 void DrawTradePlan(const string payload, const int width, const bool managing)
@@ -378,40 +392,21 @@ void DrawTradePlan(const string payload, const int width, const bool managing)
 void DrawWaiting(const string payload, const int width)
 {
    DrawStateStrip(payload, width, "BOT ĐANG CHỜ TÍN HIỆU", clrOrange);
-   DrawReasonCard(
-      width, 222, 86, "AUTO / REGIME · LÝ DO CHỌN STRATEGY",
-      Field(payload, "autoReason1"), Field(payload, "autoReason2"),
-      clrOrange, "AUTO chưa có dữ liệu chọn strategy.");
-   DrawReasonCard(
-      width, 316, 86, "TREND · LÝ DO CHƯA VÀO LỆNH",
-      Field(payload, "trendWaitReason1"), Field(payload, "trendWaitReason2"),
-      clrDeepSkyBlue, "Trend chưa có setup hợp lệ.");
-   DrawReasonCard(
-      width, 410, 86, "SIDEWAY · LÝ DO CHƯA VÀO LỆNH",
-      Field(payload, "sidewayWaitReason1"), Field(payload, "sidewayWaitReason2"),
-      clrAqua, "Sideway chưa có setup hợp lệ.");
-   DrawExitReason(payload, width, 504);
+   DrawReasonSummary(payload, width, 222, "WAITING");
 }
 
 void DrawSetup(const string payload, const int width)
 {
    DrawTradePlan(payload, width, false);
-   DrawReasonCard(
-      width, 254, 78, "LÝ DO VÀO LỆNH",
-      Field(payload, "entryReason1"), Field(payload, "entryReason2"),
-      clrLimeGreen, "Setup đã được duyệt.");
-   DrawReasonCard(
-      width, 340, 78, "AUTO / REGIME · LÝ DO CHỌN STRATEGY",
-      Field(payload, "autoReason1"), Field(payload, "autoReason2"),
-      clrOrange, "Không có dữ liệu AUTO/Regime.");
+   DrawReasonSummary(payload, width, 254, "SETUP_READY");
 
    const int x = 10;
    const int w = width - 20;
-   Card(x, 426, w, 58, C'7,21,30', C'0,72,102');
-   Text(x + 14, 434, "Chiến lược: " + ModeVi(Field(payload, "setupStrategy")), clrWhite, 8);
-   TextRight(x + w - 14, 434, "Hướng: " + SideVi(Field(payload, "setupSide")), clrWhite, 8);
-   Text(x + 14, 456, "Lot: " + Clean(Field(payload, "setupFinalLot")), clrSilver, 8);
-   TextRight(x + w - 14, 456, "Risk: " + Clean(Field(payload, "setupRiskPercent")) + "%", clrSilver, 8);
+   Card(x, 366, w, 48, C'7,21,30', C'0,72,102');
+   Text(x + 14, 374, "Chiến lược: " + ModeVi(Field(payload, "setupStrategy")), clrWhite, 8);
+   TextRight(x + w - 14, 374, "Hướng: " + SideVi(Field(payload, "setupSide")), clrWhite, 8);
+   Text(x + 14, 394, "Lot: " + Clean(Field(payload, "setupFinalLot")), clrSilver, 8);
+   TextRight(x + w - 14, 394, "Risk: " + Clean(Field(payload, "setupRiskPercent")) + "%", clrSilver, 8);
 }
 
 void DrawManaging(const string payload, const int width)
@@ -426,23 +421,7 @@ void DrawManaging(const string payload, const int width)
    Text(x + 14, 286, "Hướng: " + SideVi(Field(payload, "positionSide")) + " · Lot: " + Clean(Field(payload, "positionVolume")), clrSilver, 8);
    TextRight(x + w - 14, 286, Clean(Field(payload, "floatingPnlPercent")) + "%", clrSilver, 8);
 
-   DrawReasonCard(
-      width, 318, 78, "LÝ DO VÀO LỆNH",
-      Field(payload, "entryReason1"), Field(payload, "entryReason2"),
-      clrLimeGreen, "Không có dữ liệu lý do vào lệnh.");
-   DrawReasonCard(
-      width, 404, 78, "LÝ DO GIỮ LỆNH",
-      Field(payload, "holdReason1"), Field(payload, "holdReason2"),
-      clrDeepSkyBlue, "Không có dữ liệu lý do giữ lệnh.");
-   DrawReasonCard(
-      width, 490, 64, "LÝ DO DỜI STOP LOSS",
-      Field(payload, "stopMoveReason1"), Field(payload, "stopMoveReason2"),
-      clrLimeGreen, "Chưa phát sinh lần dời SL nào trong lệnh hiện tại.");
-   DrawReasonCard(
-      width, 562, 64, "LÝ DO CHỐT 1/3",
-      Field(payload, "partialReason1"), Field(payload, "partialReason2"),
-      clrAqua, "Chưa đạt +10 hoặc chưa phát sinh partial.");
-   DrawExitReason(payload, width, 634);
+   DrawReasonSummary(payload, width, 318, "MANAGING");
 }
 
 void RenderPanel(const string payload)
