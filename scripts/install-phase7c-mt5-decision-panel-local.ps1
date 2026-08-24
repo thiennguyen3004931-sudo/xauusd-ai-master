@@ -16,8 +16,23 @@ foreach ($forbidden in @("OrderSend", "CTrade", "PositionClose", "PositionModify
     throw "MT5 decision panel must remain read-only; forbidden token detected: $forbidden"
   }
 }
-if ($SourceText -notmatch 'ORDER PERMISSION = NONE') {
-  throw "MT5 decision panel read-only safety marker is missing."
+foreach ($required in @(
+  "ORDER PERMISSION = NONE",
+  "DEMO/LIVE",
+  'Field(payload, "accountMode")',
+  "RuntimeMatchesTerminal",
+  'Field(payload, "autoReason1")',
+  'Field(payload, "trendWaitReason1")',
+  'Field(payload, "sidewayWaitReason1")',
+  'Field(payload, "entryReason1")',
+  'Field(payload, "holdReason1")',
+  'Field(payload, "stopMoveReason1")',
+  'Field(payload, "partialReason1")',
+  'Field(payload, "exitReason1")'
+)) {
+  if ($SourceText.IndexOf($required, [System.StringComparison]::Ordinal) -lt 0) {
+    throw "MT5 decision panel synchronized semantic marker is missing: $required"
+  }
 }
 
 if (-not [System.IO.Path]::IsPathRooted($BridgeEnv)) {
@@ -142,10 +157,24 @@ if (-not $SkipCompile) {
 
 try {
   $probe = Invoke-WebRequest -Uri $ApiUrl -UseBasicParsing -TimeoutSec 8
-  if ($probe.StatusCode -ne 200 -or $probe.Content -notmatch '(?m)^mt5OrderPermission=NONE$') {
-    throw "Decision endpoint safety marker is missing."
+  if (
+    $probe.StatusCode -ne 200 -or
+    $probe.Content -notmatch '(?m)^version=2$' -or
+    $probe.Content -notmatch '(?m)^accountMode=(DEMO|LIVE)$' -or
+    $probe.Content -notmatch '(?m)^autoReason1=' -or
+    $probe.Content -notmatch '(?m)^trendWaitReason1=' -or
+    $probe.Content -notmatch '(?m)^sidewayWaitReason1=' -or
+    $probe.Content -notmatch '(?m)^entryReason1=' -or
+    $probe.Content -notmatch '(?m)^holdReason1=' -or
+    $probe.Content -notmatch '(?m)^stopMoveReason1=' -or
+    $probe.Content -notmatch '(?m)^partialReason1=' -or
+    $probe.Content -notmatch '(?m)^exitReason1=' -or
+    $probe.Content -notmatch '(?m)^mt5OrderPermission=NONE$'
+  ) {
+    throw "Decision endpoint synchronized semantic safety markers are missing."
   }
   Write-Host "PHASE7C_MT5_PANEL_API=PASS"
+  Write-Host "PHASE7C_MT5_PANEL_SEMANTIC_SYNC=PASS"
 } catch {
   Write-Warning "Decision endpoint is not ready yet: $($_.Exception.Message)"
   Write-Host "PHASE7C_MT5_PANEL_API=CHECK_AFTER_ACTIVATION"
@@ -155,5 +184,6 @@ Write-Host "PHASE7C_MT5_PANEL_INSTALL=PASS"
 Write-Host "PHASE7C_MT5_PANEL_SOURCE=$Destination"
 Write-Host "PHASE7C_MT5_PANEL_WEBREQUEST_ALLOW=http://127.0.0.1:3711"
 Write-Host "PHASE7C_MT5_PANEL_API_URL=$ApiUrl"
+Write-Host "PHASE7C_MT5_PANEL_CONTRACT=SEMANTIC_UI_V2"
 Write-Host "PHASE7C_MT5_PANEL_ORDER_PERMISSION=NONE"
 Write-Host "PHASE7C_MT5_PANEL_NEXT=MT5 Tools > Options > Expert Advisors > Allow WebRequest; add http://127.0.0.1:3711; then attach Expert Advisor XAUUSD_AI_MASTER\\XAUUSD_AI_Master_Decision_Panel to the XAUUSD chart."
