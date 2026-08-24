@@ -122,8 +122,8 @@ if (-not $SkipCompile) {
   }
   $CompileLog = Join-Path $ExpertDir "XAUUSD_AI_Master_Decision_Panel.compile.log"
   $arguments = @(
-    ('/compile:\"{0}\"' -f $Destination),
-    ('/log:\"{0}\"' -f $CompileLog)
+    ('/compile:"{0}"' -f $Destination),
+    ('/log:"{0}"' -f $CompileLog)
   )
   $compileStartedAt = (Get-Date).ToUniversalTime()
   $process = Start-Process -FilePath $MetaEditor -ArgumentList $arguments -Wait -PassThru
