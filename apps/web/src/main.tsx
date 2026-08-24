@@ -5,6 +5,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import "./styles.css";
 
+// Suppress the legacy full-body localization observer before React renders.
+// The scoped VietnameseLocalizationRuntime inside App owns dynamic translation.
+document.body.setAttribute("data-no-vi-localize", "runtime-managed");
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
