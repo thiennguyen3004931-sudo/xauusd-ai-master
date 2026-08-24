@@ -6,6 +6,14 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from .auth import api_key_dependency
+from .broker_time import (
+    broker_time_offset_seconds,
+    normalize_candles,
+    normalize_deals,
+    normalize_positions,
+    normalize_quote,
+    normalize_trading_day_boundary,
+)
 from .config import Settings
 from .errors import BridgeError
 from .forming_candles import candles_with_forming
@@ -47,17 +55,20 @@ async def bridge_error_handler(_, exc: BridgeError):
 
 @app.get("/health", dependencies=[Depends(verify_api_key)])
 def health():
-    return gateway.health()
+    return {
+        **gateway.health(),
+        "brokerTimeOffsetSeconds": broker_time_offset_seconds(),
+    }
 
 
 @app.get("/v1/quotes/{symbol}", dependencies=[Depends(verify_api_key)])
 def quote(symbol: str):
-    return gateway.quote(symbol)
+    return normalize_quote(gateway.quote(symbol))
 
 
 @app.get("/v1/session/day-boundary/{symbol}", dependencies=[Depends(verify_api_key)])
 def trading_day_boundary(symbol: str):
-    return gateway.trading_day_boundary(symbol)
+    return normalize_trading_day_boundary(gateway.trading_day_boundary(symbol))
 
 
 @app.get("/v1/candles/{symbol}", dependencies=[Depends(verify_api_key)])
@@ -67,9 +78,12 @@ def candles(
     count: int = 320,
     includeForming: bool = False,
 ):
-    if includeForming:
-        return candles_with_forming(gateway, symbol, timeframe, count)
-    return gateway.candles(symbol, timeframe, count)
+    rows = (
+        candles_with_forming(gateway, symbol, timeframe, count)
+        if includeForming
+        else gateway.candles(symbol, timeframe, count)
+    )
+    return normalize_candles(rows)
 
 
 @app.get("/v1/history/candles/{symbol}", dependencies=[Depends(verify_api_key)])
@@ -79,7 +93,9 @@ def candle_history(
     toMs: int,
     timeframe: str = "M15",
 ):
-    return historical_candles(gateway, symbol, timeframe, fromMs, toMs)
+    return normalize_candles(
+        historical_candles(gateway, symbol, timeframe, fromMs, toMs)
+    )
 
 
 @app.get("/v1/symbols/{symbol}/spec", dependencies=[Depends(verify_api_key)])
@@ -89,12 +105,12 @@ def symbol_spec(symbol: str):
 
 @app.get("/v1/history/deals", dependencies=[Depends(verify_api_key)])
 def deal_history(fromMs: int, toMs: int, symbol: str | None = None):
-    return gateway.deals(fromMs, toMs, symbol)
+    return normalize_deals(gateway.deals(fromMs, toMs, symbol))
 
 
 @app.get("/v1/positions", dependencies=[Depends(verify_api_key)])
 def positions(symbol: str | None = Query(default=None)):
-    return gateway.positions(symbol)
+    return normalize_positions(gateway.positions(symbol))
 
 
 @app.post("/v1/orders", dependencies=[Depends(verify_api_key)])
