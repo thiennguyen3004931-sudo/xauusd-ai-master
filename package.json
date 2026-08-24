@@ -15,8 +15,11 @@
     "dev:web": "turbo run dev --filter=@xauusd/web"
   },
   "devDependencies": {
+    "prettier": "^3.6.2",
     "turbo": "^2.5.6",
-    "typescript": "^5.9.2",
-    "prettier": "^3.6.2"
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@xauusd/risk-engine": "workspace:*"
   }
 }

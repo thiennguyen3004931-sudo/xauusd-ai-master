@@ -40,8 +40,38 @@ function resolveBridgeEnv(runtimeRoot) {
   const statePath = path.join(runtimeRoot, "phase7c-account-mode.json");
   if (!fs.existsSync(statePath)) throw new Error(`Account-mode state not found: ${statePath}`);
   const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
-  if (!state?.valid || !state?.envFile) throw new Error(`Account-mode state is invalid or has no envFile: ${statePath}`);
-  return path.resolve(String(state.envFile));
+
+  const version = Number(state?.version);
+  const accountMode = String(state?.accountMode ?? "").trim().toUpperCase();
+  const liveExecutionEnabled = state?.liveExecutionEnabled === true;
+  const envFile = typeof state?.envFile === "string" ? state.envFile.trim() : "";
+
+  if (version !== 1) {
+    throw new Error(`Account-mode state version must be 1: ${statePath}`);
+  }
+
+  if (accountMode !== "DEMO" && accountMode !== "LIVE") {
+    throw new Error(`Unsupported accountMode=${accountMode || "missing"}: ${statePath}`);
+  }
+
+  if (accountMode === "DEMO" && liveExecutionEnabled) {
+    throw new Error(`Invalid account-mode state: DEMO cannot enable LIVE execution: ${statePath}`);
+  }
+
+  if (accountMode === "LIVE" && !liveExecutionEnabled) {
+    throw new Error(`Invalid account-mode state: LIVE requires liveExecutionEnabled=true: ${statePath}`);
+  }
+
+  if (!envFile) {
+    throw new Error(`Account-mode state has no envFile: ${statePath}`);
+  }
+
+  const resolvedEnvFile = path.resolve(envFile);
+  if (!fs.existsSync(resolvedEnvFile)) {
+    throw new Error(`Account-mode envFile not found: ${resolvedEnvFile}`);
+  }
+
+  return resolvedEnvFile;
 }
 
 function bodySize(bar) {
