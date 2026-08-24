@@ -15,6 +15,12 @@ export interface Mt5BridgeHealth {
   accountCurrency?: string;
   server?: string;
   terminalVersion?: string;
+  configuredAccountMode?: "DEMO" | "LIVE";
+  bridgeSessionId?: string;
+  liveArmRequired?: boolean;
+  liveExecutionArmed?: boolean;
+  liveArmStatus?: "ARMED" | "DISARMED" | "NOT_REQUIRED";
+  liveArmReason?: string;
   lastError?: string;
   reconnectCount?: number;
   lastReconnectAt?: number;
