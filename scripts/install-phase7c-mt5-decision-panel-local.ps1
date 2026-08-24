@@ -22,8 +22,12 @@ foreach ($required in @(
   'Field(payload, "accountMode")',
   "RuntimeMatchesTerminal",
   'Field(payload, "autoReason1")',
-  'Field(payload, "trendWaitReason1")',
-  'Field(payload, "sidewayWaitReason1")',
+  'Field(payload, "waitReason1")',
+  "FirstEntryBlocker",
+  "DrawEntryCheckSummary",
+  'prefix + "Check" + suffix + "Status"',
+  'prefix + "Check" + suffix + "Label"',
+  'prefix + "Check" + suffix + "Actual"',
   'Field(payload, "entryReason1")',
   'Field(payload, "holdReason1")',
   'Field(payload, "stopMoveReason1")',
@@ -164,6 +168,12 @@ try {
     $probe.Content -notmatch '(?m)^autoReason1=' -or
     $probe.Content -notmatch '(?m)^trendWaitReason1=' -or
     $probe.Content -notmatch '(?m)^sidewayWaitReason1=' -or
+    $probe.Content -notmatch '(?m)^trendCheck1Status=' -or
+    $probe.Content -notmatch '(?m)^trendCheck1Label=' -or
+    $probe.Content -notmatch '(?m)^trendCheck1Actual=' -or
+    $probe.Content -notmatch '(?m)^sidewayCheck1Status=' -or
+    $probe.Content -notmatch '(?m)^sidewayCheck1Label=' -or
+    $probe.Content -notmatch '(?m)^sidewayCheck1Actual=' -or
     $probe.Content -notmatch '(?m)^entryReason1=' -or
     $probe.Content -notmatch '(?m)^holdReason1=' -or
     $probe.Content -notmatch '(?m)^stopMoveReason1=' -or

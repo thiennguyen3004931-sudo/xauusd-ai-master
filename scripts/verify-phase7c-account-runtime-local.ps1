@@ -11,8 +11,18 @@ param(
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $AccountLibrary = Join-Path $PSScriptRoot "lib\phase7c-account-mode.ps1"
-if (-not (Test-Path -LiteralPath $AccountLibrary)) { throw "Phase7C account-mode library not found: $AccountLibrary" }
+$TaskOwnershipLibrary = Join-Path $PSScriptRoot "lib\phase7c-scheduled-task-ownership.ps1"
+
+if (-not (Test-Path -LiteralPath $AccountLibrary)) {
+  throw "Phase7C account-mode library not found: $AccountLibrary"
+}
+
+if (-not (Test-Path -LiteralPath $TaskOwnershipLibrary)) {
+  throw "Phase7C Scheduled Task ownership library not found: $TaskOwnershipLibrary"
+}
+
 . $AccountLibrary
+. $TaskOwnershipLibrary
 $ExpectedAccountMode = ConvertTo-Phase7CAccountMode $ExpectedAccountMode
 $ExpectedBrokerMode = if ($ExpectedAccountMode -eq "LIVE") { "real" } else { "demo" }
 
@@ -41,14 +51,57 @@ $EnvFile = $envInfo.envFile
 Write-Host "PHASE7C_ACCOUNT_VERIFY_EXPECTED_MODE=$ExpectedAccountMode"
 Write-Host "PHASE7C_ACCOUNT_VERIFY_STATE=PASS"
 
-$task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-$actions = @($task.Actions)
-$actionText = if ($actions.Count -eq 1) { "$($actions[0].Execute) $($actions[0].Arguments)" } else { "MULTIPLE_ACTIONS" }
-$startupRunner = $actions.Count -eq 1 -and $actionText -like "*run-phase7c-executor-task-runner-local.ps1*"
-Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_STATE=$($task.State)"
-Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_STARTUP_RUNNER=$startupRunner"
-if (-not $startupRunner) { throw "Executor Scheduled Task is not using the verified startup runner." }
-if ($task.State -ne "Running") { throw "Executor Scheduled Task must be Running. Actual=$($task.State)" }
+$task = $null
+$taskTopologyVerified = $false
+$taskLookupClassification = "FOUND"
+
+try {
+  $task = Get-ScheduledTask `
+    -TaskName $TaskName `
+    -ErrorAction Stop
+}
+catch {
+  $taskLookupClassification = `
+    Get-Phase7CScheduledTaskErrorClassification `
+      -Exception $_.Exception
+
+  if ($taskLookupClassification -ne "NOT_FOUND") {
+    throw "Executor Scheduled Task lookup failed closed. Classification=$taskLookupClassification. $($_.Exception.Message)"
+  }
+}
+
+Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_LOOKUP=$taskLookupClassification"
+
+if ($null -ne $task) {
+  $expectedRunnerPath = `
+    Get-Phase7CExecutorTaskRunnerPath `
+      -ProjectRoot $ProjectRoot
+
+  $ownership = `
+    Test-Phase7CExecutorTaskActionOwnership `
+      -Actions $task.Actions `
+      -ExpectedRunnerPath $expectedRunnerPath
+
+  Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_STATE=$($task.State)"
+  Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_OWNED=$($ownership.owned)"
+  Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_OWNERSHIP_REASON=$($ownership.reason)"
+
+  if (-not [bool]$ownership.owned) {
+    throw "Executor Scheduled Task ownership verification failed. Reason=$($ownership.reason)"
+  }
+
+  if ([string]$task.State -ne "Running") {
+    throw "Executor Scheduled Task must be Running. Actual=$($task.State)"
+  }
+
+  $taskTopologyVerified = $true
+
+  Write-Host "PHASE7C_ACCOUNT_VERIFY_EXECUTOR_TOPOLOGY=TASK"
+}
+else {
+  Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_STATE=MISSING"
+  Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_OWNED=False"
+}
 
 if (-not (Test-Path $TaskConfigPath)) { throw "Executor task config not found: $TaskConfigPath" }
 $taskConfig = Get-Content -LiteralPath $TaskConfigPath -Raw | ConvertFrom-Json
@@ -94,6 +147,175 @@ try {
 finally { if ($null -ne $probe) { $probe.Dispose() } }
 Write-Host "PHASE7C_ACCOUNT_VERIFY_STARTUP_RUNNER_LOCK_HELD=$lockHeld"
 if (-not $lockHeld) { throw "Startup runner singleton lock is not held." }
+
+$runnerProcess = Get-CimInstance `
+  Win32_Process `
+  -Filter "ProcessId = $runnerPid" `
+  -ErrorAction Stop
+
+if ($null -eq $runnerProcess) {
+  throw "Startup runner process metadata is unavailable."
+}
+
+$runnerProcessName = [string]$runnerProcess.Name
+$runnerIsWindowsPowerShell = `
+  $runnerProcessName.Equals(
+    "powershell.exe",
+    [System.StringComparison]::OrdinalIgnoreCase
+  )
+
+Write-Host "PHASE7C_ACCOUNT_VERIFY_STARTUP_RUNNER_PROCESS_NAME=$runnerProcessName"
+Write-Host "PHASE7C_ACCOUNT_VERIFY_STARTUP_RUNNER_IS_POWERSHELL=$runnerIsWindowsPowerShell"
+
+if (-not $runnerIsWindowsPowerShell) {
+  throw "Startup runner process is not Windows PowerShell."
+}
+
+$runnerParentPid = [int]$runnerProcess.ParentProcessId
+
+if ($runnerParentPid -le 0) {
+  throw "Startup runner parent PID is invalid."
+}
+
+$scheduleService = Get-CimInstance `
+  Win32_Service `
+  -Filter "Name = 'Schedule'" `
+  -ErrorAction Stop
+
+if ($null -eq $scheduleService) {
+  throw "Windows Task Scheduler service metadata is unavailable."
+}
+
+$scheduleServicePid = [int]$scheduleService.ProcessId
+$scheduleServiceRunning = `
+  [string]$scheduleService.State -eq "Running"
+
+$runnerParentIsSchedule = `
+  $scheduleServiceRunning -and
+  $scheduleServicePid -gt 0 -and
+  $runnerParentPid -eq $scheduleServicePid
+
+Write-Host "PHASE7C_ACCOUNT_VERIFY_SCHEDULE_SERVICE_PID=$scheduleServicePid"
+Write-Host "PHASE7C_ACCOUNT_VERIFY_SCHEDULE_SERVICE_RUNNING=$scheduleServiceRunning"
+Write-Host "PHASE7C_ACCOUNT_VERIFY_RUNNER_PARENT_PID=$runnerParentPid"
+Write-Host "PHASE7C_ACCOUNT_VERIFY_RUNNER_PARENT_IS_SCHEDULE=$runnerParentIsSchedule"
+
+if (-not $runnerParentIsSchedule) {
+  throw "Startup runner is not directly owned by the running Windows Task Scheduler service."
+}
+
+if ([string]$runnerStatus.status -ne "SUPERVISOR_RUNNING") {
+  throw "Startup runner status is not SUPERVISOR_RUNNING. Actual=$($runnerStatus.status)"
+}
+
+if (-not [bool]$runnerStatus.armed) {
+  throw "Startup runner status must remain armed=true."
+}
+
+if (
+  $ExpectedAccountMode -eq "LIVE" -and
+  -not [bool]$runnerStatus.liveExecutionEnabled
+) {
+  throw "LIVE startup runner status does not have liveExecutionEnabled=true."
+}
+
+if (
+  $ExpectedAccountMode -eq "DEMO" -and
+  [bool]$runnerStatus.liveExecutionEnabled
+) {
+  throw "DEMO startup runner status cannot have liveExecutionEnabled=true."
+}
+
+if (
+  [string]$runnerStatus.nodePath -ne
+  [string]$taskConfig.nodePath
+) {
+  throw "Startup runner nodePath does not match executor task config."
+}
+
+if (
+  [string]$runnerStatus.pnpmPath -ne
+  [string]$taskConfig.pnpmPath
+) {
+  throw "Startup runner pnpmPath does not match executor task config."
+}
+
+$runnerStatusSupervisorPid = [int]$runnerStatus.supervisorPid
+$actualSupervisorPid = [int]$pidStatuses["supervisor"].pid
+
+$runnerSupervisorMatch = `
+  $runnerStatusSupervisorPid -gt 0 -and
+  $runnerStatusSupervisorPid -eq $actualSupervisorPid
+
+Write-Host "PHASE7C_ACCOUNT_VERIFY_RUNNER_STATUS_SUPERVISOR_PID=$runnerStatusSupervisorPid"
+Write-Host "PHASE7C_ACCOUNT_VERIFY_RUNNER_STATUS_SUPERVISOR_MATCH=$runnerSupervisorMatch"
+
+if (-not $runnerSupervisorMatch) {
+  throw "Startup runner supervisor PID does not match the active supervisor PID."
+}
+
+$supervisorProcess = Get-CimInstance `
+  Win32_Process `
+  -Filter "ProcessId = $actualSupervisorPid" `
+  -ErrorAction Stop
+
+if ($null -eq $supervisorProcess) {
+  throw "Supervisor process metadata is unavailable."
+}
+
+$supervisorProcessName = [string]$supervisorProcess.Name
+$supervisorIsPowerShell = `
+  $supervisorProcessName.Equals(
+    "powershell.exe",
+    [System.StringComparison]::OrdinalIgnoreCase
+  )
+
+$supervisorParentIsRunner = `
+  [int]$supervisorProcess.ParentProcessId -eq $runnerPid
+
+Write-Host "PHASE7C_ACCOUNT_VERIFY_SUPERVISOR_PROCESS_NAME=$supervisorProcessName"
+Write-Host "PHASE7C_ACCOUNT_VERIFY_SUPERVISOR_IS_POWERSHELL=$supervisorIsPowerShell"
+Write-Host "PHASE7C_ACCOUNT_VERIFY_SUPERVISOR_PARENT_IS_RUNNER=$supervisorParentIsRunner"
+
+if (-not $supervisorIsPowerShell) {
+  throw "Supervisor process is not Windows PowerShell."
+}
+
+if (-not $supervisorParentIsRunner) {
+  throw "Supervisor is not a direct child of the verified startup runner."
+}
+
+# Some Windows/WMI configurations return an empty CommandLine for processes
+# launched by Task Scheduler. Use it as an additional assertion only when the
+# provider exposes it; never make an empty provider field the sole identity gate.
+$supervisorCommandLine = [string]$supervisorProcess.CommandLine
+
+if (-not [string]::IsNullOrWhiteSpace($supervisorCommandLine)) {
+  $supervisorCommandTrusted = `
+    $supervisorCommandLine -like "*run-phase7c-executors-local.ps1*" -and
+    $supervisorCommandLine -like "*-AccountMode $ExpectedAccountMode*"
+
+  if ($ExpectedAccountMode -eq "LIVE") {
+    $supervisorCommandTrusted = `
+      $supervisorCommandTrusted -and
+      $supervisorCommandLine -like "*-LiveExecutionEnabled*"
+  }
+
+  Write-Host "PHASE7C_ACCOUNT_VERIFY_SUPERVISOR_COMMAND_TRUSTED=$supervisorCommandTrusted"
+
+  if (-not $supervisorCommandTrusted) {
+    throw "Supervisor command line is available but does not match the selected runtime contract."
+  }
+}
+else {
+  Write-Host "PHASE7C_ACCOUNT_VERIFY_SUPERVISOR_COMMAND_TRUSTED=PROVIDER_UNAVAILABLE"
+}
+
+if (-not $taskTopologyVerified) {
+  Write-Host "PHASE7C_ACCOUNT_VERIFY_EXECUTOR_TOPOLOGY=STARTUP_RUNNER"
+  Write-Host "PHASE7C_ACCOUNT_VERIFY_STARTUP_RUNNER_IDENTITY=TOPOLOGY_PROOF"
+  Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_FALLBACK=PASS"
+}
 
 $telegramConfigured = $false
 if (-not [System.IO.Path]::IsPathRooted($TelegramEnvFile)) { $TelegramEnvFile = Join-Path $ProjectRoot $TelegramEnvFile }

@@ -46,6 +46,27 @@ Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'Invoke-WebReques
 Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" '\$positionRaw\s+-eq\s+"\[\]"' "empty broker position array must map to zero positions"
 Assert-NotText "scripts/verify-phase7c-account-runtime-local.ps1" '\$positions\s*=\s*@\(Invoke-RestMethod\s+-Uri\s+"\$bridgeBase/v1/positions\?symbol=XAUUSD"' "account verifier must not use ambiguous REST array wrapping"
 
+# Runtime topology may be either a verified executor Scheduled Task or a
+# still-running startup runner created by Windows Task Scheduler. Fallback is
+# allowed only for a true NOT_FOUND result; access/provider failures stay
+# fail-closed. When process CommandLine is unavailable, identity is proved by
+# Schedule-service ancestry + fresh runner status + singleton lock + exact
+# supervisor PID/parent relationship + selected account/config consistency.
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'phase7c-scheduled-task-ownership\.ps1' "runtime verifier must load Scheduled Task ownership helpers"
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'Get-Phase7CScheduledTaskErrorClassification' "task lookup failures must be classified"
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'Test-Phase7CExecutorTaskActionOwnership' "existing executor task must use exact ownership verification"
+Assert-NotText "scripts/verify-phase7c-account-runtime-local.ps1" 'Get-ScheduledTask\s+-TaskName\s+\$TaskName\s+-ErrorAction\s+SilentlyContinue' "task lookup must not hide access/provider failures"
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'PHASE7C_ACCOUNT_VERIFY_TASK_LOOKUP=' "task lookup classification must be observable"
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'PHASE7C_ACCOUNT_VERIFY_EXECUTOR_TOPOLOGY=TASK' "verifier must expose Scheduled Task topology"
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'PHASE7C_ACCOUNT_VERIFY_EXECUTOR_TOPOLOGY=STARTUP_RUNNER' "verifier must expose startup-runner topology"
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'Win32_Service' "startup-runner fallback must inspect Windows Task Scheduler service"
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'PHASE7C_ACCOUNT_VERIFY_RUNNER_PARENT_IS_SCHEDULE=' "runner must be directly owned by Schedule service"
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'PHASE7C_ACCOUNT_VERIFY_RUNNER_STATUS_SUPERVISOR_MATCH=' "runner status supervisor PID must match active supervisor"
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'PHASE7C_ACCOUNT_VERIFY_SUPERVISOR_PARENT_IS_RUNNER=' "supervisor must be direct runner child"
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'PHASE7C_ACCOUNT_VERIFY_STARTUP_RUNNER_IDENTITY=TOPOLOGY_PROOF' "fallback identity proof must be explicit"
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'PHASE7C_ACCOUNT_VERIFY_TASK_FALLBACK=PASS' "verified task-missing fallback marker"
+Assert-NotText "scripts/verify-phase7c-account-runtime-local.ps1" 'Register-ScheduledTask|Start-ScheduledTask|Stop-ScheduledTask' "runtime verifier must remain read-only"
+
 # Telegram starts with lastTelegramSuccessAt=null. The verifier must not cast
 # null to zero and report an enormous fake heartbeat age while STARTING.
 Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" '\$null\s+-ne\s+\$lastTelegramSuccessAt' "Telegram verifier must guard null heartbeat"
