@@ -30,6 +30,7 @@ $UiUrl = "$ApiBase/api/v1/phase7c-ui/mt5?symbol=XAUUSD"
 $ModeUrl = "$ApiBase/api/v1/phase7c/bot-mode"
 $PidDir = Join-Path $WorkDir "phase7c-executors"
 $ArmPath = Join-Path $WorkDir "phase7c-live-arm.json"
+$TelegramStatusPath = Join-Path $PidDir "telegram-mode-status.json"
 $Installer = Join-Path $PSScriptRoot "install-phase7c-mt5-decision-panel-local.ps1"
 $AccountVerifier = Join-Path $PSScriptRoot "verify-phase7c-account-runtime-local.ps1"
 
@@ -203,6 +204,41 @@ function Wait-DashboardV2([string]$ExpectedAccountMode) {
   throw "Phase7C dashboard v2 did not become ready for $ExpectedAccountMode within $StartupTimeoutSeconds seconds."
 }
 
+function Wait-TelegramRecoveryAfterApiRestart([int]$TimeoutSeconds = 45) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $lastStatus = "MISSING"
+  $lastAge = "UNKNOWN"
+  Write-Host "PHASE7C_DASHBOARD_DEPLOY_TELEGRAM_RECOVERY_WAIT=START|TIMEOUT_SECONDS=$TimeoutSeconds"
+  while ((Get-Date) -lt $deadline) {
+    if (Test-Path -LiteralPath $TelegramStatusPath) {
+      try {
+        $telegram = Get-Content -LiteralPath $TelegramStatusPath -Raw | ConvertFrom-Json
+        $lastStatus = [string]$telegram.status
+        $lastSuccessAt = $telegram.lastTelegramSuccessAt
+        if ($null -ne $lastSuccessAt -and [long]$lastSuccessAt -gt 0) {
+          $age = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$lastSuccessAt
+          $lastAge = [string]$age
+          if (
+            [bool]$telegram.ready -and
+            $lastStatus -eq "READY" -and
+            $age -ge -10000 -and
+            $age -le 60000
+          ) {
+            Write-Host "PHASE7C_DASHBOARD_DEPLOY_TELEGRAM_RECOVERY_WAIT=PASS|STATUS=$lastStatus|HEARTBEAT_AGE_MS=$age"
+            return $true
+          }
+        }
+      } catch {
+        $lastStatus = "INVALID_STATUS_FILE"
+        $lastAge = "UNKNOWN"
+      }
+    }
+    Start-Sleep -Seconds 2
+  }
+  Write-Host "PHASE7C_DASHBOARD_DEPLOY_TELEGRAM_RECOVERY_WAIT=TIMEOUT|STATUS=$lastStatus|HEARTBEAT_AGE_MS=$lastAge"
+  return $false
+}
+
 Write-Host "PHASE7C_DASHBOARD_DEPLOY=START"
 
 $task = Get-ScheduledTask -TaskName $WebTask -ErrorAction Stop
@@ -288,6 +324,12 @@ if (-not $SkipPanelInstall) {
 } else {
   Write-Host "PHASE7C_DASHBOARD_DEPLOY_PANEL_INSTALL=SKIPPED"
 }
+
+# Restarting Control API 3711 can briefly put the independent Telegram controller
+# into DEGRADED_RETRYING while it reconnects. Wait for that same process to recover,
+# then keep the existing strict -RequireTelegram verification. This does not restart
+# Telegram, executors, bridge, switch account mode, or mutate LIVE arm state.
+[void](Wait-TelegramRecoveryAfterApiRestart -TimeoutSeconds 45)
 
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $AccountVerifier `
   -WorkDir $WorkDir `
