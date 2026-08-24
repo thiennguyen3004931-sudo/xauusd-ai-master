@@ -1,5 +1,7 @@
 param(
-  [string]$EnvFile = ".env"
+  [string]$EnvFile = ".env",
+  [ValidateSet("DEMO", "LIVE", "")] [string]$AccountMode = "",
+  [string]$LiveArmStatePath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,5 +35,17 @@ Get-Content $EnvFile | ForEach-Object {
   [Environment]::SetEnvironmentVariable($name, $value, 'Process')
 }
 
+# Account selection is supplied by the trusted Phase7C bridge runner, not by
+# the local env file. A direct/legacy bridge start therefore defaults to DEMO
+# in Settings.from_env() and cannot accidentally authorize a REAL mutation.
+if (-not [string]::IsNullOrWhiteSpace($AccountMode)) {
+  [Environment]::SetEnvironmentVariable("MT5_ACCOUNT_MODE", $AccountMode.ToUpperInvariant(), 'Process')
+}
+if (-not [string]::IsNullOrWhiteSpace($LiveArmStatePath)) {
+  [Environment]::SetEnvironmentVariable("MT5_LIVE_ARM_STATE_PATH", $LiveArmStatePath, 'Process')
+}
+
 Write-Host "MT5_BRIDGE_ENV_FILE=$EnvFile"
+Write-Host "MT5_BRIDGE_ACCOUNT_MODE=$env:MT5_ACCOUNT_MODE"
+Write-Host "MT5_BRIDGE_LIVE_ARM_BINDING=$(-not [string]::IsNullOrWhiteSpace($env:MT5_LIVE_ARM_STATE_PATH))"
 .\.venv\Scripts\python.exe -m uvicorn mt5_bridge.app:app --host $env:MT5_BRIDGE_HOST --port $env:MT5_BRIDGE_PORT
