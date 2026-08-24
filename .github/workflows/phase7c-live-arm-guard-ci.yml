@@ -74,7 +74,7 @@ jobs:
         shell: pwsh
         env:
           PYTHONPATH: ${{ github.workspace }}\packages\mt5-broker\bridge
-        run: python -m unittest .\packages\mt5-broker\bridge\tests\test_live_arm.py
+        run: python .\packages\mt5-broker\bridge\tests\test_live_arm.py
 
   live-arm-source-windows:
     runs-on: windows-latest
