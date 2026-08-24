@@ -34,11 +34,11 @@ try {
   if (-not [string]::IsNullOrWhiteSpace($RequiredCommit)) {
     & $git.Source cat-file -e "$RequiredCommit^{commit}" 2>$null
     if ($LASTEXITCODE -ne 0) {
-      throw "Required web UI commit is not present locally: $RequiredCommit. Run git fetch/pull first."
+      throw "Required web UI commit is not present locally: $RequiredCommit. Sync the integration branch first."
     }
     & $git.Source merge-base --is-ancestor $RequiredCommit HEAD 2>$null
     if ($LASTEXITCODE -ne 0) {
-      throw "Current branch does not contain required web UI commit: $RequiredCommit. Run git pull --ff-only first."
+      throw "Current branch does not contain required web UI commit: $RequiredCommit. Sync the integration branch first."
     }
   }
 
