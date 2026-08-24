@@ -51,20 +51,17 @@ $LiveEnvFile = Resolve-ProjectFile $LiveEnvFile
 
 $demoEnv = Assert-Phase7CAccountEnv -EnvFile $DemoEnvFile -AccountMode "DEMO" -RequireTrading
 $liveEnv = $null
-if (Test-Path -LiteralPath $LiveEnvFile) {
+if ($TargetMode -eq "LIVE") {
+  if (-not (Test-Path -LiteralPath $LiveEnvFile)) {
+    throw "LIVE env is not configured. Copy .env.phase7b-live.example to .env.phase7b-live and configure it locally first."
+  }
   $liveEnv = Assert-Phase7CAccountEnv -EnvFile $LiveEnvFile -AccountMode "LIVE" -RequireTrading
-}
-if ($TargetMode -eq "LIVE" -and $null -eq $liveEnv) {
-  throw "LIVE env is not configured. Copy .env.phase7b-live.example to .env.phase7b-live and configure it locally first."
-}
-$targetEnv = if ($TargetMode -eq "LIVE") { $liveEnv } else { $demoEnv }
-
-if ($null -ne $liveEnv) {
   if ($demoEnv.apiKey -ne $liveEnv.apiKey) { throw "DEMO and LIVE must use the same MT5_API_KEY because the local API process keeps a fixed bridge credential." }
   if ($demoEnv.bridgeHost -ne $liveEnv.bridgeHost -or $demoEnv.bridgePort -ne $liveEnv.bridgePort) {
     throw "DEMO and LIVE must use the same localhost MT5 bridge host/port."
   }
 }
+$targetEnv = if ($TargetMode -eq "LIVE") { $liveEnv } else { $demoEnv }
 
 $bridgeTask = Get-ScheduledTask -TaskName $BridgeTaskName -ErrorAction SilentlyContinue
 if ($null -eq $bridgeTask) {
