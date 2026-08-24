@@ -40,7 +40,8 @@ Assert-NotContains 'Start-ScheduledTask|Stop-ScheduledTask' "Capability helper m
 Assert-NotContains 'order_send|/v1/orders/place|/v1/positions/close|/v1/positions/modify' "Capability helper must not contain broker mutation paths."
 
 $preflightIndex = $source.IndexOf('& $Preflight')
-$writeIndex = $source.IndexOf('Write-LiveCapabilityAtomic')
+# LastIndexOf targets the actual invocation, not the earlier function declaration.
+$writeIndex = $source.LastIndexOf('Write-LiveCapabilityAtomic')
 if ($preflightIndex -lt 0 -or $writeIndex -lt 0 -or $preflightIndex -gt $writeIndex) {
   throw "Activation preflight must occur before capability mutation."
 }
