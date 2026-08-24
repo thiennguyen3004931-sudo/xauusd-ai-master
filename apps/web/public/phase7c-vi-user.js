@@ -26,6 +26,7 @@
     ["ORDER NONE", "Không có quyền đặt lệnh"],
     ["RỦI RO percent", "Tỷ lệ rủi ro"],
     ["RỦI RO PERCENT", "Tỷ lệ rủi ro"],
+    ["MT5 CHO PHÉP GIAO DỊCH", "MT5 cho phép giao dịch"],
   ]);
 
   const phrases = [
@@ -89,8 +90,8 @@
     let out = value;
     for (const term of technicalTerms) {
       const pattern = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi");
-      out = out.replace(pattern, (match) => {
-        const token = `__P7C_TECH_${replacements.length}__`;
+      out = out.replace(pattern, () => {
+        const token = `§${replacements.length}§`;
         replacements.push([token, term === "PnL" ? "PnL" : term.toUpperCase()]);
         return token;
       });
@@ -106,10 +107,10 @@
 
   function normalizeAllCapsVietnamese(value) {
     const trimmed = value.trim();
-    if (!trimmed || !/[À-ỹĐđ]/u.test(trimmed)) return value;
+    if (!trimmed || !/[^\x00-\x7F]/u.test(trimmed)) return value;
 
-    const uppercaseLetters = trimmed.match(/[A-ZÀ-ỸĐ]/gu) || [];
-    const lowercaseLetters = trimmed.match(/[a-zà-ỹđ]/gu) || [];
+    const uppercaseLetters = trimmed.match(/\p{Lu}/gu) || [];
+    const lowercaseLetters = trimmed.match(/\p{Ll}/gu) || [];
     if (uppercaseLetters.length < 2 || lowercaseLetters.length > 0) return value;
 
     const { out: protectedValue, replacements } = protectTechnicalTerms(trimmed);
