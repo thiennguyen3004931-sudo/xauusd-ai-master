@@ -71,9 +71,7 @@ function getClient(config: Mt5BrokerConfig): Mt5BridgeClient {
     config.healthTimeoutMs,
   ].join("|");
 
-  if (cachedClient?.signature === signature) {
-    return cachedClient.client;
-  }
+  if (cachedClient?.signature === signature) return cachedClient.client;
 
   new Mt5BrokerConfigValidator().validate(config);
   const transport = new HttpMt5Transport(config);
@@ -165,20 +163,17 @@ export async function getMt5Telemetry(
     ]);
 
     let status: DashboardServiceStatus = "HEALTHY";
-    let message = `MT5 ${health.accountMode ?? "unknown"} connected · ${positions.length} ${symbol} position(s).`;
+    let message = `MT5 ${health.accountMode ?? "unknown"} connected · apps/api read-only · ${positions.length} ${symbol} position(s).`;
 
     if (health.accountMode === "real") {
-      status = "DEGRADED";
-      message = "REAL account detected. Phase 7B DEMO must not execute on this account; apps/api remains telemetry-only.";
+      status = "HEALTHY";
+      message = `MT5 LIVE/real connected · apps/api remains read-only · bridge trading ${health.tradingEnabled ? "enabled" : "disabled"} · ${positions.length} ${symbol} position(s).`;
     } else if (health.accountMode === "contest") {
       status = "DEGRADED";
-      message = "Contest account detected. Phase 7B requires accountMode=demo.";
-    } else if (health.accountMode === "demo" && health.tradingEnabled) {
-      status = "HEALTHY";
-      message = `MT5 demo connected · Bridge trading enabled for the separate Phase 7B controller · apps/api remains read-only · ${positions.length} ${symbol} position(s).`;
+      message = "Contest account detected. Phase7C selected-account runtime supports DEMO or LIVE only.";
     } else if (health.accountMode === "demo") {
-      status = "DEGRADED";
-      message = "MT5 demo connected but Bridge trading is disabled; Phase 7B cannot auto-execute until its dedicated bridge is armed.";
+      status = health.tradingEnabled ? "HEALTHY" : "DEGRADED";
+      message = `MT5 DEMO connected · apps/api remains read-only · bridge trading ${health.tradingEnabled ? "enabled" : "disabled"} · ${positions.length} ${symbol} position(s).`;
     }
 
     return {
