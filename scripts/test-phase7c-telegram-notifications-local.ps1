@@ -20,7 +20,7 @@ function Read-DotEnv([string]$Path) {
     if (-not $line -or $line.StartsWith('#')) { continue }
     $eq = $line.IndexOf('=')
     if ($eq -le 0) { continue }
-    $key = $line.Substring(0, $eq).Trim()
+    $key = $line.Substring(0, $eq).Trim().TrimStart([char]0xFEFF)
     $value = $line.Substring($eq + 1).Trim()
     if ($value.Length -ge 2 -and (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'")))) {
       $value = $value.Substring(1, $value.Length - 2)
@@ -36,7 +36,6 @@ function Send-TestMessage([string]$Token, [string]$ChatId, [string]$ThreadId, [s
   if (-not [string]::IsNullOrWhiteSpace($ThreadId)) { $body.message_thread_id = $ThreadId }
   $result = Invoke-RestMethod -Uri $uri -Method Post -Body $body -ContentType 'application/x-www-form-urlencoded' -TimeoutSec 15
   if (-not $result.ok) { throw 'Telegram sendMessage returned ok=false.' }
-  return $result
 }
 
 $config = Read-DotEnv -Path $EnvFile
@@ -55,16 +54,16 @@ Write-Host 'PHASE7C_TELEGRAM_NOTIFICATION_TEST_CHAT_ID=CONFIGURED_NOT_PRINTED'
 
 $stamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
 $messages = @(
-  "🧪 TEST · SETUP_READY`n$symbol · TREND · BUY`nMẫu: ENGULFING`nEntry dự kiến: 4662.63 · SL: 4654.40`n⚠️ TEST - KHÔNG PHẢI LỆNH THẬT`n$stamp",
-  "🧪 TEST · ENTRY_FILLED`n$symbol · TREND · BUY · 0.12 lot`nEntry: 4662.63 · SL: 4654.40`nLý do: setup Trend hợp lệ`n⚠️ TEST - KHÔNG PHẢI LỆNH THẬT`n$stamp",
-  "🧪 TEST · SL_TO_BE`n$symbol · +6 giá`nSL → Entry / Break-even`nLý do giữ: xu hướng còn hợp lệ`n⚠️ TEST - KHÔNG PHẢI LỆNH THẬT`n$stamp",
-  "🧪 TEST · PARTIAL_1_3`n$symbol · +10 giá`nĐã mô phỏng chốt 1/3 vị thế`nPhần còn lại tiếp tục được quản lý`n⚠️ TEST - KHÔNG PHẢI LỆNH THẬT`n$stamp",
-  "🧪 TEST · POSITION_CLOSED`n$symbol · TREND`nProfit mô phỏng: +12.34 USD`nLý do đóng: TEST_NOTIFICATION_FLOW`n⚠️ TEST - KHÔNG PHẢI LỆNH THẬT`n$stamp"
+  "[TEST] SETUP_READY`n$symbol | TREND | BUY`nPattern: ENGULFING`nExpected entry: 4662.63 | SL: 4654.40`nTEST ONLY - NOT A REAL TRADE`n$stamp",
+  "[TEST] ENTRY_FILLED`n$symbol | TREND | BUY | 0.12 lot`nEntry: 4662.63 | SL: 4654.40`nReason: valid Trend setup`nTEST ONLY - NOT A REAL TRADE`n$stamp",
+  "[TEST] SL_TO_BE`n$symbol | favorable +6`nSL -> Entry / Break-even`nHold reason: trend remains valid`nTEST ONLY - NOT A REAL TRADE`n$stamp",
+  "[TEST] PARTIAL_1_3`n$symbol | favorable +10`nSimulated partial close: 1/3`nRemaining position stays managed`nTEST ONLY - NOT A REAL TRADE`n$stamp",
+  "[TEST] POSITION_CLOSED`n$symbol | TREND`nSimulated profit: +12.34 USD`nExit reason: TEST_NOTIFICATION_FLOW`nTEST ONLY - NOT A REAL TRADE`n$stamp"
 )
 
 $sent = 0
 foreach ($message in $messages) {
-  [void](Send-TestMessage -Token $token -ChatId $chatId -ThreadId $threadId -Text $message)
+  Send-TestMessage -Token $token -ChatId $chatId -ThreadId $threadId -Text $message
   $sent += 1
   Write-Host "PHASE7C_TELEGRAM_NOTIFICATION_TEST_SENT=$sent"
   Start-Sleep -Milliseconds 350
