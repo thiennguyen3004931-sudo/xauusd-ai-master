@@ -105,8 +105,20 @@ function isTradingReason(value: string): boolean {
   return !/(fixed lot|martingale|recovery lot|lot escalation|broker clock|clock offset|position sizing|sizing|lot cap|cap .*lot|configured lot)/i.test(value);
 }
 
+function isExpectedEntryBlockedReason(value: unknown): boolean {
+  const text = String(value ?? "");
+  return /\bPHASE7C_(?:TREND|SIDEWAY)_ENTRY_BLOCKED\b/i.test(text);
+}
+
 function pushUnique(target: string[], raw: unknown, max = 4) {
   if (target.length >= max) return;
+
+  // These canonical bridge responses mean the entry gate intentionally
+  // rejected a submit attempt. Mode/regime/checklist already explains the
+  // blocker, so do not surface the raw HTTP/JSON response as a cycle error.
+  // Unknown HTTP 423 and real transport/server errors remain visible.
+  if (isExpectedEntryBlockedReason(raw)) return;
+
   const reason = normalizeReason(raw);
   if (!reason || !isTradingReason(reason)) return;
   const key = reason.toLocaleLowerCase("vi-VN");

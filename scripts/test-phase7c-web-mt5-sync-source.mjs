@@ -21,6 +21,21 @@ const e2e = read("scripts/run-phase7c-demo-e2e-local.ps1");
 for (const key of ["auto", "trendWait", "sidewayWait", "entry", "hold", "stopMove", "partial", "exit"]) {
   requireText(semantic, `${key}:`, `semantic reason group ${key}`);
 }
+
+// Expected entry-gate rejections are decision state, not UI/system errors.
+// Filter only the canonical Phase7C blocked codes; never suppress HTTP 423
+// generically because an unknown 423 must remain observable.
+for (const marker of [
+  "isExpectedEntryBlockedReason",
+  "PHASE7C_(?:TREND|SIDEWAY)_ENTRY_BLOCKED",
+  "if (isExpectedEntryBlockedReason(raw)) return;",
+]) {
+  requireText(semantic, marker, `expected entry-blocked display filter ${marker}`);
+}
+forbidText(semantic, "status === 423", "generic HTTP 423 suppression");
+forbidText(semantic, "status == 423", "generic HTTP 423 suppression");
+requireText(web, "ui.reasons.trendWait", "Web Trend wait reasons must use semantic UI");
+requireText(web, "ui.reasons.sidewayWait", "Web Sideway wait reasons must use semantic UI");
 for (const key of [
   "accountMode",
   "autoReason1",
