@@ -64,6 +64,35 @@ class GuardedMt5Gateway(Mt5Gateway):
             "liveArmReason": decision.reason,
         }
 
+    def pending_orders(self, canonical_symbol: str | None = None) -> list[dict[str, Any]]:
+        """Read-only broker pending-order snapshot used by LIVE arm preflight."""
+        broker_symbol = self.settings.broker_symbol(canonical_symbol) if canonical_symbol else None
+        with self._lock:
+            rows = (
+                self._read_with_reconnect_locked("orders_get", symbol=broker_symbol)
+                if broker_symbol
+                else self._read_with_reconnect_locked("orders_get")
+            )
+        if rows is None:
+            raise BridgeError(
+                f"orders_get failed: {self.mt5.last_error()}",
+                503,
+                "PENDING_ORDERS_UNAVAILABLE",
+            )
+        return [
+            {
+                "ticket": str(getattr(row, "ticket", "")),
+                "symbol": self.settings.canonical_symbol(str(getattr(row, "symbol", "") or "")),
+                "brokerSymbol": str(getattr(row, "symbol", "") or ""),
+                "type": int(getattr(row, "type", -1)),
+                "volume": float(getattr(row, "volume_initial", 0.0) or 0.0),
+                "price": float(getattr(row, "price_open", 0.0) or 0.0),
+                "magic": int(getattr(row, "magic", 0) or 0),
+                "comment": str(getattr(row, "comment", "") or ""),
+            }
+            for row in rows
+        ]
+
     def _require_trading(self) -> None:
         # Preserve every existing bridge-level check first: trading switch,
         # connectivity, allowlist, real-account capability and AutoTrading.
