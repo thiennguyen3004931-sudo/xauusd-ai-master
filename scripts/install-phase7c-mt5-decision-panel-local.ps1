@@ -40,6 +40,15 @@ function Read-EnvValue([string]$Path, [string]$Name) {
   return ""
 }
 
+function Normalize-PathForCompare([string]$Value) {
+  if ([string]::IsNullOrWhiteSpace($Value)) { return "" }
+  $candidate = $Value.Trim().Trim('"').TrimEnd('\', '/')
+  try {
+    $candidate = (Resolve-Path -LiteralPath $candidate -ErrorAction Stop).Path
+  } catch {}
+  return $candidate.TrimEnd('\', '/')
+}
+
 if ([string]::IsNullOrWhiteSpace($TerminalPath)) {
   $TerminalPath = Read-EnvValue $BridgeEnv "MT5_TERMINAL_PATH"
 }
@@ -47,11 +56,14 @@ if ([string]::IsNullOrWhiteSpace($TerminalPath) -or -not (Test-Path -LiteralPath
   throw "Cannot resolve MT5 terminal64.exe. Pass -TerminalPath or configure MT5_TERMINAL_PATH in $BridgeEnv"
 }
 $TerminalPath = (Resolve-Path -LiteralPath $TerminalPath).Path
+$terminalInstallDir = Split-Path -Parent $TerminalPath
+$terminalPathNormalized = Normalize-PathForCompare $TerminalPath
+$terminalDirNormalized = Normalize-PathForCompare $terminalInstallDir
 
 if ([string]::IsNullOrWhiteSpace($DataPath)) {
   $portable = (Read-EnvValue $BridgeEnv "MT5_PORTABLE") -match '^(1|true|yes|on)$'
   if ($portable) {
-    $DataPath = Split-Path -Parent $TerminalPath
+    $DataPath = $terminalInstallDir
   } else {
     $terminalRoot = Join-Path $env:APPDATA "MetaQuotes\Terminal"
     $matches = @()
@@ -61,16 +73,29 @@ if ([string]::IsNullOrWhiteSpace($DataPath)) {
         if (-not (Test-Path -LiteralPath $origin)) { continue }
         try {
           $originPath = (Get-Content -LiteralPath $origin -Raw).Trim().Trim([char]0xFEFF)
-          if ([string]::Equals($originPath, $TerminalPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+          $originNormalized = Normalize-PathForCompare $originPath
+          $matchesTerminalExe = [string]::Equals(
+            $originNormalized,
+            $terminalPathNormalized,
+            [System.StringComparison]::OrdinalIgnoreCase
+          )
+          $matchesInstallDir = [string]::Equals(
+            $originNormalized,
+            $terminalDirNormalized,
+            [System.StringComparison]::OrdinalIgnoreCase
+          )
+          if ($matchesTerminalExe -or $matchesInstallDir) {
             $matches += $directory.FullName
           }
         } catch {}
       }
     }
+    $matches = @($matches | Sort-Object -Unique)
     if ($matches.Count -ne 1) {
       throw "Could not resolve one MT5 data folder for $TerminalPath. Open MT5 > File > Open Data Folder and rerun with -DataPath '<that folder>'. Matches=$($matches.Count)"
     }
     $DataPath = $matches[0]
+    Write-Host "PHASE7C_MT5_PANEL_DATA_PATH_AUTODETECT=PASS"
   }
 }
 
@@ -79,6 +104,7 @@ if (-not [System.IO.Path]::IsPathRooted($DataPath)) {
 }
 if (-not (Test-Path -LiteralPath $DataPath)) { throw "MT5 data folder not found: $DataPath" }
 $DataPath = (Resolve-Path -LiteralPath $DataPath).Path
+Write-Host "PHASE7C_MT5_PANEL_DATA_PATH=$DataPath"
 
 $ExpertDir = Join-Path $DataPath "MQL5\Experts\XAUUSD_AI_MASTER"
 New-Item -ItemType Directory -Force -Path $ExpertDir | Out-Null
@@ -96,8 +122,8 @@ if (-not $SkipCompile) {
   }
   $CompileLog = Join-Path $ExpertDir "XAUUSD_AI_Master_Decision_Panel.compile.log"
   $arguments = @(
-    ('/compile:"{0}"' -f $Destination),
-    ('/log:"{0}"' -f $CompileLog)
+    ('/compile:\"{0}\"' -f $Destination),
+    ('/log:\"{0}\"' -f $CompileLog)
   )
   $compileStartedAt = (Get-Date).ToUniversalTime()
   $process = Start-Process -FilePath $MetaEditor -ArgumentList $arguments -Wait -PassThru
