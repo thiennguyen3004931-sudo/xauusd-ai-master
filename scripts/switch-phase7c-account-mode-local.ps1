@@ -256,6 +256,10 @@ function Read-RiskProfile([string]$Mode) {
   if (-not (Test-Path $path)) { throw "$Mode risk profile is missing: $path" }
   $raw = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
   $profile = Assert-Phase7CRiskProfile $raw "$Mode risk profile"
+  if ((ConvertTo-Phase7CAccountMode $Mode) -eq "LIVE") {
+    [void](Assert-Phase7CLiveRiskProfileBinding -Profile $raw -LiveEnvFile $LiveEnvFile -Label "LIVE risk profile")
+    Write-Host "PHASE7C_ACCOUNT_SWITCH_LIVE_RISK_BINDING=PASS"
+  }
   return [pscustomobject]@{ path = $path; profile = $profile }
 }
 
