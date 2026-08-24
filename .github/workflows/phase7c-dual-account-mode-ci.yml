@@ -17,6 +17,8 @@ on:
       - "apps/api/src/services/phase7c-risk-view.service.ts"
       - "apps/api/src/services/phase7c-ui-contract.service.ts"
       - "packages/mt5-broker/bridge/.env.phase7b-live.example"
+      - "packages/mt5-broker/bridge/mt5_bridge/app.py"
+      - "packages/mt5-broker/bridge/mt5_bridge/broker_time.py"
       - "scripts/lib/phase7c-account-mode.ps1"
       - "scripts/phase7c-account-runtime-guard.mjs"
       - "scripts/phase7c-live-source-adapters.mjs"
@@ -32,6 +34,7 @@ on:
       - "scripts/set-phase7c-account-risk-profile-local.ps1"
       - "scripts/smoke-phase7c-account-runtime-local.ps1"
       - "scripts/switch-phase7c-account-mode-local.ps1"
+      - "scripts/test-phase7c-broker-time-normalization.py"
       - "scripts/test-phase7c-dual-account-mode-local.ps1"
       - "scripts/test-phase7c-dual-account-mode-source.ps1"
       - "scripts/test-phase7c-dual-account-mode.mjs"
@@ -53,6 +56,8 @@ on:
       - "apps/api/src/services/phase7c-risk-view.service.ts"
       - "apps/api/src/services/phase7c-ui-contract.service.ts"
       - "packages/mt5-broker/bridge/.env.phase7b-live.example"
+      - "packages/mt5-broker/bridge/mt5_bridge/app.py"
+      - "packages/mt5-broker/bridge/mt5_bridge/broker_time.py"
       - "scripts/lib/phase7c-account-mode.ps1"
       - "scripts/phase7c-account-runtime-guard.mjs"
       - "scripts/phase7c-live-source-adapters.mjs"
@@ -68,6 +73,7 @@ on:
       - "scripts/set-phase7c-account-risk-profile-local.ps1"
       - "scripts/smoke-phase7c-account-runtime-local.ps1"
       - "scripts/switch-phase7c-account-mode-local.ps1"
+      - "scripts/test-phase7c-broker-time-normalization.py"
       - "scripts/test-phase7c-dual-account-mode-local.ps1"
       - "scripts/test-phase7c-dual-account-mode-source.ps1"
       - "scripts/test-phase7c-dual-account-mode.mjs"
@@ -90,6 +96,11 @@ jobs:
         with:
           node-version: 24
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Validate MJS syntax
         shell: pwsh
         run: |
@@ -98,6 +109,10 @@ jobs:
           node --check .\scripts\run-phase7c-trend-account-mode.mjs
           node --check .\scripts\run-phase7c-sideway-account-mode.mjs
           node --check .\scripts\run-phase7c-sideway-locked.mjs
+
+      - name: Broker timestamp normalization regression
+        shell: pwsh
+        run: python .\scripts\test-phase7c-broker-time-normalization.py
 
       - name: Static source safety assertions
         shell: pwsh
