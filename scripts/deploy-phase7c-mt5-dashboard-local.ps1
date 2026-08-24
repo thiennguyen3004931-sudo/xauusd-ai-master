@@ -29,11 +29,12 @@ $ApiBase = "http://127.0.0.1:$ApiPort"
 $UiUrl = "$ApiBase/api/v1/phase7c-ui/mt5?symbol=XAUUSD"
 $ModeUrl = "$ApiBase/api/v1/phase7c/bot-mode"
 $PidDir = Join-Path $WorkDir "phase7c-executors"
+$ArmPath = Join-Path $WorkDir "phase7c-live-arm.json"
 $Installer = Join-Path $PSScriptRoot "install-phase7c-mt5-decision-panel-local.ps1"
-$Verifier = Join-Path $PSScriptRoot "verify-phase7c-executors-local.ps1"
+$AccountVerifier = Join-Path $PSScriptRoot "verify-phase7c-account-runtime-local.ps1"
 
 if (-not (Test-Path -LiteralPath $Installer)) { throw "MT5 panel installer missing: $Installer" }
-if (-not (Test-Path -LiteralPath $Verifier)) { throw "Phase7C verifier missing: $Verifier" }
+if (-not (Test-Path -LiteralPath $AccountVerifier)) { throw "Phase7C account verifier missing: $AccountVerifier" }
 
 function Read-AlivePid([string]$Name) {
   $pidFile = Join-Path $PidDir "$Name.pid"
@@ -49,6 +50,12 @@ function Read-AlivePid([string]$Name) {
     throw "Executor is not alive: $Name PID=$processId"
   }
   return $processId
+}
+
+function Read-UiAccountMode([string]$Content) {
+  $match = [regex]::Match($Content, '(?m)^accountMode=(DEMO|LIVE)$')
+  if (-not $match.Success) { return "" }
+  return $match.Groups[1].Value
 }
 
 function Test-ProjectCoreCommand([string]$CommandLine) {
@@ -159,7 +166,11 @@ function Wait-PortsReleased([int[]]$Ports) {
   throw "Dashboard core ports are still occupied after verified cleanup. Remaining=$($detail -join ',')"
 }
 
-function Wait-DashboardV2 {
+function Wait-DashboardV2([string]$ExpectedAccountMode) {
+  if ($ExpectedAccountMode -notin @("DEMO", "LIVE")) {
+    throw "ExpectedAccountMode must be DEMO or LIVE."
+  }
+  $escapedMode = [regex]::Escape($ExpectedAccountMode)
   $deadline = (Get-Date).AddSeconds($StartupTimeoutSeconds)
   while ((Get-Date) -lt $deadline) {
     try {
@@ -168,13 +179,18 @@ function Wait-DashboardV2 {
       if (
         $probe.StatusCode -eq 200 -and
         $content -match '(?m)^version=2$' -and
-        $content -match '(?m)^accountMode=DEMO$' -and
+        $content -match "(?m)^accountMode=$escapedMode$" -and
         $content -match '(?m)^mt5Connected=true$' -and
         $content -match '(?m)^accountGuardValid=true$' -and
         $content -match '(?m)^trendOn=' -and
         $content -match '(?m)^sidewayOn=' -and
+        $content -match '(?m)^autoReason1=' -and
+        $content -match '(?m)^trendWaitReason1=' -and
+        $content -match '(?m)^sidewayWaitReason1=' -and
         $content -match '(?m)^entryReason1=' -and
         $content -match '(?m)^holdReason1=' -and
+        $content -match '(?m)^stopMoveReason1=' -and
+        $content -match '(?m)^partialReason1=' -and
         $content -match '(?m)^exitReason1=' -and
         $content -match '(?m)^readOnly=true$' -and
         $content -match '(?m)^mt5OrderPermission=NONE$'
@@ -184,7 +200,7 @@ function Wait-DashboardV2 {
     } catch {}
     Start-Sleep -Seconds 2
   }
-  throw "Phase7C dashboard v2 did not become ready within $StartupTimeoutSeconds seconds."
+  throw "Phase7C dashboard v2 did not become ready for $ExpectedAccountMode within $StartupTimeoutSeconds seconds."
 }
 
 Write-Host "PHASE7C_DASHBOARD_DEPLOY=START"
@@ -209,13 +225,18 @@ if ([string]::IsNullOrWhiteSpace($preservedMode)) {
 Write-Host "PHASE7C_DASHBOARD_DEPLOY_MODE_BEFORE=$preservedMode"
 
 $preflight = Invoke-WebRequest -Uri $UiUrl -UseBasicParsing -TimeoutSec 8
+$preflightContent = [string]$preflight.Content
+$expectedAccountMode = Read-UiAccountMode $preflightContent
 if (
   $preflight.StatusCode -ne 200 -or
-  $preflight.Content -notmatch '(?m)^accountMode=DEMO$' -or
-  $preflight.Content -notmatch '(?m)^mt5OrderPermission=NONE$'
+  $expectedAccountMode -notin @("DEMO", "LIVE") -or
+  $preflightContent -notmatch '(?m)^mt5OrderPermission=NONE$'
 ) {
-  throw "Dashboard deploy preflight requires DEMO account and MT5 order permission NONE."
+  throw "Dashboard deploy preflight requires a verified DEMO/LIVE account and MT5 order permission NONE."
 }
+$armFileBefore = Test-Path -LiteralPath $ArmPath
+Write-Host "PHASE7C_DASHBOARD_DEPLOY_ACCOUNT_MODE=$expectedAccountMode"
+Write-Host "PHASE7C_DASHBOARD_DEPLOY_LIVE_ARM_FILE_BEFORE=$armFileBefore"
 Write-Host "PHASE7C_DASHBOARD_DEPLOY_PREFLIGHT=PASS"
 
 if ($task.State -eq "Running") {
@@ -237,7 +258,7 @@ if ($task.State -eq "Disabled") {
 Start-ScheduledTask -TaskName $WebTask -ErrorAction Stop
 Write-Host "PHASE7C_DASHBOARD_DEPLOY_WEB_TASK_START=PASS"
 
-$uiPayload = Wait-DashboardV2
+$uiPayload = Wait-DashboardV2 -ExpectedAccountMode $expectedAccountMode
 Write-Host "PHASE7C_DASHBOARD_DEPLOY_UI_V2=PASS"
 
 $modeAfter = Invoke-RestMethod -Uri $ModeUrl -Method Get -TimeoutSec 5
@@ -254,6 +275,12 @@ if ($afterSupervisorPid -ne $supervisorPid -or $afterTrendPid -ne $trendPid -or 
 }
 Write-Host "PHASE7C_DASHBOARD_DEPLOY_EXECUTORS_UNCHANGED=PASS"
 
+$armFileAfter = Test-Path -LiteralPath $ArmPath
+if ($armFileAfter -ne $armFileBefore) {
+  throw "LIVE arm file presence changed during dashboard deploy. Before=$armFileBefore After=$armFileAfter"
+}
+Write-Host "PHASE7C_DASHBOARD_DEPLOY_LIVE_ARM_FILE_PRESERVED=$armFileAfter"
+
 if (-not $SkipPanelInstall) {
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Installer
   if ($LASTEXITCODE -ne 0) { throw "MT5 dashboard panel installer failed with exit code $LASTEXITCODE" }
@@ -262,7 +289,13 @@ if (-not $SkipPanelInstall) {
   Write-Host "PHASE7C_DASHBOARD_DEPLOY_PANEL_INSTALL=SKIPPED"
 }
 
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Verifier -WorkDir $WorkDir -RequireMigratedTask -RequireTelegram
-if ($LASTEXITCODE -ne 0) { throw "Phase7C strict verifier failed after dashboard deploy." }
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $AccountVerifier `
+  -WorkDir $WorkDir `
+  -ExpectedAccountMode $expectedAccountMode `
+  -RequireTelegram
+if ($LASTEXITCODE -ne 0) {
+  throw "Phase7C strict $expectedAccountMode account verifier failed after dashboard deploy."
+}
+Write-Host "PHASE7C_DASHBOARD_DEPLOY_ACCOUNT_VERIFY=PASS|MODE=$expectedAccountMode"
 
 Write-Host "PHASE7C_DASHBOARD_DEPLOY_STATUS=PASS"
