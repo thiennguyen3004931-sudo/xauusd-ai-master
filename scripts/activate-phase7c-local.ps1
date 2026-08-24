@@ -402,7 +402,7 @@ Write-Host "PHASE7C_ACTIVATE_SERVER=$($health.server)"
 # can preserve a JSON array returned by Invoke-RestMethod as one pipeline object,
 # so capture first, then expand the variable into a normal PowerShell array.
 $positionsResponse = Invoke-RestMethod -Uri "$bridgeUrl/v1/positions?symbol=XAUUSD" -Headers @{ "x-mt5-api-key" = $apiKey } -Method Get -TimeoutSec 10
-$positions = @($positionsResponse)
+$positions = @($positionsResponse | Where-Object { $null -ne $_ })
 if ($positions.Count -gt 0) {
   $tickets = ($positions | ForEach-Object { $_.ticket }) -join ","
   throw "Phase 7C activation blocked: open XAUUSD broker position(s) detected. Count=$($positions.Count), tickets=$tickets. Do not delete local state; reconcile/close the position before clean activation."
@@ -476,8 +476,16 @@ if ($null -eq $demo -or $null -eq $risk -or $null -eq $lotSettings -or $null -eq
   $webLogDir = Join-Path $WorkDir "phase7b-web"
   throw "Phase 7C API/UI self-test failed after restart. STEP=$webSelfTestStep DETAIL=$webSelfTestError LOGS=$webLogDir"
 }
-if ($risk.safety.executionMutation -ne $false -or $risk.safety.phase7bFixedVolumeUnchanged -ne $true) {
-  throw "Phase 7C Auto Lot safety assertion failed."
+if (
+  [string]$risk.source -ne "MT5_ACCOUNT_READ_ONLY" -or
+  [string]$risk.safety.mode -ne "ACCOUNT_RISK_PREVIEW" -or
+  $risk.safety.executionMutation -ne $false -or
+  [string]$risk.safety.orderPermission -ne "NONE" -or
+  [string]$risk.safety.accountMode -ne "DEMO" -or
+  $risk.safety.liveExecutionEnabled -ne $false -or
+  $risk.safety.accountGuardValid -ne $true
+) {
+  throw "Phase 7C Auto Lot safety assertion failed. source=$($risk.source) mode=$($risk.safety.mode) mutation=$($risk.safety.executionMutation) permission=$($risk.safety.orderPermission) accountMode=$($risk.safety.accountMode) liveExecution=$($risk.safety.liveExecutionEnabled) guardValid=$($risk.safety.accountGuardValid)"
 }
 if (
   [math]::Abs([double]$lotSettings.state.trendFixedLot - $TrendFixedVolume) -gt 1e-8 -or
@@ -491,7 +499,11 @@ Write-Host "PHASE7C_ACTIVATE_LEGACY_BOT_TASK=STOPPED_NOT_RESTARTED"
 Write-Host "PHASE7C_ACTIVATE_MODE=$($mode.state.mode)"
 Write-Host "PHASE7C_ACTIVATE_AUTO_LOT_MODE=$($risk.safety.mode)"
 Write-Host "PHASE7C_ACTIVATE_AUTO_LOT_EXECUTION_MUTATION=$($risk.safety.executionMutation)"
-Write-Host "PHASE7C_ACTIVATE_PHASE7B_FIXED_VOLUME_UNCHANGED=$($risk.safety.phase7bFixedVolumeUnchanged)"
+Write-Host "PHASE7C_ACTIVATE_AUTO_LOT_SOURCE=$($risk.source)"
+Write-Host "PHASE7C_ACTIVATE_AUTO_LOT_ORDER_PERMISSION=$($risk.safety.orderPermission)"
+Write-Host "PHASE7C_ACTIVATE_AUTO_LOT_ACCOUNT_MODE=$($risk.safety.accountMode)"
+Write-Host "PHASE7C_ACTIVATE_AUTO_LOT_LIVE_EXECUTION_ENABLED=$($risk.safety.liveExecutionEnabled)"
+Write-Host "PHASE7C_ACTIVATE_AUTO_LOT_ACCOUNT_GUARD_VALID=$($risk.safety.accountGuardValid)"
 Write-Host "PHASE7C_ACTIVATE_TREND_FIXED_LOT=$TrendFixedVolume"
 Write-Host "PHASE7C_ACTIVATE_SIDEWAY_RISK_PERCENT=$SidewayRiskPercent"
 Write-Host "PHASE7C_ACTIVATE_SIDEWAY_MAX_LOT=$SidewayMaxLot"
