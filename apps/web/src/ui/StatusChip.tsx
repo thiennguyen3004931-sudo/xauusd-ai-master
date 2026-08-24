@@ -13,6 +13,7 @@ export function StatusChip({ value }: { value: string }) {
       "MANAGING",
       "PASS",
       "GUARD PASS",
+      "DEMO",
       "DEMO ONLY",
       "BOT ALIVE",
       "ENTRY ELIGIBLE",
@@ -44,6 +45,7 @@ export function StatusChip({ value }: { value: string }) {
             "SHADOW ONLY",
             "M15 EVALUATED",
             "NEXT EVALUATION",
+            "LIVE",
           ].includes(normalized)
           ? "warning"
           : "default";
