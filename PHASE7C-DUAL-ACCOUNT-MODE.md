@@ -82,6 +82,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 The switcher pauses the bot, verifies the current account is flat, isolates runtime state/risk profiles, restarts the selected bridge/executors, verifies the selected broker account and finishes in `PAUSE`. The trusted bridge runner automatically DISARMs LIVE before its bridge child starts.
 
+The switcher also refuses LIVE before mutation unless `.runtime/phase7c-lot-settings.live.json` is present, numerically valid and bound to the exact configured LIVE terminal/login/server fingerprint.
+
 ## Explicit LIVE ARM
 
 Before arming, the local LIVE env must deliberately enable the two capability prerequisites:
@@ -130,9 +132,40 @@ The status command reports selected mode, connected broker mode/login/server, cu
 
 The strategy and APIs continue to use canonical `XAUUSD`. Configure `MT5_SYMBOL_MAP_JSON` only in each local terminal env if the broker uses a suffix/prefix. The source LIVE template intentionally contains no broker-account-specific symbol mapping.
 
-## Risk isolation
+## Risk isolation and explicit LIVE risk
 
-DEMO and LIVE risk profiles remain independent. This terminal/arm feature does not create or copy a LIVE risk profile and does not import DEMO lot/risk values into LIVE. LIVE risk must be configured deliberately using the existing account-risk tooling before LIVE operation.
+DEMO and LIVE risk profiles remain independent. No terminal/profile/switch helper is allowed to infer or copy DEMO lot/risk values into LIVE.
+
+Configure LIVE risk only with explicit operator-supplied values. The three risk parameters are mandatory and have no defaults:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\configure-phase7c-live-risk-local.ps1 `
+  -TrendFixedLot <EXPLICIT_LIVE_VALUE> `
+  -SidewayRiskPercent <EXPLICIT_LIVE_VALUE> `
+  -SidewayMaxLot <EXPLICIT_LIVE_VALUE>
+```
+
+The configurator is fail-closed and requires:
+
+- Administrator PowerShell;
+- current selected runtime remains `DEMO`;
+- current strategy mode is `PAUSE`;
+- the local LIVE terminal identity profile is configured;
+- `MT5_TRADING_ENABLED=false`;
+- `XAUUSD_PHASE7C_ALLOW_LIVE_TRADING=false`;
+- values pass the existing Phase7C lot/risk limits and increments.
+
+The resulting `.runtime/phase7c-lot-settings.live.json` is bound to `LIVE`, the configured LIVE account login/server and the same terminal-profile fingerprint used by the LIVE arm guard. It preserves `NEW_POSITIONS_ONLY`, `martingale=false` and `recoveryLotEscalation=false`. Reconfiguring risk explicitly DISARMs any previous LIVE arm.
+
+Read the local LIVE risk status without changing runtime:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\get-phase7c-live-risk-local.ps1
+```
+
+If the terminal/login/server identity later changes, the old risk fingerprint becomes stale and the LIVE account switch refuses it before stopping the current runtime. Re-run the explicit LIVE risk configurator for the new profile; do not reuse a DEMO profile.
 
 ## Runtime isolation
 
