@@ -266,8 +266,8 @@ async function editPanel(message, mode, note) {
 
 function modeVi(mode) {
   return {
-    TREND: "Bot Trend",
-    SIDEWAY: "Bot Sideway",
+    TREND: "bot Trend",
+    SIDEWAY: "bot Sideway",
     AUTO: "TỰ ĐỘNG",
     PAUSE: "TẠM DỪNG",
     UNKNOWN: "KHÔNG XÁC ĐỊNH",
@@ -276,9 +276,9 @@ function modeVi(mode) {
 
 function panelText(mode, note) {
   const description = {
-    TREND: "Chỉ Bot Trend được phép tạo chiến lược mới.",
-    SIDEWAY: "Chỉ Bot Sideway được phép tạo chiến lược mới theo vùng cung/cầu và hồi quy về trung bình.",
-    AUTO: "Bộ phân loại trạng thái thị trường tự chọn Bot Trend hoặc Bot Sideway; khi đảo chiều hoặc chưa rõ sẽ khuyến nghị TẠM DỪNG.",
+    TREND: "Chỉ bot Trend được phép tạo chiến lược mới.",
+    SIDEWAY: "Chỉ bot Sideway được phép tạo chiến lược mới theo vùng cung/cầu và hồi quy về trung bình.",
+    AUTO: "Bộ phân loại trạng thái thị trường tự chọn bot Trend hoặc bot Sideway; khi đảo chiều hoặc chưa rõ sẽ khuyến nghị TẠM DỪNG.",
     PAUSE: "Không bot nào được phép tạo kế hoạch giao dịch mới.",
   }[mode] ?? "Trạng thái không xác định.";
 
@@ -300,7 +300,7 @@ function keyboard(activeMode) {
   });
   return {
     inline_keyboard: [
-      [button("Bot Trend", "TREND"), button("Bot Sideway", "SIDEWAY")],
+      [button("bot Trend", "TREND"), button("bot Sideway", "SIDEWAY")],
       [button("TỰ ĐỘNG", "AUTO"), button("TẠM DỪNG", "PAUSE")],
       [{ text: "🔄 Làm mới", callback_data: "p7c:REFRESH" }],
     ],
