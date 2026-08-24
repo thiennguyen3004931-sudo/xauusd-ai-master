@@ -140,6 +140,17 @@ function Bridge-Request([string]$Path, $EnvInfo) {
   return Invoke-RestMethod -Uri "$base$Path" -Headers @{ "x-mt5-api-key" = $EnvInfo.apiKey } -Method Get -TimeoutSec 5
 }
 
+function Get-BridgePositionCount([string]$Symbol, $EnvInfo) {
+  $base = "http://$($EnvInfo.bridgeHost):$($EnvInfo.bridgePort)"
+  $escapedSymbol = [uri]::EscapeDataString($Symbol)
+  $response = Invoke-WebRequest -Uri "$base/v1/positions?symbol=$escapedSymbol" -Headers @{ "x-mt5-api-key" = $EnvInfo.apiKey } -UseBasicParsing -TimeoutSec 5
+  $raw = ([string]$response.Content).Trim()
+  if ([string]::IsNullOrWhiteSpace($raw) -or $raw -eq "[]") { return 0 }
+  $parsed = $raw | ConvertFrom-Json
+  $items = @($parsed | Where-Object { $null -ne $_ })
+  return [int]$items.Count
+}
+
 function Assert-CurrentBrokerFlat($State) {
   $mode = ConvertTo-Phase7CAccountMode ([string]$State.accountMode)
   $envPath = Resolve-ProjectFile ([string]$State.envFile)
@@ -150,8 +161,8 @@ function Assert-CurrentBrokerFlat($State) {
     throw "Current MT5 bridge does not match account-mode state; refusing switch."
   }
   if ($currentEnv.allowedLogins -notcontains [long]$health.accountLogin) { throw "Current MT5 login is not in the current account allowlist." }
-  $positions = @(Bridge-Request "/v1/positions?symbol=XAUUSD" $currentEnv)
-  if ($positions.Count -ne 0) { throw "Account switch requires zero open XAUUSD positions. Current=$($positions.Count)" }
+  $positionCount = Get-BridgePositionCount "XAUUSD" $currentEnv
+  if ($positionCount -ne 0) { throw "Account switch requires zero open XAUUSD positions. Current=$positionCount" }
   Assert-StateFlat $mode
   return [pscustomobject]@{ mode = $mode; env = $currentEnv; health = $health }
 }
@@ -286,8 +297,8 @@ function Start-TargetBridge($EnvInfo, [string]$Mode) {
       if ($health.connected -and $health.status -eq "ok" -and [string]$health.accountMode -eq $expected) {
         if (-not [bool]$health.tradingEnabled) { throw "Target bridge trading is disabled." }
         if ($EnvInfo.allowedLogins -notcontains [long]$health.accountLogin) { throw "Target bridge login is not in the selected allowlist." }
-        $positions = @(Bridge-Request "/v1/positions?symbol=XAUUSD" $EnvInfo)
-        if ($positions.Count -ne 0) { throw "Target account must have zero XAUUSD positions before executor start." }
+        $positionCount = Get-BridgePositionCount "XAUUSD" $EnvInfo
+        if ($positionCount -ne 0) { throw "Target account must have zero XAUUSD positions before executor start. Current=$positionCount" }
         Write-Host "PHASE7C_ACCOUNT_SWITCH_TARGET_BRIDGE=PASS|MODE=$Mode"
         return
       }
