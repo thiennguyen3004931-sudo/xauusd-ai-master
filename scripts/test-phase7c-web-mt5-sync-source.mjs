@@ -36,6 +36,22 @@ forbidText(semantic, "status === 423", "generic HTTP 423 suppression");
 forbidText(semantic, "status == 423", "generic HTTP 423 suppression");
 requireText(web, "ui.reasons.trendWait", "Web Trend wait reasons must use semantic UI");
 requireText(web, "ui.reasons.sidewayWait", "Web Sideway wait reasons must use semantic UI");
+
+requireText(
+  semantic,
+  'upper === "CYCLE_ERROR"',
+  "cycle error must be handled as a friendly wait reason",
+);
+requireText(
+  semantic,
+  "chưa lấy được dữ liệu trong chu kỳ gần nhất",
+  "cycle error must not expose raw fetch failure text",
+);
+requireText(
+  semantic,
+  "ENTRY_SUBMIT|ENTRY_SUBMITTED",
+  "entry submit lifecycle events must be excluded from wait reasons",
+);
 for (const key of [
   "accountMode",
   "autoReason1",
