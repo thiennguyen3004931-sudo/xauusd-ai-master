@@ -122,3 +122,10 @@ if ($script:StopFailures.Count -gt 0) {
 
 Remove-Item -LiteralPath (Join-Path $RuntimeDir "phase7c-execution.lock") -Force -ErrorAction SilentlyContinue
 Write-Host "PHASE7C_EXECUTOR_STOP=PASS"
+
+# Explicitly publish success to callers that invoke this script with `&` and
+# inspect $LASTEXITCODE. Native taskkill.exe calls above can leave a stale
+# non-zero LASTEXITCODE even when every process is already stopped cleanly.
+# Without this explicit exit code, recovery/switch callers can misclassify a
+# successful cleanup as a failure.
+exit 0
