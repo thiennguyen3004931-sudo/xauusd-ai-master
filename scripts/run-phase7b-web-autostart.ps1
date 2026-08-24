@@ -97,6 +97,28 @@ $webErrLog = Join-Path $logDir "web.err.log"
 
 $apiUrl = "http://127.0.0.1:${ApiPort}"
 $webUrl = "http://127.0.0.1:${WebPort}"
+$webDistIndex = Join-Path $ProjectRoot "apps\web\dist\index.html"
+
+# Runtime serves the already-built production bundle. Build only as a recovery path
+# when the dist folder is missing (normal deployments build before restarting this task).
+if (-not (Test-Path -LiteralPath $webDistIndex)) {
+  Write-Host "PHASE7B_WEB_PRODUCTION_BUILD=START"
+  $env:VITE_API_BASE_URL = $apiUrl
+  try {
+    Push-Location $ProjectRoot
+    & pnpm --filter '@xauusd/web' build
+    if ($LASTEXITCODE -ne 0) { throw "Phase 7B WEB production build failed." }
+  } finally {
+    Pop-Location
+    Remove-Item Env:VITE_API_BASE_URL -ErrorAction SilentlyContinue
+  }
+  if (-not (Test-Path -LiteralPath $webDistIndex)) {
+    throw "Phase 7B WEB production build completed without dist/index.html."
+  }
+  Write-Host "PHASE7B_WEB_PRODUCTION_BUILD=PASS"
+} else {
+  Write-Host "PHASE7B_WEB_PRODUCTION_BUILD=READY"
+}
 
 $apiProcess = Start-Process powershell.exe -WindowStyle Hidden -WorkingDirectory $ProjectRoot `
   -RedirectStandardOutput $apiOutLog -RedirectStandardError $apiErrLog -PassThru -ArgumentList @(
@@ -108,8 +130,12 @@ $apiProcess = Start-Process powershell.exe -WindowStyle Hidden -WorkingDirectory
   "-ApiPort", [string]$ApiPort,
   "-WebOrigin", ('"{0}"' -f $webUrl)
 )
+
+# The preview server serves the Vite production bundle. The proxy target is set at
+# process startup so relative /api requests go straight to the local Control API.
 $env:VITE_API_BASE_URL = $apiUrl
-$webCommand = "Set-Location '$ProjectRoot'; pnpm --filter @xauusd/web dev -- --host 127.0.0.1 --port $WebPort --strictPort"
+$env:VITE_DEV_API_PROXY_TARGET = $apiUrl
+$webCommand = "Set-Location '$ProjectRoot'; pnpm --filter @xauusd/web preview -- --host 127.0.0.1 --port $WebPort --strictPort"
 $webProcess = Start-Process powershell.exe -WindowStyle Hidden -WorkingDirectory $ProjectRoot `
   -RedirectStandardOutput $webOutLog -RedirectStandardError $webErrLog -PassThru -ArgumentList @(
   "-NoProfile",
@@ -117,8 +143,10 @@ $webProcess = Start-Process powershell.exe -WindowStyle Hidden -WorkingDirectory
   "-Command", $webCommand
 )
 Remove-Item Env:VITE_API_BASE_URL -ErrorAction SilentlyContinue
+Remove-Item Env:VITE_DEV_API_PROXY_TARGET -ErrorAction SilentlyContinue
 
 Write-Host "PHASE7B_WEB_AUTOSTART=STARTING"
+Write-Host "PHASE7B_WEB_RUNTIME=PRODUCTION_PREVIEW"
 Write-Host "PHASE7B_WEB_API_PID=$($apiProcess.Id)"
 Write-Host "PHASE7B_WEB_UI_PID=$($webProcess.Id)"
 Write-Host "PHASE7B_WEB_API=$apiUrl/api/v1/phase7b-demo"
