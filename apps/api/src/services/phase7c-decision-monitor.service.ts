@@ -13,8 +13,18 @@ import {
 type Strategy = "TREND" | "SIDEWAY" | "PAUSE";
 
 interface EntryDiagnostics {
-  pattern?: { matched?: boolean; name?: string | null; side?: "BUY" | "SELL" | null };
-  trend?: { confidenceScore?: number | null; confidenceLevel?: string | null };
+  pattern?: {
+    matched?: boolean;
+    name?: string | null;
+    side?: "BUY" | "SELL" | null;
+    extreme?: number | null;
+  };
+  trend?: {
+    confidenceScore?: number | null;
+    confidenceLevel?: string | null;
+    m15Supertrend?: "BUY" | "SELL" | null;
+    m5Supertrend?: "BUY" | "SELL" | null;
+  };
   entry?: {
     eligible?: boolean;
     side?: "BUY" | "SELL" | null;
@@ -640,6 +650,7 @@ export function buildPhase7CDecisionMonitor(input: {
       reasons: input.regime.reasons,
       checkedAt: input.regime.checkedAt,
       lastCandleCloseTime: input.regime.lastCandleCloseTime,
+      supplyDemandRange: input.regime.supplyDemandRange,
     },
     mode: {
       active: input.regime.activeMode,
@@ -650,6 +661,10 @@ export function buildPhase7CDecisionMonitor(input: {
     position: positionMonitor(input),
     lotSettings: input.lots,
     preTrade,
+    entryDiagnostics: {
+      trend: input.demo?.entryDiagnostics ?? null,
+      trendError: input.demo?.entryDiagnosticsError ?? null,
+    },
     recentDecisions: input.audit.slice(0, 40).map(({ raw: _raw, ...row }) => row),
     safety: {
       readOnlyEndpoint: true as const,

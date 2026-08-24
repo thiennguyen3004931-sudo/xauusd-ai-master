@@ -14,7 +14,7 @@ const string LEGACY_PREFIX = "XAU_AI_P7C_";
 const string CANVAS_NAME = "XAU_AI_P7C_CANVAS_V7";
 const int PANEL_MIN_WIDTH = 500;
 const int PANEL_MAX_WIDTH = 620;
-const int WAITING_HEIGHT = 420;
+const int WAITING_HEIGHT = 520;
 const int SETUP_HEIGHT = 425;
 const int MANAGING_HEIGHT = 505;
 // Required installer safety marker: READ ONLY | DEMO/LIVE | ORDER PERMISSION = NONE
@@ -389,10 +389,133 @@ void DrawTradePlan(const string payload, const int width, const bool managing)
    Text(bx3 + 10, y + 38, FitText(Clean(tp), box_w - 20, 9), clrWhite, 9);
 }
 
+color EntryCheckTone(const string status)
+{
+   if(status == "PASS") return clrLimeGreen;
+   if(status == "FAIL" || status == "BLOCKED") return clrTomato;
+   if(status == "WAIT") return clrGold;
+   return clrSilver;
+}
+
+string EntryCheckStatusVi(const string status)
+{
+   if(status == "PASS") return "PASS";
+   if(status == "FAIL") return "FAIL";
+   if(status == "BLOCKED") return "BLOCK";
+   if(status == "WAIT") return "WAIT";
+   return "-";
+}
+
+void FirstEntryBlocker(
+   const string payload,
+   const string prefix,
+   string &label,
+   string &status,
+   string &actual
+)
+{
+   label = "Chưa có dữ liệu";
+   status = "WAIT";
+   actual = "-";
+
+   bool fallback_set = false;
+
+   for(int index = 1; index <= 10; index++)
+   {
+      string suffix = IntegerToString(index);
+      string candidate_status = Field(payload, prefix + "Check" + suffix + "Status");
+      if(EmptyValue(candidate_status))
+         continue;
+
+      string candidate_label = Clean(
+         Field(payload, prefix + "Check" + suffix + "Label"),
+         "Điều kiện entry"
+      );
+      string candidate_actual = Clean(
+         Field(payload, prefix + "Check" + suffix + "Actual"),
+         "-"
+      );
+
+      if(!fallback_set)
+      {
+         label = candidate_label;
+         status = candidate_status;
+         actual = candidate_actual;
+         fallback_set = true;
+      }
+
+      if(candidate_status != "PASS")
+      {
+         label = candidate_label;
+         status = candidate_status;
+         actual = candidate_actual;
+         return;
+      }
+   }
+}
+
+void DrawEntryCheckSummary(const string payload, const int width, const int y)
+{
+   const int x = 10;
+   const int w = width - 20;
+   const int h = 96;
+
+   Card(x, y, w, h, C'7,21,30', C'0,72,102');
+   Text(x + 14, y + 8, "ĐIỀU KIỆN CHẶN ENTRY", clrAqua, 9);
+
+   string trend_label, trend_status, trend_actual;
+   string sideway_label, sideway_status, sideway_actual;
+
+   FirstEntryBlocker(
+      payload,
+      "trend",
+      trend_label,
+      trend_status,
+      trend_actual
+   );
+
+   FirstEntryBlocker(
+      payload,
+      "sideway",
+      sideway_label,
+      sideway_status,
+      sideway_actual
+   );
+
+   Text(x + 14, y + 34, "TREND", clrDeepSkyBlue, 7);
+   Text(
+      x + 78,
+      y + 34,
+      FitText(
+         EntryCheckStatusVi(trend_status) + " · " +
+         trend_label + " · " + trend_actual,
+         w - 98,
+         7
+      ),
+      EntryCheckTone(trend_status),
+      7
+   );
+
+   Text(x + 14, y + 62, "SIDEWAY", clrAqua, 7);
+   Text(
+      x + 78,
+      y + 62,
+      FitText(
+         EntryCheckStatusVi(sideway_status) + " · " +
+         sideway_label + " · " + sideway_actual,
+         w - 98,
+         7
+      ),
+      EntryCheckTone(sideway_status),
+      7
+   );
+}
+
 void DrawWaiting(const string payload, const int width)
 {
    DrawStateStrip(payload, width, "BOT ĐANG CHỜ TÍN HIỆU", clrOrange);
-   DrawReasonSummary(payload, width, 222, "WAITING");
+   DrawEntryCheckSummary(payload, width, 222);
+   DrawReasonSummary(payload, width, 326, "WAITING");
 }
 
 void DrawSetup(const string payload, const int width)
