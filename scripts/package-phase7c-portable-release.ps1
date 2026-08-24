@@ -50,8 +50,14 @@ try {
   }
   Write-Host "PHASE7C_PORTABLE_PACKAGE_GIT_CLEAN=PASS"
 
-  $commit = ([string](Invoke-Git @('rev-parse', 'HEAD'))).Trim()
-  $branch = ([string](Invoke-Git @('branch', '--show-current'))).Trim()
+  $commitRaw = Invoke-Git @('rev-parse', 'HEAD')
+  $commit = [string]$commitRaw
+  $commit = $commit.Trim()
+  if ([string]::IsNullOrWhiteSpace($commit)) { throw "Could not resolve HEAD commit." }
+
+  $branchRaw = Invoke-Git @('branch', '--show-current')
+  $branch = [string]$branchRaw
+  $branch = $branch.Trim()
   if ([string]::IsNullOrWhiteSpace($branch)) { $branch = 'DETACHED_HEAD' }
 
   if (-not [string]::IsNullOrWhiteSpace($RequiredCommit)) {
