@@ -113,6 +113,11 @@ def positions(symbol: str | None = Query(default=None)):
     return normalize_positions(gateway.positions(symbol))
 
 
+@app.get("/v1/orders", dependencies=[Depends(verify_api_key)])
+def pending_orders(symbol: str | None = Query(default=None)):
+    return gateway.pending_orders(symbol)
+
+
 @app.post("/v1/orders", dependencies=[Depends(verify_api_key)])
 def place_order(request: OrderRequest):
     return gateway.place_order(request)
