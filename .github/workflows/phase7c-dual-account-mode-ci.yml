@@ -7,6 +7,7 @@ on:
       - fix/phase7c-activation-safety-regression
       - feat/phase7c-compact-mt5-dashboard
       - fix/phase7c-mt5-data-folder-detection
+      - feat/phase7c-dashboard-safe-deploy
     paths:
       - ".gitignore"
       - "PHASE7C-DUAL-ACCOUNT-MODE.md"
@@ -24,6 +25,7 @@ on:
       - "packages/mt5-broker/bridge/mt5_bridge/app.py"
       - "packages/mt5-broker/bridge/mt5_bridge/broker_time.py"
       - "scripts/activate-phase7c-local.ps1"
+      - "scripts/deploy-phase7c-mt5-dashboard-local.ps1"
       - "scripts/install-phase7c-mt5-decision-panel-local.ps1"
       - "scripts/lib/phase7c-account-mode.ps1"
       - "scripts/phase7c-account-runtime-guard.mjs"
@@ -43,6 +45,7 @@ on:
       - "scripts/test-phase7c-activation-safety-source.ps1"
       - "scripts/test-phase7c-broker-time-normalization.py"
       - "scripts/test-phase7c-compact-mt5-dashboard-source.ps1"
+      - "scripts/test-phase7c-dashboard-safe-deploy-source.ps1"
       - "scripts/test-phase7c-mt5-panel-installer-source.ps1"
       - "scripts/test-phase7c-dual-account-mode-local.ps1"
       - "scripts/test-phase7c-dual-account-mode-source.ps1"
@@ -69,6 +72,7 @@ on:
       - "packages/mt5-broker/bridge/mt5_bridge/app.py"
       - "packages/mt5-broker/bridge/mt5_bridge/broker_time.py"
       - "scripts/activate-phase7c-local.ps1"
+      - "scripts/deploy-phase7c-mt5-dashboard-local.ps1"
       - "scripts/install-phase7c-mt5-decision-panel-local.ps1"
       - "scripts/lib/phase7c-account-mode.ps1"
       - "scripts/phase7c-account-runtime-guard.mjs"
@@ -88,6 +92,7 @@ on:
       - "scripts/test-phase7c-activation-safety-source.ps1"
       - "scripts/test-phase7c-broker-time-normalization.py"
       - "scripts/test-phase7c-compact-mt5-dashboard-source.ps1"
+      - "scripts/test-phase7c-dashboard-safe-deploy-source.ps1"
       - "scripts/test-phase7c-mt5-panel-installer-source.ps1"
       - "scripts/test-phase7c-dual-account-mode-local.ps1"
       - "scripts/test-phase7c-dual-account-mode-source.ps1"
@@ -156,6 +161,14 @@ jobs:
       - name: MT5 panel installer assertions with Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-mt5-panel-installer-source.ps1
+
+      - name: Dashboard safe deploy assertions with PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-dashboard-safe-deploy-source.ps1
+
+      - name: Dashboard safe deploy assertions with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-dashboard-safe-deploy-source.ps1
 
       - name: Dual account tests with PowerShell 7
         shell: pwsh
