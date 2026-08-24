@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import {
   Alert,
   Box,
@@ -10,7 +10,6 @@ import {
   Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { ColorType, LineStyle, createChart, type UTCTimestamp } from "lightweight-charts";
 import { LoadingState, ErrorState } from "../ui/PageState";
 import {
   clean,
@@ -18,18 +17,13 @@ import {
   fetchPhase7CPerformance,
   fetchPhase7CWebStatus,
   getTradeUiState,
-  isUsablePanelValue,
   money,
   pickText,
   raw,
   stageTone,
   value,
-  type Phase7CCandle,
-  type Phase7CPanelStatus,
   type Phase7CPerformanceTrade,
-  type Phase7CUiContract,
   type Phase7CUiGate,
-  type TradeUiState,
 } from "../phase7c-panel-status";
 
 function asRecord(input: unknown): Record<string, any> {
@@ -99,16 +93,6 @@ function StatusDot({ label, ok }: { label: string; ok: boolean }) {
   );
 }
 
-function panelNumber(panel: Phase7CPanelStatus | undefined, ...keys: string[]) {
-  for (const key of keys) {
-    const text = raw(panel, key);
-    if (!isUsablePanelValue(text)) continue;
-    const numberValue = Number(text);
-    if (Number.isFinite(numberValue)) return numberValue;
-  }
-  return null;
-}
-
 function gateLabel(gate: Phase7CUiGate | undefined) {
   if (gate === "ALLOWED") return "ĐƯỢC PHÉP";
   if (gate === "BLOCKED_BY_MODE") return "CHẶN DO MODE";
@@ -132,8 +116,8 @@ function formatTradeTime(timestamp: number) {
   }).format(new Date(timestamp));
 }
 
-function price(value: number) {
-  return Number.isFinite(value) ? value.toFixed(2) : "—";
+function price(input: number) {
+  return Number.isFinite(input) ? input.toFixed(2) : "—";
 }
 
 function RecentTradeJournal({ trades, currency, loading, error }: { trades: Phase7CPerformanceTrade[]; currency: string; loading: boolean; error?: string }) {
@@ -150,14 +134,9 @@ function RecentTradeJournal({ trades, currency, loading, error }: { trades: Phas
         <Box sx={{ overflowX: "auto" }}>
           <Box sx={{ minWidth: 720 }}>
             <Box sx={{ display: "grid", gridTemplateColumns: "110px 90px 70px 70px 1fr 100px", gap: 1, px: 1, pb: 1, borderBottom: "1px solid rgba(148,163,184,.18)" }}>
-              {[
-                "Đóng lệnh",
-                "Strategy",
-                "Side",
-                "Lot",
-                "Entry → Exit",
-                "P/L",
-              ].map((label) => <Typography key={label} variant="caption" color="text.secondary" fontWeight={900}>{label}</Typography>)}
+              {["Đóng lệnh", "Strategy", "Side", "Lot", "Entry → Exit", "P/L"].map((label) => (
+                <Typography key={label} variant="caption" color="text.secondary" fontWeight={900}>{label}</Typography>
+              ))}
             </Box>
             {recent.map((trade) => (
               <Box key={trade.id} sx={{ display: "grid", gridTemplateColumns: "110px 90px 70px 70px 1fr 100px", gap: 1, alignItems: "center", px: 1, py: 1.05, borderBottom: "1px solid rgba(148,163,184,.08)" }}>
@@ -176,118 +155,9 @@ function RecentTradeJournal({ trades, currency, loading, error }: { trades: Phas
   );
 }
 
-function LiveCandlestickChart({ candles, panel, uiState, ui }: { candles: Phase7CCandle[]; panel: Phase7CPanelStatus | undefined; uiState: TradeUiState; ui?: Phase7CUiContract }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container || candles.length < 2) return;
-
-    const chart = createChart(container, {
-      width: container.clientWidth,
-      height: 430,
-      layout: { background: { type: ColorType.Solid, color: "#020914" }, textColor: "#9ca3af" },
-      grid: { vertLines: { color: "rgba(148,163,184,.08)" }, horzLines: { color: "rgba(148,163,184,.08)" } },
-      rightPriceScale: { borderColor: "rgba(148,163,184,.20)" },
-      timeScale: { borderColor: "rgba(148,163,184,.20)", timeVisible: true, secondsVisible: false },
-      crosshair: { vertLine: { color: "rgba(0,213,255,.35)" }, horzLine: { color: "rgba(0,213,255,.35)" } },
-    });
-
-    const series = chart.addCandlestickSeries({
-      upColor: "#22c55e",
-      downColor: "#ef4444",
-      borderUpColor: "#22c55e",
-      borderDownColor: "#ef4444",
-      wickUpColor: "#22c55e",
-      wickDownColor: "#ef4444",
-    });
-
-    const deduped = new Map<number, Phase7CCandle>();
-    candles.forEach((candle) => deduped.set(Math.floor(candle.openTime / 1000), candle));
-    series.setData(Array.from(deduped.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([time, candle]) => ({
-        time: time as UTCTimestamp,
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-      })));
-
-    if (uiState !== "WAITING") {
-      const setup = uiState === "SETUP_READY" ? ui?.setup : null;
-      const position = uiState === "MANAGING" ? ui?.position : null;
-      const managing = uiState === "MANAGING";
-      const levels = [
-        { title: "ENTRY", price: position?.entry ?? setup?.entry ?? (managing ? panelNumber(panel, "positionEntry", "entry") : panelNumber(panel, "entry")), color: "#38bdf8" },
-        { title: "SL", price: position?.stopLoss ?? setup?.stopLoss ?? (managing ? panelNumber(panel, "positionStopLoss", "stopLoss") : panelNumber(panel, "stopLoss")), color: "#f87171" },
-        { title: "TP1", price: position?.tp1 ?? setup?.tp1 ?? (managing ? panelNumber(panel, "positionTp1", "tp1") : panelNumber(panel, "tp1")), color: "#4ade80" },
-        { title: "TP2", price: position?.tp2 ?? setup?.tp2 ?? (managing ? panelNumber(panel, "positionTp2", "tp2") : panelNumber(panel, "tp2")), color: "#22c55e" },
-      ];
-      levels.forEach((level) => {
-        if (level.price === null || level.price === undefined || !Number.isFinite(level.price)) return;
-        series.createPriceLine({
-          price: level.price,
-          color: level.color,
-          lineWidth: 1,
-          lineStyle: LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: level.title,
-        });
-      });
-    }
-
-    chart.timeScale().fitContent();
-    const observer = new ResizeObserver(() => {
-      chart.applyOptions({ width: container.clientWidth, height: 430 });
-    });
-    observer.observe(container);
-
-    return () => {
-      observer.disconnect();
-      chart.remove();
-    };
-  }, [candles, panel, uiState, ui]);
-
-  if (candles.length < 2) {
-    return (
-      <Box sx={{ height: 430, display: "grid", placeItems: "center", borderRadius: 3, bgcolor: "#020914", border: "1px solid rgba(0,213,255,.22)" }}>
-        <Box textAlign="center">
-          <Typography variant="h6" fontWeight={900}>Không tải được dữ liệu nến XAUUSD M15</Typography>
-          <Typography variant="body2" color="text.secondary" mt={1}>Chart không dùng dữ liệu giả. Kiểm tra MT5 bridge/history feed.</Typography>
-        </Box>
-      </Box>
-    );
-  }
-
-  const regime = ui?.regime ?? value(panel, "regime", "—");
-  const confidence = ui?.confidence ?? value(panel, "confidence", "—");
-  const stage = ui?.stage ?? value(panel, "stage", "—");
-
-  return (
-    <Box sx={{ position: "relative", borderRadius: 3, overflow: "hidden", border: "1px solid rgba(0,213,255,.22)", bgcolor: "#020914" }}>
-      <Box sx={{ position: "absolute", zIndex: 3, left: 16, top: 14, pointerEvents: "none" }}>
-        <Typography variant="h6" fontWeight={950}>XAUUSD · M15</Typography>
-        <Typography variant="caption" color="text.secondary">Live MT5 candles · {candles.length} bars</Typography>
-      </Box>
-      <Stack direction="row" spacing={1} sx={{ position: "absolute", zIndex: 3, right: 78, top: 14, pointerEvents: "none" }}>
-        <Chip size="small" label={uiState === "WAITING" ? "WAITING" : uiState === "SETUP_READY" ? "SETUP READY" : "MANAGING"} color={uiState === "WAITING" ? "warning" : "success"} sx={{ fontWeight: 900 }} />
-        <Chip size="small" label={`${regime} ${confidence}%`} color="info" variant="outlined" sx={{ fontWeight: 900 }} />
-      </Stack>
-      <Box ref={containerRef} sx={{ width: "100%", height: 430 }} />
-      {uiState === "WAITING" && (
-        <Box sx={{ position: "absolute", zIndex: 3, left: 18, bottom: 18, px: 1.5, py: 1, borderRadius: 2, bgcolor: "rgba(15,23,42,.90)", border: "1px solid rgba(251,191,36,.35)", pointerEvents: "none" }}>
-          <Typography variant="subtitle2" fontWeight={950} color="warning.main">BOT ĐANG CHỜ SETUP</Typography>
-          <Typography variant="caption" color="text.secondary">Stage {stage} · Entry / SL / TP được ẩn cho tới khi setup được duyệt</Typography>
-        </Box>
-      )}
-    </Box>
-  );
-}
-
 export function Phase7BDemoPage() {
   const query = useQuery({
-    queryKey: ["phase7c-web-final-dashboard-v4-journal"],
+    queryKey: ["phase7c-web-final-dashboard-v5-no-chart"],
     queryFn: fetchPhase7CWebStatus,
     refetchInterval: 3_000,
     retry: false,
@@ -386,7 +256,7 @@ export function Phase7BDemoPage() {
             </PanelCard>
 
             <PanelCard title="TRẠNG THÁI HỆ THỐNG" accent="green">
-              <StatusDot label="Market Data" ok={(data?.candles?.length ?? 0) >= 2} />
+              <StatusDot label="MT5 Bridge" ok={Object.keys(bridge).length > 0} />
               <StatusDot label="Semantic UI" ok={Boolean(ui)} />
               <StatusDot label="Decision Engine" ok={Boolean(panel)} />
               <StatusDot label="Risk Manager" ok={Boolean(accountRisk.configuration)} />
@@ -401,7 +271,6 @@ export function Phase7BDemoPage() {
 
         <Grid size={{ xs: 12, lg: 6 }}>
           <Stack spacing={2}>
-            <LiveCandlestickChart candles={data?.candles ?? []} panel={panel} uiState={uiState} ui={ui} />
             <RecentTradeJournal
               trades={performanceQuery.data?.trades ?? []}
               currency={currency}
