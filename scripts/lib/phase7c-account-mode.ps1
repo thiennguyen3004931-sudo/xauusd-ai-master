@@ -140,6 +140,84 @@ function Get-Phase7CRiskProfilePath([string]$WorkDir, [string]$AccountMode) {
   return Join-Path $WorkDir "phase7c-lot-settings.$mode.json"
 }
 
+function Get-Phase7CLiveProfileIdentity([string]$LiveEnvFile) {
+  Set-StrictMode -Version Latest
+  if (-not (Test-Path -LiteralPath $LiveEnvFile)) {
+    throw "LIVE environment file not found: $LiveEnvFile"
+  }
+
+  $terminalPath = ([string](Get-Phase7CEnvValue $LiveEnvFile "MT5_TERMINAL_PATH")).Trim()
+  $server = ([string](Get-Phase7CEnvValue $LiveEnvFile "MT5_SERVER")).Trim()
+  $loginRaw = ([string](Get-Phase7CEnvValue $LiveEnvFile "MT5_LOGIN")).Trim()
+  $login = 0L
+
+  if ([string]::IsNullOrWhiteSpace($terminalPath)) { throw "LIVE MT5_TERMINAL_PATH is required." }
+  if ([string]::IsNullOrWhiteSpace($server)) { throw "LIVE MT5_SERVER is required." }
+  if (-not [long]::TryParse($loginRaw, [ref]$login) -or $login -le 0) {
+    throw "LIVE MT5_LOGIN must be a positive account number."
+  }
+
+  $allowed = @(Get-Phase7CAllowedLogins $LiveEnvFile)
+  if ($allowed.Count -eq 0 -or $allowed -notcontains $login) {
+    throw "LIVE MT5_LOGIN must be present in MT5_ALLOWED_LOGINS."
+  }
+
+  return [pscustomobject]@{
+    login = $login
+    server = $server
+    terminalPath = $terminalPath
+    profileFingerprint = Get-Phase7CLiveProfileFingerprint -Login $login -Server $server -TerminalPath $terminalPath
+  }
+}
+
+function Assert-Phase7CLiveRiskProfileBinding(
+  $Profile,
+  [string]$LiveEnvFile,
+  [string]$Label = "LIVE risk profile"
+) {
+  Set-StrictMode -Version Latest
+  $risk = Assert-Phase7CRiskProfile $Profile $Label
+  $identity = Get-Phase7CLiveProfileIdentity $LiveEnvFile
+
+  $modeProperty = $Profile.PSObject.Properties["accountMode"]
+  $loginProperty = $Profile.PSObject.Properties["accountLogin"]
+  $serverProperty = $Profile.PSObject.Properties["server"]
+  $fingerprintProperty = $Profile.PSObject.Properties["profileFingerprint"]
+  $appliesToProperty = $Profile.PSObject.Properties["appliesTo"]
+  $martingaleProperty = $Profile.PSObject.Properties["martingale"]
+  $recoveryProperty = $Profile.PSObject.Properties["recoveryLotEscalation"]
+
+  if ($null -eq $modeProperty -or (ConvertTo-Phase7CAccountMode ([string]$modeProperty.Value)) -ne "LIVE") {
+    throw "$Label must be explicitly bound to accountMode LIVE."
+  }
+  if ($null -eq $loginProperty -or [long]$loginProperty.Value -ne [long]$identity.login) {
+    throw "$Label accountLogin does not match the configured LIVE MT5 profile."
+  }
+  if ($null -eq $serverProperty -or -not [string]::Equals(([string]$serverProperty.Value).Trim(), $identity.server, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "$Label server does not match the configured LIVE MT5 profile."
+  }
+  if ($null -eq $fingerprintProperty -or ([string]$fingerprintProperty.Value).Trim().ToLowerInvariant() -ne $identity.profileFingerprint) {
+    throw "$Label profileFingerprint does not match the configured LIVE terminal/login/server."
+  }
+  if ($null -eq $appliesToProperty -or ([string]$appliesToProperty.Value).Trim().ToUpperInvariant() -ne "NEW_POSITIONS_ONLY") {
+    throw "$Label appliesTo must be NEW_POSITIONS_ONLY."
+  }
+  if ($null -eq $martingaleProperty -or [bool]$martingaleProperty.Value) {
+    throw "$Label must keep martingale=false."
+  }
+  if ($null -eq $recoveryProperty -or [bool]$recoveryProperty.Value) {
+    throw "$Label must keep recoveryLotEscalation=false."
+  }
+
+  return [pscustomobject]@{
+    profile = $risk
+    login = $identity.login
+    server = $identity.server
+    terminalPath = $identity.terminalPath
+    profileFingerprint = $identity.profileFingerprint
+  }
+}
+
 function Write-Phase7CAccountJsonAtomic([string]$Path, $Value, [int]$Depth = 8) {
   Set-StrictMode -Version Latest
   $directory = Split-Path -Parent $Path
