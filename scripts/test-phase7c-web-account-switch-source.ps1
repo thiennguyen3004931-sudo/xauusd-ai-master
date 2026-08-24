@@ -60,7 +60,7 @@ Assert-Literal $runner 'verify-phase7c-account-runtime-local.ps1' 'strict post-s
 Assert-Literal $runner '-RequireTelegram' 'Telegram required after switch'
 Assert-Literal $runner 'Final bot mode must remain PAUSE' 'final PAUSE guard'
 Assert-Literal $runner 'Expected DISARMED' 'LIVE must finish disarmed'
-Assert-NotContains $runner 'arm-phase7c-live-local\.ps1' 'runner must never ARM LIVE'
+Assert-NotContains $runner '(?<!dis)arm-phase7c-live-local\.ps1' 'runner must never ARM LIVE'
 Assert-NotContains $runner 'order_send|/v1/orders[^?]' 'runner must not submit broker order mutations'
 
 Assert-Literal $service 'XAUUSD-Phase7C-Account-Switch' 'API uses only fixed task name'
@@ -73,7 +73,7 @@ Assert-Literal $service 'botPaused: pause' 'PAUSE preflight'
 Assert-Literal $service 'zeroXauusdPositions: noOpenPositions' 'flat broker preflight'
 Assert-Literal $service 'noExecutionLock: !strategy.executionLock' 'execution lock preflight'
 Assert-Literal $service 'schtasks.exe' 'fixed scheduled task invocation'
-Assert-NotContains $service 'arm-phase7c-live|order_send' 'API service must not ARM or order-send'
+Assert-NotContains $service '(?<!dis)arm-phase7c-live|order_send' 'API service must not ARM or order-send'
 
 Assert-Literal $route 'Account switching is restricted to localhost.' 'localhost API guard'
 Assert-Literal $route '/preflight' 'preflight endpoint'
