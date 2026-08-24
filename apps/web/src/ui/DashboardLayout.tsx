@@ -88,7 +88,7 @@ function Navigation({ runtime, onNavigate }: { runtime: RuntimeLabel; onNavigate
           <Typography variant="caption" fontWeight={900}>MT5 PANEL · CHỈ ĐỌC</Typography>
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.9, lineHeight: 1.5 }}>
-          Runtime hiện tại: {runtime}. Web không có quyền đặt lệnh hoặc chuyển tài khoản. Chuyển DEMO/LIVE chỉ qua quy trình PowerShell Admin đã kiểm tra an toàn.
+          Runtime hiện tại: {runtime}. Web không có quyền đặt lệnh. Chuyển DEMO/LIVE chỉ qua Guarded Account Switch với PAUSE + FLAT + xác nhận 2 bước; LIVE ARM vẫn là thao tác riêng.
         </Typography>
       </Box>
     </Box>
