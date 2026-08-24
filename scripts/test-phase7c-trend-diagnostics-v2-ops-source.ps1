@@ -18,6 +18,7 @@ $canonical = Read-Source 'scripts/run-phase7b-demo-controller.ts'
 $restore = Read-Source 'scripts/restore-phase7c-executor-task-local.ps1'
 $telegram = Read-Source 'scripts/test-phase7c-telegram-notifications-local.ps1'
 $register = Read-Source 'scripts/register-phase7c-executor-task-local.ps1'
+$rootPackage = Read-Source 'package.json'
 
 # Diagnostics V2 must mirror the canonical Trend priority and constants without mutation capability.
 Assert-Text $canonical 'Pattern Rule V2 priority: THREE -> TWO -> ENGULFING' 'canonical Trend pattern priority changed unexpectedly'
@@ -33,6 +34,17 @@ Assert-Text $diag 'WAIT_PULLBACK_STOP_GT_10' 'diagnostics must expose >10 pullba
 Assert-Text $diag 'readOnly:\s*true' 'diagnostics must identify read-only safety'
 Assert-NotText $diag '/v1/orders' 'diagnostics must not access broker order endpoint'
 Assert-NotText $diag '/v1/positions/.+close' 'diagnostics must not close broker positions'
+
+# Diagnostics runtime contract must remain aligned with the canonical persisted account-mode schema.
+Assert-Text $rootPackage '"@xauusd/risk-engine"\s*:\s*"workspace:\*"' 'root workspace must expose risk-engine for diagnostics import'
+Assert-Text $diag 'const version = Number\(state\?\.version\);' 'diagnostics must read persisted account-mode version'
+Assert-Text $diag 'if \(version !== 1\)' 'diagnostics must fail closed on unsupported account-mode version'
+Assert-Text $diag 'accountMode !== "DEMO" && accountMode !== "LIVE"' 'diagnostics must accept only canonical DEMO/LIVE account modes'
+Assert-Text $diag 'accountMode === "DEMO" && liveExecutionEnabled' 'diagnostics must reject DEMO state with LIVE execution enabled'
+Assert-Text $diag 'accountMode === "LIVE" && !liveExecutionEnabled' 'diagnostics must reject LIVE state without LIVE execution enabled'
+Assert-Text $diag 'const resolvedEnvFile = path\.resolve\(envFile\);' 'diagnostics must resolve the persisted env file'
+Assert-Text $diag 'fs\.existsSync\(resolvedEnvFile\)' 'diagnostics must require the selected env file to exist'
+Assert-NotText $diag 'state\?\.valid' 'diagnostics must not depend on derived service-only valid field'
 
 # Missing canonical task restore is definition-only and guarded by PAUSE + flat checks.
 Assert-Text $register "TaskName = 'XAUUSD-Phase7C-Executors'" 'canonical executor task name must remain fixed'
