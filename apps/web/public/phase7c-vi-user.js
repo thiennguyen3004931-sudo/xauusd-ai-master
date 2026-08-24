@@ -302,9 +302,13 @@
       .replace(/\bMT5\s+cho phép giao dịch\b/gi, "MT5 cho phép giao dịch");
   }
 
-  // Test hook for the repository regression test. Not used by the UI.
+  // Test hook for the repository regression test and scoped React localization runtime.
   globalThis.__PHASE7C_VI_TEST__ = Object.freeze({ translate });
   if (typeof document === "undefined" || typeof MutationObserver === "undefined") return;
+
+  function runtimeManaged() {
+    return document.body?.getAttribute("data-no-vi-localize") === "runtime-managed";
+  }
 
   function shouldSkip(node) {
     const parent = node.parentElement;
@@ -347,10 +351,12 @@
 
   let queued = false;
   const observer = new MutationObserver((mutations) => {
+    if (runtimeManaged()) return;
     if (queued) return;
     queued = true;
     queueMicrotask(() => {
       queued = false;
+      if (runtimeManaged()) return;
       for (const mutation of mutations) {
         if (mutation.type === "characterData") {
           translateTextNode(mutation.target);
