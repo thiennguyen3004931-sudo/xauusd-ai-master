@@ -15,6 +15,7 @@ const web = read("apps/web/src/pages/Phase7BDemoPage.tsx");
 const mt5 = read("mt5/XAUUSD_AI_Master_Decision_Panel.mq5");
 const installer = read("scripts/install-phase7c-mt5-decision-panel-local.ps1");
 const dualInstaller = read("scripts/install-phase7c-mt5-decision-panel-both-accounts-local.ps1");
+const syncDeploy = read("scripts/deploy-phase7c-web-mt5-sync-local.ps1");
 const e2e = read("scripts/run-phase7c-demo-e2e-local.ps1");
 
 for (const key of ["auto", "trendWait", "sidewayWait", "entry", "hold", "stopMove", "partial", "exit"]) {
@@ -102,6 +103,21 @@ requireText(dualInstaller, ".env.phase7b-live", "dual installer LIVE profile");
 requireText(dualInstaller, "PHASE7C_MT5_PANEL_SYNC_DEMO=PASS", "dual installer DEMO pass marker");
 requireText(dualInstaller, "PHASE7C_MT5_PANEL_SYNC_LIVE=PASS", "dual installer LIVE pass marker");
 requireText(dualInstaller, "PHASE7C_MT5_PANEL_SYNC_EXECUTION_MUTATION=False", "dual installer mutation boundary");
+
+for (const marker of [
+  "deploy-phase7c-web-ui-local.ps1",
+  "install-phase7c-mt5-decision-panel-both-accounts-local.ps1",
+  "PHASE7C_WEB_MT5_SYNC_RUNTIME_PRESERVED=PASS",
+  "PHASE7C_WEB_MT5_SYNC_SEMANTIC_CONTRACT=PASS",
+  "PHASE7C_WEB_MT5_SYNC_MT5_ORDER_PERMISSION=NONE",
+  "PHASE7C_WEB_MT5_SYNC_STRATEGY_CHANGED=False",
+  "PHASE7C_WEB_MT5_SYNC_RISK_CHANGED=False",
+]) {
+  requireText(syncDeploy, marker, `sync deploy ${marker}`);
+}
+for (const forbidden of ["phase7c-account-switch/execute", "arm-phase7c-live-local.ps1", "order_send", "/v1/orders"]) {
+  forbidText(syncDeploy, forbidden, "sync deploy mutation boundary");
+}
 
 for (const marker of [
   "ConfirmDemoExecution",
