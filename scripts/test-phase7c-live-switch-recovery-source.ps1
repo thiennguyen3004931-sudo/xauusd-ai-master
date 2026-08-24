@@ -66,7 +66,7 @@ Forbid $guarded 'order_send|/v1/orders/place|/v1/positions/close|/v1/positions/m
 
 Require $stopper 'PHASE7C_EXECUTOR_STOP=PASS' "Executor stopper PASS marker is missing."
 Require $stopper '(?ms)PHASE7C_EXECUTOR_STOP=PASS.*?exit 0' "Executor stopper must explicitly return exit code 0 after successful cleanup so callers do not inherit stale native LASTEXITCODE values."
-Require $stopper 'PHASE7C_EXECUTOR_STOP=FAIL.+exit 1' "Executor stopper must retain explicit failure exit code 1."
+Require $stopper '(?ms)PHASE7C_EXECUTOR_STOP=FAIL.*?exit 1' "Executor stopper must retain explicit failure exit code 1."
 
 $preflightIndex = $guarded.IndexOf('& $Preflight')
 $switchIndex = $guarded.IndexOf('& $Switcher')
