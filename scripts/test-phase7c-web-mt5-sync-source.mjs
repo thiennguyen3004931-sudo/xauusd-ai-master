@@ -66,17 +66,18 @@ for (const key of [
 ]) {
   requireText(mt5, `Field(payload, "${key}")`, `MT5 semantic reason ${key}`);
 }
-for (const title of [
-  "AUTO / REGIME · LÝ DO CHỌN STRATEGY",
-  "TREND · LÝ DO CHƯA VÀO LỆNH",
-  "SIDEWAY · LÝ DO CHƯA VÀO LỆNH",
-  "LÝ DO VÀO LỆNH",
-  "LÝ DO GIỮ LỆNH",
-  "LÝ DO DỜI STOP LOSS",
-  "LÝ DO CHỐT 1/3",
-  "LÝ DO ĐÓNG TOÀN BỘ",
+for (const label of [
+  "LÝ DO QUYẾT ĐỊNH",
+  "AUTO/REGIME",
+  "TREND",
+  "SIDEWAY",
+  "VÀO LỆNH",
+  "GIỮ LỆNH",
+  "DỜI SL",
+  "CHỐT 1/3",
+  "ĐÓNG TOÀN BỘ",
 ]) {
-  requireText(mt5, title, `MT5 semantic section ${title}`);
+  requireText(mt5, label, `MT5 compact semantic label ${label}`);
 }
 forbidText(mt5, '"DEMO · CHỈ ĐỌC"', "hard-coded MT5 DEMO label");
 for (const forbidden of ["OrderSend", "CTrade", "PositionClose", "PositionModify"]) {
