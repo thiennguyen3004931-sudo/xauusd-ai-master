@@ -19,26 +19,79 @@ if (-not (Test-Path $RuntimeDir)) {
   exit 0
 }
 
+function Get-Phase7CProcessStartTicks([System.Diagnostics.Process]$Process) {
+  if ($null -eq $Process) { return $null }
+  try { return [long]$Process.StartTime.ToUniversalTime().Ticks }
+  catch { return $null }
+}
+
+function Test-Phase7CSameProcessAlive([int]$ProcessId, [Nullable[long]]$StartTicks) {
+  $current = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  if ($null -eq $current) { return $false }
+  if ($null -eq $StartTicks) { return $true }
+  try {
+    return [long]$current.StartTime.ToUniversalTime().Ticks -eq [long]$StartTicks.Value
+  } catch {
+    # Fail closed if Windows cannot expose StartTime for a process that is
+    # still visible. The caller will keep waiting instead of assuming it died.
+    return $true
+  }
+}
+
+function Wait-Phase7CProcessGone(
+  [int]$ProcessId,
+  [Nullable[long]]$StartTicks,
+  [int]$TimeoutMilliseconds = 5000
+) {
+  $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+  do {
+    if (-not (Test-Phase7CSameProcessAlive $ProcessId $StartTicks)) { return $true }
+    Start-Sleep -Milliseconds 100
+  } while ([DateTime]::UtcNow -lt $deadline)
+  return -not (Test-Phase7CSameProcessAlive $ProcessId $StartTicks)
+}
+
 function Stop-ProcessTree([int]$ProcessId, [string]$Label) {
   if ($ProcessId -le 0) { return $false }
   $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
   # A parent taskkill may already have removed a descendant captured in an
   # earlier CIM snapshot. That is a successful stopped state, not a warning.
   if ($null -eq $process) { return $true }
+  $startTicks = Get-Phase7CProcessStartTicks $process
 
   try {
     $taskkill = Join-Path $env:SystemRoot "System32\taskkill.exe"
     if (Test-Path $taskkill) {
       & $taskkill /PID $ProcessId /T /F 2>$null | Out-Null
-      Start-Sleep -Milliseconds 150
     } else {
       Stop-Process -Id $ProcessId -Force -ErrorAction Stop
     }
   } catch {
-    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+    # The process can exit between Get-Process and taskkill. A failed native
+    # kill is therefore not itself a stop failure; verify the original PID
+    # identity below before deciding.
   }
 
-  return $null -eq (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
+  # Windows process-tree teardown is asynchronous. The previous 150 ms check
+  # could report a false failure for a launcher that was already terminating.
+  # Wait for the exact original PID identity to disappear before escalating.
+  if (Wait-Phase7CProcessGone $ProcessId $startTicks 5000) { return $true }
+
+  try {
+    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+  } catch {}
+
+  if (Wait-Phase7CProcessGone $ProcessId $startTicks 3000) { return $true }
+
+  # One final verified tree kill covers a stubborn child/console teardown.
+  try {
+    $taskkill = Join-Path $env:SystemRoot "System32\taskkill.exe"
+    if (Test-Path $taskkill) {
+      & $taskkill /PID $ProcessId /T /F 2>$null | Out-Null
+    }
+  } catch {}
+
+  return Wait-Phase7CProcessGone $ProcessId $startTicks 2000
 }
 
 function Stop-PidFile([string]$Path, [string]$Label) {
@@ -56,7 +109,7 @@ function Stop-PidFile([string]$Path, [string]$Label) {
         if ($stopped) {
           Write-Host "PHASE7C_${Label}_STOP=PASS_TREE|PID=$pidValue"
         } else {
-          Write-Warning "Process tree for $Label PID $pidValue may still be alive."
+          Write-Warning "Process tree for $Label PID $pidValue may still be alive after the shutdown grace period."
           $script:StopFailures += "${Label}:$pidValue"
           $removePidFile = $false
         }

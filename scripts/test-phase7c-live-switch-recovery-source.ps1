@@ -67,6 +67,11 @@ Forbid $guarded 'order_send|/v1/orders/place|/v1/positions/close|/v1/positions/m
 Require $stopper 'PHASE7C_EXECUTOR_STOP=PASS' "Executor stopper PASS marker is missing."
 Require $stopper '(?ms)PHASE7C_EXECUTOR_STOP=PASS.*?exit 0' "Executor stopper must explicitly return exit code 0 after successful cleanup so callers do not inherit stale native LASTEXITCODE values."
 Require $stopper '(?ms)PHASE7C_EXECUTOR_STOP=FAIL.*?exit 1' "Executor stopper must retain explicit failure exit code 1."
+Require $stopper 'function Wait-Phase7CProcessGone' "Executor stopper must wait for asynchronous Windows process teardown."
+Require $stopper 'Wait-Phase7CProcessGone \$ProcessId \$startTicks 5000' "Executor stopper must provide an initial shutdown grace period before reporting failure."
+Require $stopper 'Wait-Phase7CProcessGone \$ProcessId \$startTicks 3000' "Executor stopper must recheck after Stop-Process escalation."
+Require $stopper 'Get-Phase7CProcessStartTicks' "Executor stopper must bind shutdown verification to the original PID identity."
+Forbid $stopper 'Start-Sleep -Milliseconds 150' "Executor stopper must not use the old 150 ms one-shot teardown check."
 
 $preflightIndex = $guarded.IndexOf('& $Preflight')
 $switchIndex = $guarded.IndexOf('& $Switcher')
