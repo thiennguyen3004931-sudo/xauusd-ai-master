@@ -41,4 +41,15 @@ Assert-LiteralContains "('/compile:`"{0}`"' -f `$Destination)" 'MetaEditor compi
 Assert-LiteralContains "('/log:`"{0}`"' -f `$CompileLog)" 'MetaEditor log quoting'
 Assert-NotContains '\[string\]::Equals\(\s*\$originPath\s*,\s*\$TerminalPath' 'exact-only origin comparison'
 
+# Structured entry checklist is now the canonical compact WAITING contract.
+Assert-LiteralContains 'FirstEntryBlocker' 'structured blocker selector'
+Assert-LiteralContains 'DrawEntryCheckSummary' 'structured blocker renderer'
+Assert-LiteralContains 'prefix + "Check" + suffix + "Status"' 'entry check status binding'
+Assert-LiteralContains 'prefix + "Check" + suffix + "Label"' 'entry check label binding'
+Assert-LiteralContains 'prefix + "Check" + suffix + "Actual"' 'entry check actual binding'
+Assert-LiteralContains 'trendCheck1Status=' 'Trend checklist API contract'
+Assert-LiteralContains 'sidewayCheck1Status=' 'Sideway checklist API contract'
+Assert-NotContains 'Field\(payload,\s*"trendWaitReason1"\)' 'stale direct Trend wait reason binding'
+Assert-NotContains 'Field\(payload,\s*"sidewayWaitReason1"\)' 'stale direct Sideway wait reason binding'
+
 Write-Host "PHASE7C_MT5_PANEL_INSTALLER_SOURCE_TEST=PASS"
