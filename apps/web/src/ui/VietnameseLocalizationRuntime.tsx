@@ -14,6 +14,34 @@ declare global {
 }
 
 const SKIP_SELECTOR = "script,style,code,pre,textarea,[data-no-vi-localize-self]";
+const PRICE_BID_TOKEN = "\uE000PHASE7C_PRICE_BID\uE001";
+const PRICE_ASK_TOKEN = "\uE000PHASE7C_PRICE_ASK\uE001";
+const lastTextValue = new WeakMap<Node, string>();
+
+function normalizePriceLabels(value: string) {
+  return value
+    .replace(/(?:Giá\s+){2,}Bid\b/gi, "Giá Bid")
+    .replace(/(?:Giá\s+){2,}Ask\b/gi, "Giá Ask");
+}
+
+function translatePresentation(value: string) {
+  const translate = globalThis.__PHASE7C_VI_TEST__?.translate;
+  if (!value || typeof translate !== "function") return value;
+
+  // The legacy dictionary maps Bid -> "Giá Bid" and Ask -> "Giá Ask".
+  // Protect labels that are already translated so repeated MutationObserver
+  // passes cannot grow them into "Giá Giá Giá ... Bid/Ask".
+  const normalized = normalizePriceLabels(value);
+  const protectedValue = normalized
+    .replace(/Giá\s+Bid\b/gi, PRICE_BID_TOKEN)
+    .replace(/Giá\s+Ask\b/gi, PRICE_ASK_TOKEN);
+
+  const translated = translate(protectedValue)
+    .split(PRICE_BID_TOKEN).join("Giá Bid")
+    .split(PRICE_ASK_TOKEN).join("Giá Ask");
+
+  return normalizePriceLabels(translated);
+}
 
 function translateTextNode(node: Node) {
   if (node.nodeType !== Node.TEXT_NODE) return;
@@ -21,22 +49,20 @@ function translateTextNode(node: Node) {
   if (!parent || parent.closest(SKIP_SELECTOR)) return;
 
   const before = node.nodeValue || "";
-  const translate = globalThis.__PHASE7C_VI_TEST__?.translate;
-  if (!before || typeof translate !== "function") return;
+  if (!before || lastTextValue.get(node) === before) return;
 
-  const after = translate(before);
+  const after = translatePresentation(before);
+  lastTextValue.set(node, after);
   if (after !== before) node.nodeValue = after;
 }
 
 function translateAttributes(element: Element) {
   if (element.matches(SKIP_SELECTOR)) return;
-  const translate = globalThis.__PHASE7C_VI_TEST__?.translate;
-  if (typeof translate !== "function") return;
 
   for (const attribute of ["title", "placeholder", "aria-label", "alt"]) {
     if (!element.hasAttribute(attribute)) continue;
     const before = element.getAttribute(attribute) || "";
-    const after = translate(before);
+    const after = translatePresentation(before);
     if (after !== before) element.setAttribute(attribute, after);
   }
 }
@@ -118,7 +144,6 @@ export function VietnameseLocalizationRuntime({ children }: { children: ReactNod
     return () => {
       observer.disconnect();
       pending.clear();
-      document.body.removeAttribute("data-no-vi-localize");
       if (scheduledHandle !== null) {
         if (usingIdleCallback && typeof idleWindow.cancelIdleCallback === "function") {
           idleWindow.cancelIdleCallback(scheduledHandle);
