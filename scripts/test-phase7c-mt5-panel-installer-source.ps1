@@ -15,6 +15,12 @@ function Assert-Contains([string]$Pattern, [string]$Label) {
   }
 }
 
+function Assert-LiteralContains([string]$Needle, [string]$Label) {
+  if ($Source.IndexOf($Needle, [System.StringComparison]::Ordinal) -lt 0) {
+    throw "Missing installer literal marker: $Label"
+  }
+}
+
 function Assert-NotContains([string]$Pattern, [string]$Label) {
   if ($Source -match $Pattern) {
     throw "Forbidden installer regression pattern detected: $Label"
@@ -31,8 +37,8 @@ Assert-Contains '\$matchesInstallDir\s*=\s*\[string\]::Equals' 'install director
 Assert-Contains 'if\s*\(\$matchesTerminalExe\s+-or\s+\$matchesInstallDir\)' 'either origin form accepted'
 Assert-Contains '\$matches\s*=\s*@\(\$matches\s*\|\s*Sort-Object\s+-Unique\)' 'unique data folder match'
 Assert-Contains 'PHASE7C_MT5_PANEL_DATA_PATH_AUTODETECT=PASS' 'autodetect success marker'
-Assert-Contains "\('/compile:\"\{0\}\"'\s+-f\s+\$Destination\)" 'MetaEditor compile quoting'
-Assert-Contains "\('/log:\"\{0\}\"'\s+-f\s+\$CompileLog\)" 'MetaEditor log quoting'
+Assert-LiteralContains "('/compile:`"{0}`"' -f `$Destination)" 'MetaEditor compile quoting'
+Assert-LiteralContains "('/log:`"{0}`"' -f `$CompileLog)" 'MetaEditor log quoting'
 Assert-NotContains '\[string\]::Equals\(\s*\$originPath\s*,\s*\$TerminalPath' 'exact-only origin comparison'
 
 Write-Host "PHASE7C_MT5_PANEL_INSTALLER_SOURCE_TEST=PASS"
