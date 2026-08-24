@@ -1,6 +1,6 @@
 #property copyright "XAUUSD AI MASTER"
-#property version   "1.38"
-#property description "Bảng quyết định XAUUSD AI MASTER · chỉ đọc · giao diện tiếng Việt"
+#property version   "1.39"
+#property description "Bảng quyết định XAUUSD AI MASTER · compact · chỉ đọc"
 
 #include <Canvas\Canvas.mqh>
 
@@ -11,12 +11,12 @@ input int InpX = 12;
 input int InpY = 28;
 
 const string LEGACY_PREFIX = "XAU_AI_P7C_";
-const string CANVAS_NAME = "XAU_AI_P7C_CANVAS_V5";
-const int PANEL_MIN_WIDTH = 760;
-const int PANEL_MAX_WIDTH = 860;
-const int WAITING_HEIGHT = 550;
-const int SETUP_HEIGHT = 540;
-const int MANAGING_HEIGHT = 590;
+const string CANVAS_NAME = "XAU_AI_P7C_CANVAS_V6";
+const int PANEL_MIN_WIDTH = 500;
+const int PANEL_MAX_WIDTH = 620;
+const int WAITING_HEIGHT = 420;
+const int SETUP_HEIGHT = 425;
+const int MANAGING_HEIGHT = 505;
 // Required installer safety marker: READ ONLY | DEMO | ORDER PERMISSION = NONE
 
 CCanvas g_canvas;
@@ -55,14 +55,20 @@ string Clean(const string value, const string fallback="-")
    return EmptyValue(value) ? fallback : value;
 }
 
+bool BoolField(const string payload, const string key)
+{
+   string value = Field(payload, key);
+   return value == "true" || value == "True" || value == "TRUE" || value == "1";
+}
+
 int PanelWidth()
 {
    int chart_width = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
-   int target = (int)MathRound(chart_width * 0.40);
+   int target = (int)MathRound(chart_width * 0.32);
    target = (int)MathMax(PANEL_MIN_WIDTH, MathMin(PANEL_MAX_WIDTH, target));
    if(chart_width > 100)
       target = (int)MathMin(target, chart_width - 24);
-   return (int)MathMax(620, target);
+   return (int)MathMax(460, target);
 }
 
 void PurgeLegacyPanelObjects()
@@ -211,21 +217,13 @@ string SideVi(const string value)
    return value;
 }
 
-string SetupVi(const string value)
+string ReasonVi(const string value, const string fallback="Chưa có dữ liệu")
 {
-   if(value == "ENGULFING") return "NẾN NHẤN CHÌM";
-   if(value == "TWO_CANDLE_BODY_DOMINANCE") return "MẪU HAI NẾN THÂN CHIẾM ƯU THẾ";
-   if(EmptyValue(value)) return "CHƯA CÓ";
-   return value;
-}
-
-string ReasonVi(const string value)
-{
-   if(EmptyValue(value)) return "CHƯA CÓ LÝ DO TỪ HỆ THỐNG";
+   if(EmptyValue(value)) return fallback;
    string out = value;
-   StringReplace(out, "A confirmed CHOCH indicates a possible structural reversal.", "Đã xác nhận thay đổi cấu trúc, thị trường có khả năng đảo chiều.");
+   StringReplace(out, "A confirmed CHOCH indicates a possible structural reversal.", "CHOCH xác nhận khả năng đảo chiều cấu trúc.");
    StringReplace(out, "Bollinger bandwidth is", "Độ rộng dải Bollinger là");
-   StringReplace(out, "ENTRY_MODE_BLOCK: AUTO_REGIME_RECOMMENDS_PAUSE", "Thị trường yêu cầu TẠM DỪNG nên chưa cho phép vào lệnh mới.");
+   StringReplace(out, "ENTRY_MODE_BLOCK: AUTO_REGIME_RECOMMENDS_PAUSE", "AUTO đang chờ trạng thái thị trường phù hợp.");
    StringReplace(out, "ENTRY_MODE_BLOCK: PAUSE_MODE_BLOCKS_NEW_ENTRY", "Chế độ TẠM DỪNG đang chặn lệnh mới.");
    StringReplace(out, "M15_NO_ENTRY_SIGNAL", "Khung M15 chưa có tín hiệu vào lệnh.");
    StringReplace(out, "WAIT_PULLBACK", "Đang chờ giá hồi về vùng phù hợp.");
@@ -239,125 +237,102 @@ string ReasonVi(const string value)
    return out;
 }
 
-string GateText(const string gate)
-{
-   if(gate == "ALLOWED") return "ĐƯỢC PHÉP";
-   if(gate == "BLOCKED_BY_MODE") return "BỊ CHẶN DO CHẾ ĐỘ";
-   if(gate == "BLOCKED_BY_REGIME") return "CHƯA ĐƯỢC PHÉP";
-   return "ĐANG CHỜ";
-}
-
-color GateTone(const string gate)
-{
-   if(gate == "ALLOWED") return clrLimeGreen;
-   if(gate == "BLOCKED_BY_MODE") return clrOrange;
-   if(gate == "BLOCKED_BY_REGIME") return clrGold;
-   return clrSilver;
-}
-
 void BeginPanel(const int width, const int height)
 {
    g_canvas.Erase(A(C'3,10,18', 255));
    g_canvas.FillRectangle(0, 0, width - 1, height - 1, A(C'3,10,18', 255));
-   g_canvas.Rectangle(0, 0, width - 1, height - 1, A(C'0,190,225'));
+   g_canvas.Rectangle(0, 0, width - 1, height - 1, A(C'0,160,200'));
    g_canvas.FillRectangle(8, 6, width - 9, 8, A(C'0,210,255'));
 }
 
 void DrawHeader(const int width, const string mode, const string strategy, const string regime, const string confidence)
 {
-   const int x = 14;
-   const int y = 16;
-   const int w = width - 28;
-   const int h = 104;
-   Card(x, y, w, h, C'7,20,30', C'0,80,110');
+   const int x = 10;
+   const int y = 14;
+   const int w = width - 20;
+   const int h = 78;
+   Card(x, y, w, h, C'7,20,30', C'0,72,102');
 
-   Text(x + 18, y + 12, "XAUUSD AI MASTER", clrDeepSkyBlue, 14);
-   TextRight(x + w - 18, y + 14, "BẢN HOÀN THIỆN v5.2", clrGold, 9);
-   Text(x + 18, y + 40, "Giai đoạn 7C | TÀI KHOẢN THỬ NGHIỆM | CHỈ ĐỌC", clrSilver, 9);
-   Text(x + 18, y + 62, "Chế độ: " + ModeVi(mode), ModeTone(mode, strategy), 10);
-   TextRight(x + w - 18, y + 62, "Đang áp dụng: " + ModeVi(strategy), ModeTone(mode, strategy), 9);
-   Text(x + 18, y + 82, "Thị trường: " + RegimeVi(regime), RegimeTone(regime), 10);
-   TextRight(x + w - 18, y + 82, "Độ tin cậy: " + Clean(confidence) + "%", RegimeTone(regime), 10);
+   Text(x + 14, y + 10, "XAUUSD AI MASTER", clrDeepSkyBlue, 12);
+   TextRight(x + w - 14, y + 12, "DEMO · CHỈ ĐỌC", clrSilver, 8);
+   Text(x + 14, y + 34, "Chế độ: " + ModeVi(mode), ModeTone(mode, strategy), 9);
+   TextRight(x + w - 14, y + 34, "Đang áp dụng: " + ModeVi(strategy), ModeTone(mode, strategy), 8);
+   Text(x + 14, y + 56, "Thị trường: " + RegimeVi(regime), RegimeTone(regime), 9);
+   TextRight(x + w - 14, y + 56, "Tin cậy: " + Clean(confidence) + "%", RegimeTone(regime), 9);
 }
 
-void DrawStateCard(const int width, const string title, const string stage, const string action, const color tone)
+void DrawStatusItem(const int x, const int y, const string label, const bool on)
 {
-   const int x = 14;
-   const int y = 128;
-   const int w = width - 28;
-   const int h = 68;
-   Card(x, y, w, h, C'9,24,34', tone);
-   Text(x + 18, y + 12, title, tone, 11);
-   Text(x + 18, y + 40, "Giai đoạn: " + StageVi(stage), clrWhite, 9);
-   TextRight(x + w - 18, y + 40, action, clrSilver, 9);
+   color tone = on ? clrLimeGreen : clrTomato;
+   g_canvas.FillCircle(x + 5, y + 7, 4, A(tone));
+   Text(x + 16, y, label, clrSilver, 8);
+   Text(x + 16, y + 18, on ? "ON" : "OFF", tone, 8);
 }
 
-void DrawReasons(const int width, const int y, const string title, const string r1, const string r2, const string r3, const color tone)
+void DrawSystemStatus(const string payload, const int width)
 {
-   const int x = 14;
-   const int w = width - 28;
-   const int h = 120;
-   Card(x, y, w, h, C'7,21,30', C'0,72,102');
-   Text(x + 18, y + 12, title, tone, 10);
-   int max_text_width = w - 54;
-   string a = FitText(ReasonVi(r1), max_text_width, 9);
-   string b = EmptyValue(r2) ? "" : FitText(ReasonVi(r2), max_text_width, 9);
-   string c = EmptyValue(r3) ? "" : FitText(ReasonVi(r3), max_text_width, 9);
-   Text(x + 28, y + 42, "- " + a, clrWhite, 9);
-   if(StringLen(b) > 0) Text(x + 28, y + 66, "- " + b, clrSilver, 9);
-   if(StringLen(c) > 0) Text(x + 28, y + 90, "- " + c, clrSilver, 9);
-}
-
-void DrawGateCard(const int width, const int y, const string trend, const string sideway, const string reversal, const string recommended)
-{
-   const int x = 14;
-   const int w = width - 28;
-   const int h = 132;
-   const int label_x = x + 28;
-   const int value_right = x + w - 28;
-   Card(x, y, w, h, C'7,21,30', C'0,72,102');
-   Text(x + 18, y + 12, "BỘ LỌC VÀ QUYỀN HOẠT ĐỘNG", clrAqua, 10);
-
-   Text(label_x, y + 42, "bot Trend", clrSilver, 9);
-   TextRight(value_right, y + 42, GateText(trend), GateTone(trend), 9);
-   Text(label_x, y + 64, "bot Sideway", clrSilver, 9);
-   TextRight(value_right, y + 64, GateText(sideway), GateTone(sideway), 9);
-   Text(label_x, y + 86, "Bộ lọc đảo chiều", clrSilver, 9);
-   TextRight(value_right, y + 86, reversal == "BLOCKING" ? "ĐANG CHẶN" : "KHÔNG CHẶN", reversal == "BLOCKING" ? clrOrange : clrLimeGreen, 9);
-   Text(label_x, y + 108, "Khuyến nghị", clrSilver, 9);
-   TextRight(value_right, y + 108, ModeVi(recommended), clrWhite, 9);
-}
-
-void DrawFooter(const int width, const int y)
-{
-   const int x = 14;
-   const int w = width - 28;
+   const int x = 10;
+   const int y = 100;
+   const int w = width - 20;
    const int h = 62;
-   Card(x, y, w, h, C'6,18,26', C'0,72,102');
-   int center_x = x + w / 2;
-   TextCenter(center_x, y + 12, "CHỈ ĐỌC | THỬ NGHIỆM | KHÔNG CÓ QUYỀN ĐẶT LỆNH", clrSilver, 8);
-   TextCenter(center_x, y + 34, "HÒA VỐN +6 | CHỐT 1/3 TẠI +10 | CHỈ ÁP DỤNG VỊ THẾ MỚI", clrSilver, 8);
+   Card(x, y, w, h, C'7,21,30', C'0,72,102');
+   Text(x + 14, y + 8, "TRẠNG THÁI HỆ THỐNG", clrAqua, 9);
+
+   int col = (w - 28) / 4;
+   DrawStatusItem(x + 14, y + 30, "MT5", BoolField(payload, "mt5Connected"));
+   DrawStatusItem(x + 14 + col, y + 30, "An toàn", BoolField(payload, "accountGuardValid"));
+   DrawStatusItem(x + 14 + col * 2, y + 30, "bot Trend", BoolField(payload, "trendOn"));
+   DrawStatusItem(x + 14 + col * 3, y + 30, "bot Sideway", BoolField(payload, "sidewayOn"));
 }
 
-void DrawWaiting(const string payload, const int width)
+void DrawStateStrip(const string payload, const int width, const string title, const color tone)
 {
-   DrawStateCard(width, "BOT ĐANG CHỜ MẪU TÍN HIỆU", Field(payload, "stage"), "Không mở lệnh mới", clrOrange);
-   DrawReasons(width, 204, "LÝ DO CHƯA VÀO LỆNH", Field(payload, "waitReason1"), Field(payload, "waitReason2"), Field(payload, "waitReason3"), clrDeepSkyBlue);
-   DrawGateCard(width, 332, Field(payload, "trendGate"), Field(payload, "sidewayGate"), Field(payload, "reversalFilter"), Field(payload, "recommendedMode"));
-   DrawFooter(width, 472);
+   const int x = 10;
+   const int y = 170;
+   const int w = width - 20;
+   const int h = 44;
+   Card(x, y, w, h, C'9,24,34', tone);
+   Text(x + 14, y + 8, title, tone, 9);
+   TextRight(x + w - 14, y + 8, StageVi(Field(payload, "stage")), clrWhite, 8);
+   Text(x + 14, y + 26, "Khuyến nghị: " + ModeVi(Field(payload, "recommendedMode")), clrSilver, 8);
+}
+
+void DrawReasonCard(const int width, const int y, const int height, const string title, const string r1, const string r2, const color tone, const string fallback)
+{
+   const int x = 10;
+   const int w = width - 20;
+   Card(x, y, w, height, C'7,21,30', C'0,72,102');
+   Text(x + 14, y + 8, title, tone, 9);
+   int max_text_width = w - 38;
+   Text(x + 20, y + 30, FitText(ReasonVi(r1, fallback), max_text_width, 8), clrWhite, 8);
+   if(!EmptyValue(r2))
+      Text(x + 20, y + 50, FitText(ReasonVi(r2), max_text_width, 8), clrSilver, 8);
+}
+
+void DrawExitReason(const string payload, const int width, const int y)
+{
+   DrawReasonCard(
+      width,
+      y,
+      64,
+      "LÝ DO CHỐT GẦN NHẤT",
+      Field(payload, "exitReason1"),
+      Field(payload, "exitReason2"),
+      clrGold,
+      "Chưa có giao dịch đã chốt gần đây.");
 }
 
 void DrawTradePlan(const string payload, const int width, const bool managing)
 {
-   const int x = 14;
-   const int y = 128;
-   const int w = width - 28;
-   const int h = 88;
+   const int x = 10;
+   const int y = 170;
+   const int w = width - 20;
+   const int h = 76;
    Card(x, y, w, h, C'6,18,27', C'0,72,102');
 
-   int gap = 8;
-   int box_w = (w - 36 - gap * 2) / 3;
-   int bx1 = x + 12;
+   int gap = 6;
+   int box_w = (w - 28 - gap * 2) / 3;
+   int bx1 = x + 10;
    int bx2 = bx1 + box_w + gap;
    int bx3 = bx2 + box_w + gap;
    string entry = managing ? Field(payload, "positionEntry") : Field(payload, "setupEntry");
@@ -365,53 +340,64 @@ void DrawTradePlan(const string payload, const int width, const bool managing)
    string tp = managing ? Field(payload, "positionTp2") : Field(payload, "setupTp2");
    if(EmptyValue(tp)) tp = managing ? Field(payload, "positionTp1") : Field(payload, "setupTp1");
 
-   Card(bx1, y + 12, box_w, 62, C'7,25,38', C'0,120,170');
-   Card(bx2, y + 12, box_w, 62, C'30,14,22', C'150,45,60');
-   Card(bx3, y + 12, box_w, 62, C'12,28,20', C'50,150,75');
-   Text(bx1 + 12, y + 20, "ĐIỂM VÀO", clrDeepSkyBlue, 8);
-   Text(bx2 + 12, y + 20, "CẮT LỖ", clrTomato, 8);
-   Text(bx3 + 12, y + 20, "CHỐT LỜI", clrLimeGreen, 8);
-   Text(bx1 + 12, y + 42, FitText(Clean(entry), box_w - 24, 10), clrWhite, 10);
-   Text(bx2 + 12, y + 42, FitText(Clean(stop), box_w - 24, 10), clrWhite, 10);
-   Text(bx3 + 12, y + 42, FitText(Clean(tp), box_w - 24, 10), clrWhite, 10);
+   Card(bx1, y + 10, box_w, 56, C'7,25,38', C'0,110,155');
+   Card(bx2, y + 10, box_w, 56, C'30,14,22', C'140,45,60');
+   Card(bx3, y + 10, box_w, 56, C'12,28,20', C'45,140,70');
+   Text(bx1 + 10, y + 18, "ENTRY", clrDeepSkyBlue, 7);
+   Text(bx2 + 10, y + 18, "STOPLOSS", clrTomato, 7);
+   Text(bx3 + 10, y + 18, "TP", clrLimeGreen, 7);
+   Text(bx1 + 10, y + 38, FitText(Clean(entry), box_w - 20, 9), clrWhite, 9);
+   Text(bx2 + 10, y + 38, FitText(Clean(stop), box_w - 20, 9), clrWhite, 9);
+   Text(bx3 + 10, y + 38, FitText(Clean(tp), box_w - 20, 9), clrWhite, 9);
+}
+
+void DrawWaiting(const string payload, const int width)
+{
+   DrawStateStrip(payload, width, "BOT ĐANG CHỜ TÍN HIỆU", clrOrange);
+   DrawReasonCard(
+      width, 222, 104, "LÝ DO CHƯA VÀO LỆNH",
+      Field(payload, "waitReason1"), Field(payload, "waitReason2"),
+      clrDeepSkyBlue, "Chưa có setup hợp lệ.");
+   DrawExitReason(payload, width, 334);
 }
 
 void DrawSetup(const string payload, const int width)
 {
    DrawTradePlan(payload, width, false);
-   DrawReasons(width, 224, "LÝ DO MẪU TÍN HIỆU ĐƯỢC DUYỆT", Field(payload, "entryReason1"), Field(payload, "entryReason2"), Field(payload, "entryReason3"), clrLimeGreen);
+   DrawReasonCard(
+      width, 254, 86, "LÝ DO VÀO LỆNH",
+      Field(payload, "entryReason1"), Field(payload, "entryReason2"),
+      clrLimeGreen, "Setup đã được duyệt.");
 
-   const int x = 14;
-   const int y = 352;
-   const int w = width - 28;
-   Card(x, y, w, 88, C'7,21,30', C'0,72,102');
-   Text(x + 18, y + 12, "KHỐI LƯỢNG / RỦI RO", clrAqua, 10);
-   Text(x + 28, y + 42, "Chiến lược: " + ModeVi(Field(payload, "setupStrategy")), clrWhite, 9);
-   TextRight(x + w - 28, y + 42, "Hướng lệnh: " + SideVi(Field(payload, "setupSide")), clrWhite, 9);
-   Text(x + 28, y + 64, "Khối lượng: " + Clean(Field(payload, "setupFinalLot")), clrSilver, 9);
-   TextRight(x + w - 28, y + 64, "Rủi ro: " + Clean(Field(payload, "setupRiskPercent")) + "%", clrSilver, 9);
-   DrawFooter(width, 448);
+   const int x = 10;
+   const int w = width - 20;
+   Card(x, 348, w, 58, C'7,21,30', C'0,72,102');
+   Text(x + 14, 356, "Chiến lược: " + ModeVi(Field(payload, "setupStrategy")), clrWhite, 8);
+   TextRight(x + w - 14, 356, "Hướng: " + SideVi(Field(payload, "setupSide")), clrWhite, 8);
+   Text(x + 14, 378, "Lot: " + Clean(Field(payload, "setupFinalLot")), clrSilver, 8);
+   TextRight(x + w - 14, 378, "Risk: " + Clean(Field(payload, "setupRiskPercent")) + "%", clrSilver, 8);
 }
 
 void DrawManaging(const string payload, const int width)
 {
    DrawTradePlan(payload, width, true);
 
-   const int x = 14;
-   const int w = width - 28;
-   Card(x, 224, w, 62, C'8,26,20', C'45,130,70');
-   Text(x + 18, 238, "ĐANG GIỮ LỆNH", clrLimeGreen, 10);
-   TextRight(x + w - 18, 238, "Lãi/lỗ: " + Clean(Field(payload, "floatingPnlUsd")) + " USD", clrWhite, 10);
-   Text(x + 18, 260, "Hướng: " + SideVi(Field(payload, "positionSide")) + " | Khối lượng: " + Clean(Field(payload, "positionVolume")), clrSilver, 8);
+   const int x = 10;
+   const int w = width - 20;
+   Card(x, 254, w, 56, C'8,26,20', C'45,130,70');
+   Text(x + 14, 264, "ĐANG GIỮ LỆNH", clrLimeGreen, 9);
+   TextRight(x + w - 14, 264, "Lãi/lỗ: " + Clean(Field(payload, "floatingPnlUsd")) + " USD", clrWhite, 9);
+   Text(x + 14, 286, "Hướng: " + SideVi(Field(payload, "positionSide")) + " · Lot: " + Clean(Field(payload, "positionVolume")), clrSilver, 8);
+   TextRight(x + w - 14, 286, Clean(Field(payload, "floatingPnlPercent")) + "%", clrSilver, 8);
 
-   DrawReasons(width, 294, "LÝ DO GIỮ LỆNH", Field(payload, "holdReason1"), Field(payload, "holdReason2"), Field(payload, "holdReason3"), clrDeepSkyBlue);
-
-   Card(x, 422, w, 80, C'7,21,30', C'0,72,102');
-   Text(x + 18, 436, "QUẢN TRỊ LỆNH", clrAqua, 10);
-   Text(x + 28, 466, "Hòa vốn tại +6", clrWhite, 9);
-   Text(x + 170, 466, "Tại +10: chốt 1/3", clrWhite, 9);
-   TextRight(x + w - 28, 466, "CHỈ ĐỌC", clrSilver, 9);
-   DrawFooter(width, 510);
+   DrawReasonCard(
+      width, 318, 78, "LÝ DO VÀO LỆNH",
+      Field(payload, "entryReason1"), Field(payload, "entryReason2"),
+      clrLimeGreen, "Không có dữ liệu lý do vào lệnh.");
+   DrawReasonCard(
+      width, 404, 78, "LÝ DO GIỮ LỆNH",
+      Field(payload, "holdReason1"), Field(payload, "holdReason2"),
+      clrDeepSkyBlue, "Không có dữ liệu lý do giữ lệnh.");
 }
 
 void RenderPanel(const string payload)
@@ -428,6 +414,7 @@ void RenderPanel(const string payload)
       Field(payload, "effectiveStrategy"),
       Field(payload, "regime"),
       Field(payload, "confidence"));
+   DrawSystemStatus(payload, width);
 
    if(ui_state == "MANAGING")
       DrawManaging(payload, width);
@@ -442,18 +429,17 @@ void RenderPanel(const string payload)
 void RenderError(const string title, const string message)
 {
    int width = PanelWidth();
-   if(!EnsureCanvas(width, 300))
+   if(!EnsureCanvas(width, 230))
       return;
-   BeginPanel(width, 300);
-   Card(14, 16, width - 28, 266, C'12,18,26', C'180,60,60');
-   Text(32, 34, "XAUUSD AI MASTER", clrDeepSkyBlue, 14);
-   TextRight(width - 32, 36, "BẢN HOÀN THIỆN v5.2", clrGold, 9);
-   Text(32, 78, title, clrTomato, 11);
-   Text(32, 112, FitText(message, width - 64, 9), clrWhite, 9);
-   Text(32, 156, "1. Cho phép truy cập web tới http://127.0.0.1:3711", clrSilver, 8);
-   Text(32, 180, "2. Kiểm tra API điều khiển và cầu nối MT5", clrSilver, 8);
-   Text(32, 204, "3. Gắn lại bảng EA nếu cần", clrSilver, 8);
-   TextCenter(width / 2, 250, "CHỈ ĐỌC | THỬ NGHIỆM | KHÔNG CÓ QUYỀN ĐẶT LỆNH", clrSilver, 8);
+   BeginPanel(width, 230);
+   Card(10, 14, width - 20, 202, C'12,18,26', C'180,60,60');
+   Text(24, 28, "XAUUSD AI MASTER", clrDeepSkyBlue, 12);
+   TextRight(width - 24, 30, "DEMO · CHỈ ĐỌC", clrSilver, 8);
+   Text(24, 68, title, clrTomato, 10);
+   Text(24, 98, FitText(message, width - 48, 8), clrWhite, 8);
+   Text(24, 136, "Cho phép WebRequest tới http://127.0.0.1:3711", clrSilver, 8);
+   Text(24, 160, "Kiểm tra API điều khiển và cầu nối MT5.", clrSilver, 8);
+   TextCenter(width / 2, 194, "ORDER PERMISSION = NONE", clrSilver, 8);
    g_canvas.Update(true);
 }
 
@@ -467,12 +453,12 @@ void RefreshPanel()
    int status = WebRequest("GET", InpApiUrl, headers, 5000, request, response, response_headers);
    if(status == -1)
    {
-      RenderError("KHÔNG GỌI ĐƯỢC API ĐIỀU KHIỂN", "Lỗi truy cập web " + IntegerToString(GetLastError()));
+      RenderError("KHÔNG GỌI ĐƯỢC API", "Lỗi WebRequest " + IntegerToString(GetLastError()));
       return;
    }
    if(status != 200)
    {
-      RenderError("API ĐIỀU KHIỂN CHƯA SẴN SÀNG", "Mã phản hồi " + IntegerToString(status));
+      RenderError("API CHƯA SẴN SÀNG", "Mã phản hồi " + IntegerToString(status));
       return;
    }
 

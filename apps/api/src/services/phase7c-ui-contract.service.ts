@@ -27,6 +27,12 @@ export interface Phase7CUiContract {
     sideway: Phase7CUiGate;
     reversalFilter: "BLOCKING" | "CLEAR";
   };
+  status: {
+    mt5Connected: boolean;
+    accountGuardValid: boolean;
+    trendOn: boolean;
+    sidewayOn: boolean;
+  };
   setup: null | {
     strategy: string;
     side: string | null;
@@ -143,9 +149,22 @@ function holdReasons(snapshot: Snapshot, state: Phase7CUiState): string[] {
   return reasons;
 }
 
+function exitReasons(snapshot: Snapshot): string[] {
+  const reasons: string[] = [];
+  for (const row of snapshot.recentDecisions) {
+    const event = String(row.event ?? "");
+    if (!/(?:EXIT|CLOSE|CLOSED|TAKE_PROFIT|STOP_LOSS|POSITION_GONE)/i.test(event)) continue;
+    pushUnique(reasons, row.reason, 2);
+    if (reasons.length >= 2) break;
+  }
+  return reasons;
+}
+
 export function buildPhase7CUiContract(snapshot: Snapshot): Phase7CUiContract {
   const state = uiState(snapshot);
   const accountMode: "DEMO" | "LIVE" = snapshot.account.accountMode === "real" ? "LIVE" : "DEMO";
+  const trendGate = gateFor(snapshot, "TREND");
+  const sidewayGate = gateFor(snapshot, "SIDEWAY");
   const setup = state === "SETUP_READY" ? {
     strategy: snapshot.preTrade.strategy,
     side: snapshot.preTrade.side,
@@ -187,12 +206,18 @@ export function buildPhase7CUiContract(snapshot: Snapshot): Phase7CUiContract {
       wait: state === "WAITING" ? waitReasons(snapshot) : [],
       entry: entryReasons(snapshot, state),
       hold: holdReasons(snapshot, state),
-      exit: [],
+      exit: exitReasons(snapshot),
     },
     gates: {
-      trend: gateFor(snapshot, "TREND"),
-      sideway: gateFor(snapshot, "SIDEWAY"),
+      trend: trendGate,
+      sideway: sidewayGate,
       reversalFilter: snapshot.engine.regime === "REVERSAL" ? "BLOCKING" : "CLEAR",
+    },
+    status: {
+      mt5Connected: snapshot.account.reachable === true,
+      accountGuardValid: snapshot.safety.accountGuardValid === true,
+      trendOn: trendGate === "ALLOWED",
+      sidewayOn: sidewayGate === "ALLOWED",
     },
     setup,
     position,
@@ -217,6 +242,7 @@ export function formatPhase7CUiContractForMt5(ui: Phase7CUiContract): string {
   const wait = ui.reasons.wait;
   const entry = ui.reasons.entry;
   const hold = ui.reasons.hold;
+  const exit = ui.reasons.exit;
   const setup = ui.setup;
   const position = ui.position;
   const lines: Array<[string, unknown]> = [
@@ -235,6 +261,10 @@ export function formatPhase7CUiContractForMt5(ui: Phase7CUiContract): string {
     ["trendGate", ui.gates.trend],
     ["sidewayGate", ui.gates.sideway],
     ["reversalFilter", ui.gates.reversalFilter],
+    ["mt5Connected", ui.status.mt5Connected],
+    ["accountGuardValid", ui.status.accountGuardValid],
+    ["trendOn", ui.status.trendOn],
+    ["sidewayOn", ui.status.sidewayOn],
     ["waitReason1", wait[0]],
     ["waitReason2", wait[1]],
     ["waitReason3", wait[2]],
@@ -244,6 +274,9 @@ export function formatPhase7CUiContractForMt5(ui: Phase7CUiContract): string {
     ["holdReason1", hold[0]],
     ["holdReason2", hold[1]],
     ["holdReason3", hold[2]],
+    ["exitReason1", exit[0]],
+    ["exitReason2", exit[1]],
+    ["exitReason3", exit[2]],
     ["setupStrategy", setup?.strategy],
     ["setupSide", setup?.side],
     ["setupName", setup?.name],
