@@ -14,7 +14,7 @@ const string LEGACY_PREFIX = "XAU_AI_P7C_";
 const string CANVAS_NAME = "XAU_AI_P7C_CANVAS_V7";
 const int PANEL_MIN_WIDTH = 500;
 const int PANEL_MAX_WIDTH = 620;
-const int WAITING_HEIGHT = 520;
+const int WAITING_HEIGHT = 420;
 const int SETUP_HEIGHT = 425;
 const int MANAGING_HEIGHT = 505;
 // Required installer safety marker: READ ONLY | DEMO/LIVE | ORDER PERMISSION = NONE
@@ -328,7 +328,7 @@ void DrawReasonSummary(const string payload, const int width, const int y, const
 {
    const int x = 10;
    const int w = width - 20;
-   int h = state == "MANAGING" ? 176 : (state == "SETUP_READY" ? 104 : 190);
+   int h = state == "MANAGING" ? 176 : (state == "SETUP_READY" ? 104 : 84);
    Card(x, y, w, h, C'7,21,30', C'0,72,102');
    Text(x + 14, y + 8, "LÝ DO QUYẾT ĐỊNH", clrAqua, 9);
    int line_x = x + 18;
@@ -338,9 +338,7 @@ void DrawReasonSummary(const string payload, const int width, const int y, const
    if(state == "WAITING")
    {
       DrawReasonLine(line_x, line_y, max_width, "AUTO/REGIME", Field(payload, "autoReason1"), clrOrange, "AUTO chưa có dữ liệu chọn strategy.");
-      DrawReasonLine(line_x, line_y + 36, max_width, "TREND", Field(payload, "trendWaitReason1"), clrDeepSkyBlue, "Trend chưa có setup hợp lệ.");
-      DrawReasonLine(line_x, line_y + 72, max_width, "SIDEWAY", Field(payload, "sidewayWaitReason1"), clrAqua, "Sideway chưa có setup hợp lệ.");
-      DrawReasonLine(line_x, line_y + 108, max_width, "ĐÓNG TOÀN BỘ", Field(payload, "exitReason1"), clrGold, "Chưa có điều kiện đóng toàn bộ gần đây.");
+      DrawReasonLine(line_x, line_y + 28, max_width, "KẾT LUẬN", Field(payload, "waitReason1"), clrGold, "Bot đang chờ setup hợp lệ.");
    }
    else if(state == "SETUP_READY")
    {
