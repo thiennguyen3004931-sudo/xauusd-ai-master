@@ -7,6 +7,7 @@ on:
     paths:
       - "apps/api/src/services/phase7c-bot-mode.service.ts"
       - "scripts/test-phase7c-bot-mode-provenance.ts"
+      - "scripts/test-phase7c-bot-mode-provenance-writers.mjs"
       - ".github/workflows/phase7c-bot-mode-provenance-ci.yml"
 
 permissions:
@@ -37,6 +38,9 @@ jobs:
 
       - name: Bot mode provenance filesystem regression
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/test-phase7c-bot-mode-provenance.ts
+
+      - name: Bot mode provenance writer audit
+        run: node scripts/test-phase7c-bot-mode-provenance-writers.mjs
 
       - name: Build API dependency graph
         run: pnpm --filter @xauusd/api... build
