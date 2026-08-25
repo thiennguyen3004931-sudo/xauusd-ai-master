@@ -185,6 +185,15 @@ export function Phase7CControlCenterPage() {
   });
 
   const lifecycleData = lifecycle.data;
+  const brokerModeSupported =
+    lifecycleData?.bridge.accountMode === "demo" ||
+    lifecycleData?.bridge.accountMode === "real";
+  const detectedAccountLabel =
+    lifecycleData?.bridge.accountMode === "real"
+      ? "LIVE"
+      : lifecycleData?.bridge.accountMode === "demo"
+        ? "DEMO"
+        : lifecycleData?.bridge.accountMode?.toUpperCase() ?? "MT5 OFFLINE";
   const mode = lifecycleData?.mode.mode ?? decision?.mode.active ?? "—";
   const currency = decision?.account.currency ?? "USD";
   const position = decision?.position;
@@ -238,7 +247,7 @@ export function Phase7CControlCenterPage() {
                 useFlexGap
               >
                 <Typography variant="h6" fontWeight={950}>
-                  Điều khiển Bot DEMO
+                  Điều khiển Bot DEMO / LIVE
                 </Typography>
                 <Chip
                   color={
@@ -264,6 +273,12 @@ export function Phase7CControlCenterPage() {
                   variant="outlined"
                 />
                 <Chip
+                  color={lifecycleData?.bridge.accountMode === "real" ? "warning" : "default"}
+                  label={`ACCOUNT ${detectedAccountLabel}`}
+                  size="small"
+                  variant="outlined"
+                />
+                <Chip
                   icon={<TelegramRounded />}
                   color={lifecycleData?.telegramReady ? "success" : "default"}
                   label={
@@ -277,16 +292,18 @@ export function Phase7CControlCenterPage() {
                 <Chip label={`MODE ${mode}`} size="small" variant="outlined" />
               </Stack>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                Một nút khởi động Trend, Sideway và Telegram ở PAUSE; hệ thống
-                chỉ chuyển AUTO sau khi toàn bộ cổng an toàn đạt.
+                Một nút BẬT BOT tự nhận diện tài khoản MT5 đang đăng nhập: DEMO
+                chạy DEMO; LIVE chạy LIVE chỉ khi tài khoản LIVE đó đã được cấp
+                quyền trước. Web không tự cấp quyền/ARM LIVE lần đầu. Hệ thống
+                giữ PAUSE trong preflight và chỉ chuyển AUTO sau khi toàn bộ cổng
+                an toàn đạt.
               </Typography>
               <Typography
                 variant="caption"
                 color="text.secondary"
                 sx={{ display: "block", mt: 0.7 }}
               >
-                {lifecycleData?.bridge.accountMode?.toUpperCase() ??
-                  "MT5 OFFLINE"}
+                {detectedAccountLabel}
                 {lifecycleData?.bridge.server
                   ? ` · ${lifecycleData.bridge.server}`
                   : ""}
@@ -312,7 +329,7 @@ export function Phase7CControlCenterPage() {
                   lifecycleData?.ready ||
                   !lifecycleData?.controlEnabled ||
                   !bridgeReady ||
-                  lifecycleData?.bridge.accountMode !== "demo" ||
+                  !brokerModeSupported ||
                   lifecycleData?.bridge.tradingEnabled !== true ||
                   lifecycleData?.bridge.terminalTradeAllowed !== true ||
                   lifecycleData?.bridge.expertTradeAllowed !== true ||
@@ -356,8 +373,19 @@ export function Phase7CControlCenterPage() {
           {!bridgeReady ? (
             <Alert severity="warning" sx={{ mt: 2 }}>
               MT5 đang tắt hoặc Bridge đang tự kết nối lại. Web vẫn hoạt động;
-              nút BẬT BOT được khóa cho tới khi MT5 DEMO và Algo Trading sẵn
-              sàng.
+              nút BẬT BOT được khóa cho tới khi MT5 DEMO/LIVE và Algo Trading
+              sẵn sàng.
+            </Alert>
+          ) : !brokerModeSupported ? (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              Loại tài khoản MT5 hiện tại không được Phase7C hỗ trợ. Chỉ DEMO
+              hoặc LIVE/real được phép; Bot giữ PAUSE.
+            </Alert>
+          ) : lifecycleData?.bridge.accountMode === "real" ? (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              Đang nhận diện tài khoản LIVE. Nút BẬT BOT chỉ chạy LIVE nếu quyền
+              LIVE đã được xác nhận trước; nếu chưa có quyền, backend sẽ chặn và
+              giữ PAUSE. Web không đổi tài khoản MT5 và không tự ARM LIVE lần đầu.
             </Alert>
           ) : null}
           {lifecycle.error ? (
