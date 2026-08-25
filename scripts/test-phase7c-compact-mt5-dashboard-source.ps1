@@ -18,17 +18,39 @@ function Assert-NotText([string]$Text, [string]$Pattern, [string]$Message) {
 $mq5 = Read-Source "mt5\XAUUSD_AI_Master_Decision_Panel.mq5"
 $ui = Read-Source "apps\api\src\services\phase7c-ui-contract.service.ts"
 
-# Option B: larger, more readable dimensions with generous spacing.
-Assert-Text $mq5 'PANEL_MIN_WIDTH\s*=\s*620' "Option B panel minimum width must be 620px"
-Assert-Text $mq5 'PANEL_MAX_WIDTH\s*=\s*760' "Option B panel maximum width must be 760px"
-Assert-Text $mq5 'WAITING_HEIGHT\s*=\s*500' "Option B waiting panel height must be 500px"
-Assert-Text $mq5 'SETUP_HEIGHT\s*=\s*500' "Option B setup panel height must be 500px"
-Assert-Text $mq5 'MANAGING_HEIGHT\s*=\s*620' "Option B managing panel height must be 620px"
-Assert-Text $mq5 'REASON_LABEL_WIDTH\s*=\s*150' "Option B reason label column must be 150px"
-Assert-Text $mq5 'REASON_SECOND_LINE_OFFSET\s*=\s*16' "Option B wrapped reason line spacing must be 16px"
-Assert-Text $mq5 'REASON_WAITING_ROW_STEP\s*=\s*44' "Option B waiting reason rows must be separated by 44px"
-Assert-Text $mq5 'REASON_MANAGING_ROW_STEP\s*=\s*40' "Option B managing reason rows must be separated by 40px"
+# Option B base dimensions remain spacious.
+Assert-Text $mq5 'PANEL_MIN_WIDTH\s*=\s*620' "Option B panel minimum width must remain 620px"
+Assert-Text $mq5 'PANEL_MAX_WIDTH\s*=\s*760' "Option B panel maximum width must remain 760px"
 Assert-Text $mq5 'chart_width\s*\*\s*0\.40' "Option B panel should use about 40 percent of chart width"
+
+# Contained-grid layout: uniform body typography and fixed cell geometry.
+Assert-Text $mq5 'BODY_FONT_SIZE\s*=\s*9' "contained grid must use a uniform 9px body font"
+Assert-Text $mq5 'SECTION_FONT_SIZE\s*=\s*10' "section titles must use a consistent 10px font"
+Assert-Text $mq5 'REASON_LABEL_WIDTH\s*=\s*170' "reason label column must be wide enough for labels"
+Assert-Text $mq5 'REASON_ROW_HEIGHT\s*=\s*64' "each reason must live in a fixed 64px row"
+Assert-Text $mq5 'REASON_ROW_GAP\s*=\s*6' "reason rows must have explicit vertical gaps"
+Assert-Text $mq5 'REASON_SECOND_LINE_OFFSET\s*=\s*18' "wrapped reason lines must have readable separation"
+Assert-Text $mq5 'void\s+VerticalDivider\s*\(' "dashboard must provide vertical dividers"
+Assert-Text $mq5 'void\s+DrawReasonRowCard\s*\(' "each decision reason must render in its own contained row card"
+Assert-Text $mq5 'Card\(x,\s*y,\s*width,\s*REASON_ROW_HEIGHT' "reason row helper must draw its own card"
+Assert-Text $mq5 'VerticalDivider\(x\s*\+\s*REASON_LABEL_WIDTH' "reason row must separate label and content columns"
+Assert-Text $mq5 'WrapTextTwoLines\(ReasonVi\(reason,\s*fallback\),\s*content_width,\s*BODY_FONT_SIZE' "reason content must wrap inside its own column"
+Assert-Text $mq5 'DrawReasonRowCard\(' "reason summary must use contained row cards"
+Assert-NotText $mq5 'void\s+DrawReasonLine\s*\(' "legacy free-floating reason line renderer must be removed"
+
+# System status must be a real four-column grid with separators.
+Assert-Text $mq5 'STATUS_COLUMN_COUNT\s*=\s*4' "system status must define four equal columns"
+Assert-Text $mq5 'for\(int divider\s*=\s*1;\s*divider\s*<\s*STATUS_COLUMN_COUNT;\s*divider\+\+\)' "system status must draw dividers between columns"
+Assert-Text $mq5 'VerticalDivider\(' "system status must use the shared divider helper"
+
+# Major cards need explicit padding and enough height so text remains inside bounds.
+Assert-Text $mq5 'HEADER_HEIGHT\s*=\s*104' "header card must provide enough vertical room"
+Assert-Text $mq5 'STATUS_HEIGHT\s*=\s*86' "status card must provide enough vertical room"
+Assert-Text $mq5 'STATE_STRIP_HEIGHT\s*=\s*58' "state strip must provide enough vertical room"
+Assert-Text $mq5 'ENTRY_CHECK_HEIGHT\s*=\s*112' "entry blocker card must provide enough vertical room"
+Assert-Text $mq5 'WAITING_HEIGHT\s*=\s*590' "waiting canvas must contain all enlarged cards"
+Assert-Text $mq5 'SETUP_HEIGHT\s*=\s*590' "setup canvas must contain all enlarged cards"
+Assert-Text $mq5 'MANAGING_HEIGHT\s*=\s*780' "managing canvas must contain five reason rows"
 
 # Legacy rule-oriented blocks must stay removed from the MQL panel.
 Assert-NotText $mq5 'void\s+DrawFooter\s*\(' "legacy rule footer must stay removed"
@@ -45,24 +67,7 @@ Assert-Text $mq5 'Field\(payload,\s*.holdReason1.' "panel must show hold reason"
 Assert-Text $mq5 'Field\(payload,\s*.exitReason1.' "panel must show latest exit reason"
 Assert-Text $mq5 'Field\(payload,\s*.floatingPnlUsd.' "panel must show floating profit/loss"
 
-# Option B card grid: every major card gets more height/padding and no overlap.
-Assert-Text $mq5 'const int h = 90;' "Option B header card must be taller"
-Assert-Text $mq5 'const int y = 112;' "Option B system status must start below the header"
-Assert-Text $mq5 'const int h = 74;' "Option B system status card must be taller"
-Assert-Text $mq5 'const int y = 194;' "Option B state/trade section must start on the spacious grid"
-Assert-Text $mq5 'DrawEntryCheckSummary\(payload,\s*width,\s*252\)' "Option B waiting blocker card must use spacious y position"
-Assert-Text $mq5 'DrawReasonSummary\(payload,\s*width,\s*364,\s*.WAITING.\)' "Option B waiting reason card must be separated from blocker card"
-Assert-Text $mq5 'DrawReasonSummary\(payload,\s*width,\s*292,\s*.SETUP_READY.\)' "Option B setup reason card must use spacious y position"
-Assert-Text $mq5 'DrawReasonSummary\(payload,\s*width,\s*370,\s*.MANAGING.\)' "Option B managing reason card must sit below position card"
-Assert-Text $mq5 'state\s*==\s*.MANAGING.\s*\?\s*238\s*:\s*\(state\s*==\s*.SETUP_READY.\s*\?\s*126\s*:\s*126\)' "Option B reason cards must allocate sufficient height"
-
-# Reason text uses two lines, larger label separation, and readable 8px text.
-Assert-Text $mq5 'void\s+WrapTextTwoLines\s*\(' "panel must provide two-line reason wrapping"
-Assert-Text $mq5 'WrapTextTwoLines\(ReasonVi\(reason,\s*fallback\),\s*max_width\s*-\s*REASON_LABEL_WIDTH,\s*8' "Option B reason text must use readable 8px font"
-Assert-Text $mq5 'Text\(x,\s*y,\s*label,\s*tone,\s*8\)' "Option B reason labels must use readable 8px font"
-Assert-NotText $mq5 'FitText\(ReasonVi\(reason,\s*fallback\)' "decision reason must not be single-line truncated"
-
-# Entry blocker rows stay compact semantically while gaining visual breathing room.
+# Entry blocker rows stay compact semantically.
 Assert-Text $mq5 'string\s+CompactEntryCheckLabel\s*\(' "entry blocker labels must have a compact formatter"
 Assert-Text $mq5 'StringReplace\(out,\s*.Mode / Regime.,\s*.Mode/Regime.' "Mode / Regime label must be compacted"
 Assert-Text $mq5 'string\s+CompactEntryCheckActual\s*\(' "entry blocker actual value must have a compact formatter"
@@ -71,11 +76,8 @@ Assert-Text $mq5 'EntryCheckStatusVi\(status\)\s*\+\s*"[^"]*"\s*\+\s*CompactEntr
 Assert-Text $mq5 'CompactEntryCheckActual\(actual\)' "blocker row must use compact actual values"
 Assert-NotText $mq5 'trend_label\s*\+\s*"[^"]*"\s*\+\s*trend_actual' "legacy verbose Trend blocker concatenation must stay removed"
 Assert-NotText $mq5 'sideway_label\s*\+\s*"[^"]*"\s*\+\s*sideway_actual' "legacy verbose Sideway blocker concatenation must stay removed"
-Assert-Text $mq5 'const int h = 104;' "Option B blocker card must have more vertical space"
-Assert-Text $mq5 'y \+ 38' "Option B blocker first row must have more top padding"
-Assert-Text $mq5 'y \+ 70' "Option B blocker second row must have consistent spacing"
 
-# System status uses green/red dots and ON/OFF text.
+# System status truth remains canonical.
 Assert-Text $mq5 'FillCircle' "system status must use visible status dots"
 Assert-Text $mq5 'on\s*\?\s*.ON.\s*:\s*.OFF.' "status dots must be paired with ON/OFF text"
 Assert-Text $mq5 'BoolField\(payload,\s*.mt5Connected.' "panel must show MT5 connection status"
@@ -83,7 +85,6 @@ Assert-Text $mq5 'BoolField\(payload,\s*.accountGuardValid.' "panel must show ac
 Assert-Text $mq5 'BoolField\(payload,\s*.trendOn.' "panel must show bot Trend permission status"
 Assert-Text $mq5 'BoolField\(payload,\s*.sidewayOn.' "panel must show bot Sideway permission status"
 
-# Contract status truth and journal-based exit reasons.
 Assert-Text $ui 'status:\s*\{' "UI contract must expose a status section"
 Assert-Text $ui 'mt5Connected:\s*snapshot\.account\.reachable\s*===\s*true' "MT5 status must come from telemetry reachability"
 Assert-Text $ui 'accountGuardValid:\s*snapshot\.safety\.accountGuardValid\s*===\s*true' "account safety status must come from canonical safety state"
