@@ -5,12 +5,13 @@ on:
     branches:
       - fix/phase7c-legacy-background-cleanup
     paths:
+      - "apps/api/src/routes/phase7c.route.ts"
       - "apps/api/src/services/phase7c-account-mode.service.ts"
+      - "apps/api/src/services/phase7c-account-profile-selection.service.ts"
       - "apps/api/src/services/phase7c-lifecycle.service.ts"
       - "apps/api/src/services/phase7c-live-authorization.service.ts"
       - "apps/api/src/services/phase7c-lot-settings.service.ts"
       - "apps/api/src/services/phase7c-web-account-start-policy.ts"
-      - "apps/api/src/routes/phase7c.route.ts"
       - "apps/web/src/pages/Phase7CControlCenterPage.tsx"
       - "apps/web/src/phase7c-types.ts"
       - "scripts/lib/phase7c-account-mode.ps1"
@@ -19,12 +20,13 @@ on:
       - ".github/workflows/phase7c-web-auto-account-start-ci.yml"
   pull_request:
     paths:
+      - "apps/api/src/routes/phase7c.route.ts"
       - "apps/api/src/services/phase7c-account-mode.service.ts"
+      - "apps/api/src/services/phase7c-account-profile-selection.service.ts"
       - "apps/api/src/services/phase7c-lifecycle.service.ts"
       - "apps/api/src/services/phase7c-live-authorization.service.ts"
       - "apps/api/src/services/phase7c-lot-settings.service.ts"
       - "apps/api/src/services/phase7c-web-account-start-policy.ts"
-      - "apps/api/src/routes/phase7c.route.ts"
       - "apps/web/src/pages/Phase7CControlCenterPage.tsx"
       - "apps/web/src/phase7c-types.ts"
       - "scripts/lib/phase7c-account-mode.ps1"
@@ -59,7 +61,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Web auto-account start regression
-        run: pnpm exec tsx scripts/test-phase7c-web-auto-account-start.ts
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/test-phase7c-web-auto-account-start.ts
 
       - name: Existing dual-account regression
         run: node scripts/test-phase7c-dual-account-mode.mjs
