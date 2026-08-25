@@ -116,6 +116,24 @@ test("AUTO keeps REVERSAL fail-closed when the canonical Trend entry is not elig
   assert.equal(snapshot.preTrade.approved, false);
 });
 
+test("AUTO REVERSAL exception never bypasses active-lot hard safety", () => {
+  const input = fixture();
+  input.regime = {
+    ...input.regime,
+    regime: "REVERSAL",
+    recommendedMode: "PAUSE",
+    modeMatchesRecommendation: true,
+  };
+  input.lots.restartRequired = true;
+
+  const snapshot = buildPhase7CDecisionMonitor(input);
+  assert.equal(snapshot.mode.effectiveStrategy, "TREND");
+  assert.equal(snapshot.preTrade.strategy, "TREND");
+  assert.equal(snapshot.preTrade.approved, false);
+  assert.equal(snapshot.preTrade.stage, "BLOCKED");
+  assert.match(snapshot.preTrade.limitReason, /restart an toàn/i);
+});
+
 test("MT5 payload remains read-only and carries the canonical decision", () => {
   const payload = formatPhase7CDecisionMonitorForMt5(buildPhase7CDecisionMonitor(fixture()));
   assert.match(payload, /^version=1/m);
