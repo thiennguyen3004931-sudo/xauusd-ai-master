@@ -171,4 +171,10 @@ jobs:
           grep -q 'inferBrokerClockOffset' apps/api/src/routes/phase7b-demo.route.ts
           grep -q 'const now = Number(quote.timestamp)' scripts/run-phase7b-demo-controller.ts
           grep -q 'SL cấu trúc 6–10; >10 chờ hồi' apps/web/src/ui/DashboardLayout.tsx
-          grep -q 'Chỉ xác nhận xu hướng khung lớn' apps/web/src/pages/Phase7BPatternCheckPage.tsx
+          if grep -q 'Chỉ xác nhận xu hướng khung lớn' apps/web/src/pages/Phase7BPatternCheckPage.tsx; then
+            echo 'PHASE7B_CANONICAL_RUNNER_WEB=LEGACY_CANONICAL_UI'
+          else
+            grep -q 'SEMANTIC UI v2' apps/web/src/pages/Phase7BPatternCheckPage.tsx
+            grep -q 'fetchPhase7CWebStatus' apps/web/src/pages/Phase7BPatternCheckPage.tsx
+            echo 'PHASE7B_CANONICAL_RUNNER_WEB=SUPERSEDED_BY_SEMANTIC_UI_V2'
+          fi
