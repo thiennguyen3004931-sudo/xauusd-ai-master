@@ -1,5 +1,5 @@
 #property copyright "XAUUSD AI MASTER"
-#property version   "1.41"
+#property version   "1.40"
 #property description "Bảng quyết định XAUUSD AI MASTER · compact · chỉ đọc · DEMO/LIVE aware"
 
 #include <Canvas\Canvas.mqh>
