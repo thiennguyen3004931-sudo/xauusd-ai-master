@@ -173,5 +173,8 @@ function validateTempResult() {
   }
   if (!api.includes("inferBrokerClockOffset")) throw new Error("Temporary API lost broker-clock normalization.");
   if (!layout.includes("SL cấu trúc 6–10; >10 chờ hồi")) throw new Error("Temporary layout stop rule missing.");
-  if (!page.includes("Chỉ xác nhận xu hướng khung lớn")) throw new Error("Temporary page MA200 macro role missing.");
+  const pageRoleValid =
+    page.includes("Chỉ xác nhận xu hướng khung lớn") ||
+    (page.includes("SEMANTIC UI v2") && page.includes("fetchPhase7CWebStatus"));
+  if (!pageRoleValid) throw new Error("Temporary page canonical role / Semantic UI v2 marker missing.");
 }
