@@ -101,7 +101,8 @@ const patches = [
 
   patch(files.test, "TEST_THREE_CANDLE_FIXTURE",
     `function m5TrendMove(signalTimestamp: number, entry: number): Phase7Bar[] {`,
-    `function bullishThreeCandleM15(): Phase7Bar[] {\n  const bars = bullishTwoCandleM15();\n\n  // New A-B-C-D pattern: A is bearish; B/C/D are bullish.\n  // Body(A)=1.20 while Body(B)+Body(C)+Body(D)=0.40+0.40+0.50=1.30 > 1.20.\n  // No requirement that Body(B) itself must be smaller than Body(A) for this new pattern.\n  bars[198] = { ...bars[198]!, open: 120.0, high: 120.1, low: 118.7, close: 118.8 };\n  bars[199] = { ...bars[199]!, open: 119.0, high: 119.5, low: 118.9, close: 119.4 };\n  bars[200] = { ...bars[200]!, open: 120.3, high: 120.9, low: 120.2, close: 120.7 };\n  bars[201] = { ...bars[201]!, open: 120.6, high: 121.3, low: 120.0, close: 121.1 };\n  return bars;\n}\n\nfunction bullishThreeCandleM15TooWeak(): Phase7Bar[] {\n  const bars = bullishThreeCandleM15();\n  // Keep A bearish and B/C/D bullish, but total B+C+D = 0.90 <= A = 1.20.\n  bars[199] = { ...bars[199]!, open: 119.0, close: 119.3, high: 119.5, low: 118.9 };\n  bars[200] = { ...bars[200]!, open: 120.3, close: 120.6, high: 120.8, low: 120.2 };\n  bars[201] = { ...bars[201]!, open: 120.6, close: 120.9, high: 121.1, low: 120.0 };\n  return bars;\n}\n\nfunction m5TrendMove(signalTimestamp: number, entry: number): Phase7Bar[] {`),
+    `function bullishThreeCandleM15(): Phase7Bar[] {\n  const bars = bullishTwoCandleM15();\n\n  // New A-B-C-D pattern: A is bearish; B/C/D are bullish.\n  // Body(A)=1.20 while Body(B)+Body(C)+Body(D)=0.40+0.40+0.50=1.30 > 1.20.\n  // No requirement that Body(B) itself must be smaller than Body(A) for this new pattern.\n  bars[198] = { ...bars[198]!, open: 120.0, high: 120.1, low: 118.7, close: 118.8 };\n  bars[199] = { ...bars[199]!, open: 119.0, high: 119.5, low: 118.9, close: 119.4 };\n  bars[200] = { ...bars[200]!, open: 120.3, high: 120.9, low: 120.2, close: 120.7 };\n  bars[201] = { ...bars[201]!, open: 120.6, high: 121.3, low: 120.0, close: 121.1 };\n  return bars;\n}\n\nfunction bullishThreeCandleM15TooWeak(): Phase7Bar[] {\n  const bars = bullishThreeCandleM15();\n  // Keep A bearish and B/C/D bullish, but total B+C+D = 0.90 <= A = 1.20.\n  bars[199] = { ...bars[199]!, open: 119.0, close: 119.3, high: 119.5, low: 118.9 };\n  bars[200] = { ...bars[200]!, open: 120.3, close: 120.6, high: 120.8, low: 120.2 };\n  bars[201] = { ...bars[201]!, open: 120.6, close: 120.9, high: 121.1, low: 120.0 };
+  return bars;\n}\n\nfunction m5TrendMove(signalTimestamp: number, entry: number): Phase7Bar[] {`),
 
   patch(files.test, "TEST_THREE_CANDLE_CASES",
     `  it("moves SL to entry at +6 and closes one third at +10 while keeping the remainder", () => {`,
@@ -124,6 +125,13 @@ for (const file of Object.values(files)) {
   });
 }
 
+const webPatternUiSuperseded =
+  states.get(files.web)?.source.includes("THREE_CANDLE_BODY_DOMINANCE") ||
+  (
+    states.get(files.web)?.source.includes("SEMANTIC UI v2") &&
+    states.get(files.web)?.source.includes("fetchPhase7CWebStatus")
+  );
+
 const patternRuleV2AlreadyApplied = [
   states.get(files.service)?.source.includes(
     "Pattern Rule V2 priority: THREE -> TWO -> ENGULFING.",
@@ -143,9 +151,7 @@ const patternRuleV2AlreadyApplied = [
   states.get(files.api)?.source.includes(
     "THREE_CANDLE_BODY_DOMINANCE",
   ),
-  states.get(files.web)?.source.includes(
-    "THREE_CANDLE_BODY_DOMINANCE",
-  ),
+  webPatternUiSuperseded,
 ].every(Boolean);
 
 if (patternRuleV2AlreadyApplied) {
