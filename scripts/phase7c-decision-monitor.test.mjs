@@ -79,6 +79,43 @@ test("decision monitor calculates the active Trend lot and exact risk before ent
   assert.deepEqual(snapshot.engine.reasons, ["ADX and structure support trend."]);
 });
 
+test("AUTO permits a canonical Trend entry during confirmed REVERSAL instead of collapsing to PAUSE", () => {
+  const input = fixture();
+  input.regime = {
+    ...input.regime,
+    regime: "REVERSAL",
+    recommendedMode: "PAUSE",
+    modeMatchesRecommendation: true,
+    reasons: ["A confirmed CHOCH indicates a possible structural reversal."],
+  };
+
+  const snapshot = buildPhase7CDecisionMonitor(input);
+  assert.equal(snapshot.mode.active, "AUTO");
+  assert.equal(snapshot.engine.regime, "REVERSAL");
+  assert.equal(snapshot.engine.recommendedMode, "PAUSE");
+  assert.equal(snapshot.mode.effectiveStrategy, "TREND");
+  assert.equal(snapshot.preTrade.strategy, "TREND");
+  assert.equal(snapshot.preTrade.approved, true);
+});
+
+test("AUTO keeps REVERSAL fail-closed when the canonical Trend entry is not eligible", () => {
+  const input = fixture();
+  input.regime = {
+    ...input.regime,
+    regime: "REVERSAL",
+    recommendedMode: "PAUSE",
+    modeMatchesRecommendation: true,
+  };
+  input.demo.entryDiagnostics.entry.eligible = false;
+  input.demo.entryDiagnostics.entry.action = "WAIT_SIGNAL";
+
+  const snapshot = buildPhase7CDecisionMonitor(input);
+  assert.equal(snapshot.mode.active, "AUTO");
+  assert.equal(snapshot.mode.effectiveStrategy, "PAUSE");
+  assert.equal(snapshot.preTrade.strategy, "PAUSE");
+  assert.equal(snapshot.preTrade.approved, false);
+});
+
 test("MT5 payload remains read-only and carries the canonical decision", () => {
   const payload = formatPhase7CDecisionMonitorForMt5(buildPhase7CDecisionMonitor(fixture()));
   assert.match(payload, /^version=1/m);
