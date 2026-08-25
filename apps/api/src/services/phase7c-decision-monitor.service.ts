@@ -288,14 +288,18 @@ function trendDecision(input: {
   const estimatedRiskPercent = estimatedRiskUsd !== null && balance !== null && balance > 0
     ? estimatedRiskUsd / balance * 100
     : null;
+  const eligible = entryInfo?.eligible === true;
+  const autoReversalCanonicalTrendEntry = regime.activeMode === "AUTO" &&
+    regime.regime === "REVERSAL" &&
+    eligible;
   const modeAllows = regime.activeMode === "TREND" ||
-    (regime.activeMode === "AUTO" && regime.recommendedMode === "TREND");
+    (regime.activeMode === "AUTO" && regime.recommendedMode === "TREND") ||
+    autoReversalCanonicalTrendEntry;
   const safetyAllows = telemetry.reachable &&
     accountModeAllowsBroker(telemetry.health?.accountMode, accountModeState) &&
     telemetry.positions.length === 0 &&
     lots.activeAlive && lots.active?.armed === true &&
     !lots.restartRequired;
-  const eligible = entryInfo?.eligible === true;
   const approved = modeAllows && safetyAllows && eligible;
   const setup = diagnostics?.pattern?.matched
     ? diagnostics.pattern.name ?? "TREND_PATTERN"
@@ -624,8 +628,14 @@ export function buildPhase7CDecisionMonitor(input: {
 }) {
   const now = input.now ?? Date.now();
   const accountModeState = input.accountModeState ?? getPhase7CAccountModeState();
+  const canonicalTrendEligible = input.demo?.entryDiagnostics?.entry?.eligible === true;
+  const autoReversalCanonicalTrendEntry = input.regime.activeMode === "AUTO" &&
+    input.regime.regime === "REVERSAL" &&
+    canonicalTrendEligible;
   const requestedStrategy = input.regime.activeMode === "AUTO"
-    ? input.regime.recommendedMode
+    ? autoReversalCanonicalTrendEntry
+      ? "TREND"
+      : input.regime.recommendedMode
     : input.regime.activeMode;
   const effectiveStrategy: Strategy = requestedStrategy === "TREND" || requestedStrategy === "SIDEWAY"
     ? requestedStrategy
