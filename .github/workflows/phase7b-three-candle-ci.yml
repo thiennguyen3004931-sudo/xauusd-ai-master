@@ -49,7 +49,13 @@ jobs:
           grep -q 'THREE_CANDLE_BODY_DOMINANCE' packages/risk-engine/src/services/Phase7BDualPatternTrendRiderService.ts
           grep -q 'THREE_CANDLE_BODY_DOMINANCE' scripts/run-phase7b-demo-controller.ts
           grep -q 'THREE_CANDLE_BODY_DOMINANCE' apps/api/src/routes/phase7b-demo.route.ts
-          grep -q 'THREE_CANDLE_BODY_DOMINANCE' apps/web/src/pages/Phase7BPatternCheckPage.tsx
+          if grep -q 'THREE_CANDLE_BODY_DOMINANCE' apps/web/src/pages/Phase7BPatternCheckPage.tsx; then
+            echo 'PHASE7B_THREE_CANDLE_WEB=LEGACY_PATTERN_UI'
+          else
+            grep -q 'SEMANTIC UI v2' apps/web/src/pages/Phase7BPatternCheckPage.tsx
+            grep -q 'fetchPhase7CWebStatus' apps/web/src/pages/Phase7BPatternCheckPage.tsx
+            echo 'PHASE7B_THREE_CANDLE_WEB=SUPERSEDED_BY_SEMANTIC_UI_V2'
+          fi
 
       - name: Build risk-engine dependency graph
         run: pnpm --filter @xauusd/risk-engine... build
