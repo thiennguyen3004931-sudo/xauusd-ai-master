@@ -323,6 +323,14 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
 
   const accountModeState = getPhase7CAccountModeState();
   const current = getPhase7CLifecycleRuntimeStatus();
+
+  if (accountModeState.accountMode === "LIVE") {
+    phase7CBotModeService.set("PAUSE", "web-control-center-live-start-blocked");
+    throw new Error(
+      "Web không được chuyển LIVE sang mode hoạt động. LIVE phải được kích hoạt qua flow operator/ARM riêng; Bot vẫn PAUSE.",
+    );
+  }
+
   if (current.ready) {
     const mode = phase7CBotModeService.set("AUTO", "web-control-center-start");
     return {
@@ -335,12 +343,6 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
   }
 
   phase7CBotModeService.set("PAUSE", "web-control-center-preflight");
-
-  if (accountModeState.accountMode === "LIVE") {
-    throw new Error(
-      "LIVE chưa ở trạng thái READY đã verify. Web không được cold-start LIVE; hãy dùng switch-phase7c-account-mode-local.ps1 trong PowerShell Administrator. Bot vẫn PAUSE.",
-    );
-  }
 
   if (current.running || Object.values(current.processes).some((entry) => entry.alive)) {
     await runStopper();
