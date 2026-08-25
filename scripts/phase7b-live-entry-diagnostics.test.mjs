@@ -34,10 +34,13 @@ test("reachable DEMO telemetry keeps canonical entry diagnostics enabled", async
   assert.equal(policy.shouldComputePhase7BEntryDiagnostics({ reachable: true, accountMode: "demo" }), true);
 });
 
-test("unsupported account modes stay fail-closed", async () => {
+test("unsupported or malformed account modes stay fail-closed", async () => {
   const policy = await loadPolicy();
   assert.equal(policy.shouldComputePhase7BEntryDiagnostics({ reachable: true, accountMode: "contest" }), false);
+  assert.equal(policy.shouldComputePhase7BEntryDiagnostics({ reachable: true, accountMode: "REAL" }), false);
+  assert.equal(policy.shouldComputePhase7BEntryDiagnostics({ reachable: true, accountMode: "" }), false);
   assert.equal(policy.shouldComputePhase7BEntryDiagnostics({ reachable: true, accountMode: null }), false);
+  assert.equal(policy.shouldComputePhase7BEntryDiagnostics({ reachable: true, accountMode: undefined }), false);
 });
 
 test("unreachable telemetry never computes canonical entry diagnostics", async () => {
