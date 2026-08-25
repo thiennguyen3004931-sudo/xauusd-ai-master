@@ -23,9 +23,10 @@ Assert-Text $mq5 'PANEL_MIN_WIDTH\s*=\s*620' "Option B panel minimum width must 
 Assert-Text $mq5 'PANEL_MAX_WIDTH\s*=\s*760' "Option B panel maximum width must remain 760px"
 Assert-Text $mq5 'chart_width\s*\*\s*0\.40' "Option B panel should use about 40 percent of chart width"
 
-# Contained-grid layout: uniform body typography and fixed cell geometry.
-Assert-Text $mq5 'BODY_FONT_SIZE\s*=\s*9' "contained grid must use a uniform 9px body font"
-Assert-Text $mq5 'SECTION_FONT_SIZE\s*=\s*10' "section titles must use a consistent 10px font"
+# Contained-grid layout: physical pixel typography and fixed cell geometry.
+Assert-Text $mq5 'BODY_FONT_SIZE\s*=\s*12' "contained grid must use a 12px physical body font"
+Assert-Text $mq5 'SECTION_FONT_SIZE\s*=\s*13' "section titles must use a 13px physical font"
+Assert-Text $mq5 'TITLE_FONT_SIZE\s*=\s*17' "panel title must use a 17px physical font"
 Assert-Text $mq5 'REASON_ROW_HEIGHT\s*=\s*64' "each reason must live in a fixed 64px row"
 Assert-Text $mq5 'REASON_ROW_GAP\s*=\s*6' "reason rows must have explicit vertical gaps"
 Assert-Text $mq5 'void\s+VerticalDivider\s*\(' "dashboard must provide vertical dividers"
