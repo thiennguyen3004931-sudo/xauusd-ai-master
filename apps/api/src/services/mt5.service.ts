@@ -22,6 +22,7 @@ export interface Mt5TelemetrySnapshot {
   message: string;
   latencyMs: number | null;
   bridgeBaseUrl: string;
+  accountLogin: number | null;
   health: Omit<Mt5BridgeHealth, "accountLogin"> | null;
   quote: Mt5BridgeQuote | null;
   spec: Mt5BridgeSymbolSpec | null;
@@ -107,6 +108,7 @@ export async function getMt5Telemetry(
       message: "MT5 telemetry integration is disabled in apps/api.",
       latencyMs: null,
       bridgeBaseUrl: baseUrl,
+      accountLogin: null,
       health: null,
       quote: null,
       spec: null,
@@ -125,6 +127,7 @@ export async function getMt5Telemetry(
       message: "MT5_BRIDGE_API_KEY is not configured for apps/api.",
       latencyMs: null,
       bridgeBaseUrl: baseUrl,
+      accountLogin: null,
       health: null,
       quote: null,
       spec: null,
@@ -148,6 +151,7 @@ export async function getMt5Telemetry(
         message: health.lastError || "MT5 bridge reports disconnected terminal.",
         latencyMs: Math.max(0, Math.round(performance.now() - start)),
         bridgeBaseUrl: baseUrl,
+        accountLogin: health.accountLogin ?? null,
         health: sanitizeHealth(health),
         quote: null,
         spec: null,
@@ -184,6 +188,7 @@ export async function getMt5Telemetry(
       message,
       latencyMs: Math.max(0, Math.round(performance.now() - start)),
       bridgeBaseUrl: baseUrl,
+      accountLogin: health.accountLogin ?? null,
       health: sanitizeHealth(health),
       quote,
       spec,
@@ -199,6 +204,7 @@ export async function getMt5Telemetry(
       message: errorMessage(error),
       latencyMs: Math.max(0, Math.round(performance.now() - start)),
       bridgeBaseUrl: baseUrl,
+      accountLogin: null,
       health: null,
       quote: null,
       spec: null,
