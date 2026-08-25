@@ -78,7 +78,18 @@ Write-Host "PHASE7C_ENV_FILE=$EnvFile"
 
 Push-Location $ProjectRoot
 try {
-  pnpm exec tsx $Controller
+  $NodePath = [string]$env:PHASE7C_NODE_PATH
+  if ([string]::IsNullOrWhiteSpace($NodePath)) {
+    $NodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
+    if ($null -eq $NodeCommand) {
+      throw "Node.js executable is unavailable. Set PHASE7C_NODE_PATH or install Node.js."
+    }
+    $NodePath = [string]$NodeCommand.Source
+  }
+  if (-not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
+    throw "Node.js executable not found: $NodePath"
+  }
+  & $NodePath $Controller
   if ($LASTEXITCODE -ne 0) { throw "Phase 7C Sideway controller exited with code $LASTEXITCODE" }
 }
 finally { Pop-Location }
