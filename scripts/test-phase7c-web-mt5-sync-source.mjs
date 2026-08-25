@@ -111,7 +111,7 @@ for (const marker of [
   'prefix + "Check" + suffix + "Status"',
   'prefix + "Check" + suffix + "Label"',
   'prefix + "Check" + suffix + "Actual"',
-  'DrawEntryCheckSummary(payload, width, 222)',
+  'DrawEntryCheckSummary(payload, width, 252)',
 ]) {
   requireText(mt5, marker, `MT5 structured entry-check binding ${marker}`);
 }
