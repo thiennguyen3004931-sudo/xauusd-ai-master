@@ -7,6 +7,7 @@ import {
   type Phase7BPendingPullback,
 } from "@xauusd/risk-engine";
 import { getMt5Telemetry } from "../services/mt5.service";
+import { shouldComputePhase7BEntryDiagnostics } from "../services/phase7b-entry-diagnostics-account-mode";
 
 type ManagedState = {
   ticket: string;
@@ -183,7 +184,10 @@ router.get("/", async (_req: Request, res: Response) => {
 
     let entryDiagnostics: EntryDiagnostics | null = null;
     let entryDiagnosticsError: string | null = null;
-    if (telemetry.reachable && telemetry.health?.accountMode === "demo") {
+    if (shouldComputePhase7BEntryDiagnostics({
+      reachable: telemetry.reachable,
+      accountMode: telemetry.health?.accountMode ?? null,
+    })) {
       try {
         const brokerClockOffsetMs = inferBrokerClockOffset(
           telemetry.quote?.timestamp,
