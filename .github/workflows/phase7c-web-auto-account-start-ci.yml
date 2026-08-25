@@ -6,6 +6,7 @@ on:
       - fix/phase7c-legacy-background-cleanup
     paths:
       - "apps/api/src/routes/phase7c.route.ts"
+      - "apps/api/src/services/mt5.service.ts"
       - "apps/api/src/services/phase7c-account-mode.service.ts"
       - "apps/api/src/services/phase7c-account-profile-selection.service.ts"
       - "apps/api/src/services/phase7c-lifecycle.service.ts"
@@ -21,6 +22,7 @@ on:
   pull_request:
     paths:
       - "apps/api/src/routes/phase7c.route.ts"
+      - "apps/api/src/services/mt5.service.ts"
       - "apps/api/src/services/phase7c-account-mode.service.ts"
       - "apps/api/src/services/phase7c-account-profile-selection.service.ts"
       - "apps/api/src/services/phase7c-lifecycle.service.ts"
