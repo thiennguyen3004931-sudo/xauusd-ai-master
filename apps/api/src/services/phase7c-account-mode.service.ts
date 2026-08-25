@@ -1,5 +1,10 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import {
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, resolve } from "node:path";
 
 export type Phase7CAccountMode = "DEMO" | "LIVE";
 
@@ -94,6 +99,38 @@ export function getPhase7CAccountModeState(): Phase7CAccountModeState {
       error: error instanceof Error ? error.message : "Invalid account mode state.",
     };
   }
+}
+
+function writeJsonAtomic(filePath: string, value: unknown): void {
+  mkdirSync(dirname(filePath), { recursive: true });
+  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  renameSync(temporaryPath, filePath);
+}
+
+export function setPhase7CAccountModeFromWebAutoDetection(input: {
+  accountMode: Phase7CAccountMode;
+  envFile: string;
+  liveAuthorizationValidated: boolean;
+  updatedBy?: string;
+}): Phase7CAccountModeState {
+  if (!input.envFile.trim()) throw new Error("Selected account envFile is required.");
+  if (input.accountMode === "LIVE" && input.liveAuthorizationValidated !== true) {
+    throw new Error("Web cannot select LIVE without validated prior LIVE authorization.");
+  }
+  if (input.accountMode === "DEMO" && input.liveAuthorizationValidated === true) {
+    throw new Error("DEMO selection cannot carry LIVE authorization into execution state.");
+  }
+
+  writeJsonAtomic(phase7CAccountModeStatePath(), {
+    version: 1,
+    accountMode: input.accountMode,
+    liveExecutionEnabled: input.accountMode === "LIVE",
+    envFile: resolve(input.envFile),
+    updatedAt: new Date().toISOString(),
+    updatedBy: input.updatedBy?.trim() || "web-auto-detect-account",
+  });
+  return getPhase7CAccountModeState();
 }
 
 export function expectedBrokerAccountMode(state = getPhase7CAccountModeState()): "demo" | "real" {
