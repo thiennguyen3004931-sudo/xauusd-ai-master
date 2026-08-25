@@ -21,6 +21,12 @@ Assert-Contains $source '$AccountApi.state.accountMode' 'API accountMode schema'
 Assert-Contains $source '$AccountApi.state.valid' 'API valid schema'
 Assert-Contains $source 'ACCOUNT_FILE_API_MATCH=PASS' 'file/API consistency proof'
 
+# Boolean safety must fail closed even if an API field drifts from JSON bool to string.
+Assert-Contains $source 'function ConvertTo-StrictBoolean' 'strict boolean parser'
+Assert-Contains $source '[bool]::TryParse' 'string boolean parser'
+Assert-NotContains $source '[bool]$AccountApi.state.valid' 'unsafe initial valid cast'
+Assert-NotContains $source '[bool]$FinalAccount.state.valid' 'unsafe final valid cast'
+
 # Runtime must remain LIVE selected but fail closed and paused.
 Assert-Contains $source '/api/v1/phase7c/account-mode' 'canonical account GET'
 Assert-Contains $source '/api/v1/phase7c/bot-mode' 'bot-mode GET'
