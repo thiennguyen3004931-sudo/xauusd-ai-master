@@ -1,5 +1,5 @@
 #property copyright "XAUUSD AI MASTER"
-#property version   "1.40"
+#property version   "1.41"
 #property description "Bảng quyết định XAUUSD AI MASTER · compact · chỉ đọc · DEMO/LIVE aware"
 
 #include <Canvas\Canvas.mqh>
@@ -148,6 +148,56 @@ string FitText(const string source, const int max_width, const int px)
    while(StringLen(text) > 1 && g_canvas.TextWidth(text + suffix) > max_width)
       text = StringSubstr(text, 0, StringLen(text) - 1);
    return text + suffix;
+}
+
+void WrapTextTwoLines(
+   const string source,
+   const int max_width,
+   const int px,
+   string &line1,
+   string &line2
+)
+{
+   string text = Clean(source, "-");
+   line1 = text;
+   line2 = "";
+   SetFont(px);
+
+   if(g_canvas.TextWidth(text) <= max_width)
+      return;
+
+   string words[];
+   ushort separator = (ushort)StringGetCharacter(" ", 0);
+   int count = StringSplit(text, separator, words);
+   if(count <= 1)
+   {
+      line1 = FitText(text, max_width, px);
+      return;
+   }
+
+   line1 = "";
+   int split_index = 0;
+   for(int index = 0; index < count; index++)
+   {
+      string candidate = line1 == "" ? words[index] : line1 + " " + words[index];
+      if(line1 != "" && g_canvas.TextWidth(candidate) > max_width)
+         break;
+
+      line1 = candidate;
+      split_index = index + 1;
+      if(g_canvas.TextWidth(line1) > max_width)
+      {
+         line1 = FitText(line1, max_width, px);
+         break;
+      }
+   }
+
+   string remainder = "";
+   for(int index = split_index; index < count; index++)
+      remainder += (remainder == "" ? "" : " ") + words[index];
+
+   if(remainder != "")
+      line2 = FitText(remainder, max_width, px);
 }
 
 void Text(const int x, const int y, const string value, const color clr, const int px)
@@ -321,7 +371,11 @@ void DrawStateStrip(const string payload, const int width, const string title, c
 void DrawReasonLine(const int x, const int y, const int max_width, const string label, const string reason, const color tone, const string fallback)
 {
    Text(x, y, label, tone, 7);
-   Text(x + 112, y, FitText(ReasonVi(reason, fallback), max_width - 112, 7), clrWhite, 7);
+   string line1, line2;
+   WrapTextTwoLines(ReasonVi(reason, fallback), max_width - 112, 7, line1, line2);
+   Text(x + 112, y, line1, clrWhite, 7);
+   if(line2 != "")
+      Text(x + 112, y + 13, line2, clrWhite, 7);
 }
 
 void DrawReasonSummary(const string payload, const int width, const int y, const string state)
@@ -402,6 +456,23 @@ string EntryCheckStatusVi(const string status)
    if(status == "BLOCKED") return "BLOCK";
    if(status == "WAIT") return "WAIT";
    return "-";
+}
+
+string CompactEntryCheckLabel(const string value)
+{
+   string out = Clean(value, "Điều kiện entry");
+   StringReplace(out, "Mode / Regime", "Mode/Regime");
+   StringReplace(out, "Mode/ Regime", "Mode/Regime");
+   StringReplace(out, "Mode /Regime", "Mode/Regime");
+   return out;
+}
+
+string CompactEntryCheckText(const string status, const string label, const string actual)
+{
+   string compact = EntryCheckStatusVi(status) + " · " + CompactEntryCheckLabel(label);
+   if(!EmptyValue(actual))
+      compact += ": " + actual;
+   return compact;
 }
 
 void FirstEntryBlocker(
@@ -485,8 +556,7 @@ void DrawEntryCheckSummary(const string payload, const int width, const int y)
       x + 78,
       y + 34,
       FitText(
-         EntryCheckStatusVi(trend_status) + " · " +
-         trend_label + " · " + trend_actual,
+         CompactEntryCheckText(trend_status, trend_label, trend_actual),
          w - 98,
          7
       ),
@@ -499,8 +569,7 @@ void DrawEntryCheckSummary(const string payload, const int width, const int y)
       x + 78,
       y + 62,
       FitText(
-         EntryCheckStatusVi(sideway_status) + " · " +
-         sideway_label + " · " + sideway_actual,
+         CompactEntryCheckText(sideway_status, sideway_label, sideway_actual),
          w - 98,
          7
       ),
