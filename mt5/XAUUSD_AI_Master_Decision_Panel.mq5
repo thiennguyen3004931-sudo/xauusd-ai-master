@@ -17,6 +17,10 @@ const int PANEL_MAX_WIDTH = 620;
 const int WAITING_HEIGHT = 420;
 const int SETUP_HEIGHT = 425;
 const int MANAGING_HEIGHT = 505;
+const int REASON_LABEL_WIDTH = 128;
+const int REASON_SECOND_LINE_OFFSET = 12;
+const int REASON_WAITING_ROW_STEP = 34;
+const int REASON_MANAGING_ROW_STEP = 31;
 // Required installer safety marker: READ ONLY | DEMO/LIVE | ORDER PERMISSION = NONE
 
 CCanvas g_canvas;
@@ -372,17 +376,17 @@ void DrawReasonLine(const int x, const int y, const int max_width, const string 
 {
    Text(x, y, label, tone, 7);
    string line1, line2;
-   WrapTextTwoLines(ReasonVi(reason, fallback), max_width - 112, 7, line1, line2);
-   Text(x + 112, y, line1, clrWhite, 7);
+   WrapTextTwoLines(ReasonVi(reason, fallback), max_width - REASON_LABEL_WIDTH, 7, line1, line2);
+   Text(x + REASON_LABEL_WIDTH, y, line1, clrWhite, 7);
    if(line2 != "")
-      Text(x + 112, y + 13, line2, clrWhite, 7);
+      Text(x + REASON_LABEL_WIDTH, y + REASON_SECOND_LINE_OFFSET, line2, clrWhite, 7);
 }
 
 void DrawReasonSummary(const string payload, const int width, const int y, const string state)
 {
    const int x = 10;
    const int w = width - 20;
-   int h = state == "MANAGING" ? 176 : (state == "SETUP_READY" ? 104 : 84);
+   int h = state == "MANAGING" ? 180 : (state == "SETUP_READY" ? 104 : 96);
    Card(x, y, w, h, C'7,21,30', C'0,72,102');
    Text(x + 14, y + 8, "LÝ DO QUYẾT ĐỊNH", clrAqua, 9);
    int line_x = x + 18;
@@ -392,7 +396,7 @@ void DrawReasonSummary(const string payload, const int width, const int y, const
    if(state == "WAITING")
    {
       DrawReasonLine(line_x, line_y, max_width, "AUTO/REGIME", Field(payload, "autoReason1"), clrOrange, "AUTO chưa có dữ liệu chọn strategy.");
-      DrawReasonLine(line_x, line_y + 28, max_width, "KẾT LUẬN", Field(payload, "waitReason1"), clrGold, "Bot đang chờ setup hợp lệ.");
+      DrawReasonLine(line_x, line_y + REASON_WAITING_ROW_STEP, max_width, "KẾT LUẬN", Field(payload, "waitReason1"), clrGold, "Bot đang chờ setup hợp lệ.");
    }
    else if(state == "SETUP_READY")
    {
@@ -402,10 +406,10 @@ void DrawReasonSummary(const string payload, const int width, const int y, const
    else
    {
       DrawReasonLine(line_x, line_y, max_width, "VÀO LỆNH", Field(payload, "entryReason1"), clrLimeGreen, "Không có dữ liệu lý do vào lệnh.");
-      DrawReasonLine(line_x, line_y + 28, max_width, "GIỮ LỆNH", Field(payload, "holdReason1"), clrDeepSkyBlue, "Không có dữ liệu lý do giữ lệnh.");
-      DrawReasonLine(line_x, line_y + 56, max_width, "DỜI SL", Field(payload, "stopMoveReason1"), clrLimeGreen, "Chưa phát sinh dời SL.");
-      DrawReasonLine(line_x, line_y + 84, max_width, "CHỐT 1/3", Field(payload, "partialReason1"), clrAqua, "Chưa phát sinh partial.");
-      DrawReasonLine(line_x, line_y + 112, max_width, "ĐÓNG TOÀN BỘ", Field(payload, "exitReason1"), clrGold, "Chưa phát sinh điều kiện đóng toàn bộ.");
+      DrawReasonLine(line_x, line_y + REASON_MANAGING_ROW_STEP, max_width, "GIỮ LỆNH", Field(payload, "holdReason1"), clrDeepSkyBlue, "Không có dữ liệu lý do giữ lệnh.");
+      DrawReasonLine(line_x, line_y + REASON_MANAGING_ROW_STEP * 2, max_width, "DỜI SL", Field(payload, "stopMoveReason1"), clrLimeGreen, "Chưa phát sinh dời SL.");
+      DrawReasonLine(line_x, line_y + REASON_MANAGING_ROW_STEP * 3, max_width, "CHỐT 1/3", Field(payload, "partialReason1"), clrAqua, "Chưa phát sinh partial.");
+      DrawReasonLine(line_x, line_y + REASON_MANAGING_ROW_STEP * 4, max_width, "ĐÓNG TOÀN BỘ", Field(payload, "exitReason1"), clrGold, "Chưa phát sinh điều kiện đóng toàn bộ.");
    }
 }
 
@@ -467,11 +471,22 @@ string CompactEntryCheckLabel(const string value)
    return out;
 }
 
+string CompactEntryCheckActual(const string value)
+{
+   string out = Clean(value, "-");
+   StringReplace(out, "PAUSE → PAUSE", "PAUSE");
+   StringReplace(out, "AUTO → AUTO", "AUTO");
+   StringReplace(out, "TREND → TREND", "TREND");
+   StringReplace(out, "SIDEWAY → SIDEWAY", "SIDEWAY");
+   return out;
+}
+
 string CompactEntryCheckText(const string status, const string label, const string actual)
 {
    string compact = EntryCheckStatusVi(status) + " · " + CompactEntryCheckLabel(label);
-   if(!EmptyValue(actual))
-      compact += ": " + actual;
+   string compact_actual = CompactEntryCheckActual(actual);
+   if(!EmptyValue(compact_actual))
+      compact += ": " + compact_actual;
    return compact;
 }
 
@@ -527,7 +542,7 @@ void DrawEntryCheckSummary(const string payload, const int width, const int y)
 {
    const int x = 10;
    const int w = width - 20;
-   const int h = 96;
+   const int h = 88;
 
    Card(x, y, w, h, C'7,21,30', C'0,72,102');
    Text(x + 14, y + 8, "ĐIỀU KIỆN CHẶN ENTRY", clrAqua, 9);
@@ -582,7 +597,7 @@ void DrawWaiting(const string payload, const int width)
 {
    DrawStateStrip(payload, width, "BOT ĐANG CHỜ TÍN HIỆU", clrOrange);
    DrawEntryCheckSummary(payload, width, 222);
-   DrawReasonSummary(payload, width, 326, "WAITING");
+   DrawReasonSummary(payload, width, 314, "WAITING");
 }
 
 void DrawSetup(const string payload, const int width)
@@ -611,7 +626,7 @@ void DrawManaging(const string payload, const int width)
    Text(x + 14, 286, "Hướng: " + SideVi(Field(payload, "positionSide")) + " · Lot: " + Clean(Field(payload, "positionVolume")), clrSilver, 8);
    TextRight(x + w - 14, 286, Clean(Field(payload, "floatingPnlPercent")) + "%", clrSilver, 8);
 
-   DrawReasonSummary(payload, width, 318, "MANAGING");
+   DrawReasonSummary(payload, width, 316, "MANAGING");
 }
 
 void RenderPanel(const string payload)
