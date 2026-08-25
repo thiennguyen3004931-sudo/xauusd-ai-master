@@ -2,6 +2,10 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 
 const allowedWriter = "apps/api/src/services/phase7c-bot-mode.service.ts";
+const testFixtures = new Set([
+  "scripts/test-phase7c-bot-mode-provenance.ts",
+  "scripts/test-phase7c-bot-mode-provenance-writers.mjs",
+]);
 const tracked = execFileSync("git", ["ls-files"], { encoding: "utf8" })
   .split(/\r?\n/)
   .map((value) => value.trim())
@@ -29,7 +33,7 @@ for (const file of tracked) {
 
   if (!pathNeedles.some((needle) => source.includes(needle))) continue;
   references.push(file);
-  if (file === allowedWriter) continue;
+  if (file === allowedWriter || testFixtures.has(file)) continue;
 
   if (writerPatterns.some((pattern) => pattern.test(source))) {
     suspicious.push(file);
