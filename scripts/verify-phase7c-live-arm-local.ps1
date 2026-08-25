@@ -43,6 +43,14 @@ function ConvertTo-StrictBoolean($Value, [string]$Label) {
   Fail "$Label is not a valid boolean."
 }
 
+function Get-GitStatusLines {
+  $lines = @(git -C $ProjectRoot status --porcelain)
+  if ($LASTEXITCODE -ne 0) {
+    Fail "Git status failed."
+  }
+  return $lines
+}
+
 function Get-EnvValue([string]$Path, [string]$Name) {
   foreach ($raw in Get-Content -LiteralPath $Path) {
     $line = ([string]$raw).Trim()
@@ -108,7 +116,7 @@ Write-Host "============================================================"
 Write-Host ""
 Write-Host "=== 1. SAFE CHECKPOINT ==="
 
-$DirtyBefore = @(git -C $ProjectRoot status --porcelain)
+$DirtyBefore = @(Get-GitStatusLines)
 Write-Host "WORKTREE_CHANGE_COUNT_BEFORE=$($DirtyBefore.Count)"
 if ($DirtyBefore.Count -ne 0) {
   $DirtyBefore | ForEach-Object { Write-Host $_ }
@@ -142,16 +150,20 @@ if ('accountMode' -notin $StateFields -or 'valid' -notin $StateFields) {
 $FileAccountMode = [string]$AccountFile.accountMode
 $ApiAccountMode = [string]$AccountApi.state.accountMode
 $AccountValid = ConvertTo-StrictBoolean $AccountApi.state.valid "account.state.valid"
+$LifeRunning = ConvertTo-StrictBoolean $Life.running "lifecycle.running"
+$LifeReady = ConvertTo-StrictBoolean $Life.ready "lifecycle.ready"
+$LifeTelegramReady = ConvertTo-StrictBoolean $Life.telegramReady "lifecycle.telegramReady"
+$BridgeMatch = ConvertTo-StrictBoolean $Life.bridge.accountModeMatchesConfigured "lifecycle.bridge.accountModeMatchesConfigured"
 
 Write-Host "FILE_ACCOUNT_MODE=$FileAccountMode"
 Write-Host "API_ACCOUNT_MODE=$ApiAccountMode"
 Write-Host "ACCOUNT_VALID=$AccountValid"
 Write-Host "BOT_MODE=$($Bot.state.mode)"
-Write-Host "RUNNING=$($Life.running)"
-Write-Host "READY=$($Life.ready)"
-Write-Host "TELEGRAM_READY=$($Life.telegramReady)"
+Write-Host "RUNNING=$LifeRunning"
+Write-Host "READY=$LifeReady"
+Write-Host "TELEGRAM_READY=$LifeTelegramReady"
 Write-Host "BRIDGE=$($Life.bridge.accountMode)"
-Write-Host "BRIDGE_MATCH=$($Life.bridge.accountModeMatchesConfigured)"
+Write-Host "BRIDGE_MATCH=$BridgeMatch"
 Write-Host "POSITIONS=$($Life.bridge.openXauusdPositions)"
 Write-Host "LIVE_ARM_FILE=$(Test-Path -LiteralPath $ArmFile)"
 
@@ -164,17 +176,10 @@ if ($ApiAccountMode -ne "LIVE" -or -not $AccountValid) {
 if ([string]$Bot.state.mode -ne "PAUSE") {
   Fail "LIVE bot mode must remain PAUSE."
 }
-if (
-  -not [bool]$Life.running -or
-  -not [bool]$Life.ready -or
-  -not [bool]$Life.telegramReady
-) {
+if (-not $LifeRunning -or -not $LifeReady -or -not $LifeTelegramReady) {
   Fail "LIVE runtime/Telegram is not READY."
 }
-if (
-  [string]$Life.bridge.accountMode -ne "real" -or
-  -not [bool]$Life.bridge.accountModeMatchesConfigured
-) {
+if ([string]$Life.bridge.accountMode -ne "real" -or -not $BridgeMatch) {
   Fail "LIVE bridge/account mismatch."
 }
 if ([int]$Life.bridge.openXauusdPositions -ne 0) {
@@ -259,17 +264,21 @@ $Health = Invoke-RestMethod `
   -Method Get `
   -TimeoutSec 10
 
+$HealthConnected = ConvertTo-StrictBoolean $Health.connected "health.connected"
+$HealthArmRequired = ConvertTo-StrictBoolean $Health.liveArmRequired "health.liveArmRequired"
+$HealthArmed = ConvertTo-StrictBoolean $Health.liveExecutionArmed "health.liveExecutionArmed"
+
 Write-Host "HEALTH_STATUS=$($Health.status)"
-Write-Host "CONNECTED=$($Health.connected)"
+Write-Host "CONNECTED=$HealthConnected"
 Write-Host "CONFIGURED_ACCOUNT=$($Health.configuredAccountMode)"
 Write-Host "BROKER_ACCOUNT=$($Health.accountMode)"
 Write-Host "TRADING_ENABLED=$($Health.tradingEnabled)"
-Write-Host "LIVE_ARM_REQUIRED=$($Health.liveArmRequired)"
-Write-Host "LIVE_EXECUTION_ARMED=$($Health.liveExecutionArmed)"
+Write-Host "LIVE_ARM_REQUIRED=$HealthArmRequired"
+Write-Host "LIVE_EXECUTION_ARMED=$HealthArmed"
 Write-Host "LIVE_ARM_STATUS=$($Health.liveArmStatus)"
 Write-Host "LIVE_ARM_REASON=$($Health.liveArmReason)"
 
-if ([string]$Health.status -ne "ok" -or -not [bool]$Health.connected) {
+if ([string]$Health.status -ne "ok" -or -not $HealthConnected) {
   Fail "LIVE bridge health is not healthy."
 }
 if (
@@ -278,10 +287,10 @@ if (
 ) {
   Fail "LIVE bridge configured/actual account contract mismatch."
 }
-if (-not [bool]$Health.liveArmRequired) {
+if (-not $HealthArmRequired) {
   Fail "LIVE bridge does not require the arm guard."
 }
-if ([bool]$Health.liveExecutionArmed) {
+if ($HealthArmed) {
   Fail "LIVE execution is unexpectedly ARMED."
 }
 if ([string]$Health.liveArmStatus -ne "DISARMED") {
@@ -404,25 +413,30 @@ $FinalAccount = $Final.AccountApi
 $FinalBot = $Final.Bot
 $FinalLife = $Final.Life
 $FinalAccountValid = ConvertTo-StrictBoolean $FinalAccount.state.valid "final account.state.valid"
+$FinalRunning = ConvertTo-StrictBoolean $FinalLife.running "final lifecycle.running"
+$FinalReady = ConvertTo-StrictBoolean $FinalLife.ready "final lifecycle.ready"
+$FinalTelegramReady = ConvertTo-StrictBoolean $FinalLife.telegramReady "final lifecycle.telegramReady"
+$FinalBridgeMatch = ConvertTo-StrictBoolean $FinalLife.bridge.accountModeMatchesConfigured "final lifecycle.bridge.accountModeMatchesConfigured"
 $FinalHealth = Invoke-RestMethod `
   -Uri "http://${BridgeHost}:${BridgePort}/health" `
   -Headers @{ "x-mt5-api-key" = $ApiKey } `
   -Method Get `
   -TimeoutSec 10
+$FinalHealthArmed = ConvertTo-StrictBoolean $FinalHealth.liveExecutionArmed "final health.liveExecutionArmed"
 $FinalArm = Test-Path -LiteralPath $ArmFile
-$DirtyAfter = @(git -C $ProjectRoot status --porcelain)
+$DirtyAfter = @(Get-GitStatusLines)
 
 Write-Host "FINAL_ACCOUNT=$($FinalAccount.state.accountMode)"
 Write-Host "FINAL_ACCOUNT_VALID=$FinalAccountValid"
 Write-Host "FINAL_MODE=$($FinalBot.state.mode)"
-Write-Host "FINAL_RUNNING=$($FinalLife.running)"
-Write-Host "FINAL_READY=$($FinalLife.ready)"
-Write-Host "FINAL_TELEGRAM_READY=$($FinalLife.telegramReady)"
+Write-Host "FINAL_RUNNING=$FinalRunning"
+Write-Host "FINAL_READY=$FinalReady"
+Write-Host "FINAL_TELEGRAM_READY=$FinalTelegramReady"
 Write-Host "FINAL_BRIDGE=$($FinalLife.bridge.accountMode)"
-Write-Host "FINAL_BRIDGE_MATCH=$($FinalLife.bridge.accountModeMatchesConfigured)"
+Write-Host "FINAL_BRIDGE_MATCH=$FinalBridgeMatch"
 Write-Host "FINAL_POSITIONS=$($FinalLife.bridge.openXauusdPositions)"
 Write-Host "FINAL_LIVE_ARM_FILE=$FinalArm"
-Write-Host "FINAL_BRIDGE_ARMED=$($FinalHealth.liveExecutionArmed)"
+Write-Host "FINAL_BRIDGE_ARMED=$FinalHealthArmed"
 Write-Host "FINAL_ARM_STATUS=$($FinalHealth.liveArmStatus)"
 Write-Host "FINAL_ARM_REASON=$($FinalHealth.liveArmReason)"
 Write-Host "WORKTREE_CHANGE_COUNT=$($DirtyAfter.Count)"
@@ -436,23 +450,16 @@ if (
 if ([string]$FinalBot.state.mode -ne "PAUSE") {
   Fail "Final bot mode changed from PAUSE."
 }
-if (
-  -not [bool]$FinalLife.running -or
-  -not [bool]$FinalLife.ready -or
-  -not [bool]$FinalLife.telegramReady
-) {
+if (-not $FinalRunning -or -not $FinalReady -or -not $FinalTelegramReady) {
   Fail "Final LIVE runtime/Telegram is not READY."
 }
-if (
-  [string]$FinalLife.bridge.accountMode -ne "real" -or
-  -not [bool]$FinalLife.bridge.accountModeMatchesConfigured
-) {
+if ([string]$FinalLife.bridge.accountMode -ne "real" -or -not $FinalBridgeMatch) {
   Fail "Final LIVE bridge/account mismatch."
 }
 if ([int]$FinalLife.bridge.openXauusdPositions -ne 0) {
   Fail "Final LIVE XAUUSD positions are not zero."
 }
-if ($FinalArm -or [bool]$FinalHealth.liveExecutionArmed) {
+if ($FinalArm -or $FinalHealthArmed) {
   Fail "Verifier created or observed an armed LIVE state."
 }
 if (
