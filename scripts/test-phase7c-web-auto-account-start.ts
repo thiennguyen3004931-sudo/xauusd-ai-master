@@ -100,6 +100,7 @@ const authorization: Phase7CLiveAuthorizationRecord = {
 const validAuth = evaluatePhase7CLiveAuthorization({
   authorization,
   expectedIdentity: identity,
+  brokerAccountLogin: 123456,
   brokerServer: "DBGMarkets-Live",
 });
 assert.equal(validAuth.valid, true);
@@ -109,6 +110,7 @@ assert.equal(
   evaluatePhase7CLiveAuthorization({
     authorization: { ...authorization, profileFingerprint: "different" },
     expectedIdentity: identity,
+    brokerAccountLogin: 123456,
     brokerServer: "DBGMarkets-Live",
   }).reason,
   "LIVE_AUTH_PROFILE_MISMATCH",
@@ -117,6 +119,25 @@ assert.equal(
   evaluatePhase7CLiveAuthorization({
     authorization,
     expectedIdentity: identity,
+    brokerAccountLogin: 999999,
+    brokerServer: "DBGMarkets-Live",
+  }).reason,
+  "LIVE_AUTH_BROKER_LOGIN_MISMATCH",
+);
+assert.equal(
+  evaluatePhase7CLiveAuthorization({
+    authorization,
+    expectedIdentity: identity,
+    brokerAccountLogin: null,
+    brokerServer: "DBGMarkets-Live",
+  }).reason,
+  "LIVE_AUTH_BROKER_LOGIN_MISSING",
+);
+assert.equal(
+  evaluatePhase7CLiveAuthorization({
+    authorization,
+    expectedIdentity: identity,
+    brokerAccountLogin: 123456,
     brokerServer: "Other-Live",
   }).reason,
   "LIVE_AUTH_BROKER_SERVER_MISMATCH",
@@ -125,6 +146,7 @@ assert.equal(
   evaluatePhase7CLiveAuthorization({
     authorization: null,
     expectedIdentity: identity,
+    brokerAccountLogin: 123456,
     brokerServer: "DBGMarkets-Live",
   }).reason,
   "LIVE_AUTH_MISSING",
@@ -143,15 +165,33 @@ assert.doesNotMatch(lifecycleSource, /web-control-center-live-start-blocked/);
 assert.match(lifecycleSource, /-LiveExecutionEnabled/);
 assert.match(lifecycleSource, /phase7CBotModeService\.set\("PAUSE", "web-control-center-preflight"\)/);
 assert.match(lifecycleSource, /finalTelemetry/);
+assert.match(lifecycleSource, /telemetry\.accountLogin/);
+assert.match(lifecycleSource, /finalTelemetry\.accountLogin/);
 
 const authorizationSource = fs.readFileSync(
   path.join(root, "apps/api/src/services/phase7c-live-authorization.service.ts"),
   "utf8",
 );
 assert.match(authorizationSource, /phase7c-live-authorization\.json/);
+assert.match(authorizationSource, /brokerAccountLogin/);
+assert.match(authorizationSource, /LIVE_AUTH_BROKER_LOGIN_MISMATCH/);
 assert.match(authorizationSource, /accountState\.accountMode !== "LIVE"/);
 assert.match(authorizationSource, /accountState\.liveExecutionEnabled !== true/);
 assert.match(authorizationSource, /legacy-explicit-live-state:/);
+
+const mt5Source = fs.readFileSync(
+  path.join(root, "apps/api/src/services/mt5.service.ts"),
+  "utf8",
+);
+assert.match(mt5Source, /accountLogin: number \| null/);
+assert.match(mt5Source, /accountLogin: health\.accountLogin/);
+
+const accountModeLibrarySource = fs.readFileSync(
+  path.join(root, "scripts/lib/phase7c-account-mode.ps1"),
+  "utf8",
+);
+assert.match(accountModeLibrarySource, /phase7c-live-authorization\.json/);
+assert.match(accountModeLibrarySource, /Write-Phase7CLiveAuthorizationState/);
 
 const switchSource = fs.readFileSync(
   path.join(root, "scripts/switch-phase7c-account-mode-local.ps1"),
@@ -159,6 +199,9 @@ const switchSource = fs.readFileSync(
 );
 assert.match(switchSource, /ConfirmLiveExecution/);
 assert.match(switchSource, /LIVE account switching requires explicit -ConfirmLiveExecution/);
+assert.match(switchSource, /Write-Phase7CLiveAuthorizationState/);
+assert.match(switchSource, /ACCOUNT_SWITCH_LIVE_AUTHORIZATION=PASS/);
+assert.match(switchSource, /accountLogin.*identity\.login|identity\.login.*accountLogin/i);
 
 const uiSource = fs.readFileSync(
   path.join(root, "apps/web/src/pages/Phase7CControlCenterPage.tsx"),
