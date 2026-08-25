@@ -1,6 +1,6 @@
 #property copyright "XAUUSD AI MASTER"
 #property version   "1.40"
-#property description "Bảng quyết định XAUUSD AI MASTER · compact · chỉ đọc · DEMO/LIVE aware"
+#property description "Bảng quyết định XAUUSD AI MASTER · spacious · chỉ đọc · DEMO/LIVE aware"
 
 #include <Canvas\Canvas.mqh>
 
@@ -12,15 +12,15 @@ input int InpY = 28;
 
 const string LEGACY_PREFIX = "XAU_AI_P7C_";
 const string CANVAS_NAME = "XAU_AI_P7C_CANVAS_V7";
-const int PANEL_MIN_WIDTH = 500;
-const int PANEL_MAX_WIDTH = 620;
-const int WAITING_HEIGHT = 420;
-const int SETUP_HEIGHT = 425;
-const int MANAGING_HEIGHT = 505;
-const int REASON_LABEL_WIDTH = 128;
-const int REASON_SECOND_LINE_OFFSET = 12;
-const int REASON_WAITING_ROW_STEP = 34;
-const int REASON_MANAGING_ROW_STEP = 31;
+const int PANEL_MIN_WIDTH = 620;
+const int PANEL_MAX_WIDTH = 760;
+const int WAITING_HEIGHT = 500;
+const int SETUP_HEIGHT = 500;
+const int MANAGING_HEIGHT = 620;
+const int REASON_LABEL_WIDTH = 150;
+const int REASON_SECOND_LINE_OFFSET = 16;
+const int REASON_WAITING_ROW_STEP = 44;
+const int REASON_MANAGING_ROW_STEP = 40;
 // Required installer safety marker: READ ONLY | DEMO/LIVE | ORDER PERMISSION = NONE
 
 CCanvas g_canvas;
@@ -85,7 +85,7 @@ bool RuntimeMatchesTerminal(const string payload)
 int PanelWidth()
 {
    int chart_width = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
-   int target = (int)MathRound(chart_width * 0.32);
+   int target = (int)MathRound(chart_width * 0.40);
    target = (int)MathMax(PANEL_MIN_WIDTH, MathMin(PANEL_MAX_WIDTH, target));
    if(chart_width > 100)
       target = (int)MathMin(target, chart_width - 24);
@@ -321,77 +321,77 @@ void DrawHeader(const string payload, const int width, const string mode, const 
    const int x = 10;
    const int y = 14;
    const int w = width - 20;
-   const int h = 78;
+   const int h = 90;
    Card(x, y, w, h, C'7,20,30', C'0,72,102');
 
    string runtime_mode = Clean(Field(payload, "accountMode"), "CHECK");
    string local_mode = LocalAccountMode();
    color account_tone = RuntimeMatchesTerminal(payload) ? clrLimeGreen : clrTomato;
 
-   Text(x + 14, y + 10, "XAUUSD AI MASTER", clrDeepSkyBlue, 12);
-   TextRight(x + w - 14, y + 12, runtime_mode + " · CHỈ ĐỌC", account_tone, 8);
-   Text(x + 14, y + 34, "Chế độ: " + ModeVi(mode), ModeTone(mode, strategy), 9);
-   TextRight(x + w - 14, y + 34, "Đang áp dụng: " + ModeVi(strategy), ModeTone(mode, strategy), 8);
-   Text(x + 14, y + 56, "Thị trường: " + RegimeVi(regime), RegimeTone(regime), 9);
-   TextRight(x + w - 14, y + 56, "MT5 " + local_mode + " · Tin cậy " + Clean(confidence) + "%", account_tone, 8);
+   Text(x + 18, y + 12, "XAUUSD AI MASTER", clrDeepSkyBlue, 13);
+   TextRight(x + w - 18, y + 14, runtime_mode + " · CHỈ ĐỌC", account_tone, 9);
+   Text(x + 18, y + 40, "Chế độ: " + ModeVi(mode), ModeTone(mode, strategy), 10);
+   TextRight(x + w - 18, y + 40, "Đang áp dụng: " + ModeVi(strategy), ModeTone(mode, strategy), 9);
+   Text(x + 18, y + 66, "Thị trường: " + RegimeVi(regime), RegimeTone(regime), 10);
+   TextRight(x + w - 18, y + 66, "MT5 " + local_mode + " · Tin cậy " + Clean(confidence) + "%", account_tone, 9);
 }
 
 void DrawStatusItem(const int x, const int y, const string label, const bool on)
 {
    color tone = on ? clrLimeGreen : clrTomato;
-   g_canvas.FillCircle(x + 5, y + 7, 4, A(tone));
-   Text(x + 16, y, label, clrSilver, 8);
-   Text(x + 16, y + 18, on ? "ON" : "OFF", tone, 8);
+   g_canvas.FillCircle(x + 6, y + 8, 5, A(tone));
+   Text(x + 20, y, label, clrSilver, 9);
+   Text(x + 20, y + 22, on ? "ON" : "OFF", tone, 9);
 }
 
 void DrawSystemStatus(const string payload, const int width)
 {
    const int x = 10;
-   const int y = 100;
+   const int y = 112;
    const int w = width - 20;
-   const int h = 62;
+   const int h = 74;
    Card(x, y, w, h, C'7,21,30', C'0,72,102');
-   Text(x + 14, y + 8, "TRẠNG THÁI HỆ THỐNG", clrAqua, 9);
+   Text(x + 18, y + 10, "TRẠNG THÁI HỆ THỐNG", clrAqua, 10);
 
-   int col = (w - 28) / 4;
-   DrawStatusItem(x + 14, y + 30, "MT5", BoolField(payload, "mt5Connected") && RuntimeMatchesTerminal(payload));
-   DrawStatusItem(x + 14 + col, y + 30, "An toàn", BoolField(payload, "accountGuardValid"));
-   DrawStatusItem(x + 14 + col * 2, y + 30, "bot Trend", BoolField(payload, "trendOn"));
-   DrawStatusItem(x + 14 + col * 3, y + 30, "bot Sideway", BoolField(payload, "sidewayOn"));
+   int col = (w - 36) / 4;
+   DrawStatusItem(x + 18, y + 36, "MT5", BoolField(payload, "mt5Connected") && RuntimeMatchesTerminal(payload));
+   DrawStatusItem(x + 18 + col, y + 36, "An toàn", BoolField(payload, "accountGuardValid"));
+   DrawStatusItem(x + 18 + col * 2, y + 36, "bot Trend", BoolField(payload, "trendOn"));
+   DrawStatusItem(x + 18 + col * 3, y + 36, "bot Sideway", BoolField(payload, "sidewayOn"));
 }
 
 void DrawStateStrip(const string payload, const int width, const string title, const color tone)
 {
    const int x = 10;
-   const int y = 170;
+   const int y = 194;
    const int w = width - 20;
-   const int h = 44;
+   const int h = 50;
    Card(x, y, w, h, C'9,24,34', tone);
-   Text(x + 14, y + 8, title, tone, 9);
-   TextRight(x + w - 14, y + 8, StageVi(Field(payload, "stage")), clrWhite, 8);
-   Text(x + 14, y + 26, "Khuyến nghị: " + ModeVi(Field(payload, "recommendedMode")), clrSilver, 8);
+   Text(x + 18, y + 10, title, tone, 10);
+   TextRight(x + w - 18, y + 10, StageVi(Field(payload, "stage")), clrWhite, 9);
+   Text(x + 18, y + 31, "Khuyến nghị: " + ModeVi(Field(payload, "recommendedMode")), clrSilver, 9);
 }
 
 void DrawReasonLine(const int x, const int y, const int max_width, const string label, const string reason, const color tone, const string fallback)
 {
-   Text(x, y, label, tone, 7);
+   Text(x, y, label, tone, 8);
    string line1, line2;
-   WrapTextTwoLines(ReasonVi(reason, fallback), max_width - REASON_LABEL_WIDTH, 7, line1, line2);
-   Text(x + REASON_LABEL_WIDTH, y, line1, clrWhite, 7);
+   WrapTextTwoLines(ReasonVi(reason, fallback), max_width - REASON_LABEL_WIDTH, 8, line1, line2);
+   Text(x + REASON_LABEL_WIDTH, y, line1, clrWhite, 8);
    if(line2 != "")
-      Text(x + REASON_LABEL_WIDTH, y + REASON_SECOND_LINE_OFFSET, line2, clrWhite, 7);
+      Text(x + REASON_LABEL_WIDTH, y + REASON_SECOND_LINE_OFFSET, line2, clrWhite, 8);
 }
 
 void DrawReasonSummary(const string payload, const int width, const int y, const string state)
 {
    const int x = 10;
    const int w = width - 20;
-   int h = state == "MANAGING" ? 180 : (state == "SETUP_READY" ? 104 : 96);
+   int h = state == "MANAGING" ? 238 : (state == "SETUP_READY" ? 126 : 126);
    Card(x, y, w, h, C'7,21,30', C'0,72,102');
-   Text(x + 14, y + 8, "LÝ DO QUYẾT ĐỊNH", clrAqua, 9);
-   int line_x = x + 18;
-   int max_width = w - 36;
-   int line_y = y + 31;
+   Text(x + 18, y + 10, "LÝ DO QUYẾT ĐỊNH", clrAqua, 10);
+   int line_x = x + 22;
+   int max_width = w - 44;
+   int line_y = y + 40;
 
    if(state == "WAITING")
    {
@@ -401,7 +401,7 @@ void DrawReasonSummary(const string payload, const int width, const int y, const
    else if(state == "SETUP_READY")
    {
       DrawReasonLine(line_x, line_y, max_width, "VÀO LỆNH", Field(payload, "entryReason1"), clrLimeGreen, "Setup đã được duyệt.");
-      DrawReasonLine(line_x, line_y + 36, max_width, "AUTO/REGIME", Field(payload, "autoReason1"), clrOrange, "Không có dữ liệu AUTO/Regime.");
+      DrawReasonLine(line_x, line_y + REASON_WAITING_ROW_STEP, max_width, "AUTO/REGIME", Field(payload, "autoReason1"), clrOrange, "Không có dữ liệu AUTO/Regime.");
    }
    else
    {
@@ -416,14 +416,14 @@ void DrawReasonSummary(const string payload, const int width, const int y, const
 void DrawTradePlan(const string payload, const int width, const bool managing)
 {
    const int x = 10;
-   const int y = 170;
+   const int y = 194;
    const int w = width - 20;
-   const int h = 76;
+   const int h = 88;
    Card(x, y, w, h, C'6,18,27', C'0,72,102');
 
-   int gap = 6;
-   int box_w = (w - 28 - gap * 2) / 3;
-   int bx1 = x + 10;
+   int gap = 10;
+   int box_w = (w - 36 - gap * 2) / 3;
+   int bx1 = x + 12;
    int bx2 = bx1 + box_w + gap;
    int bx3 = bx2 + box_w + gap;
    string entry = managing ? Field(payload, "positionEntry") : Field(payload, "setupEntry");
@@ -434,15 +434,15 @@ void DrawTradePlan(const string payload, const int width, const bool managing)
    string tp = EmptyValue(tp2) ? tp1 : tp2;
    string tp_label = strategy == "TREND" && EmptyValue(tp2) ? "MỐC +10" : "TP";
 
-   Card(bx1, y + 10, box_w, 56, C'7,25,38', C'0,110,155');
-   Card(bx2, y + 10, box_w, 56, C'30,14,22', C'140,45,60');
-   Card(bx3, y + 10, box_w, 56, C'12,28,20', C'45,140,70');
-   Text(bx1 + 10, y + 18, "ENTRY", clrDeepSkyBlue, 7);
-   Text(bx2 + 10, y + 18, "STOPLOSS", clrTomato, 7);
-   Text(bx3 + 10, y + 18, tp_label, clrLimeGreen, 7);
-   Text(bx1 + 10, y + 38, FitText(Clean(entry), box_w - 20, 9), clrWhite, 9);
-   Text(bx2 + 10, y + 38, FitText(Clean(stop), box_w - 20, 9), clrWhite, 9);
-   Text(bx3 + 10, y + 38, FitText(Clean(tp), box_w - 20, 9), clrWhite, 9);
+   Card(bx1, y + 12, box_w, 64, C'7,25,38', C'0,110,155');
+   Card(bx2, y + 12, box_w, 64, C'30,14,22', C'140,45,60');
+   Card(bx3, y + 12, box_w, 64, C'12,28,20', C'45,140,70');
+   Text(bx1 + 12, y + 20, "ENTRY", clrDeepSkyBlue, 8);
+   Text(bx2 + 12, y + 20, "STOPLOSS", clrTomato, 8);
+   Text(bx3 + 12, y + 20, tp_label, clrLimeGreen, 8);
+   Text(bx1 + 12, y + 46, FitText(Clean(entry), box_w - 24, 10), clrWhite, 10);
+   Text(bx2 + 12, y + 46, FitText(Clean(stop), box_w - 24, 10), clrWhite, 10);
+   Text(bx3 + 12, y + 46, FitText(Clean(tp), box_w - 24, 10), clrWhite, 10);
 }
 
 color EntryCheckTone(const string status)
@@ -542,10 +542,10 @@ void DrawEntryCheckSummary(const string payload, const int width, const int y)
 {
    const int x = 10;
    const int w = width - 20;
-   const int h = 88;
+   const int h = 104;
 
    Card(x, y, w, h, C'7,21,30', C'0,72,102');
-   Text(x + 14, y + 8, "ĐIỀU KIỆN CHẶN ENTRY", clrAqua, 9);
+   Text(x + 18, y + 10, "ĐIỀU KIỆN CHẶN ENTRY", clrAqua, 10);
 
    string trend_label, trend_status, trend_actual;
    string sideway_label, sideway_status, sideway_actual;
@@ -566,52 +566,52 @@ void DrawEntryCheckSummary(const string payload, const int width, const int y)
       sideway_actual
    );
 
-   Text(x + 14, y + 34, "TREND", clrDeepSkyBlue, 7);
+   Text(x + 18, y + 38, "TREND", clrDeepSkyBlue, 8);
    Text(
-      x + 78,
-      y + 34,
+      x + 96,
+      y + 38,
       FitText(
          CompactEntryCheckText(trend_status, trend_label, trend_actual),
-         w - 98,
-         7
+         w - 118,
+         8
       ),
       EntryCheckTone(trend_status),
-      7
+      8
    );
 
-   Text(x + 14, y + 62, "SIDEWAY", clrAqua, 7);
+   Text(x + 18, y + 70, "SIDEWAY", clrAqua, 8);
    Text(
-      x + 78,
-      y + 62,
+      x + 96,
+      y + 70,
       FitText(
          CompactEntryCheckText(sideway_status, sideway_label, sideway_actual),
-         w - 98,
-         7
+         w - 118,
+         8
       ),
       EntryCheckTone(sideway_status),
-      7
+      8
    );
 }
 
 void DrawWaiting(const string payload, const int width)
 {
    DrawStateStrip(payload, width, "BOT ĐANG CHỜ TÍN HIỆU", clrOrange);
-   DrawEntryCheckSummary(payload, width, 222);
-   DrawReasonSummary(payload, width, 314, "WAITING");
+   DrawEntryCheckSummary(payload, width, 252);
+   DrawReasonSummary(payload, width, 364, "WAITING");
 }
 
 void DrawSetup(const string payload, const int width)
 {
    DrawTradePlan(payload, width, false);
-   DrawReasonSummary(payload, width, 254, "SETUP_READY");
+   DrawReasonSummary(payload, width, 292, "SETUP_READY");
 
    const int x = 10;
    const int w = width - 20;
-   Card(x, 366, w, 48, C'7,21,30', C'0,72,102');
-   Text(x + 14, 374, "Chiến lược: " + ModeVi(Field(payload, "setupStrategy")), clrWhite, 8);
-   TextRight(x + w - 14, 374, "Hướng: " + SideVi(Field(payload, "setupSide")), clrWhite, 8);
-   Text(x + 14, 394, "Lot: " + Clean(Field(payload, "setupFinalLot")), clrSilver, 8);
-   TextRight(x + w - 14, 394, "Risk: " + Clean(Field(payload, "setupRiskPercent")) + "%", clrSilver, 8);
+   Card(x, 426, w, 62, C'7,21,30', C'0,72,102');
+   Text(x + 18, 438, "Chiến lược: " + ModeVi(Field(payload, "setupStrategy")), clrWhite, 9);
+   TextRight(x + w - 18, 438, "Hướng: " + SideVi(Field(payload, "setupSide")), clrWhite, 9);
+   Text(x + 18, 466, "Lot: " + Clean(Field(payload, "setupFinalLot")), clrSilver, 9);
+   TextRight(x + w - 18, 466, "Risk: " + Clean(Field(payload, "setupRiskPercent")) + "%", clrSilver, 9);
 }
 
 void DrawManaging(const string payload, const int width)
@@ -620,13 +620,13 @@ void DrawManaging(const string payload, const int width)
 
    const int x = 10;
    const int w = width - 20;
-   Card(x, 254, w, 56, C'8,26,20', C'45,130,70');
-   Text(x + 14, 264, "ĐANG GIỮ LỆNH", clrLimeGreen, 9);
-   TextRight(x + w - 14, 264, "Lãi/lỗ: " + Clean(Field(payload, "floatingPnlUsd")) + " USD", clrWhite, 9);
-   Text(x + 14, 286, "Hướng: " + SideVi(Field(payload, "positionSide")) + " · Lot: " + Clean(Field(payload, "positionVolume")), clrSilver, 8);
-   TextRight(x + w - 14, 286, Clean(Field(payload, "floatingPnlPercent")) + "%", clrSilver, 8);
+   Card(x, 292, w, 68, C'8,26,20', C'45,130,70');
+   Text(x + 18, 304, "ĐANG GIỮ LỆNH", clrLimeGreen, 10);
+   TextRight(x + w - 18, 304, "Lãi/lỗ: " + Clean(Field(payload, "floatingPnlUsd")) + " USD", clrWhite, 10);
+   Text(x + 18, 334, "Hướng: " + SideVi(Field(payload, "positionSide")) + " · Lot: " + Clean(Field(payload, "positionVolume")), clrSilver, 9);
+   TextRight(x + w - 18, 334, Clean(Field(payload, "floatingPnlPercent")) + "%", clrSilver, 9);
 
-   DrawReasonSummary(payload, width, 316, "MANAGING");
+   DrawReasonSummary(payload, width, 370, "MANAGING");
 }
 
 void RenderPanel(const string payload)
