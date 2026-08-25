@@ -51,11 +51,13 @@ $LiveEnvFile = Resolve-ProjectFile $LiveEnvFile
 
 $demoEnv = Assert-Phase7CAccountEnv -EnvFile $DemoEnvFile -AccountMode "DEMO" -RequireTrading
 $liveEnv = $null
+$liveIdentity = $null
 if ($TargetMode -eq "LIVE") {
   if (-not (Test-Path -LiteralPath $LiveEnvFile)) {
     throw "LIVE env is not configured. Copy .env.phase7b-live.example to .env.phase7b-live and configure it locally first."
   }
   $liveEnv = Assert-Phase7CAccountEnv -EnvFile $LiveEnvFile -AccountMode "LIVE" -RequireTrading
+  $liveIdentity = Get-Phase7CLiveProfileIdentity $LiveEnvFile
   if ($demoEnv.apiKey -ne $liveEnv.apiKey) { throw "DEMO and LIVE must use the same MT5_API_KEY because the local API process keeps a fixed bridge credential." }
   if ($demoEnv.bridgeHost -ne $liveEnv.bridgeHost -or $demoEnv.bridgePort -ne $liveEnv.bridgePort) {
     throw "DEMO and LIVE must use the same localhost MT5 bridge host/port."
@@ -301,6 +303,19 @@ function Start-TargetBridge($EnvInfo, [string]$Mode) {
       if ($health.connected -and $health.status -eq "ok" -and [string]$health.accountMode -eq $expected) {
         if (-not [bool]$health.tradingEnabled) { throw "Target bridge trading is disabled." }
         if ($EnvInfo.allowedLogins -notcontains [long]$health.accountLogin) { throw "Target bridge login is not in the selected allowlist." }
+        if ($Mode -eq "LIVE") {
+          if ($null -eq $liveIdentity) { throw "Target LIVE profile identity is unavailable." }
+          if ([long]$health.accountLogin -ne [long]$liveIdentity.login) {
+            throw "Target LIVE bridge accountLogin does not match the explicitly configured LIVE identity."
+          }
+          if (-not [string]::Equals(
+            ([string]$health.server).Trim(),
+            ([string]$liveIdentity.server).Trim(),
+            [System.StringComparison]::OrdinalIgnoreCase
+          )) {
+            throw "Target LIVE bridge server does not match the explicitly configured LIVE identity."
+          }
+        }
         $positionCount = Get-BridgePositionCount "XAUUSD" $EnvInfo
         if ($positionCount -ne 0) { throw "Target account must have zero XAUUSD positions before executor start. Current=$positionCount" }
         Write-Host "PHASE7C_ACCOUNT_SWITCH_TARGET_BRIDGE=PASS|MODE=$Mode"
@@ -363,6 +378,15 @@ try {
 
   $finalMode = Invoke-RestMethod -Uri "$($ControlApiUrl.TrimEnd('/'))/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 5
   if ([string]$finalMode.state.mode -ne "PAUSE") { throw "Account switch must finish in PAUSE." }
+
+  if ($TargetMode -eq "LIVE") {
+    [void](Write-Phase7CLiveAuthorizationState `
+      -WorkDir $WorkDir `
+      -LiveEnvFile $LiveEnvFile `
+      -AuthorizedBy "switch-phase7c-account-mode-local:-ConfirmLiveExecution")
+    Write-Host "PHASE7C_ACCOUNT_SWITCH_LIVE_AUTHORIZATION=PASS"
+  }
+
   Write-Host "PHASE7C_ACCOUNT_SWITCH_FINAL_ACCOUNT_MODE=$TargetMode"
   Write-Host "PHASE7C_ACCOUNT_SWITCH_FINAL_BOT_MODE=PAUSE"
   Write-Host "PHASE7C_ACCOUNT_SWITCH_STATUS=PASS"
