@@ -18,6 +18,9 @@ coverage/
 .vscode/
 .idea/
 
+# Locally generated portable release archives
+/artifacts/
+
 # Local backups
 _backup_packages/
 *_backup/
