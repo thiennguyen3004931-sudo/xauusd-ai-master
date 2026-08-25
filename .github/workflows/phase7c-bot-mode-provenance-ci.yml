@@ -6,6 +6,8 @@ on:
       - fix/phase7c-legacy-background-cleanup
     paths:
       - "apps/api/src/services/phase7c-bot-mode.service.ts"
+      - "scripts/activate-phase7c-local.ps1"
+      - "scripts/test-phase7c-activation-preserves-bot-mode.mjs"
       - "scripts/test-phase7c-bot-mode-provenance.ts"
       - "scripts/test-phase7c-bot-mode-provenance-writers.mjs"
       - ".github/workflows/phase7c-bot-mode-provenance-ci.yml"
@@ -41,6 +43,9 @@ jobs:
 
       - name: Bot mode provenance writer audit
         run: node scripts/test-phase7c-bot-mode-provenance-writers.mjs
+
+      - name: Activation preserves persistent bot mode
+        run: node scripts/test-phase7c-activation-preserves-bot-mode.mjs
 
       - name: Build API dependency graph
         run: pnpm --filter @xauusd/api... build
