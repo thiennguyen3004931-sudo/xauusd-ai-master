@@ -41,17 +41,26 @@ Assert-Text $mq5 'Field\(payload,\s*.exitReason1.' "panel must show latest exit 
 Assert-Text $mq5 'Field\(payload,\s*.floatingPnlUsd.' "panel must show floating profit/loss"
 
 # Decision reasons must remain compact but readable: wrap to at most two lines
-# instead of truncating the entire reason to one line with FitText().
+# with a dedicated label column and enough row spacing to avoid overlap.
 Assert-Text $mq5 'void\s+WrapTextTwoLines\s*\(' "panel must provide two-line reason wrapping"
 Assert-Text $mq5 'WrapTextTwoLines\(\s*ReasonVi\(reason,\s*fallback\)' "decision reasons must use the two-line wrapper"
-Assert-Text $mq5 'Text\(x\s*\+\s*112,\s*y\s*\+\s*13,\s*line2' "wrapped reason second line must render inside compact row spacing"
+Assert-Text $mq5 'REASON_LABEL_WIDTH\s*=\s*128' "reason text must start after a dedicated 128px label column"
+Assert-Text $mq5 'REASON_SECOND_LINE_OFFSET\s*=\s*12' "wrapped reason second line must use compact safe spacing"
+Assert-Text $mq5 'REASON_WAITING_ROW_STEP\s*=\s*34' "waiting reason rows must not overlap"
+Assert-Text $mq5 'REASON_MANAGING_ROW_STEP\s*=\s*31' "managing reason rows must not overlap"
+Assert-Text $mq5 'state\s*==\s*.MANAGING.\s*\?\s*180\s*:\s*\(state\s*==\s*.SETUP_READY.\s*\?\s*104\s*:\s*96\)' "reason cards must allocate enough height inside compact panels"
+Assert-Text $mq5 'DrawReasonSummary\(payload,\s*width,\s*314,\s*.WAITING.\)' "waiting reason card must move up to preserve total panel height"
+Assert-Text $mq5 'DrawReasonSummary\(payload,\s*width,\s*316,\s*.MANAGING.\)' "managing reason card must move up to preserve total panel height"
 Assert-NotText $mq5 'FitText\(ReasonVi\(reason,\s*fallback\)' "decision reason must not be single-line truncated"
 
-# Entry blocker rows must use a compact label/status/value form.
+# Entry blocker rows must use a compact label/status/value form and collapse
+# repeated transitions such as PAUSE -> PAUSE to a single PAUSE value.
 Assert-Text $mq5 'string\s+CompactEntryCheckLabel\s*\(' "entry blocker labels must have a compact formatter"
 Assert-Text $mq5 'StringReplace\(out,\s*.Mode / Regime.,\s*.Mode/Regime.' "Mode / Regime label must be compacted"
+Assert-Text $mq5 'string\s+CompactEntryCheckActual\s*\(' "entry blocker actual value must have a compact formatter"
+Assert-Text $mq5 'StringReplace\(out,\s*.PAUSE → PAUSE.,\s*.PAUSE.' "duplicate PAUSE transition must collapse"
 Assert-Text $mq5 'EntryCheckStatusVi\(status\)\s*\+\s*. · .\s*\+\s*CompactEntryCheckLabel\(label\)' "blocker row must render compact status and label"
-Assert-Text $mq5 '.: .\s*\+\s*actual' "blocker row must separate actual value with a colon"
+Assert-Text $mq5 'CompactEntryCheckActual\(actual\)' "blocker row must use compact actual values"
 Assert-NotText $mq5 'trend_label\s*\+\s*. · .\s*\+\s*trend_actual' "legacy verbose Trend blocker concatenation must stay removed"
 Assert-NotText $mq5 'sideway_label\s*\+\s*. · .\s*\+\s*sideway_actual' "legacy verbose Sideway blocker concatenation must stay removed"
 
