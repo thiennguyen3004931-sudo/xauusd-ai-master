@@ -34,6 +34,8 @@ export type Phase7CLiveAuthorizationReason =
   | "LIVE_AUTH_PROFILE_MISMATCH"
   | "LIVE_AUTH_LOGIN_MISMATCH"
   | "LIVE_AUTH_SERVER_MISMATCH"
+  | "LIVE_AUTH_BROKER_LOGIN_MISSING"
+  | "LIVE_AUTH_BROKER_LOGIN_MISMATCH"
   | "LIVE_AUTH_BROKER_SERVER_MISSING"
   | "LIVE_AUTH_BROKER_SERVER_MISMATCH"
   | "LIVE_AUTH_PROFILE_INVALID";
@@ -192,6 +194,7 @@ function parseAuthorization(value: unknown): Phase7CLiveAuthorizationRecord | nu
 export function evaluatePhase7CLiveAuthorization(input: {
   authorization: Phase7CLiveAuthorizationRecord | null;
   expectedIdentity: Phase7CLiveProfileIdentity;
+  brokerAccountLogin: number | null | undefined;
   brokerServer: string | null | undefined;
 }): Phase7CLiveAuthorizationEvaluation {
   const { authorization, expectedIdentity } = input;
@@ -214,6 +217,14 @@ export function evaluatePhase7CLiveAuthorization(input: {
     expectedIdentity.profileFingerprint.trim().toLowerCase()
   ) {
     return { valid: false, reason: "LIVE_AUTH_PROFILE_MISMATCH" };
+  }
+
+  const brokerAccountLogin = Number(input.brokerAccountLogin);
+  if (!Number.isInteger(brokerAccountLogin) || brokerAccountLogin <= 0) {
+    return { valid: false, reason: "LIVE_AUTH_BROKER_LOGIN_MISSING" };
+  }
+  if (brokerAccountLogin !== expectedIdentity.accountLogin) {
+    return { valid: false, reason: "LIVE_AUTH_BROKER_LOGIN_MISMATCH" };
   }
   if (!normalizeServer(input.brokerServer)) {
     return { valid: false, reason: "LIVE_AUTH_BROKER_SERVER_MISSING" };
@@ -250,6 +261,7 @@ function readDurableAuthorization(): {
 
 export function getPhase7CLiveAuthorizationStatus(
   brokerServer: string | null | undefined,
+  brokerAccountLogin: number | null | undefined,
 ): Phase7CLiveAuthorizationStatus {
   let identity: Phase7CLiveProfileIdentity;
   try {
@@ -279,6 +291,7 @@ export function getPhase7CLiveAuthorizationStatus(
   const evaluation = evaluatePhase7CLiveAuthorization({
     authorization: durable.authorization,
     expectedIdentity: identity,
+    brokerAccountLogin,
     brokerServer,
   });
   return {
@@ -323,22 +336,23 @@ export function preserveLegacyExplicitLiveAuthorization(): boolean {
 
 export function ensurePhase7CLiveAuthorizationForWebStart(
   brokerServer: string | null | undefined,
+  brokerAccountLogin: number | null | undefined,
 ): Phase7CLiveAuthorizationStatus {
-  const existing = getPhase7CLiveAuthorizationStatus(brokerServer);
+  const existing = getPhase7CLiveAuthorizationStatus(brokerServer, brokerAccountLogin);
   if (existing.valid || existing.reason !== "LIVE_AUTH_MISSING") return existing;
 
   const record = legacyAuthorizationRecord();
   if (!record || !existing.identity) return existing;
-  if (!normalizeServer(brokerServer)) {
+  const evaluation = evaluatePhase7CLiveAuthorization({
+    authorization: record,
+    expectedIdentity: existing.identity,
+    brokerAccountLogin,
+    brokerServer,
+  });
+  if (!evaluation.valid) {
     return {
       ...existing,
-      reason: "LIVE_AUTH_BROKER_SERVER_MISSING",
-    };
-  }
-  if (normalizeServer(brokerServer) !== normalizeServer(existing.identity.server)) {
-    return {
-      ...existing,
-      reason: "LIVE_AUTH_BROKER_SERVER_MISMATCH",
+      reason: evaluation.reason,
     };
   }
 
