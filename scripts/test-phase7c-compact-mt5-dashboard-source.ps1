@@ -26,17 +26,27 @@ Assert-Text $mq5 'chart_width\s*\*\s*0\.40' "Option B panel should use about 40 
 # Contained-grid layout: uniform body typography and fixed cell geometry.
 Assert-Text $mq5 'BODY_FONT_SIZE\s*=\s*9' "contained grid must use a uniform 9px body font"
 Assert-Text $mq5 'SECTION_FONT_SIZE\s*=\s*10' "section titles must use a consistent 10px font"
-Assert-Text $mq5 'REASON_LABEL_WIDTH\s*=\s*170' "reason label column must be wide enough for labels"
 Assert-Text $mq5 'REASON_ROW_HEIGHT\s*=\s*64' "each reason must live in a fixed 64px row"
 Assert-Text $mq5 'REASON_ROW_GAP\s*=\s*6' "reason rows must have explicit vertical gaps"
-Assert-Text $mq5 'REASON_SECOND_LINE_OFFSET\s*=\s*18' "wrapped reason lines must have readable separation"
 Assert-Text $mq5 'void\s+VerticalDivider\s*\(' "dashboard must provide vertical dividers"
 Assert-Text $mq5 'void\s+DrawReasonRowCard\s*\(' "each decision reason must render in its own contained row card"
 Assert-Text $mq5 'Card\(x,\s*y,\s*width,\s*REASON_ROW_HEIGHT' "reason row helper must draw its own card"
-Assert-Text $mq5 'VerticalDivider\(x\s*\+\s*REASON_LABEL_WIDTH' "reason row must separate label and content columns"
 Assert-Text $mq5 'WrapTextTwoLines\(ReasonVi\(reason,\s*fallback\),\s*content_width,\s*BODY_FONT_SIZE' "reason content must wrap inside its own column"
 Assert-Text $mq5 'DrawReasonRowCard\(' "reason summary must use contained row cards"
 Assert-NotText $mq5 'void\s+DrawReasonLine\s*\(' "legacy free-floating reason line renderer must be removed"
+
+# DPI root-cause fix: fonts must use positive pixel sizes and live canvas metrics.
+Assert-Text $mq5 'g_canvas\.FontSet\("Segoe UI",\s*px\)' "MT5 font must use positive pixel size independent of Windows font scaling"
+Assert-NotText $mq5 'g_canvas\.FontSet\("Segoe UI",\s*-px\s*\*\s*10\)' "negative logical-point font sizing must be removed"
+Assert-Text $mq5 'int\s+TextHeightPx\s*\(' "panel must measure live canvas text height"
+Assert-Text $mq5 'g_canvas\.TextHeight\("Ag"\)' "text-height helper must use CCanvas TextHeight"
+Assert-Text $mq5 'int\s+CenteredTextY\s*\(' "panel must provide metric-based vertical centering"
+Assert-Text $mq5 'TextHeightPx\(px\)' "vertical centering must derive from measured font height"
+Assert-Text $mq5 'int\s+ReasonLabelColumnWidth\s*\(' "reason label column must be measured dynamically"
+Assert-Text $mq5 'g_canvas\.TextWidth\("ĐÓNG TOÀN BỘ"\)' "reason label width must include the longest operator label"
+Assert-Text $mq5 'int\s+EntryStrategyColumnWidth\s*\(' "entry strategy column must be measured dynamically"
+Assert-Text $mq5 'g_canvas\.TextWidth\("SIDEWAY"\)' "entry strategy width must fit SIDEWAY without truncation"
+Assert-Text $mq5 'CenteredTextY\(' "text-bearing cells must use measured vertical centering"
 
 # System status must be a real four-column grid with separators.
 Assert-Text $mq5 'STATUS_COLUMN_COUNT\s*=\s*4' "system status must define four equal columns"
