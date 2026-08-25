@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { BotMode } from "@xauusd/strategy-engine";
 
@@ -6,6 +6,15 @@ export interface Phase7CBotModeState {
   mode: BotMode;
   updatedAt: string;
   updatedBy: string;
+}
+
+export interface Phase7CBotModeAuditEvent {
+  event: "BOT_MODE_SET_ATTEMPT";
+  fromMode: BotMode;
+  toMode: BotMode;
+  updatedAt: string;
+  updatedBy: string;
+  pid: number;
 }
 
 const VALID_MODES: readonly BotMode[] = ["AUTO", "TREND", "SIDEWAY", "PAUSE"];
@@ -29,11 +38,13 @@ export function getPhase7CBotModeOptions(): readonly BotMode[] {
 
 export class Phase7CBotModeService {
   private readonly filePath: string;
+  private readonly auditPath: string;
 
   constructor(filePath = process.env.PHASE7C_BOT_MODE_FILE) {
     this.filePath = filePath?.trim()
       ? resolve(filePath)
       : resolve(process.cwd(), ".runtime", "phase7c-bot-mode.json");
+    this.auditPath = resolve(dirname(this.filePath), "phase7c-bot-mode-audit.jsonl");
   }
 
   get(): Phase7CBotModeState {
@@ -53,17 +64,48 @@ export class Phase7CBotModeService {
     }
   }
 
-  set(mode: BotMode, updatedBy = "operator"): Phase7CBotModeState {
-    const state: Phase7CBotModeState = {
-      mode,
-      updatedAt: new Date().toISOString(),
-      updatedBy: updatedBy.trim() || "operator",
-    };
+  private appendAudit(event: Phase7CBotModeAuditEvent): void {
+    mkdirSync(dirname(this.auditPath), { recursive: true });
+    appendFileSync(this.auditPath, `${JSON.stringify(event)}\n`, "utf8");
+  }
 
+  private writeState(state: Phase7CBotModeState): void {
     mkdirSync(dirname(this.filePath), { recursive: true });
     const temporaryPath = `${this.filePath}.${process.pid}.tmp`;
     writeFileSync(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
     renameSync(temporaryPath, this.filePath);
+  }
+
+  set(mode: BotMode, updatedBy = "operator"): Phase7CBotModeState {
+    const previous = this.get();
+    const normalizedUpdatedBy = updatedBy.trim() || "operator";
+    const updatedAt = new Date().toISOString();
+    const state: Phase7CBotModeState = {
+      mode,
+      updatedAt,
+      updatedBy: normalizedUpdatedBy,
+    };
+    const event: Phase7CBotModeAuditEvent = {
+      event: "BOT_MODE_SET_ATTEMPT",
+      fromMode: previous.mode,
+      toMode: mode,
+      updatedAt,
+      updatedBy: normalizedUpdatedBy,
+      pid: process.pid,
+    };
+
+    if (mode !== "PAUSE") {
+      this.appendAudit(event);
+      this.writeState(state);
+      return state;
+    }
+
+    this.writeState(state);
+    try {
+      this.appendAudit(event);
+    } catch {
+      // PAUSE is the safety state and must remain available even if provenance storage fails.
+    }
     return state;
   }
 }
