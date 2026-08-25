@@ -357,7 +357,10 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
 
   phase7CBotModeService.set("PAUSE", "web-control-center-preflight");
   const initialAccountState = getPhase7CAccountModeState();
-  let liveAuthorization = getPhase7CLiveAuthorizationStatus(telemetry.health?.server ?? null);
+  let liveAuthorization = getPhase7CLiveAuthorizationStatus(
+    telemetry.health?.server ?? null,
+    telemetry.accountLogin,
+  );
   const accountDecision = resolvePhase7CWebStartAccount({
     reachable: telemetry.reachable,
     brokerAccountMode: telemetry.health?.accountMode ?? null,
@@ -375,7 +378,10 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
   const targetAccountMode = accountDecision.targetAccountMode;
   if (targetAccountMode === "LIVE") {
     if (accountDecision.authorizationSource === "LEGACY_EXPLICIT_LIVE_STATE") {
-      liveAuthorization = ensurePhase7CLiveAuthorizationForWebStart(telemetry.health?.server ?? null);
+      liveAuthorization = ensurePhase7CLiveAuthorizationForWebStart(
+        telemetry.health?.server ?? null,
+        telemetry.accountLogin,
+      );
     }
     if (!liveAuthorization.valid || !liveAuthorization.identity) {
       throw new Error(`LIVE authorization không hợp lệ: ${liveAuthorizationError(liveAuthorization)}. Bot giữ PAUSE.`);
@@ -429,7 +435,10 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
     await runStopper();
   }
 
-  const launcherPid = await launchSelectedSupervisor(targetAccountMode, targetAccountMode === "LIVE" ? liveAuthorization : null);
+  const launcherPid = await launchSelectedSupervisor(
+    targetAccountMode,
+    targetAccountMode === "LIVE" ? liveAuthorization : null,
+  );
   const ready = await waitForReady();
   if (!ready) {
     phase7CBotModeService.set("PAUSE", "web-control-center-start-failed");
@@ -450,7 +459,10 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
       throw new Error(`MT5 account mode đổi trong lúc khởi động. target=${targetAccountMode}; broker=${finalTelemetry.health?.accountMode ?? "unknown"}.`);
     }
     if (targetAccountMode === "LIVE") {
-      const finalAuthorization = getPhase7CLiveAuthorizationStatus(finalTelemetry.health?.server ?? null);
+      const finalAuthorization = getPhase7CLiveAuthorizationStatus(
+        finalTelemetry.health?.server ?? null,
+        finalTelemetry.accountLogin,
+      );
       if (!finalAuthorization.valid) {
         throw new Error(`LIVE authorization đổi/không còn hợp lệ: ${liveAuthorizationError(finalAuthorization)}.`);
       }
