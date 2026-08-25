@@ -136,17 +136,29 @@ const lifecycleSource = fs.readFileSync(
 );
 assert.match(lifecycleSource, /resolvePhase7CWebStartAccount/);
 assert.match(lifecycleSource, /ensurePhase7CLiveAuthorizationForWebStart/);
+assert.match(lifecycleSource, /preserveLegacyExplicitLiveAuthorization/);
 assert.match(lifecycleSource, /launchSelectedSupervisor/);
 assert.doesNotMatch(lifecycleSource, /Web cold-start chỉ được phép cho DEMO/);
 assert.doesNotMatch(lifecycleSource, /web-control-center-live-start-blocked/);
 assert.match(lifecycleSource, /-LiveExecutionEnabled/);
+assert.match(lifecycleSource, /phase7CBotModeService\.set\("PAUSE", "web-control-center-preflight"\)/);
+assert.match(lifecycleSource, /finalTelemetry/);
+
+const authorizationSource = fs.readFileSync(
+  path.join(root, "apps/api/src/services/phase7c-live-authorization.service.ts"),
+  "utf8",
+);
+assert.match(authorizationSource, /phase7c-live-authorization\.json/);
+assert.match(authorizationSource, /accountState\.accountMode !== "LIVE"/);
+assert.match(authorizationSource, /accountState\.liveExecutionEnabled !== true/);
+assert.match(authorizationSource, /legacy-explicit-live-state:/);
 
 const switchSource = fs.readFileSync(
   path.join(root, "scripts/switch-phase7c-account-mode-local.ps1"),
   "utf8",
 );
-assert.match(switchSource, /Write-Phase7CLiveAuthorizationState/);
 assert.match(switchSource, /ConfirmLiveExecution/);
+assert.match(switchSource, /LIVE account switching requires explicit -ConfirmLiveExecution/);
 
 const uiSource = fs.readFileSync(
   path.join(root, "apps/web/src/pages/Phase7CControlCenterPage.tsx"),
