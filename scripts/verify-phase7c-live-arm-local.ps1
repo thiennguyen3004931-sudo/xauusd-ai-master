@@ -28,6 +28,21 @@ function Fail([string]$Message) {
   throw "DUNG: $Message"
 }
 
+function ConvertTo-StrictBoolean($Value, [string]$Label) {
+  if ($Value -is [bool]) {
+    return [bool]$Value
+  }
+
+  if ($Value -is [string]) {
+    $parsed = $false
+    if ([bool]::TryParse($Value.Trim(), [ref]$parsed)) {
+      return $parsed
+    }
+  }
+
+  Fail "$Label is not a valid boolean."
+}
+
 function Get-EnvValue([string]$Path, [string]$Name) {
   foreach ($raw in Get-Content -LiteralPath $Path) {
     $line = ([string]$raw).Trim()
@@ -126,7 +141,7 @@ if ('accountMode' -notin $StateFields -or 'valid' -notin $StateFields) {
 
 $FileAccountMode = [string]$AccountFile.accountMode
 $ApiAccountMode = [string]$AccountApi.state.accountMode
-$AccountValid = [bool]$AccountApi.state.valid
+$AccountValid = ConvertTo-StrictBoolean $AccountApi.state.valid "account.state.valid"
 
 Write-Host "FILE_ACCOUNT_MODE=$FileAccountMode"
 Write-Host "API_ACCOUNT_MODE=$ApiAccountMode"
@@ -388,6 +403,7 @@ $Final = Get-CanonicalState
 $FinalAccount = $Final.AccountApi
 $FinalBot = $Final.Bot
 $FinalLife = $Final.Life
+$FinalAccountValid = ConvertTo-StrictBoolean $FinalAccount.state.valid "final account.state.valid"
 $FinalHealth = Invoke-RestMethod `
   -Uri "http://${BridgeHost}:${BridgePort}/health" `
   -Headers @{ "x-mt5-api-key" = $ApiKey } `
@@ -397,7 +413,7 @@ $FinalArm = Test-Path -LiteralPath $ArmFile
 $DirtyAfter = @(git -C $ProjectRoot status --porcelain)
 
 Write-Host "FINAL_ACCOUNT=$($FinalAccount.state.accountMode)"
-Write-Host "FINAL_ACCOUNT_VALID=$($FinalAccount.state.valid)"
+Write-Host "FINAL_ACCOUNT_VALID=$FinalAccountValid"
 Write-Host "FINAL_MODE=$($FinalBot.state.mode)"
 Write-Host "FINAL_RUNNING=$($FinalLife.running)"
 Write-Host "FINAL_READY=$($FinalLife.ready)"
@@ -413,7 +429,7 @@ Write-Host "WORKTREE_CHANGE_COUNT=$($DirtyAfter.Count)"
 
 if (
   [string]$FinalAccount.state.accountMode -ne "LIVE" -or
-  -not [bool]$FinalAccount.state.valid
+  -not $FinalAccountValid
 ) {
   Fail "Final canonical LIVE account state changed or became invalid."
 }
