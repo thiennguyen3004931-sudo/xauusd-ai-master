@@ -3,11 +3,21 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { phase7CBotModeService } from "./phase7c-bot-mode.service";
+import { activatePhase7CAccountRiskProfile } from "./phase7c-account-profile-selection.service";
 import { phase7CLotSettingsService } from "./phase7c-lot-settings.service";
 import {
   accountModeAllowsBroker,
   getPhase7CAccountModeState,
+  setPhase7CAccountModeFromWebAutoDetection,
+  type Phase7CAccountMode,
 } from "./phase7c-account-mode.service";
+import {
+  ensurePhase7CLiveAuthorizationForWebStart,
+  getPhase7CLiveAuthorizationStatus,
+  preserveLegacyExplicitLiveAuthorization,
+  type Phase7CLiveAuthorizationStatus,
+} from "./phase7c-live-authorization.service";
+import { resolvePhase7CWebStartAccount } from "./phase7c-web-account-start-policy";
 import { getMt5Telemetry, type Mt5TelemetrySnapshot } from "./mt5.service";
 
 const execFileAsync = promisify(execFile);
@@ -47,6 +57,16 @@ function findProjectRoot(): string {
     current = parent;
   }
   throw new Error(`Cannot locate project root from ${process.cwd()}.`);
+}
+
+function accountEnvFile(accountMode: Phase7CAccountMode): string {
+  return path.join(
+    findProjectRoot(),
+    "packages",
+    "mt5-broker",
+    "bridge",
+    accountMode === "LIVE" ? ".env.phase7b-live" : ".env.phase7b-demo",
+  );
 }
 
 function readJson<T>(file: string): T | null {
@@ -146,10 +166,10 @@ export function getPhase7CLifecycleRuntimeStatus() {
       realAccountAllowed: accountModeState.accountMode === "LIVE" && accountModeState.liveExecutionEnabled,
       accountGuardValid: accountModeState.valid,
       accountSwitchFromWeb: false as const,
-      liveColdStartFromWeb: false as const,
-      startMode: accountModeState.accountMode === "LIVE"
-        ? "ADMIN_SWITCH_PAUSE_THEN_OPERATOR_AUTO" as const
-        : "PAUSE_THEN_AUTO_AFTER_READY" as const,
+      accountSelectionFromWeb: true as const,
+      liveColdStartFromWeb: true as const,
+      firstTimeLiveArmFromWeb: false as const,
+      startMode: "PAUSE_THEN_AUTO_AFTER_READY" as const,
       stopBlockedWithOpenPosition: true as const,
       mt5PanelOrderPermission: "NONE" as const,
     },
@@ -194,17 +214,29 @@ function pairPowerShellArguments(args: string[]): string[] {
   return output;
 }
 
-async function launchDemoSupervisor(): Promise<number> {
+async function launchSelectedSupervisor(
+  accountMode: Phase7CAccountMode,
+  liveAuthorization: Phase7CLiveAuthorizationStatus | null,
+): Promise<number> {
   const accountModeState = getPhase7CAccountModeState();
-  if (!accountModeState.valid || accountModeState.accountMode !== "DEMO") {
-    throw new Error("Web cold-start chỉ được phép cho DEMO. LIVE phải dùng account-switch Admin đã verify.");
+  if (!accountModeState.valid || accountModeState.accountMode !== accountMode) {
+    throw new Error(`Web launcher account state không khớp target ${accountMode}.`);
   }
+  if (
+    accountMode === "LIVE" &&
+    (accountModeState.liveExecutionEnabled !== true || liveAuthorization?.valid !== true)
+  ) {
+    throw new Error("LIVE cold-start bị chặn vì chưa có prior LIVE authorization hợp lệ.");
+  }
+
   const projectRoot = findProjectRoot();
   const script = path.join(projectRoot, "scripts", "run-phase7c-executors-local.ps1");
   const telegramEnv = path.join(projectRoot, ".env.phase7b-telegram");
-  const bridgeEnv = path.join(projectRoot, "packages", "mt5-broker", "bridge", ".env.phase7b-demo");
+  const bridgeEnv = accountModeState.envFile
+    ? path.resolve(accountModeState.envFile)
+    : accountEnvFile(accountMode);
   if (!fs.existsSync(script)) throw new Error(`Missing executor supervisor: ${script}`);
-  if (!fs.existsSync(bridgeEnv)) throw new Error(`Missing DEMO bridge env: ${bridgeEnv}`);
+  if (!fs.existsSync(bridgeEnv)) throw new Error(`Missing ${accountMode} bridge env: ${bridgeEnv}`);
   if (!fs.existsSync(telegramEnv)) throw new Error(`Missing Telegram env: ${telegramEnv}`);
 
   const settings = phase7CLotSettingsService.getState();
@@ -219,12 +251,15 @@ async function launchDemoSupervisor(): Promise<number> {
     "-ControlApiUrl", `http://127.0.0.1:${Number(process.env.PORT ?? 3711) || 3711}`,
     "-EnvFile", bridgeEnv,
     "-TelegramEnvFile", telegramEnv,
-    "-AccountMode", "DEMO",
+    "-AccountMode", accountMode,
+  ];
+  if (accountMode === "LIVE") args.push("-LiveExecutionEnabled");
+  args.push(
     "-TrendFixedVolume", String(settings.trendFixedLot),
     "-SidewayRiskPercent", String(settings.sidewayRiskPercent),
     "-SidewayMaxLot", String(settings.sidewayMaxLot),
     "-Armed",
-  ];
+  );
   const invocation = [
     `& ${quotePowerShellLiteral(script)}`,
     ...pairPowerShellArguments(args),
@@ -236,8 +271,8 @@ async function launchDemoSupervisor(): Promise<number> {
     `$ErrorActionPreference = 'Stop'\r\n${invocation}\r\n`,
     "utf8",
   );
-  fs.appendFileSync(logPath, `\n=== WEB START ${new Date().toISOString()} ===\n`, "utf8");
-  fs.writeFileSync(supervisorOut, `=== WEB START ${new Date().toISOString()} ===\n`, "utf8");
+  fs.appendFileSync(logPath, `\n=== WEB START ${new Date().toISOString()} MODE=${accountMode} ===\n`, "utf8");
+  fs.writeFileSync(supervisorOut, `=== WEB START ${new Date().toISOString()} MODE=${accountMode} ===\n`, "utf8");
   fs.writeFileSync(supervisorErr, "", "utf8");
 
   const command = [
@@ -313,8 +348,63 @@ function logTail(file: string, lines = 40): string {
   }
 }
 
+function liveAuthorizationError(status: Phase7CLiveAuthorizationStatus): string {
+  return status.error ? `${status.reason}: ${status.error}` : status.reason;
+}
+
 export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
   if (!controlEnabled()) throw new Error("Điều khiển Bot chỉ khả dụng trên localhost Windows.");
+
+  phase7CBotModeService.set("PAUSE", "web-control-center-preflight");
+  const initialAccountState = getPhase7CAccountModeState();
+  let liveAuthorization = getPhase7CLiveAuthorizationStatus(telemetry.health?.server ?? null);
+  const accountDecision = resolvePhase7CWebStartAccount({
+    reachable: telemetry.reachable,
+    brokerAccountMode: telemetry.health?.accountMode ?? null,
+    currentState: initialAccountState,
+    durableLiveAuthorizationValid: liveAuthorization.valid,
+  });
+  if (!accountDecision.allowed || !accountDecision.targetAccountMode) {
+    throw new Error(
+      accountDecision.reason === "LIVE_NOT_PREAUTHORIZED"
+        ? "MT5 đang đăng nhập LIVE nhưng tài khoản LIVE này chưa được cấp quyền trước. Web không tự ARM LIVE lần đầu; hãy dùng flow Admin -ConfirmLiveExecution một lần. Bot giữ PAUSE."
+        : `Không thể chọn account runtime từ MT5 hiện tại: ${accountDecision.reason}. Bot giữ PAUSE.`,
+    );
+  }
+
+  const targetAccountMode = accountDecision.targetAccountMode;
+  if (targetAccountMode === "LIVE") {
+    if (accountDecision.authorizationSource === "LEGACY_EXPLICIT_LIVE_STATE") {
+      liveAuthorization = ensurePhase7CLiveAuthorizationForWebStart(telemetry.health?.server ?? null);
+    }
+    if (!liveAuthorization.valid || !liveAuthorization.identity) {
+      throw new Error(`LIVE authorization không hợp lệ: ${liveAuthorizationError(liveAuthorization)}. Bot giữ PAUSE.`);
+    }
+  } else if (
+    initialAccountState.valid &&
+    initialAccountState.accountMode === "LIVE" &&
+    initialAccountState.liveExecutionEnabled
+  ) {
+    // Upgrade migration: preserve an already-explicit LIVE approval before
+    // selecting DEMO. This never authorizes a LIVE from a DEMO-only state.
+    preserveLegacyExplicitLiveAuthorization();
+  }
+
+  if (initialAccountState.accountMode !== targetAccountMode) {
+    const liveIdentity = targetAccountMode === "LIVE" ? liveAuthorization.identity : null;
+    activatePhase7CAccountRiskProfile({
+      accountMode: targetAccountMode,
+      liveIdentity,
+      updatedBy: `web-auto-detect:${targetAccountMode}`,
+    });
+    setPhase7CAccountModeFromWebAutoDetection({
+      accountMode: targetAccountMode,
+      envFile: accountEnvFile(targetAccountMode),
+      liveAuthorizationValidated: targetAccountMode === "LIVE",
+      updatedBy: `web-auto-detect:${targetAccountMode}`,
+    });
+  }
+
   assertPhase7CSelectedAccountReady(telemetry);
   if (telemetry.positions.length > 0) {
     throw new Error(`Không khởi động sạch khi đang có ${telemetry.positions.length} vị thế XAUUSD. Hãy kiểm tra/quản lý vị thế trước.`);
@@ -323,13 +413,6 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
 
   const accountModeState = getPhase7CAccountModeState();
   const current = getPhase7CLifecycleRuntimeStatus();
-
-  if (accountModeState.accountMode === "LIVE") {
-    phase7CBotModeService.set("PAUSE", "web-control-center-live-start-blocked");
-    throw new Error(
-      "Web không được chuyển LIVE sang mode hoạt động. LIVE phải được kích hoạt qua flow operator/ARM riêng; Bot vẫn PAUSE.",
-    );
-  }
 
   if (current.ready) {
     const mode = phase7CBotModeService.set("AUTO", "web-control-center-start");
@@ -342,13 +425,11 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
     };
   }
 
-  phase7CBotModeService.set("PAUSE", "web-control-center-preflight");
-
   if (current.running || Object.values(current.processes).some((entry) => entry.alive)) {
     await runStopper();
   }
 
-  const launcherPid = await launchDemoSupervisor();
+  const launcherPid = await launchSelectedSupervisor(targetAccountMode, targetAccountMode === "LIVE" ? liveAuthorization : null);
   const ready = await waitForReady();
   if (!ready) {
     phase7CBotModeService.set("PAUSE", "web-control-center-start-failed");
@@ -365,6 +446,15 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
   try {
     const finalTelemetry = await getMt5Telemetry("XAUUSD");
     assertPhase7CSelectedAccountReady(finalTelemetry);
+    if (finalTelemetry.health?.accountMode !== (targetAccountMode === "LIVE" ? "real" : "demo")) {
+      throw new Error(`MT5 account mode đổi trong lúc khởi động. target=${targetAccountMode}; broker=${finalTelemetry.health?.accountMode ?? "unknown"}.`);
+    }
+    if (targetAccountMode === "LIVE") {
+      const finalAuthorization = getPhase7CLiveAuthorizationStatus(finalTelemetry.health?.server ?? null);
+      if (!finalAuthorization.valid) {
+        throw new Error(`LIVE authorization đổi/không còn hợp lệ: ${liveAuthorizationError(finalAuthorization)}.`);
+      }
+    }
     if (finalTelemetry.positions.length > 0) {
       throw new Error(`Phát hiện ${finalTelemetry.positions.length} vị thế XAUUSD trong lúc khởi động.`);
     }
@@ -377,9 +467,9 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
   const mode = phase7CBotModeService.set("AUTO", "web-control-center-start");
   return {
     action: "STARTED",
-    message: `Bot DEMO đã RUNNING · AUTO · Trend ${ready.lotSettings.configured.trendFixedLot.toFixed(2)} lot · Telegram READY.`,
+    message: `Bot ${targetAccountMode} đã RUNNING · AUTO · Trend ${ready.lotSettings.configured.trendFixedLot.toFixed(2)} lot · Telegram READY.`,
     launcherPid,
-    accountMode: "DEMO" as const,
+    accountMode: targetAccountMode,
     mode,
     lifecycle: getPhase7CLifecycleRuntimeStatus(),
   };
