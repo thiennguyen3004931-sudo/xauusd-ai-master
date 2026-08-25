@@ -21,7 +21,19 @@ Assert-Text "apps/api/src/services/phase7c-decision-monitor.service.ts" 'decisio
 
 Assert-Text "apps/api/src/services/phase7c-ui-contract.service.ts" 'orderPermission:\s*"NONE"' "semantic UI must remain read-only"
 Assert-Text "apps/api/src/services/phase7c-ui-contract.service.ts" 'accountMode:\s*"DEMO"\s*\|\s*"LIVE"' "semantic UI must expose account mode"
-Assert-Text "apps/api/src/services/phase7c-lifecycle.service.ts" 'liveColdStartFromWeb:\s*false' "web must not cold-start LIVE"
+
+# Web lifecycle may cold-start a previously authorized LIVE account, but must
+# never grant first-time LIVE execution permission from the web. The dedicated
+# start policy requires durable/legacy explicit authorization and fails closed
+# with LIVE_NOT_PREAUTHORIZED otherwise.
+Assert-Text "apps/api/src/services/phase7c-lifecycle.service.ts" 'liveColdStartFromWeb:\s*true' "web may cold-start only a preauthorized LIVE runtime"
+Assert-Text "apps/api/src/services/phase7c-lifecycle.service.ts" 'firstTimeLiveArmFromWeb:\s*false' "web must never perform first-time LIVE ARM"
+Assert-Text "apps/api/src/services/phase7c-lifecycle.service.ts" 'resolvePhase7CWebStartAccount' "web lifecycle must route account selection through the guarded start policy"
+Assert-Text "apps/api/src/services/phase7c-lifecycle.service.ts" 'LIVE_NOT_PREAUTHORIZED' "web lifecycle must fail closed when LIVE lacks prior authorization"
+Assert-Text "apps/api/src/services/phase7c-web-account-start-policy.ts" 'durableLiveAuthorizationValid' "LIVE web start must require durable prior authorization"
+Assert-Text "apps/api/src/services/phase7c-web-account-start-policy.ts" 'DURABLE_LIVE_AUTHORIZATION' "LIVE web start must expose durable authorization provenance"
+Assert-Text "apps/api/src/services/phase7c-web-account-start-policy.ts" 'LEGACY_EXPLICIT_LIVE_STATE' "legacy explicit LIVE authorization migration must remain explicit"
+Assert-Text "apps/api/src/services/phase7c-web-account-start-policy.ts" 'LIVE_NOT_PREAUTHORIZED' "unapproved LIVE web start must remain blocked"
 Assert-Text "apps/api/src/services/phase7c-lifecycle.service.ts" 'ADMIN_SWITCH_PAUSE_THEN_OPERATOR_AUTO' "LIVE lifecycle must require verified admin switch first"
 Assert-Text "apps/api/src/routes/phase7c.route.ts" 'router\.get\("/account-mode"' "API must expose read-only account mode"
 Assert-Text "apps/api/src/routes/phase7c.route.ts" 'webCanSwitchAccount:\s*false' "API must not switch MT5 account from web"
