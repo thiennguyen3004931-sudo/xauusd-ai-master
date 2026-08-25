@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 import { acquireExecutionLock } from "./phase7c-execution-lock.mjs";
+import { evaluateAutoTrendEntryModeGate } from "./phase7c-trend-mode-gate.mjs";
 
 const nativeFetch = globalThis.fetch.bind(globalThis);
 const controlApiBase = (process.env.ZIQ_PHASE7C_CONTROL_API_URL?.trim() || "http://127.0.0.1:3711").replace(/\/$/, "");
@@ -70,7 +71,7 @@ globalThis.fetch = async function phase7CTrendGate(input, init = undefined) {
     }
 
     console.log(
-      `PHASE7C_TREND_ENTRY_ALLOWED=MODE_${decision.activeMode}|RECOMMENDED_${decision.recommendedMode ?? "N/A"}`,
+      `PHASE7C_TREND_ENTRY_ALLOWED=MODE_${decision.activeMode}|RECOMMENDED_${decision.recommendedMode ?? "N/A"}|REASON_${decision.reason}`,
     );
     return await nativeFetch(input, init);
   } catch (error) {
@@ -331,6 +332,7 @@ function startTrendRuntimeHeartbeat() {
       heartbeatMs,
   );
 }
+
 async function evaluateTrendEntryPermission() {
   const modePayload = await controlRequest("/api/v1/phase7c/bot-mode");
   const activeMode = String(modePayload?.state?.mode ?? "PAUSE").toUpperCase();
@@ -375,17 +377,16 @@ async function evaluateTrendEntryPermission() {
     symbol: regimeSymbol,
     count: String(regimeCandleCount),
   });
-  const regime = await controlRequest(`/api/v1/phase7c/live-regime?${query.toString()}`);
-  const recommendedMode = String(regime?.recommendedMode ?? "PAUSE").toUpperCase();
+  const [regime, demo] = await Promise.all([
+    controlRequest(`/api/v1/phase7c/live-regime?${query.toString()}`),
+    controlRequest("/api/v1/phase7b-demo"),
+  ]);
 
-  return {
-    allowed: recommendedMode === "TREND",
+  return evaluateAutoTrendEntryModeGate({
     activeMode,
-    recommendedMode,
-    reason: recommendedMode === "TREND"
-      ? "AUTO_REGIME_ALLOWS_TREND"
-      : `AUTO_REGIME_RECOMMENDS_${recommendedMode}`,
-  };
+    regime,
+    demo,
+  });
 }
 
 async function fetchOpenPositionsUnderLock(request) {
