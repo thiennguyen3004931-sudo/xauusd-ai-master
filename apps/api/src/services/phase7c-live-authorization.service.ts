@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -289,37 +290,17 @@ export function getPhase7CLiveAuthorizationStatus(
   };
 }
 
-export function ensurePhase7CLiveAuthorizationForWebStart(
-  brokerServer: string | null | undefined,
-): Phase7CLiveAuthorizationStatus {
-  const existing = getPhase7CLiveAuthorizationStatus(brokerServer);
-  if (existing.valid || existing.reason !== "LIVE_AUTH_MISSING") return existing;
-
+function legacyAuthorizationRecord(): Phase7CLiveAuthorizationRecord | null {
   const accountState = getPhase7CAccountModeState();
   if (
     !accountState.valid ||
     accountState.accountMode !== "LIVE" ||
     accountState.liveExecutionEnabled !== true
   ) {
-    return existing;
+    return null;
   }
-
-  const identity = existing.identity;
-  if (!identity) return existing;
-  if (!normalizeServer(brokerServer)) {
-    return {
-      ...existing,
-      reason: "LIVE_AUTH_BROKER_SERVER_MISSING",
-    };
-  }
-  if (normalizeServer(brokerServer) !== normalizeServer(identity.server)) {
-    return {
-      ...existing,
-      reason: "LIVE_AUTH_BROKER_SERVER_MISMATCH",
-    };
-  }
-
-  const record: Phase7CLiveAuthorizationRecord = {
+  const identity = getPhase7CLiveProfileIdentity();
+  return {
     version: 1,
     authorized: true,
     accountMode: "LIVE",
@@ -329,13 +310,45 @@ export function ensurePhase7CLiveAuthorizationForWebStart(
     authorizedAt: accountState.updatedAt ?? new Date().toISOString(),
     authorizedBy: `legacy-explicit-live-state:${accountState.updatedBy}`,
   };
+}
+
+export function preserveLegacyExplicitLiveAuthorization(): boolean {
+  const filePath = phase7CLiveAuthorizationPath();
+  if (existsSync(filePath)) return false;
+  const record = legacyAuthorizationRecord();
+  if (!record) return false;
+  writeAuthorizationAtomic(record);
+  return true;
+}
+
+export function ensurePhase7CLiveAuthorizationForWebStart(
+  brokerServer: string | null | undefined,
+): Phase7CLiveAuthorizationStatus {
+  const existing = getPhase7CLiveAuthorizationStatus(brokerServer);
+  if (existing.valid || existing.reason !== "LIVE_AUTH_MISSING") return existing;
+
+  const record = legacyAuthorizationRecord();
+  if (!record || !existing.identity) return existing;
+  if (!normalizeServer(brokerServer)) {
+    return {
+      ...existing,
+      reason: "LIVE_AUTH_BROKER_SERVER_MISSING",
+    };
+  }
+  if (normalizeServer(brokerServer) !== normalizeServer(existing.identity.server)) {
+    return {
+      ...existing,
+      reason: "LIVE_AUTH_BROKER_SERVER_MISMATCH",
+    };
+  }
+
   writeAuthorizationAtomic(record);
   return {
     valid: true,
     reason: "LIVE_AUTHORIZED",
     source: "LEGACY_EXPLICIT_LIVE_STATE_MIGRATED",
     authorization: record,
-    identity,
+    identity: existing.identity,
     error: null,
   };
 }
