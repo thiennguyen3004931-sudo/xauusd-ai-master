@@ -7,12 +7,16 @@ on:
     paths:
       - 'apps/api/src/services/phase7c-decision-monitor.service.ts'
       - 'scripts/run-phase7c-trend-controller.mjs'
+      - 'scripts/phase7c-trend-mode-gate.mjs'
+      - 'scripts/phase7c-trend-mode-gate.test.mjs'
       - 'scripts/phase7c-decision-monitor.test.mjs'
       - '.github/workflows/phase7c-reversal-entry-gate-ci.yml'
   pull_request:
     paths:
       - 'apps/api/src/services/phase7c-decision-monitor.service.ts'
       - 'scripts/run-phase7c-trend-controller.mjs'
+      - 'scripts/phase7c-trend-mode-gate.mjs'
+      - 'scripts/phase7c-trend-mode-gate.test.mjs'
       - 'scripts/phase7c-decision-monitor.test.mjs'
       - '.github/workflows/phase7c-reversal-entry-gate-ci.yml'
   workflow_dispatch:
@@ -36,5 +40,9 @@ jobs:
         run: pnpm build
       - name: Run Phase7C decision monitor regression tests
         run: pnpm --dir apps/api exec tsx ../../scripts/phase7c-decision-monitor.test.mjs
+      - name: Run Trend AUTO reversal gate tests
+        run: node --test scripts/phase7c-trend-mode-gate.test.mjs
       - name: Parse Trend controller gate
         run: node --check scripts/run-phase7c-trend-controller.mjs
+      - name: Parse Trend mode policy
+        run: node --check scripts/phase7c-trend-mode-gate.mjs
