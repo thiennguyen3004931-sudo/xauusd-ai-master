@@ -58,11 +58,11 @@ Assert-NotText $mq5 'FitText\(ReasonVi\(reason,\s*fallback\)' "decision reason m
 Assert-Text $mq5 'string\s+CompactEntryCheckLabel\s*\(' "entry blocker labels must have a compact formatter"
 Assert-Text $mq5 'StringReplace\(out,\s*.Mode / Regime.,\s*.Mode/Regime.' "Mode / Regime label must be compacted"
 Assert-Text $mq5 'string\s+CompactEntryCheckActual\s*\(' "entry blocker actual value must have a compact formatter"
-Assert-Text $mq5 'StringReplace\(out,\s*.PAUSE → PAUSE.,\s*.PAUSE.' "duplicate PAUSE transition must collapse"
-Assert-Text $mq5 'EntryCheckStatusVi\(status\)\s*\+\s*. · .\s*\+\s*CompactEntryCheckLabel\(label\)' "blocker row must render compact status and label"
+Assert-Text $mq5 'StringReplace\(out,\s*"PAUSE[^"]*PAUSE",\s*"PAUSE"' "duplicate PAUSE transition must collapse"
+Assert-Text $mq5 'EntryCheckStatusVi\(status\)\s*\+\s*"[^"]*"\s*\+\s*CompactEntryCheckLabel\(label\)' "blocker row must render compact status and label"
 Assert-Text $mq5 'CompactEntryCheckActual\(actual\)' "blocker row must use compact actual values"
-Assert-NotText $mq5 'trend_label\s*\+\s*. · .\s*\+\s*trend_actual' "legacy verbose Trend blocker concatenation must stay removed"
-Assert-NotText $mq5 'sideway_label\s*\+\s*. · .\s*\+\s*sideway_actual' "legacy verbose Sideway blocker concatenation must stay removed"
+Assert-NotText $mq5 'trend_label\s*\+\s*"[^"]*"\s*\+\s*trend_actual' "legacy verbose Trend blocker concatenation must stay removed"
+Assert-NotText $mq5 'sideway_label\s*\+\s*"[^"]*"\s*\+\s*sideway_actual' "legacy verbose Sideway blocker concatenation must stay removed"
 
 # System status uses green/red dots and ON/OFF text.
 Assert-Text $mq5 'FillCircle' "system status must use visible status dots"
