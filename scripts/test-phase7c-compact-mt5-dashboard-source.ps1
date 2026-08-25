@@ -27,8 +27,8 @@ Assert-Text $mq5 'chart_width\s*\*\s*0\.40' "Option B panel should use about 40 
 Assert-Text $mq5 'BODY_FONT_SIZE\s*=\s*13' "body text must use a readable 13px physical font"
 Assert-Text $mq5 'SECTION_FONT_SIZE\s*=\s*15' "section titles must use a readable 15px physical font"
 Assert-Text $mq5 'TITLE_FONT_SIZE\s*=\s*20' "panel title must use a readable 20px physical font"
-Assert-Text $mq5 'REASON_ROW_HEIGHT\s*=\s*72' "reason rows must be tall enough for larger text"
-Assert-Text $mq5 'REASON_ROW_GAP\s*=\s*8' "reason rows must retain clear visual gaps"
+Assert-Text $mq5 'REASON_ROW_HEIGHT\s*=\s*64' "reason rows must retain contained 64px geometry"
+Assert-Text $mq5 'REASON_ROW_GAP\s*=\s*6' "reason rows must retain explicit visual gaps"
 Assert-Text $mq5 'void\s+VerticalDivider\s*\(' "dashboard must provide vertical dividers"
 Assert-Text $mq5 'void\s+DrawReasonRowCard\s*\(' "each decision reason must render in its own contained row card"
 Assert-Text $mq5 'Card\(x,\s*y,\s*width,\s*REASON_ROW_HEIGHT' "reason row helper must draw its own card"
@@ -54,14 +54,14 @@ Assert-Text $mq5 'STATUS_COLUMN_COUNT\s*=\s*4' "system status must define four e
 Assert-Text $mq5 'for\(int divider\s*=\s*1;\s*divider\s*<\s*STATUS_COLUMN_COUNT;\s*divider\+\+\)' "system status must draw dividers between columns"
 Assert-Text $mq5 'VerticalDivider\(' "system status must use the shared divider helper"
 
-# Larger cards must contain the larger typography without overlap.
-Assert-Text $mq5 'HEADER_HEIGHT\s*=\s*116' "header card must grow for 20px title and 13px body text"
-Assert-Text $mq5 'STATUS_HEIGHT\s*=\s*94' "status card must grow for readable status text"
-Assert-Text $mq5 'STATE_STRIP_HEIGHT\s*=\s*64' "state strip must grow for readable text"
-Assert-Text $mq5 'ENTRY_CHECK_HEIGHT\s*=\s*124' "entry blocker card must grow for readable text"
-Assert-Text $mq5 'WAITING_HEIGHT\s*=\s*650' "waiting canvas must contain enlarged readable cards"
-Assert-Text $mq5 'SETUP_HEIGHT\s*=\s*650' "setup canvas must contain enlarged readable cards"
-Assert-Text $mq5 'MANAGING_HEIGHT\s*=\s*860' "managing canvas must contain enlarged readable cards"
+# Existing geometry stays compact; metric centering must contain the larger text.
+Assert-Text $mq5 'HEADER_HEIGHT\s*=\s*104' "header card geometry must stay compact"
+Assert-Text $mq5 'STATUS_HEIGHT\s*=\s*86' "status card geometry must stay compact"
+Assert-Text $mq5 'STATE_STRIP_HEIGHT\s*=\s*58' "state strip geometry must stay compact"
+Assert-Text $mq5 'ENTRY_CHECK_HEIGHT\s*=\s*112' "entry blocker geometry must stay compact"
+Assert-Text $mq5 'WAITING_HEIGHT\s*=\s*590' "waiting canvas must stay compact"
+Assert-Text $mq5 'SETUP_HEIGHT\s*=\s*590' "setup canvas must stay compact"
+Assert-Text $mq5 'MANAGING_HEIGHT\s*=\s*780' "managing canvas must stay compact"
 
 # Legacy rule-oriented blocks must stay removed from the MQL panel.
 Assert-NotText $mq5 'void\s+DrawFooter\s*\(' "legacy rule footer must stay removed"
