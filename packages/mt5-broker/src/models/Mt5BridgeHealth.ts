@@ -21,6 +21,8 @@ export interface Mt5BridgeHealth {
   liveExecutionArmed?: boolean;
   liveArmStatus?: "ARMED" | "DISARMED" | "NOT_REQUIRED";
   liveArmReason?: string;
+  liveArmScope?: "BRIDGE_SESSION" | "LEGACY_TTL";
+  liveRiskReductionAllowedWhenDisarmed?: boolean;
   lastError?: string;
   reconnectCount?: number;
   lastReconnectAt?: number;
