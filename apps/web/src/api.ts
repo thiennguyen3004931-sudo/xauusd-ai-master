@@ -46,21 +46,11 @@ type ApiErrorPayload = {
 };
 
 function friendlyHttpMessage(status: number, raw?: string) {
-  if (status === 502) {
-    return "Không lấy được dữ liệu từ dịch vụ nền (HTTP 502). API/Bridge/Telegram có thể đang khởi động lại; trang sẽ tự thử lại.";
-  }
-  if (status === 503) {
-    return "Dịch vụ nền chưa sẵn sàng (HTTP 503). Giữ MT5/API mở và thử lại sau vài giây.";
-  }
-  if (status === 504) {
-    return "Dịch vụ nền phản hồi quá thời gian (HTTP 504). Trang sẽ tự thử lại.";
-  }
-  if (status >= 500) {
-    return `Lỗi dịch vụ nền HTTP ${status}. Kiểm tra API/Bridge rồi thử lại.`;
-  }
-  if (status >= 400) {
-    return `Yêu cầu không hợp lệ hoặc bị từ chối HTTP ${status}.`;
-  }
+  if (status === 502) return "Không lấy được dữ liệu từ dịch vụ nền (HTTP 502). API/Bridge/Telegram có thể đang khởi động lại; trang sẽ tự thử lại.";
+  if (status === 503) return "Dịch vụ nền chưa sẵn sàng (HTTP 503). Giữ MT5/API mở và thử lại sau vài giây.";
+  if (status === 504) return "Dịch vụ nền phản hồi quá thời gian (HTTP 504). Trang sẽ tự thử lại.";
+  if (status >= 500) return `Lỗi dịch vụ nền HTTP ${status}. Kiểm tra API/Bridge rồi thử lại.`;
+  if (status >= 400) return `Yêu cầu không hợp lệ hoặc bị từ chối HTTP ${status}.`;
   return raw?.trim() || `HTTP ${status}`;
 }
 
@@ -80,29 +70,17 @@ function payloadMessage(payload: unknown, fallback: string) {
 export async function safeReadJson<T>(response: Response, label = "API"): Promise<T> {
   const text = await response.text();
   const trimmed = text.trim();
-
   if (!trimmed) {
-    throw new Error(
-      response.ok
-        ? `${label} trả về dữ liệu rỗng. Trang sẽ tự thử lại; kiểm tra API nếu lỗi kéo dài.`
-        : friendlyHttpMessage(response.status),
-    );
+    throw new Error(response.ok ? `${label} trả về dữ liệu rỗng. Trang sẽ tự thử lại; kiểm tra API nếu lỗi kéo dài.` : friendlyHttpMessage(response.status));
   }
-
   let payload: unknown;
   try {
     payload = JSON.parse(trimmed) as unknown;
   } catch {
-    if (!response.ok) {
-      throw new Error(friendlyHttpMessage(response.status, trimmed.slice(0, 180)));
-    }
+    if (!response.ok) throw new Error(friendlyHttpMessage(response.status, trimmed.slice(0, 180)));
     throw new Error(`${label} trả về JSON không hợp lệ hoặc chưa hoàn chỉnh. Trang sẽ tự thử lại.`);
   }
-
-  if (!response.ok) {
-    throw new Error(payloadMessage(payload, friendlyHttpMessage(response.status, trimmed.slice(0, 180))));
-  }
-
+  if (!response.ok) throw new Error(payloadMessage(payload, friendlyHttpMessage(response.status, trimmed.slice(0, 180))));
   return payload as T;
 }
 
@@ -111,232 +89,134 @@ async function read<T>(response: Response): Promise<T> {
 }
 
 export async function getDashboard(): Promise<DashboardSnapshot> {
-  return read<DashboardSnapshot>(
-    await fetch(`${API_BASE}/api/v1/dashboard`, { cache: "no-store" }),
-  );
+  return read<DashboardSnapshot>(await fetch(`${API_BASE}/api/v1/dashboard`, { cache: "no-store" }));
 }
 
-export async function getMt5Telemetry(
-  symbol = "XAUUSD",
-): Promise<Mt5TelemetrySnapshot> {
-  const response = await fetch(
-    `${API_BASE}/api/v1/mt5/status?symbol=${encodeURIComponent(symbol)}`,
-    { cache: "no-store" },
-  );
-
-  const payload = await safeReadJson<Mt5TelemetrySnapshot>(response, "MT5 telemetry");
-
-  if (
-    payload &&
-    typeof payload === "object" &&
-    typeof payload.enabled === "boolean" &&
-    typeof payload.reachable === "boolean" &&
-    typeof payload.status === "string"
-  ) {
-    return payload;
-  }
-
-  return payload;
+export async function getMt5Telemetry(symbol = "XAUUSD"): Promise<Mt5TelemetrySnapshot> {
+  const response = await fetch(`${API_BASE}/api/v1/mt5/status?symbol=${encodeURIComponent(symbol)}`, { cache: "no-store" });
+  return safeReadJson<Mt5TelemetrySnapshot>(response, "MT5 telemetry");
 }
 
-export async function setTradingMode(
-  mode: Exclude<TradingMode, "LIVE_LOCKED">,
-): Promise<DashboardSnapshot["control"]> {
-  return read<DashboardSnapshot["control"]>(
-    await fetch(`${API_BASE}/api/v1/control/mode`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode }),
-    }),
-  );
+export async function setTradingMode(mode: Exclude<TradingMode, "LIVE_LOCKED">): Promise<DashboardSnapshot["control"]> {
+  return read<DashboardSnapshot["control"]>(await fetch(`${API_BASE}/api/v1/control/mode`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ mode }),
+  }));
 }
 
-export async function runBacktest(
-  input: BacktestRunRequest,
-): Promise<BacktestResultDto> {
-  return read<BacktestResultDto>(
-    await fetch(`${API_BASE}/api/v1/backtest`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
-    }),
-  );
+export async function runBacktest(input: BacktestRunRequest): Promise<BacktestResultDto> {
+  return read<BacktestResultDto>(await fetch(`${API_BASE}/api/v1/backtest`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  }));
 }
 
-export async function getMt5Performance(
-  days = 90,
-): Promise<Mt5PerformanceSnapshot> {
-  return read<Mt5PerformanceSnapshot>(
-    await fetch(
-      `${API_BASE}/api/v1/mt5/performance?symbol=XAUUSD&days=${days}`,
-      { cache: "no-store" },
-    ),
-  );
+export async function getMt5Performance(days = 90): Promise<Mt5PerformanceSnapshot> {
+  return read<Mt5PerformanceSnapshot>(await fetch(`${API_BASE}/api/v1/mt5/performance?symbol=XAUUSD&days=${days}`, { cache: "no-store" }));
 }
 
 export async function getPhase7BDemo(): Promise<Phase7BDemoSnapshot> {
-  return read<Phase7BDemoSnapshot>(
-    await fetch(`${API_BASE}/api/v1/phase7b-demo`, { cache: "no-store" }),
-  );
+  return read<Phase7BDemoSnapshot>(await fetch(`${API_BASE}/api/v1/phase7b-demo`, { cache: "no-store" }));
 }
 
 export async function getPhase7CLiveRegime(): Promise<Phase7CLiveRegimeSnapshot> {
-  return read<Phase7CLiveRegimeSnapshot>(
-    await fetch(
-      `${API_BASE}/api/v1/phase7c/live-regime?symbol=XAUUSD`,
-      { cache: "no-store" },
-    ),
-  );
+  return read<Phase7CLiveRegimeSnapshot>(await fetch(`${API_BASE}/api/v1/phase7c/live-regime?symbol=XAUUSD`, { cache: "no-store" }));
 }
 
 export async function getPhase7CDecisionMonitor(): Promise<Phase7CDecisionMonitorSnapshot> {
-  return read<Phase7CDecisionMonitorSnapshot>(
-    await fetch(`${API_BASE}/api/v1/phase7c/decision-monitor?symbol=XAUUSD`, {
-      cache: "no-store",
-    }),
-  );
+  return read<Phase7CDecisionMonitorSnapshot>(await fetch(`${API_BASE}/api/v1/phase7c/decision-monitor?symbol=XAUUSD`, { cache: "no-store" }));
 }
 
 export async function getPhase7CLifecycle(): Promise<Phase7CLifecycleSnapshot> {
-  return read<Phase7CLifecycleSnapshot>(
-    await fetch(`${API_BASE}/api/v1/phase7c/lifecycle`, { cache: "no-store" }),
-  );
+  return read<Phase7CLifecycleSnapshot>(await fetch(`${API_BASE}/api/v1/phase7c/lifecycle`, { cache: "no-store" }));
 }
 
 export async function runPhase7CLifecycleAction(action: "start" | "stop"): Promise<Phase7CLifecycleActionResponse> {
-  return read<Phase7CLifecycleActionResponse>(
-    await fetch(`${API_BASE}/api/v1/phase7c/lifecycle/${action}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    }),
-  );
+  return read<Phase7CLifecycleActionResponse>(await fetch(`${API_BASE}/api/v1/phase7c/lifecycle/${action}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  }));
 }
 
-export async function getPhase7CDailyRecovery(
-  volume = 0.03,
-): Promise<Phase7CDailyRecoverySnapshot> {
-  return read<Phase7CDailyRecoverySnapshot>(
-    await fetch(
-      `${API_BASE}/api/v1/phase7c/daily-recovery?symbol=XAUUSD&volume=${encodeURIComponent(volume)}`,
-      { cache: "no-store" },
-    ),
-  );
+export async function setPhase7CBotMode(mode: "AUTO" | "PAUSE"): Promise<{
+  state: Phase7CLifecycleSnapshot["mode"];
+  options: string[];
+  accountMode: string;
+}> {
+  return read(await fetch(`${API_BASE}/api/v1/phase7c/bot-mode`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ mode, source: "web-control-center" }),
+  }));
 }
 
-export async function getPhase7CAccountRisk(
-  riskPercent = 0.25,
-  maxLot = 0.03,
-): Promise<Phase7CAccountRiskSnapshot> {
-  return read<Phase7CAccountRiskSnapshot>(
-    await fetch(
-      `${API_BASE}/api/v1/phase7c/account-risk?riskPercent=${encodeURIComponent(riskPercent)}&maxLot=${encodeURIComponent(maxLot)}`,
-      { cache: "no-store" },
-    ),
-  );
+export async function getPhase7CDailyRecovery(volume = 0.03): Promise<Phase7CDailyRecoverySnapshot> {
+  return read<Phase7CDailyRecoverySnapshot>(await fetch(`${API_BASE}/api/v1/phase7c/daily-recovery?symbol=XAUUSD&volume=${encodeURIComponent(volume)}`, { cache: "no-store" }));
+}
+
+export async function getPhase7CAccountRisk(riskPercent = 0.25, maxLot = 0.03): Promise<Phase7CAccountRiskSnapshot> {
+  return read<Phase7CAccountRiskSnapshot>(await fetch(`${API_BASE}/api/v1/phase7c/account-risk?riskPercent=${encodeURIComponent(riskPercent)}&maxLot=${encodeURIComponent(maxLot)}`, { cache: "no-store" }));
 }
 
 export async function getPhase7CLotSettings(): Promise<Phase7CLotSettingsSnapshot> {
-  return read<Phase7CLotSettingsSnapshot>(
-    await fetch(`${API_BASE}/api/v1/phase7c/lot-settings`, { cache: "no-store" }),
-  );
+  return read<Phase7CLotSettingsSnapshot>(await fetch(`${API_BASE}/api/v1/phase7c/lot-settings`, { cache: "no-store" }));
 }
 
-export async function setPhase7CLotSettings(input: {
-  trendFixedLot: number;
-  sidewayRiskPercent: number;
-  sidewayMaxLot: number;
-}): Promise<Phase7CLotSettingsSnapshot> {
-  return read<Phase7CLotSettingsSnapshot>(
-    await fetch(`${API_BASE}/api/v1/phase7c/lot-settings`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...input, source: "web-control-center" }),
-    }),
-  );
+export async function setPhase7CLotSettings(input: { trendFixedLot: number; sidewayRiskPercent: number; sidewayMaxLot: number }): Promise<Phase7CLotSettingsSnapshot> {
+  return read<Phase7CLotSettingsSnapshot>(await fetch(`${API_BASE}/api/v1/phase7c/lot-settings`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...input, source: "web-control-center" }),
+  }));
 }
 
-export async function getPhase7CAutoLotPreview(
-  stopDistance: number,
-  riskPercent = 0.25,
-  maxLot = 0.03,
-): Promise<Phase7CAutoLotPreview> {
-  return read<Phase7CAutoLotPreview>(
-    await fetch(
-      `${API_BASE}/api/v1/phase7c/auto-lot-preview?stopDistance=${encodeURIComponent(stopDistance)}&riskPercent=${encodeURIComponent(riskPercent)}&maxLot=${encodeURIComponent(maxLot)}`,
-      { cache: "no-store" },
-    ),
-  );
+export async function getPhase7CAutoLotPreview(stopDistance: number, riskPercent = 0.25, maxLot = 0.03): Promise<Phase7CAutoLotPreview> {
+  return read<Phase7CAutoLotPreview>(await fetch(`${API_BASE}/api/v1/phase7c/auto-lot-preview?stopDistance=${encodeURIComponent(stopDistance)}&riskPercent=${encodeURIComponent(riskPercent)}&maxLot=${encodeURIComponent(maxLot)}`, { cache: "no-store" }));
 }
 
-export async function getPhase7CForwardRange(
-  from: string,
-  to: string,
-): Promise<Phase7CForwardRangeResult> {
-  return read<Phase7CForwardRangeResult>(
-    await fetch(
-      `${API_BASE}/api/v1/phase7c/forward-range?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
-      { cache: "no-store" },
-    ),
-  );
+export async function getPhase7CForwardRange(from: string, to: string): Promise<Phase7CForwardRangeResult> {
+  return read<Phase7CForwardRangeResult>(await fetch(`${API_BASE}/api/v1/phase7c/forward-range?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { cache: "no-store" }));
 }
 
-export async function runPhase7CBacktest(
-  input: Phase7CBacktestRequest,
-): Promise<Phase7CBacktestResult> {
-  return read<Phase7CBacktestResult>(
-    await fetch(`${API_BASE}/api/v1/phase7c/backtest`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
-    }),
-  );
+export async function runPhase7CBacktest(input: Phase7CBacktestRequest): Promise<Phase7CBacktestResult> {
+  return read<Phase7CBacktestResult>(await fetch(`${API_BASE}/api/v1/phase7c/backtest`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  }));
 }
 
-export async function runPhase7CAutoLotBacktest(
-  input: Phase7CAutoLotBacktestRequest,
-): Promise<Phase7CAutoLotBacktestResult> {
-  return read<Phase7CAutoLotBacktestResult>(
-    await fetch(`${API_BASE}/api/v1/phase7c/auto-lot-backtest`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
-    }),
-  );
+export async function runPhase7CAutoLotBacktest(input: Phase7CAutoLotBacktestRequest): Promise<Phase7CAutoLotBacktestResult> {
+  return read<Phase7CAutoLotBacktestResult>(await fetch(`${API_BASE}/api/v1/phase7c/auto-lot-backtest`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  }));
 }
 
-export async function runPhase7DDailyPnlBacktest(
-  input: Phase7DDailyPnlRequest,
-): Promise<Phase7DDailyPnlResult> {
-  return read<Phase7DDailyPnlResult>(
-    await fetch(`${API_BASE}/api/v1/phase7d/daily-pnl-backtest`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
-    }),
-  );
+export async function runPhase7DDailyPnlBacktest(input: Phase7DDailyPnlRequest): Promise<Phase7DDailyPnlResult> {
+  return read<Phase7DDailyPnlResult>(await fetch(`${API_BASE}/api/v1/phase7d/daily-pnl-backtest`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  }));
 }
 
-export async function runPhase7ESupertrendBacktest(
-  input: Phase7ESupertrendRequest,
-): Promise<Phase7ESupertrendResult> {
-  return read<Phase7ESupertrendResult>(
-    await fetch(`${API_BASE}/api/v1/phase7e/supertrend-backtest`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
-    }),
-  );
+export async function runPhase7ESupertrendBacktest(input: Phase7ESupertrendRequest): Promise<Phase7ESupertrendResult> {
+  return read<Phase7ESupertrendResult>(await fetch(`${API_BASE}/api/v1/phase7e/supertrend-backtest`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  }));
 }
 
-export async function runPhase7ERealignmentBacktest(
-  input: Phase7ERealignmentRequest,
-): Promise<Phase7ERealignmentResult> {
-  return read<Phase7ERealignmentResult>(
-    await fetch(`${API_BASE}/api/v1/phase7e/realignment-backtest`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
-    }),
-  );
+export async function runPhase7ERealignmentBacktest(input: Phase7ERealignmentRequest): Promise<Phase7ERealignmentResult> {
+  return read<Phase7ERealignmentResult>(await fetch(`${API_BASE}/api/v1/phase7e/realignment-backtest`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  }));
 }
