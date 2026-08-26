@@ -1152,24 +1152,22 @@ async function formatEvent(event, enrichment) {
   }
 
   if (type === "ENTRY_REJECTED") {
-  return warningCard(
-    "⛔ ENTRY · KHÔNG VÀO MT5",
-    event.reason ??
-      event.message ??
-      event.response?.reason ??
-      event.response?.message ??
-      event.response?.detail?.reason ??
-      "ENTRY_REJECTED",
-    event.response?.status ??
-      event.status ??
-      event.response?.retcode ??
-      event.retcode,
-  );
-}
+    return warningCard(
+      "⛔ ENTRY · KHÔNG VÀO MT5",
+      event.reason ??
+        event.message ??
+        event.response?.reason ??
+        event.response?.message ??
+        event.response?.detail?.reason ??
+        "ENTRY_REJECTED",
+      event.response?.status ??
+        event.status ??
+        event.response?.retcode ??
+        event.retcode,
+    );
+  }
 
-if (
-  type === "ENTRY_ACCEPTED_POSITION_NOT_RESOLVED"
-) {
+  if (type === "ENTRY_ACCEPTED_POSITION_NOT_RESOLVED") {
     return warningCard(
       "⚠️ ENTRY",
       event.message ??
