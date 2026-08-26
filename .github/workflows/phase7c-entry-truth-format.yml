@@ -25,100 +25,38 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-
           path = Path("scripts/run-phase7b-telegram-notifier.mjs")
           text = path.read_text(encoding="utf-8")
-
-          old = '''  if (type === "ENTRY_REJECTED") {
-          return warningCard(
-            "⛔ ENTRY · KHÔNG VÀO MT5",
-            event.reason ??
-              event.message ??
-              event.response?.reason ??
-              event.response?.message ??
-              event.response?.detail?.reason ??
-              "ENTRY_REJECTED",
-            event.response?.status ??
-              event.status ??
-              event.response?.retcode ??
-              event.retcode,
-          );
-        }
-
-        if (
-          type === "ENTRY_ACCEPTED_POSITION_NOT_RESOLVED"
-        ) {
-            return warningCard(
-              "⚠️ ENTRY",
-              event.message ??
-                "Position chưa resolve",
-              event.retcode,
-            );
-          }
-          '''
-
-          # The previous CI-applied patch has valid JS but lost indentation because
-          # Python triple-string dedentation changed leading whitespace. Match the
-          # actual source shape directly if the first literal is not present.
-          if old not in text:
-              old = '''  if (type === "ENTRY_REJECTED") {
-          return warningCard(
-            "⛔ ENTRY · KHÔNG VÀO MT5",
-            event.reason ??
-              event.message ??
-              event.response?.reason ??
-              event.response?.message ??
-              event.response?.detail?.reason ??
-              "ENTRY_REJECTED",
-            event.response?.status ??
-              event.status ??
-              event.response?.retcode ??
-              event.retcode,
-          );
-        }
-
-        if (
-          type === "ENTRY_ACCEPTED_POSITION_NOT_RESOLVED"
-        ) {
-            return warningCard(
-              "⚠️ ENTRY",
-              event.message ??
-                "Position chưa resolve",
-              event.retcode,
-            );
-          }
-'''
-
-          # Normalize using line-boundary anchors instead of relying on indentation.
           start = text.index('  if (type === "ENTRY_REJECTED") {')
           end = text.index('  if (type.endsWith("_REJECTED")) {', start)
-          replacement = '''  if (type === "ENTRY_REJECTED") {
-            return warningCard(
-              "⛔ ENTRY · KHÔNG VÀO MT5",
-              event.reason ??
-                event.message ??
-                event.response?.reason ??
-                event.response?.message ??
-                event.response?.detail?.reason ??
-                "ENTRY_REJECTED",
-              event.response?.status ??
-                event.status ??
-                event.response?.retcode ??
-                event.retcode,
-            );
-          }
-
-          if (type === "ENTRY_ACCEPTED_POSITION_NOT_RESOLVED") {
-            return warningCard(
-              "⚠️ ENTRY",
-              event.message ??
-                "Position chưa resolve",
-              event.retcode,
-            );
-          }
-
-          '''
-          text = text[:start] + replacement + text[end:]
+          lines = [
+              '  if (type === "ENTRY_REJECTED") {',
+              '    return warningCard(',
+              '      "⛔ ENTRY · KHÔNG VÀO MT5",',
+              '      event.reason ??',
+              '        event.message ??',
+              '        event.response?.reason ??',
+              '        event.response?.message ??',
+              '        event.response?.detail?.reason ??',
+              '        "ENTRY_REJECTED",',
+              '      event.response?.status ??',
+              '        event.status ??',
+              '        event.response?.retcode ??',
+              '        event.retcode,',
+              '    );',
+              '  }',
+              '',
+              '  if (type === "ENTRY_ACCEPTED_POSITION_NOT_RESOLVED") {',
+              '    return warningCard(',
+              '      "⚠️ ENTRY",',
+              '      event.message ??',
+              '        "Position chưa resolve",',
+              '      event.retcode,',
+              '    );',
+              '  }',
+              '',
+          ]
+          text = text[:start] + "\n".join(lines) + "\n" + text[end:]
           path.write_text(text, encoding="utf-8")
 
       - name: Verify exact notifier tests
