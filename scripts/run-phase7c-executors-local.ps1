@@ -20,9 +20,10 @@ $TrendLauncher = Join-Path $PSScriptRoot "run-phase7c-trend-controller-local.ps1
 $SidewayLauncher = Join-Path $PSScriptRoot "run-phase7c-sideway-controller-local.ps1"
 $TelegramModeLauncher = Join-Path $PSScriptRoot "run-phase7c-telegram-mode-controller-local.ps1"
 $RegimeNotifierLauncher = Join-Path $PSScriptRoot "run-phase7c-regime-notifier-local.ps1"
+$TradeNotifierLauncher = Join-Path $PSScriptRoot "run-phase7b-telegram-notifier-local.ps1"
 $AccountLibrary = Join-Path $PSScriptRoot "lib\phase7c-account-mode.ps1"
 
-foreach ($required in @($TrendLauncher, $SidewayLauncher, $TelegramModeLauncher, $RegimeNotifierLauncher, $AccountLibrary)) {
+foreach ($required in @($TrendLauncher, $SidewayLauncher, $TelegramModeLauncher, $RegimeNotifierLauncher, $TradeNotifierLauncher, $AccountLibrary)) {
   if (-not (Test-Path -LiteralPath $required)) { throw "Required Phase7C runtime file not found: $required" }
 }
 . $AccountLibrary
@@ -86,6 +87,8 @@ $TrendPidPath = Join-Path $RuntimeDir "trend.pid"
 $SidewayPidPath = Join-Path $RuntimeDir "sideway.pid"
 $TelegramModePidPath = Join-Path $RuntimeDir "telegram-mode.pid"
 $RegimeNotifierPidPath = Join-Path $RuntimeDir "regime-notifier.pid"
+$TradeNotifierPidPath = Join-Path $RuntimeDir "trade-notifier.pid"
+$TradeNotifierRuntimePath = Join-Path $RuntimeDir "trade-notifier-runtime.json"
 $TrendOut = Join-Path $RuntimeDir "trend.out.log"
 $TrendErr = Join-Path $RuntimeDir "trend.err.log"
 $SidewayOut = Join-Path $RuntimeDir "sideway.out.log"
@@ -94,6 +97,8 @@ $TelegramModeOut = Join-Path $RuntimeDir "telegram-mode.out.log"
 $TelegramModeErr = Join-Path $RuntimeDir "telegram-mode.err.log"
 $RegimeNotifierOut = Join-Path $RuntimeDir "regime-notifier.out.log"
 $RegimeNotifierErr = Join-Path $RuntimeDir "regime-notifier.err.log"
+$TradeNotifierOut = Join-Path $RuntimeDir "trade-notifier.out.log"
+$TradeNotifierErr = Join-Path $RuntimeDir "trade-notifier.err.log"
 $ActiveLotSettingsPath = Join-Path $RuntimeDir "active-lot-settings.json"
 
 function Read-EnvValueFromFile([string]$Path, [string]$Name) {
@@ -125,7 +130,9 @@ function Stop-Phase7CExecutorOrphans {
     "run-phase7c-telegram-mode-controller-local.ps1",
     "run-phase7c-telegram-mode-controller.mjs",
     "run-phase7c-regime-notifier-local.ps1",
-    "run-phase7c-regime-notifier.mjs"
+    "run-phase7c-regime-notifier.mjs",
+    "run-phase7b-telegram-notifier-local.ps1",
+    "run-phase7b-telegram-notifier.mjs"
   )
   $targets = @(
     Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
@@ -230,6 +237,25 @@ function Set-Phase7CStartupPause {
   Write-Host "PHASE7C_STARTUP_BOT_MODE_SOURCE=startup-scheduled-task"
 }
 
+function Test-TradeNotifierHeartbeat($Process) {
+  if ($null -eq $Process) { return $false }
+  try {
+    $Process.Refresh()
+    if ($Process.HasExited -or -not (Test-Path -LiteralPath $TradeNotifierRuntimePath)) { return $false }
+    $snapshot = Get-Content -LiteralPath $TradeNotifierRuntimePath -Raw | ConvertFrom-Json
+    if ([string]$snapshot.status -ne "RUNNING") { return $false }
+    if ([int]$snapshot.wrapperPid -ne [int]$Process.Id) { return $false }
+    if ([string]$snapshot.accountMode -ne $AccountMode) { return $false }
+    if ([string]$snapshot.orderPermission -ne "NONE") { return $false }
+    $heartbeatAt = [int64]$snapshot.heartbeatAt
+    $heartbeatAge = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $heartbeatAt
+    if ($heartbeatAt -le 0 -or $heartbeatAge -gt 15000) { return $false }
+    if ($null -eq $snapshot.pid) { return $false }
+    Get-Process -Id ([int]$snapshot.pid) -ErrorAction Stop | Out-Null
+    return $true
+  } catch { return $false }
+}
+
 $TelegramConfigured = $false
 if (-not $DisableTelegram -and (Test-Path $TelegramEnvFile)) {
   $telegramToken = Read-EnvValueFromFile $TelegramEnvFile "ZIQ_TELEGRAM_BOT_TOKEN"
@@ -245,7 +271,9 @@ Stop-PidFile $TrendPidPath
 Stop-PidFile $SidewayPidPath
 Stop-PidFile $TelegramModePidPath
 Stop-PidFile $RegimeNotifierPidPath
+Stop-PidFile $TradeNotifierPidPath
 Stop-Phase7CExecutorOrphans
+Remove-Item -LiteralPath $TradeNotifierRuntimePath -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $env:ZIQ_PHASE7C_EXECUTION_LOCK -Force -ErrorAction SilentlyContinue
 Set-Content -LiteralPath $SupervisorPidPath -Value $PID -Encoding ascii
 
@@ -282,6 +310,14 @@ $regimeNotifierArgs = @(
   "-ControlApiUrl", ('"{0}"' -f $ControlApiUrl),
   "-Symbol", "XAUUSD"
 )
+$tradeNotifierArgs = @(
+  "-File", ('"{0}"' -f $TradeNotifierLauncher),
+  "-WorkDir", ('"{0}"' -f $WorkDir),
+  "-EnvFile", ('"{0}"' -f $TelegramEnvFile),
+  "-AccountMode", $AccountMode,
+  "-RuntimeFile", ('"{0}"' -f $TradeNotifierRuntimePath),
+  "-IntervalSeconds", "2"
+)
 if ($Armed) { $trendArgs += "-Armed"; $sidewayArgs += "-Armed" }
 if ($Once) { $trendArgs += "-Once"; $sidewayArgs += "-Once" }
 
@@ -298,6 +334,7 @@ Write-Host "PHASE7C_DECISION_OBSERVABILITY=$DecisionRuntimeDir"
 Write-Host "PHASE7C_DEPENDENCY_WAIT_SECONDS=$DependencyWaitSeconds"
 Write-Host "PHASE7C_TELEGRAM_CONFIGURED=$TelegramConfigured"
 Write-Host "PHASE7C_TELEGRAM_MT5_ORDER_PERMISSION=NONE"
+Write-Host "PHASE7C_TRADE_NOTIFIER_RUNTIME=$TradeNotifierRuntimePath"
 Write-Host "PHASE7C_TREND_FIXED_LOT=$TrendFixedVolume"
 Write-Host "PHASE7C_SIDEWAY_RISK_PERCENT=$SidewayRiskPercent"
 Write-Host "PHASE7C_SIDEWAY_MAX_LOT=$SidewayMaxLot"
@@ -331,11 +368,19 @@ function Start-RegimeNotifierChild {
   Write-Host "PHASE7C_REGIME_NOTIFIER_PID=$($process.Id)"
   return $process
 }
+function Start-TradeNotifierChild {
+  Remove-Item -LiteralPath $TradeNotifierRuntimePath -Force -ErrorAction SilentlyContinue
+  $process = Start-Process -FilePath "powershell.exe" -ArgumentList ($common + $tradeNotifierArgs) -WorkingDirectory $ProjectRoot -RedirectStandardOutput $TradeNotifierOut -RedirectStandardError $TradeNotifierErr -PassThru
+  Set-Content -LiteralPath $TradeNotifierPidPath -Value $process.Id -Encoding ascii
+  Write-Host "PHASE7C_TRADE_NOTIFIER_PID=$($process.Id)"
+  return $process
+}
 
 $trend = $null
 $sideway = $null
 $telegramMode = $null
 $regimeNotifier = $null
+$tradeNotifier = $null
 try {
   Wait-Phase7CDependencies
   Set-Phase7CStartupPause
@@ -363,6 +408,7 @@ try {
     $trend = $null; $sideway = $null
     Write-Host "PHASE7C_EXECUTOR_SHADOW_STATUS=PASS"
     Write-Host "PHASE7C_EXECUTOR_UNARMED_SUPERVISOR=TELEGRAM_MODE_ONLY"
+    Write-Host "PHASE7C_EXECUTOR_UNARMED_TELEGRAM_SERVICES=MODE_PLUS_TRADE_NOTIFIER"
     Write-ActiveLotSettings
   } else {
     Start-Sleep -Seconds 3
@@ -375,6 +421,7 @@ try {
 
   if ($TelegramConfigured) {
     $telegramMode = Start-TelegramModeChild
+    $tradeNotifier = Start-TradeNotifierChild
     if ($Armed) { $regimeNotifier = Start-RegimeNotifierChild }
     Start-Sleep -Seconds 3
     $telegramMode.Refresh()
@@ -384,6 +431,15 @@ try {
       $telegramMode = $null
       Write-Host "PHASE7C_TELEGRAM_MODE_STATUS=RESTART_PENDING"
     } else { Write-Host "PHASE7C_TELEGRAM_MODE_STATUS=RUNNING" }
+
+    if (-not (Test-TradeNotifierHeartbeat $tradeNotifier)) {
+      Write-Warning "Trade notifier exited or heartbeat is not healthy during startup. Supervisor will retry. Check $TradeNotifierErr"
+      if ($null -ne $tradeNotifier -and -not $tradeNotifier.HasExited) { Stop-ProcessTree $tradeNotifier.Id }
+      Remove-Item -LiteralPath $TradeNotifierPidPath -Force -ErrorAction SilentlyContinue
+      $tradeNotifier = $null
+      Write-Host "PHASE7C_TRADE_NOTIFIER_STATUS=RESTART_PENDING"
+    } else { Write-Host "PHASE7C_TRADE_NOTIFIER_STATUS=RUNNING" }
+
     if ($null -ne $regimeNotifier) {
       $regimeNotifier.Refresh()
       if ($regimeNotifier.HasExited) {
@@ -411,6 +467,20 @@ try {
       try { $telegramMode = Start-TelegramModeChild; Write-Host "PHASE7C_TELEGRAM_MODE_STATUS=RESTARTED" }
       catch { Write-Warning "Telegram mode controller restart failed: $($_.Exception.Message)" }
     }
+
+    if ($null -ne $tradeNotifier) {
+      if (-not (Test-TradeNotifierHeartbeat $tradeNotifier)) {
+        Write-Warning "Trade notifier stopped or heartbeat became stale. Supervisor will restart it. Check $TradeNotifierErr"
+        if (-not $tradeNotifier.HasExited) { Stop-ProcessTree $tradeNotifier.Id }
+        Remove-Item -LiteralPath $TradeNotifierPidPath -Force -ErrorAction SilentlyContinue
+        $tradeNotifier = $null
+        Write-Host "PHASE7C_TRADE_NOTIFIER_STATUS=RESTART_PENDING"
+      }
+    } elseif ($TelegramConfigured) {
+      try { $tradeNotifier = Start-TradeNotifierChild; Write-Host "PHASE7C_TRADE_NOTIFIER_STATUS=RESTARTED" }
+      catch { Write-Warning "Trade notifier restart failed: $($_.Exception.Message)" }
+    }
+
     if ($null -ne $regimeNotifier) {
       $regimeNotifier.Refresh()
       if ($regimeNotifier.HasExited) {
@@ -427,11 +497,14 @@ try {
 }
 finally {
   if ($null -ne $telegramMode -and -not $telegramMode.HasExited) { Stop-ProcessTree $telegramMode.Id }
+  if ($null -ne $tradeNotifier -and -not $tradeNotifier.HasExited) { Stop-ProcessTree $tradeNotifier.Id }
   if ($null -ne $regimeNotifier -and -not $regimeNotifier.HasExited) { Stop-ProcessTree $regimeNotifier.Id }
   if ($null -ne $trend -and -not $trend.HasExited) { Stop-ProcessTree $trend.Id }
   if ($null -ne $sideway -and -not $sideway.HasExited) { Stop-ProcessTree $sideway.Id }
   Stop-Phase7CExecutorOrphans
   Remove-Item -LiteralPath $TelegramModePidPath -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $TradeNotifierPidPath -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $TradeNotifierRuntimePath -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $RegimeNotifierPidPath -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $TrendPidPath -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $SidewayPidPath -Force -ErrorAction SilentlyContinue
