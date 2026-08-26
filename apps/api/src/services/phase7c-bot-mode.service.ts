@@ -19,6 +19,7 @@ export interface Phase7CBotModeAuditEvent {
 
 const VALID_MODES: readonly BotMode[] = ["AUTO", "TREND", "SIDEWAY", "PAUSE"];
 const VALID_MODE_SET = new Set<BotMode>(VALID_MODES);
+const WEB_AUTO_SOURCE = "web-control-center";
 
 function defaultState(): Phase7CBotModeState {
   return {
@@ -34,6 +35,10 @@ export function isPhase7CBotMode(value: unknown): value is BotMode {
 
 export function getPhase7CBotModeOptions(): readonly BotMode[] {
   return VALID_MODES;
+}
+
+export function isPhase7CAutoActivationSourceAllowed(updatedBy: unknown): boolean {
+  return typeof updatedBy === "string" && updatedBy.trim() === WEB_AUTO_SOURCE;
 }
 
 export class Phase7CBotModeService {
@@ -93,6 +98,15 @@ export class Phase7CBotModeService {
       updatedBy: normalizedUpdatedBy,
       pid: process.pid,
     };
+
+    if (mode === "AUTO" && !isPhase7CAutoActivationSourceAllowed(normalizedUpdatedBy)) {
+      try {
+        this.appendAudit(event);
+      } catch {
+        // Denial remains fail-closed even if provenance storage is unavailable.
+      }
+      throw new Error("AUTO activation is restricted to the manual Web control center.");
+    }
 
     if (mode !== "PAUSE") {
       this.appendAudit(event);
