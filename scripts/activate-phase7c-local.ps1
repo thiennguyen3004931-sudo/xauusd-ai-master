@@ -281,28 +281,14 @@ if ([string]::IsNullOrWhiteSpace($apiKey) -or $apiKey.Length -lt 16) {
 $BridgeTask = Resolve-ExistingTaskName @("XAUUSD-Phase7B-Bridge", "XAUUSD-MT5-Bridge") "BRIDGE"
 $WebTask = Resolve-ExistingTaskName @("XAUUSD-Phase7B-Web") "WEB"
 
-# Freeze every entry-capable executor before validating state. This makes a
-# cold-start preflight safe even when the Phase 7C API is currently offline.
+# Freeze every entry-capable executor before validating state. Safety is
+# enforced by process/task state, never by mutating the operator's persistent
+# AUTO/TREND/SIDEWAY/PAUSE selection.
 Write-Host "PHASE7C_ACTIVATE_ENTRY_FREEZE=START"
-try {
-  $pauseResult = Invoke-RestMethod `
-    -Uri "$apiUrl/api/v1/phase7c/bot-mode" `
-    -Method Post `
-    -ContentType "application/json" `
-    -Body (@{ mode = "PAUSE"; source = "activation-entry-freeze" } | ConvertTo-Json) `
-    -TimeoutSec 5
-  if ([string]$pauseResult.state.mode -ne "PAUSE") {
-    throw "Control API did not confirm PAUSE."
-  }
-  Write-Host "PHASE7C_ACTIVATE_ENTRY_FREEZE_MODE=PAUSE"
-} catch {
-  # A cold start may have no API yet. Process/task freeze below remains the
-  # authoritative first gate and the broker is checked before any relaunch.
-  Write-Host "PHASE7C_ACTIVATE_ENTRY_FREEZE_MODE=API_UNAVAILABLE_COLD_START"
-}
 Stop-TaskSafe $LegacyBotTask
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ExecutorStopper -WorkDir $WorkDir
 if ($LASTEXITCODE -ne 0) { throw "Could not stop existing Phase 7C executors safely." }
+Write-Host "PHASE7C_ACTIVATE_ENTRY_FREEZE_MODE=PERSISTENT_BOT_MODE_PRESERVED"
 Write-Host "PHASE7C_ACTIVATE_ENTRY_FREEZE=PASS"
 
 Write-Host "PHASE7C_ACTIVATE_PREFLIGHT=START"
