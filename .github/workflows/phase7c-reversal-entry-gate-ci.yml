@@ -8,9 +8,12 @@ on:
       - 'apps/api/src/routes/phase7b-demo.route.ts'
       - 'apps/api/src/services/phase7b-entry-diagnostics-account-mode.ts'
       - 'apps/api/src/services/phase7c-decision-monitor.service.ts'
+      - 'scripts/run-phase7b-demo-controller.ts'
       - 'scripts/run-phase7c-trend-controller.mjs'
       - 'scripts/phase7c-trend-mode-gate.mjs'
       - 'scripts/phase7c-trend-mode-gate.test.mjs'
+      - 'scripts/phase7c-trend-entry-block.mjs'
+      - 'scripts/phase7c-trend-entry-block-classification.test.mjs'
       - 'scripts/phase7c-decision-monitor.test.mjs'
       - 'scripts/phase7b-live-entry-diagnostics.test.mjs'
       - '.github/workflows/phase7c-reversal-entry-gate-ci.yml'
@@ -19,9 +22,12 @@ on:
       - 'apps/api/src/routes/phase7b-demo.route.ts'
       - 'apps/api/src/services/phase7b-entry-diagnostics-account-mode.ts'
       - 'apps/api/src/services/phase7c-decision-monitor.service.ts'
+      - 'scripts/run-phase7b-demo-controller.ts'
       - 'scripts/run-phase7c-trend-controller.mjs'
       - 'scripts/phase7c-trend-mode-gate.mjs'
       - 'scripts/phase7c-trend-mode-gate.test.mjs'
+      - 'scripts/phase7c-trend-entry-block.mjs'
+      - 'scripts/phase7c-trend-entry-block-classification.test.mjs'
       - 'scripts/phase7c-decision-monitor.test.mjs'
       - 'scripts/phase7b-live-entry-diagnostics.test.mjs'
       - '.github/workflows/phase7c-reversal-entry-gate-ci.yml'
@@ -50,6 +56,8 @@ jobs:
         run: pnpm --dir apps/api exec tsx ../../scripts/phase7c-decision-monitor.test.mjs
       - name: Run Trend AUTO reversal gate tests
         run: node --test scripts/phase7c-trend-mode-gate.test.mjs
+      - name: Run Trend expected mode-block classification regression
+        run: node --test scripts/phase7c-trend-entry-block-classification.test.mjs
       - name: Parse Trend controller gate
         run: node --check scripts/run-phase7c-trend-controller.mjs
       - name: Parse Trend mode policy
