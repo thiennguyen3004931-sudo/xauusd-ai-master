@@ -31,7 +31,9 @@ function Test-Mode([ValidateSet("DEMO", "LIVE")] [string]$Mode) {
   ) | Set-Content -LiteralPath $envFile -Encoding utf8
 
   try {
-    $output = & $Wrapper -WorkDir $root -EnvFile $envFile -AccountMode $Mode -RuntimeFile $runtimeFile -IntervalSeconds 1 -Once 2>&1 | Out-String
+    # Write-Host uses the information stream in PowerShell Core, so capture all
+    # streams to verify the wrapper's explicit PASS and safety markers.
+    $output = & $Wrapper -WorkDir $root -EnvFile $envFile -AccountMode $Mode -RuntimeFile $runtimeFile -IntervalSeconds 1 -Once *>&1 | Out-String
     Assert-True ($LASTEXITCODE -eq 0 -or $null -eq $LASTEXITCODE) "$Mode wrapper returned a non-zero native exit code: $LASTEXITCODE`n$output"
     Assert-True ($output.Contains('PHASE7B_TELEGRAM_WRAPPER_TEST_EXIT=PASS')) "$Mode wrapper did not complete one-shot successfully.`n$output"
     Assert-True (Test-Path -LiteralPath $runtimeFile -PathType Leaf) "$Mode wrapper runtime file was not created"
