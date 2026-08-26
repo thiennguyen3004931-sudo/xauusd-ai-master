@@ -1,6 +1,8 @@
 param(
   [Parameter(Mandatory = $true)] [string]$WorkDir,
   [string]$EnvFile = ".env.phase7b-telegram",
+  [ValidateSet("DEMO", "LIVE")] [string]$AccountMode = "DEMO",
+  [string]$RuntimeFile = "",
   [int]$IntervalSeconds = 2,
   [switch]$SendTest,
   [switch]$Once
@@ -9,6 +11,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $WorkDir = (Resolve-Path $WorkDir).Path
+$AccountMode = $AccountMode.ToUpperInvariant()
 $Notifier = Join-Path $PSScriptRoot "run-phase7b-telegram-notifier.mjs"
 
 if (-not [System.IO.Path]::IsPathRooted($EnvFile)) {
@@ -21,21 +24,51 @@ if (-not (Test-Path $Notifier)) {
   throw "Telegram notifier not found: $Notifier"
 }
 
-$demoDir = if ((Split-Path -Leaf $WorkDir) -eq "phase7b-demo-forward") {
-  $WorkDir
-} else {
-  Join-Path $WorkDir "phase7b-demo-forward"
-}
-New-Item -ItemType Directory -Path $demoDir -Force | Out-Null
+$trendDirName = if ($AccountMode -eq "LIVE") { "phase7b-live-forward" } else { "phase7b-demo-forward" }
+$sidewayDirName = if ($AccountMode -eq "LIVE") { "phase7c-sideway-live-forward" } else { "phase7c-sideway-forward" }
+$workLeaf = Split-Path -Leaf $WorkDir
+$knownTrendDirs = @("phase7b-demo-forward", "phase7b-live-forward")
 
-$journal = Join-Path $demoDir "phase7b-demo-events.jsonl"
-$runtimeRoot = Split-Path -Parent $demoDir
-$sidewayDir = Join-Path $runtimeRoot "phase7c-sideway-forward"
+if ($knownTrendDirs -contains $workLeaf) {
+  if ($workLeaf -ne $trendDirName) {
+    throw "Trade notifier WorkDir/account mode mismatch. AccountMode=$AccountMode expects $trendDirName, got $workLeaf"
+  }
+  $trendDir = $WorkDir
+  $runtimeRoot = Split-Path -Parent $WorkDir
+} else {
+  $runtimeRoot = $WorkDir
+  $trendDir = Join-Path $runtimeRoot $trendDirName
+}
+
+$sidewayDir = Join-Path $runtimeRoot $sidewayDirName
+New-Item -ItemType Directory -Path $trendDir -Force | Out-Null
+New-Item -ItemType Directory -Path $sidewayDir -Force | Out-Null
+
+# The Trend controller keeps its legacy canonical filename in both account modes;
+# only the parent forward directory changes for LIVE versus DEMO.
+$journal = Join-Path $trendDir "phase7b-demo-events.jsonl"
 $sidewayJournal = Join-Path $sidewayDir "phase7c-sideway-events.jsonl"
-$state = Join-Path $demoDir "phase7b-telegram-state.json"
-$runtime = Join-Path $demoDir "phase7b-telegram-runtime.json"
-if (-not (Test-Path $journal)) {
-  New-Item -ItemType File -Path $journal -Force | Out-Null
+$state = Join-Path $trendDir "phase7b-telegram-state.json"
+
+if ([string]::IsNullOrWhiteSpace($RuntimeFile)) {
+  $runtime = Join-Path $trendDir "phase7b-telegram-runtime.json"
+} else {
+  if (-not [System.IO.Path]::IsPathRooted($RuntimeFile)) {
+    $RuntimeFile = Join-Path $runtimeRoot $RuntimeFile
+  }
+  $runtime = [System.IO.Path]::GetFullPath($RuntimeFile)
+}
+$runtimeParent = Split-Path -Parent $runtime
+if (-not [string]::IsNullOrWhiteSpace($runtimeParent)) {
+  New-Item -ItemType Directory -Path $runtimeParent -Force | Out-Null
+}
+
+# Create empty journals if controllers have not emitted their first event yet.
+# This guarantees both feeds are registered by the long-running notifier from startup.
+foreach ($journalPath in @($journal, $sidewayJournal)) {
+  if (-not (Test-Path -LiteralPath $journalPath)) {
+    New-Item -ItemType File -Path $journalPath -Force | Out-Null
+  }
 }
 
 function Read-TelegramRuntime {
@@ -63,14 +96,18 @@ function Write-TelegramRuntime {
   )
   $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   $payload = [ordered]@{
-    version = 1
+    version = 2
     status = $Status
+    accountMode = $AccountMode
     pid = if ($NodePid -gt 0) { $NodePid } else { $null }
     wrapperPid = $PID
     startedAt = if ($StartedAt) { $StartedAt } else { $null }
     heartbeatAt = $now
     heartbeatAgeMs = 0
     intervalSeconds = [Math]::Max(1, $IntervalSeconds)
+    trendJournal = $journal
+    sidewayJournal = $sidewayJournal
+    orderPermission = "NONE"
     sendTest = $SendTest.IsPresent
     once = $Once.IsPresent
     exitCode = if ($Status -eq "STOPPED") { $ExitCode } else { $null }
@@ -105,20 +142,16 @@ if ([string]::IsNullOrWhiteSpace($env:ZIQ_TELEGRAM_CHAT_ID)) {
   throw "ZIQ_TELEGRAM_CHAT_ID is missing in $EnvFile"
 }
 
+$env:ZIQ_PHASE7C_ACCOUNT_MODE = $AccountMode
 $env:ZIQ_TELEGRAM_JOURNAL_PATH = $journal
-
-if (Test-Path -LiteralPath $sidewayJournal) {
-  $env:ZIQ_TELEGRAM_SIDEWAY_JOURNAL_PATH = $sidewayJournal
-} else {
-  Remove-Item Env:ZIQ_TELEGRAM_SIDEWAY_JOURNAL_PATH -ErrorAction SilentlyContinue
-}
-
+$env:ZIQ_TELEGRAM_SIDEWAY_JOURNAL_PATH = $sidewayJournal
 $env:ZIQ_TELEGRAM_STATE_PATH = $state
 $env:ZIQ_TELEGRAM_INTERVAL_MS = [string]([math]::Max(1, $IntervalSeconds) * 1000)
 $env:ZIQ_TELEGRAM_SEND_TEST = if ($SendTest) { "true" } else { "false" }
 $env:ZIQ_TELEGRAM_ONCE = if ($Once) { "true" } else { "false" }
 
 Write-Host "PHASE7B_TELEGRAM_ENV=$EnvFile"
+Write-Host "PHASE7B_TELEGRAM_ACCOUNT_MODE=$AccountMode"
 Write-Host "PHASE7B_TELEGRAM_JOURNAL=$journal"
 Write-Host "PHASE7B_TELEGRAM_SIDEWAY_JOURNAL=$sidewayJournal"
 Write-Host "PHASE7B_TELEGRAM_SIDEWAY_JOURNAL_EXISTS=$(Test-Path -LiteralPath $sidewayJournal)"
