@@ -134,6 +134,10 @@ async function importLegacyTrendController() {
     "../packages/risk-engine/dist/index.js",
     import.meta.url,
   ).href;
+  const entryBlockClassifierUrl = new URL(
+    "./phase7c-trend-entry-block.mjs",
+    import.meta.url,
+  ).href;
 
   // The temporary legacy runtime lives under scripts/, while the root
   // workspace does not expose @xauusd/risk-engine in root node_modules.
@@ -158,13 +162,41 @@ async function importLegacyTrendController() {
       `throw new Error("${previewCompleteSentinel}");`,
     );
 
+  // The legacy bridge client intentionally throws on every non-2xx response.
+  // Phase 7C's final entry gate uses HTTP 423 for a normal policy decision,
+  // not for an MT5/data failure. Canonicalize only that exact error at the
+  // outer cycle boundary. Any other bridge/network error remains CYCLE_ERROR.
+  const cycleErrorHandlerPattern = /catch \(error\) \{\s*journal\("CYCLE_ERROR", \{ message: errorMessage\(error\) \}\);\s*console\.error\(`PHASE7B_DEMO_CYCLE_ERROR=\$\{errorMessage\(error\)\}`\);\s*\}/;
+  const classifiedRuntimeOutput = runtimeOutput.replace(
+    cycleErrorHandlerPattern,
+    `catch (error) {
+        const entryBlock = classifyPhase7CTrendEntryBlock(error);
+        if (entryBlock) {
+            journal("ENTRY_MODE_BLOCKED", entryBlock);
+            console.warn("PHASE7B_DEMO_ENTRY_MODE_BLOCKED=" + entryBlock.reasonCode + "|ACTIVE_" + (entryBlock.activeMode ?? "UNKNOWN") + "|RECOMMENDED_" + (entryBlock.recommendedMode ?? "N/A"));
+        }
+        else {
+            journal("CYCLE_ERROR", { message: errorMessage(error) });
+            console.error("PHASE7B_DEMO_CYCLE_ERROR=" + errorMessage(error));
+        }
+    }`,
+  );
+
+  if (classifiedRuntimeOutput === runtimeOutput) {
+    throw new Error(
+      "Legacy Trend cycle-error classifier patch did not match the transpiled controller.",
+    );
+  }
+
   const runtimeSource =
-    `${runtimeOutput}\n//# sourceURL=${sourceLabel}\n`;
+    `import { classifyPhase7CTrendEntryBlock } from ${JSON.stringify(entryBlockClassifierUrl)};\n` +
+    `${classifiedRuntimeOutput}\n//# sourceURL=${sourceLabel}\n`;
 
   fs.writeFileSync(runtimeUrl, runtimeSource, "utf8");
 
   console.log("PHASE7C_TREND_LEGACY_TRANSPILE=ESM");
   console.log(`PHASE7C_TREND_LEGACY_RUNTIME=${runtimeUrl.href}`);
+  console.log("PHASE7C_TREND_EXPECTED_MODE_BLOCK_CLASSIFICATION=ENABLED");
 
   try {
     await import(`${runtimeUrl.href}?pid=${process.pid}`);
