@@ -240,6 +240,11 @@ export interface Phase7CLifecycleSnapshot {
     tradingEnabled: boolean | null;
     terminalTradeAllowed: boolean | null;
     expertTradeAllowed: boolean | null;
+    liveExecutionArmed: boolean | null;
+    liveArmStatus: "ARMED" | "DISARMED" | "NOT_REQUIRED" | null;
+    liveArmReason: string | null;
+    liveArmScope: "BRIDGE_SESSION" | "LEGACY_TTL" | null;
+    liveRiskReductionAllowedWhenDisarmed: boolean | null;
     openXauusdPositions: number;
   };
   safety: {
