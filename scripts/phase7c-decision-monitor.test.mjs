@@ -253,7 +253,7 @@ test("Daily Recovery follows the canonical Phase7C account mode instead of requi
   assert.doesNotMatch(source, /telemetry\.health\?\.accountMode\s*!==\s*["']demo["']/);
   assert.match(
     source,
-    /accountModeAllowsBroker\(\s*telemetry\.health\?\.accountMode,\s*accountModeState\s*\)/s,
+    /accountModeAllowsBroker\(\s*telemetry\.health\?\.accountMode,\s*accountModeState\s*,?\s*\)/s,
   );
   assert.match(source, /MT5_LIVE_READ_ONLY/);
   assert.match(source, /MT5_DEMO_READ_ONLY/);
