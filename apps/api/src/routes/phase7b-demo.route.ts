@@ -8,6 +8,7 @@ import {
 } from "@xauusd/risk-engine";
 import { getMt5Telemetry } from "../services/mt5.service";
 import { shouldComputePhase7BEntryDiagnostics } from "../services/phase7b-entry-diagnostics-account-mode";
+import { phase7BForwardRuntimeDirName } from "../services/phase7b-status-runtime-account-mode";
 
 type ManagedState = {
   ticket: string;
@@ -140,8 +141,8 @@ const router = Router();
 
 router.get("/", async (_req: Request, res: Response) => {
   try {
-    const demoDir = findLatestDemoDir();
     const telemetry = await getMt5Telemetry("XAUUSD");
+    const demoDir = findLatestDemoDir(telemetry.health?.accountMode ?? null);
     const statePath = demoDir ? path.join(demoDir, "phase7b-demo-state.json") : null;
     const journalPath = demoDir ? path.join(demoDir, "phase7b-demo-events.jsonl") : null;
     const runtimePath = demoDir ? path.join(demoDir, "phase7b-demo-runtime.json") : null;
@@ -584,14 +585,25 @@ function smaPeriod(values: number[], period: number): number {
 }
 function round(value: number, digits: number): number { const factor = 10 ** digits; return Math.round((value + Number.EPSILON) * factor) / factor; }
 
-function findLatestDemoDir(): string | null {
+function findLatestDemoDir(brokerAccountMode: string | null | undefined): string | null {
+  const forwardDirName = phase7BForwardRuntimeDirName(brokerAccountMode);
+  const runtimeRoot = process.env.PHASE7C_RUNTIME_ROOT?.trim();
+  if (runtimeRoot) {
+    const candidate = path.resolve(runtimeRoot, forwardDirName);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
   const configured = process.env.PHASE7B_DEMO_WORK_DIR?.trim();
   if (configured) {
     const resolved = path.resolve(configured);
-    const candidate = path.basename(resolved).toLowerCase() === "phase7b-demo-forward"
+    const configuredBase = path.basename(resolved).toLowerCase();
+    const siblingCandidate = configuredBase === forwardDirName
       ? resolved
-      : path.join(resolved, "phase7b-demo-forward");
-    if (fs.existsSync(candidate)) return candidate;
+      : path.join(path.dirname(resolved), forwardDirName);
+    if (fs.existsSync(siblingCandidate)) return siblingCandidate;
+
+    const nestedCandidate = path.join(resolved, forwardDirName);
+    if (fs.existsSync(nestedCandidate)) return nestedCandidate;
   }
 
   const bases = [
@@ -605,13 +617,13 @@ function findLatestDemoDir(): string | null {
     if (!fs.existsSync(base)) continue;
     for (const entry of fs.readdirSync(base, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
-      const demo = path.join(base, entry.name, "phase7b-demo-forward");
-      if (!fs.existsSync(demo)) continue;
-      const runtime = path.join(demo, "phase7b-demo-runtime.json");
-      const state = path.join(demo, "phase7b-demo-state.json");
-      const journal = path.join(demo, "phase7b-demo-events.jsonl");
-      const probe = fs.existsSync(runtime) ? runtime : fs.existsSync(journal) ? journal : fs.existsSync(state) ? state : demo;
-      found.push({ dir: demo, mtimeMs: fs.statSync(probe).mtimeMs });
+      const runtimeDir = path.join(base, entry.name, forwardDirName);
+      if (!fs.existsSync(runtimeDir)) continue;
+      const runtime = path.join(runtimeDir, "phase7b-demo-runtime.json");
+      const state = path.join(runtimeDir, "phase7b-demo-state.json");
+      const journal = path.join(runtimeDir, "phase7b-demo-events.jsonl");
+      const probe = fs.existsSync(runtime) ? runtime : fs.existsSync(journal) ? journal : fs.existsSync(state) ? state : runtimeDir;
+      found.push({ dir: runtimeDir, mtimeMs: fs.statSync(probe).mtimeMs });
     }
   }
 
