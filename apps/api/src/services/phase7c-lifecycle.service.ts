@@ -169,7 +169,7 @@ export function getPhase7CLifecycleRuntimeStatus() {
       accountSelectionFromWeb: true as const,
       liveColdStartFromWeb: true as const,
       firstTimeLiveArmFromWeb: false as const,
-      startMode: "PAUSE_THEN_AUTO_AFTER_READY" as const,
+      startMode: "PAUSE_UNTIL_MANUAL_WEB_AUTO" as const,
       stopBlockedWithOpenPosition: true as const,
       mt5PanelOrderPermission: "NONE" as const,
     },
@@ -192,8 +192,6 @@ export function assertPhase7CSelectedAccountReady(telemetry: Mt5TelemetrySnapsho
   if (telemetry.health?.expertTradeAllowed !== true) throw new Error("MT5 Algo/Expert Trading chưa bật.");
 }
 
-// Backward-compatible exported name for older imports. It now validates the
-// selected Phase7C account mode instead of hard-coding DEMO.
 export const assertPhase7CDemoReady = assertPhase7CSelectedAccountReady;
 
 function quotePowerShellLiteral(value: string): string {
@@ -304,7 +302,6 @@ async function runStopper(): Promise<void> {
       maxBuffer: 32 * 1024,
     });
   } catch {
-    // Task can already be stopped.
   }
   await execFileAsync(
     "powershell.exe",
@@ -320,13 +317,11 @@ async function runStopper(): Promise<void> {
         maxBuffer: 32 * 1024,
       });
     } catch {
-      // It may have exited immediately after its supervisor child stopped.
     }
   }
   try {
     fs.unlinkSync(path.join(executorRuntime(), "web-lifecycle-launcher.pid"));
   } catch {
-    // Missing file is fine.
   }
 }
 
@@ -391,8 +386,6 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
     initialAccountState.accountMode === "LIVE" &&
     initialAccountState.liveExecutionEnabled
   ) {
-    // Upgrade migration: preserve an already-explicit LIVE approval before
-    // selecting DEMO. This never authorizes a LIVE from a DEMO-only state.
     preserveLegacyExplicitLiveAuthorization();
   }
 
@@ -421,10 +414,10 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
   const current = getPhase7CLifecycleRuntimeStatus();
 
   if (current.ready) {
-    const mode = phase7CBotModeService.set("AUTO", "web-control-center-start");
+    const mode = phase7CBotModeService.set("PAUSE", "web-control-center-ready-pause");
     return {
       action: "ALREADY_RUNNING",
-      message: `Bot ${accountModeState.accountMode} đã chạy và đã verify; mode chuyển AUTO.`,
+      message: `Bot ${accountModeState.accountMode} đã chạy và đã verify; giữ PAUSE. Bật AUTO thủ công từ Web khi sẵn sàng.`,
       accountMode: accountModeState.accountMode,
       mode,
       lifecycle: getPhase7CLifecycleRuntimeStatus(),
@@ -473,13 +466,13 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
   } catch (error) {
     phase7CBotModeService.set("PAUSE", "web-control-center-final-preflight-failed");
     await runStopper().catch(() => undefined);
-    throw new Error(`Kiểm tra cuối trước AUTO thất bại; executor đã dừng và giữ PAUSE. ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Kiểm tra cuối trước READY thất bại; executor đã dừng và giữ PAUSE. ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  const mode = phase7CBotModeService.set("AUTO", "web-control-center-start");
+  const mode = phase7CBotModeService.set("PAUSE", "web-control-center-ready-pause");
   return {
     action: "STARTED",
-    message: `Bot ${targetAccountMode} đã RUNNING · AUTO · Trend ${ready.lotSettings.configured.trendFixedLot.toFixed(2)} lot · Telegram READY.`,
+    message: `Bot ${targetAccountMode} đã RUNNING · PAUSE · Trend ${ready.lotSettings.configured.trendFixedLot.toFixed(2)} lot · Telegram READY. Bật AUTO thủ công từ Web khi sẵn sàng.`,
     launcherPid,
     accountMode: targetAccountMode,
     mode,

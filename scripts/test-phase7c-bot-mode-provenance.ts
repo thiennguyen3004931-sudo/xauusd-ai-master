@@ -23,7 +23,7 @@ function readAudit(statePath: string) {
     const statePath = path.join(root, "phase7c-bot-mode.json");
     const service = new Phase7CBotModeService(statePath);
 
-    const auto = service.set("AUTO", "web-control-center-start");
+    const auto = service.set("AUTO", "web-control-center");
     assert.equal(auto.mode, "AUTO");
 
     let events = readAudit(statePath);
@@ -31,7 +31,7 @@ function readAudit(statePath: string) {
     assert.equal(events[0].event, "BOT_MODE_SET_ATTEMPT");
     assert.equal(events[0].fromMode, "PAUSE");
     assert.equal(events[0].toMode, "AUTO");
-    assert.equal(events[0].updatedBy, "web-control-center-start");
+    assert.equal(events[0].updatedBy, "web-control-center");
     assert.equal(typeof events[0].pid, "number");
     assert.ok(Number.isInteger(events[0].pid) && events[0].pid > 0);
     assert.ok(Number.isFinite(Date.parse(events[0].updatedAt)));
@@ -56,7 +56,7 @@ function readAudit(statePath: string) {
     const service = new Phase7CBotModeService(statePath);
 
     assert.throws(
-      () => service.set("AUTO", "test-active-audit-failure"),
+      () => service.set("TREND", "test-active-audit-failure"),
       /EISDIR|illegal operation|directory/i,
     );
     assert.equal(service.get().mode, "PAUSE");
@@ -89,6 +89,22 @@ function readAudit(statePath: string) {
     const persisted = JSON.parse(fs.readFileSync(statePath, "utf8"));
     assert.equal(persisted.mode, "PAUSE");
     assert.equal(persisted.updatedBy, "test-pause-audit-failure");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+{
+  const root = makeTempRoot("bot-mode-web-only-auto");
+  try {
+    const statePath = path.join(root, "phase7c-bot-mode.json");
+    const service = new Phase7CBotModeService(statePath);
+
+    assert.throws(
+      () => service.set("AUTO", "telegram"),
+      /manual Web control center/i,
+    );
+    assert.equal(service.get().mode, "PAUSE");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -5,11 +5,18 @@ on:
     branches:
       - fix/phase7c-legacy-background-cleanup
     paths:
+      - "apps/api/src/routes/phase7c.route.ts"
       - "apps/api/src/services/phase7c-bot-mode.service.ts"
+      - "apps/api/src/services/phase7c-lifecycle.service.ts"
+      - "apps/web/src/api.ts"
+      - "apps/web/src/pages/Phase7CControlCenterPage.tsx"
       - "scripts/activate-phase7c-local.ps1"
+      - "scripts/phase7c-telegram-mode-logic.mjs"
+      - "scripts/run-phase7c-telegram-mode-controller.mjs"
       - "scripts/test-phase7c-activation-preserves-bot-mode.mjs"
       - "scripts/test-phase7c-bot-mode-provenance.ts"
       - "scripts/test-phase7c-bot-mode-provenance-writers.mjs"
+      - "scripts/test-phase7c-web-only-auto-control.ts"
       - ".github/workflows/phase7c-bot-mode-provenance-ci.yml"
 
 permissions:
@@ -46,6 +53,9 @@ jobs:
 
       - name: Activation preserves persistent bot mode
         run: node scripts/test-phase7c-activation-preserves-bot-mode.mjs
+
+      - name: Web-only AUTO control regression
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/test-phase7c-web-only-auto-control.ts
 
       - name: Build API dependency graph
         run: pnpm --filter @xauusd/api... build

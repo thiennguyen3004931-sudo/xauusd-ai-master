@@ -4,6 +4,8 @@ import {
   isExpiredTelegramCallbackError,
   nextTelegramUpdateOffset,
   persistedTelegramUpdateOffset,
+  telegramModeForCallback,
+  telegramModeForCommand,
 } from "./phase7c-telegram-mode-logic.mjs";
 
 const fallbackToken = requiredEnv("ZIQ_TELEGRAM_BOT_TOKEN");
@@ -23,7 +25,6 @@ const statusFile = resolve(
   process.env.ZIQ_PHASE7C_TELEGRAM_MODE_STATUS_FILE?.trim() || defaultStatusFile,
 );
 const telegramBase = `https://api.telegram.org/bot${token}`;
-const validModes = new Set(["AUTO", "TREND", "SIDEWAY", "PAUSE"]);
 let updateOffset = await loadUpdateOffset();
 let ready = false;
 let initialPanelSent = false;
@@ -60,8 +61,8 @@ while (true) {
       }
       if (!initialPanelSent) {
         const startupNote = initial.mode === "PAUSE"
-          ? "Bot DEMO và Telegram vừa khởi động ở chế độ TẠM DỪNG; đang chờ xác minh an toàn trước khi cho phép TỰ ĐỘNG."
-          : `Bot DEMO và Telegram vừa khởi động ở chế độ ${modeVi(initial.mode)}.`;
+          ? "Bot và Telegram vừa khởi động ở chế độ TẠM DỪNG; AUTO chỉ được bật thủ công từ Web sau khi xác minh an toàn."
+          : `Bot và Telegram vừa khởi động ở chế độ ${modeVi(initial.mode)}.`;
         await sendPanel(initial.mode, startupNote);
         lastTelegramSuccessAt = Date.now();
         initialPanelSent = true;
@@ -158,7 +159,7 @@ async function syncExternalMode() {
   lastMode = current.mode;
   await sendPanel(
     current.mode,
-    `Web/API đã chuyển chế độ ${modeVi(previousMode)} → ${modeVi(current.mode)}. Bot DEMO và Telegram đang hoạt động.`,
+    `Web/API đã chuyển chế độ ${modeVi(previousMode)} → ${modeVi(current.mode)}. Bot và Telegram đang hoạt động.`,
   );
   console.log(`PHASE7C_MODE_CHANGED=${current.mode}|SOURCE=EXTERNAL_API`);
 }
@@ -181,8 +182,17 @@ async function handleCallback(callback) {
     return;
   }
 
-  const mode = data.startsWith("p7c:") ? data.slice(4).toUpperCase() : "";
-  if (!validModes.has(mode)) {
+  if (data.toUpperCase() === "P7C:AUTO") {
+    const current = await getBotMode();
+    lastApiSuccessAt = Date.now();
+    lastMode = current.mode;
+    if (callbackId) await answerCallback(callbackId, "AUTO chỉ được bật thủ công từ Web.");
+    await editPanel(callback.message, current.mode, "Telegram không có quyền bật AUTO. Hãy dùng Web Control Center.");
+    return;
+  }
+
+  const mode = telegramModeForCallback(data);
+  if (!mode) {
     if (callbackId) await answerCallback(callbackId, "Chế độ không hợp lệ.");
     return;
   }
@@ -202,27 +212,23 @@ async function handleMessage(message) {
   if (!raw) return;
   const command = raw.split(/\s+/)[0].toLowerCase().replace(/@[^\s]+$/, "");
 
-  // Keep legacy commands for compatibility and add Vietnamese aliases for operators.
-  const commands = {
-    "/trend": "TREND",
-    "/sideway": "SIDEWAY",
-    "/auto": "AUTO",
-    "/pause": "PAUSE",
-    "/xuhuong": "TREND",
-    "/dingang": "SIDEWAY",
-    "/tudong": "AUTO",
-    "/tamdung": "PAUSE",
-  };
-
   if (command === "/mode" || command === "/bots" || command === "/chedo" || command === "/bot") {
     const current = await getBotMode();
     lastApiSuccessAt = Date.now();
     lastMode = current.mode;
-    await sendPanel(current.mode, "Chọn bot bạn muốn cho phép hoạt động.");
+    await sendPanel(current.mode, "Chọn bot bạn muốn cho phép hoạt động. AUTO chỉ bật từ Web.");
     return;
   }
 
-  const mode = commands[command];
+  if (command === "/auto" || command === "/tudong") {
+    const current = await getBotMode();
+    lastApiSuccessAt = Date.now();
+    lastMode = current.mode;
+    await sendPanel(current.mode, "Telegram không có quyền bật AUTO. Hãy dùng Web Control Center.");
+    return;
+  }
+
+  const mode = telegramModeForCommand(command);
   if (!mode) return;
   const state = await setBotMode(mode, "telegram-command");
   lastApiSuccessAt = Date.now();
@@ -278,8 +284,8 @@ function panelText(mode, note) {
   const description = {
     TREND: "Chỉ bot Trend được phép tạo chiến lược mới.",
     SIDEWAY: "Chỉ bot Sideway được phép tạo chiến lược mới theo vùng cung/cầu và hồi quy về trung bình.",
-    AUTO: "Bộ phân loại trạng thái thị trường tự chọn bot Trend hoặc bot Sideway; khi đảo chiều hoặc chưa rõ sẽ khuyến nghị TẠM DỪNG.",
-    PAUSE: "Không bot nào được phép tạo kế hoạch giao dịch mới.",
+    AUTO: "Bộ phân loại trạng thái thị trường tự chọn bot Trend hoặc bot Sideway; AUTO chỉ được kích hoạt thủ công từ Web.",
+    PAUSE: "Không bot nào được phép tạo kế hoạch giao dịch mới; executor vẫn chạy để quản lý trạng thái/vị thế hiện có.",
   }[mode] ?? "Trạng thái không xác định.";
 
   return [
@@ -289,7 +295,7 @@ function panelText(mode, note) {
     escapeHtml(description),
     "",
     `ℹ️ ${escapeHtml(note)}`,
-    "🔒 Bảng điều khiển chỉ đổi chế độ qua giao diện điều khiển nội bộ, không gửi lệnh trực tiếp tới MT5.",
+    "🔒 Telegram không thể bật AUTO và không gửi lệnh trực tiếp tới MT5.",
   ].join("\n");
 }
 
@@ -301,7 +307,7 @@ function keyboard(activeMode) {
   return {
     inline_keyboard: [
       [button("bot Trend", "TREND"), button("bot Sideway", "SIDEWAY")],
-      [button("TỰ ĐỘNG", "AUTO"), button("TẠM DỪNG", "PAUSE")],
+      [button("TẠM DỪNG", "PAUSE")],
       [{ text: "🔄 Làm mới", callback_data: "p7c:REFRESH" }],
     ],
   };
