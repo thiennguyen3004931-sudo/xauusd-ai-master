@@ -9,6 +9,7 @@ on:
       - scripts/run-phase7b-telegram-notifier.mjs
       - scripts/run-phase7c-executors-local.ps1
       - scripts/test-phase7c-trade-notifier-source.ps1
+      - scripts/test-phase7c-trade-notifier-wrapper.ps1
       - scripts/phase7c-trade-notifier-synthetic.test.mjs
       - .github/workflows/phase7c-trade-notifier-ci.yml
   pull_request:
@@ -17,6 +18,7 @@ on:
       - scripts/run-phase7b-telegram-notifier.mjs
       - scripts/run-phase7c-executors-local.ps1
       - scripts/test-phase7c-trade-notifier-source.ps1
+      - scripts/test-phase7c-trade-notifier-wrapper.ps1
       - scripts/phase7c-trade-notifier-synthetic.test.mjs
       - .github/workflows/phase7c-trade-notifier-ci.yml
 
@@ -37,9 +39,16 @@ jobs:
         with:
           node-version: 22
 
-      - name: Supervisor and wrapper source contract
+      - name: Supervisor, wrapper, and startup safety contract
         shell: pwsh
         run: ./scripts/test-phase7c-trade-notifier-source.ps1
+
+      - name: Notifier JavaScript syntax
+        run: node --check ./scripts/run-phase7b-telegram-notifier.mjs
+
+      - name: Wrapper LIVE and DEMO journal integration
+        shell: pwsh
+        run: ./scripts/test-phase7c-trade-notifier-wrapper.ps1
 
       - name: Synthetic ENTRY-HOLD-BE-partial-EXIT lifecycle
         run: node --test ./scripts/phase7c-trade-notifier-synthetic.test.mjs
