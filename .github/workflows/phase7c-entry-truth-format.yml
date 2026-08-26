@@ -1,0 +1,137 @@
+name: Phase7C Entry Truth Format
+
+on:
+  push:
+    branches:
+      - fix/phase7c-telegram-entry-truth
+    paths:
+      - .github/workflows/phase7c-entry-truth-format.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: fix/phase7c-telegram-entry-truth
+
+      - name: Normalize notifier indentation only
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("scripts/run-phase7b-telegram-notifier.mjs")
+          text = path.read_text(encoding="utf-8")
+
+          old = '''  if (type === "ENTRY_REJECTED") {
+          return warningCard(
+            "⛔ ENTRY · KHÔNG VÀO MT5",
+            event.reason ??
+              event.message ??
+              event.response?.reason ??
+              event.response?.message ??
+              event.response?.detail?.reason ??
+              "ENTRY_REJECTED",
+            event.response?.status ??
+              event.status ??
+              event.response?.retcode ??
+              event.retcode,
+          );
+        }
+
+        if (
+          type === "ENTRY_ACCEPTED_POSITION_NOT_RESOLVED"
+        ) {
+            return warningCard(
+              "⚠️ ENTRY",
+              event.message ??
+                "Position chưa resolve",
+              event.retcode,
+            );
+          }
+          '''
+
+          # The previous CI-applied patch has valid JS but lost indentation because
+          # Python triple-string dedentation changed leading whitespace. Match the
+          # actual source shape directly if the first literal is not present.
+          if old not in text:
+              old = '''  if (type === "ENTRY_REJECTED") {
+          return warningCard(
+            "⛔ ENTRY · KHÔNG VÀO MT5",
+            event.reason ??
+              event.message ??
+              event.response?.reason ??
+              event.response?.message ??
+              event.response?.detail?.reason ??
+              "ENTRY_REJECTED",
+            event.response?.status ??
+              event.status ??
+              event.response?.retcode ??
+              event.retcode,
+          );
+        }
+
+        if (
+          type === "ENTRY_ACCEPTED_POSITION_NOT_RESOLVED"
+        ) {
+            return warningCard(
+              "⚠️ ENTRY",
+              event.message ??
+                "Position chưa resolve",
+              event.retcode,
+            );
+          }
+'''
+
+          # Normalize using line-boundary anchors instead of relying on indentation.
+          start = text.index('  if (type === "ENTRY_REJECTED") {')
+          end = text.index('  if (type.endsWith("_REJECTED")) {', start)
+          replacement = '''  if (type === "ENTRY_REJECTED") {
+            return warningCard(
+              "⛔ ENTRY · KHÔNG VÀO MT5",
+              event.reason ??
+                event.message ??
+                event.response?.reason ??
+                event.response?.message ??
+                event.response?.detail?.reason ??
+                "ENTRY_REJECTED",
+              event.response?.status ??
+                event.status ??
+                event.response?.retcode ??
+                event.retcode,
+            );
+          }
+
+          if (type === "ENTRY_ACCEPTED_POSITION_NOT_RESOLVED") {
+            return warningCard(
+              "⚠️ ENTRY",
+              event.message ??
+                "Position chưa resolve",
+              event.retcode,
+            );
+          }
+
+          '''
+          text = text[:start] + replacement + text[end:]
+          path.write_text(text, encoding="utf-8")
+
+      - name: Verify exact notifier tests
+        run: |
+          node --check ./scripts/run-phase7b-telegram-notifier.mjs
+          node --test ./scripts/phase7c-trade-notifier-synthetic.test.mjs
+
+      - name: Commit formatting and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/phase7c-entry-truth-format.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/run-phase7b-telegram-notifier.mjs .github/workflows/phase7c-entry-truth-format.yml
+          git commit -m "style: normalize Telegram entry formatting"
+          git push origin HEAD:fix/phase7c-telegram-entry-truth
