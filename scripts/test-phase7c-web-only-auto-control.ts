@@ -43,6 +43,15 @@ assert.match(pageSource, /mutationFn:\s*setPhase7CBotMode/);
 assert.match(pageSource, /botModeAction\.mutate\(["']PAUSE["']\)/);
 assert.match(pageSource, /botModeAction\.mutate\(["']AUTO["']\)/);
 
+// PAUSE is the fail-safe mode and must remain available even when executors are not running.
+const pauseStart = pageSource.indexOf("const canPause =");
+const pauseEnd = pageSource.indexOf("return (", pauseStart);
+assert.ok(pauseStart >= 0 && pauseEnd > pauseStart, "cannot isolate canPause source");
+const canPauseSource = pageSource.slice(pauseStart, pauseEnd);
+assert.match(canPauseSource, /controlEnabled\s*===\s*true/);
+assert.match(canPauseSource, /mode\s*!==\s*["']PAUSE["']/);
+assert.doesNotMatch(canPauseSource, /\.running\s*===\s*true/);
+
 // Lifecycle start must never enable AUTO as a side effect. Starting executors ends in PAUSE.
 const lifecycleSource = read("apps/api/src/services/phase7c-lifecycle.service.ts");
 assert.doesNotMatch(lifecycleSource, /phase7CBotModeService\.set\(\s*["']AUTO["']/);
