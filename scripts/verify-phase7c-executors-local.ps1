@@ -218,7 +218,8 @@ if ($RequireTelegram -and -not $telegramConfigured) {
 }
 
 $pidStatuses = @{}
-foreach ($name in @("supervisor", "trend", "sideway", "telegram-mode", "regime-notifier", "trade-notifier")) {
+$pidNames = if ($DeploymentGate -and -not $RequireTelegram) { @("supervisor", "trade-notifier") } else { @("supervisor", "trend", "sideway", "telegram-mode", "regime-notifier", "trade-notifier") }
+foreach ($name in $pidNames) {
   $status = Read-PidStatus $name
   $pidStatuses[$name] = $status
   $label = $name.ToUpper().Replace("-", "_")
@@ -229,24 +230,26 @@ foreach ($name in @("supervisor", "trend", "sideway", "telegram-mode", "regime-n
 $telegramModeReady = $false
 $telegramModeStatus = "MISSING"
 $telegramModeHeartbeatAgeMs = $null
-if (Test-Path $TelegramModeStatusPath) {
-  try {
-    $telegramRuntime = Get-Content -LiteralPath $TelegramModeStatusPath -Raw | ConvertFrom-Json
-    $telegramModeStatus = [string]$telegramRuntime.status
-    if ($null -ne $telegramRuntime.lastTelegramSuccessAt) {
-      $telegramModeHeartbeatAgeMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$telegramRuntime.lastTelegramSuccessAt
+if (-not $DeploymentGate -or $RequireTelegram) {
+  if (Test-Path $TelegramModeStatusPath) {
+    try {
+      $telegramRuntime = Get-Content -LiteralPath $TelegramModeStatusPath -Raw | ConvertFrom-Json
+      $telegramModeStatus = [string]$telegramRuntime.status
+      if ($null -ne $telegramRuntime.lastTelegramSuccessAt) {
+        $telegramModeHeartbeatAgeMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$telegramRuntime.lastTelegramSuccessAt
+      }
+      $telegramModeReady = [bool]$telegramRuntime.ready -and
+        $null -ne $telegramModeHeartbeatAgeMs -and
+        $telegramModeHeartbeatAgeMs -ge -10000 -and
+        $telegramModeHeartbeatAgeMs -le 60000
+    } catch {
+      $telegramModeStatus = "INVALID_STATUS_FILE"
     }
-    $telegramModeReady = [bool]$telegramRuntime.ready -and
-      $null -ne $telegramModeHeartbeatAgeMs -and
-      $telegramModeHeartbeatAgeMs -ge -10000 -and
-      $telegramModeHeartbeatAgeMs -le 60000
-  } catch {
-    $telegramModeStatus = "INVALID_STATUS_FILE"
   }
+  Write-Host "PHASE7C_VERIFY_TELEGRAM_MODE_READY=$telegramModeReady"
+  Write-Host "PHASE7C_VERIFY_TELEGRAM_MODE_RUNTIME_STATUS=$telegramModeStatus"
+  Write-Host "PHASE7C_VERIFY_TELEGRAM_MODE_HEARTBEAT_AGE_MS=$telegramModeHeartbeatAgeMs"
 }
-Write-Host "PHASE7C_VERIFY_TELEGRAM_MODE_READY=$telegramModeReady"
-Write-Host "PHASE7C_VERIFY_TELEGRAM_MODE_RUNTIME_STATUS=$telegramModeStatus"
-Write-Host "PHASE7C_VERIFY_TELEGRAM_MODE_HEARTBEAT_AGE_MS=$telegramModeHeartbeatAgeMs"
 
 $tradeNotifierReady = $false
 $tradeNotifierRuntimeStatus = 'MISSING'
