@@ -42,7 +42,7 @@ requireText(
   "LIVE Web Start first-time ARM boundary",
 );
 requireText(
-  startSource,
+  lifecycle,
   "liveAuthorization?.valid !== true",
   "LIVE launcher must revalidate prior authorization",
 );
