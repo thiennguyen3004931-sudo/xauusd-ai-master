@@ -271,20 +271,21 @@ class LiveArmTests(unittest.TestCase):
             mt5 = ManagedRiskFakeMt5("BUY")
             gateway = GuardedMt5Gateway(make_settings(ledger_path, arm), IdempotencyLedger(ledger_path), mt5)
             self.assertTrue(gateway.start())
-
             try:
-                response = gateway.close_position(
-                    "321",
-                    CloseRequest(volume=0.04, commandId="reduce-risk-close"),
-                )
-            except BridgeError as exc:
-                self.fail(f"partial close must remain available while DISARMED, got {exc.code}")
+                try:
+                    response = gateway.close_position(
+                        "321",
+                        CloseRequest(volume=0.04, commandId="reduce-risk-close"),
+                    )
+                except BridgeError as exc:
+                    self.fail(f"partial close must remain available while DISARMED, got {exc.code}")
 
-            self.assertTrue(response["success"])
-            self.assertEqual(len(mt5.sent), 1)
-            self.assertAlmostEqual(mt5.sent[0]["volume"], 0.04)
-            self.assertEqual(mt5.sent[0]["position"], 321)
-            gateway.stop()
+                self.assertTrue(response["success"])
+                self.assertEqual(len(mt5.sent), 1)
+                self.assertAlmostEqual(mt5.sent[0]["volume"], 0.04)
+                self.assertEqual(mt5.sent[0]["position"], 321)
+            finally:
+                gateway.stop()
 
     def test_disarmed_live_allows_break_even_stop_but_blocks_looser_stop(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -294,27 +295,28 @@ class LiveArmTests(unittest.TestCase):
             mt5 = ManagedRiskFakeMt5("BUY")
             gateway = GuardedMt5Gateway(make_settings(ledger_path, arm), IdempotencyLedger(ledger_path), mt5)
             self.assertTrue(gateway.start())
-
             try:
-                response = gateway.modify_position(
-                    "321",
-                    ModifyRequest(stopLoss=4610.0, commandId="move-to-be"),
-                )
-            except BridgeError as exc:
-                self.fail(f"BE/tighter stop must remain available while DISARMED, got {exc.code}")
+                try:
+                    response = gateway.modify_position(
+                        "321",
+                        ModifyRequest(stopLoss=4610.0, commandId="move-to-be"),
+                    )
+                except BridgeError as exc:
+                    self.fail(f"BE/tighter stop must remain available while DISARMED, got {exc.code}")
 
-            self.assertTrue(response["success"])
-            self.assertEqual(len(mt5.sent), 1)
-            self.assertAlmostEqual(mt5.sent[0]["sl"], 4610.0)
+                self.assertTrue(response["success"])
+                self.assertEqual(len(mt5.sent), 1)
+                self.assertAlmostEqual(mt5.sent[0]["sl"], 4610.0)
 
-            with self.assertRaises(BridgeError) as loosened:
-                gateway.modify_position(
-                    "321",
-                    ModifyRequest(stopLoss=4600.0, commandId="loosen-stop"),
-                )
-            self.assertEqual(loosened.exception.code, "LIVE_RISK_INCREASE_BLOCKED")
-            self.assertEqual(len(mt5.sent), 1)
-            gateway.stop()
+                with self.assertRaises(BridgeError) as loosened:
+                    gateway.modify_position(
+                        "321",
+                        ModifyRequest(stopLoss=4600.0, commandId="loosen-stop"),
+                    )
+                self.assertEqual(loosened.exception.code, "LIVE_RISK_INCREASE_BLOCKED")
+                self.assertEqual(len(mt5.sent), 1)
+            finally:
+                gateway.stop()
 
     def test_demo_settings_do_not_require_live_arm(self):
         with tempfile.TemporaryDirectory() as directory:
