@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link as RouterLink } from "react-router-dom";
 import PlayArrowRounded from "@mui/icons-material/PlayArrowRounded";
 import StopRounded from "@mui/icons-material/StopRounded";
-import TelegramRounded from "@mui/icons-material/TelegramRounded";
+import TelegramRounded from "@mui/icons-material/Telegram";
 import {
   Alert,
   Box,
