@@ -227,7 +227,6 @@ export function Phase7CControlCenterPage() {
     (lifecycleData?.bridge.openXauusdPositions ?? 0) === 0 &&
     mode !== "AUTO";
   const canPause =
-    lifecycleData?.running === true &&
     lifecycleData?.controlEnabled === true &&
     mode !== "PAUSE";
 
