@@ -1,0 +1,36 @@
+name: Phase7C Trade Notifier Deploy Verifier CI
+
+on:
+  push:
+    branches:
+      - fix/phase7c-trade-notifier-deploy-verification
+    paths:
+      - scripts/verify-phase7c-executors-local.ps1
+      - scripts/test-phase7c-trade-notifier-deploy-verifier-source.ps1
+      - .github/workflows/phase7c-trade-notifier-deploy-verifier-ci.yml
+  pull_request:
+    branches:
+      - fix/phase7c-legacy-background-cleanup
+    paths:
+      - scripts/verify-phase7c-executors-local.ps1
+      - scripts/test-phase7c-trade-notifier-deploy-verifier-source.ps1
+      - .github/workflows/phase7c-trade-notifier-deploy-verifier-ci.yml
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-gate-contract:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Source contract with PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-trade-notifier-deploy-verifier-source.ps1
+
+      - name: Source contract with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-trade-notifier-deploy-verifier-source.ps1
