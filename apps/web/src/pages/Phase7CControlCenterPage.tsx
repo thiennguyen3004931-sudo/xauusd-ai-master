@@ -29,6 +29,7 @@ import {
   getPhase7CLifecycle,
   getPhase7CLotSettings,
   runPhase7CLifecycleAction,
+  setPhase7CBotMode,
   setPhase7CLotSettings,
 } from "../api";
 import { MetricCard } from "../ui/MetricCard";
@@ -78,12 +79,7 @@ function ReasonBox({ title, children }: { title: string; children: string }) {
         bgcolor: "rgba(255,255,255,.015)",
       }}
     >
-      <Typography
-        variant="caption"
-        color="primary"
-        fontWeight={900}
-        letterSpacing=".05em"
-      >
+      <Typography variant="caption" color="primary" fontWeight={900} letterSpacing=".05em">
         {title}
       </Typography>
       <Typography variant="body2" sx={{ mt: 0.8, lineHeight: 1.65 }}>
@@ -111,8 +107,7 @@ export function Phase7CControlCenterPage() {
     retry: false,
   });
   const configuredTrendLot = lotSettings.data?.state.trendFixedLot ?? 0.03;
-  const configuredSidewayRisk =
-    lotSettings.data?.state.sidewayRiskPercent ?? 0.25;
+  const configuredSidewayRisk = lotSettings.data?.state.sidewayRiskPercent ?? 0.25;
   const configuredSidewayMaxLot = lotSettings.data?.state.sidewayMaxLot ?? 0.03;
 
   const decisionMonitor = useQuery({
@@ -142,8 +137,7 @@ export function Phase7CControlCenterPage() {
     sidewayMaxLot: number;
   } | null>(null);
   const trendFixedLot = lotDraft?.trendFixedLot ?? configuredTrendLot;
-  const sidewayRiskPercent =
-    lotDraft?.sidewayRiskPercent ?? configuredSidewayRisk;
+  const sidewayRiskPercent = lotDraft?.sidewayRiskPercent ?? configuredSidewayRisk;
   const sidewayMaxLot = lotDraft?.sidewayMaxLot ?? configuredSidewayMaxLot;
   const updateLotDraft = (patch: Partial<NonNullable<typeof lotDraft>>) => {
     setLotDraft((current) => ({
@@ -159,13 +153,19 @@ export function Phase7CControlCenterPage() {
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["phase7c-lifecycle"] }),
-        queryClient.invalidateQueries({
-          queryKey: ["phase7c-decision-monitor"],
-        }),
+        queryClient.invalidateQueries({ queryKey: ["phase7c-decision-monitor"] }),
         queryClient.invalidateQueries({ queryKey: ["phase7c-lot-settings"] }),
-        queryClient.invalidateQueries({
-          queryKey: ["phase7c-daily-recovery-control-center"],
-        }),
+        queryClient.invalidateQueries({ queryKey: ["phase7c-daily-recovery-control-center"] }),
+      ]);
+    },
+  });
+
+  const botModeAction = useMutation({
+    mutationFn: setPhase7CBotMode,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["phase7c-lifecycle"] }),
+        queryClient.invalidateQueries({ queryKey: ["phase7c-decision-monitor"] }),
       ]);
     },
   });
@@ -176,18 +176,14 @@ export function Phase7CControlCenterPage() {
       setLotDraft(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["phase7c-lot-settings"] }),
-        queryClient.invalidateQueries({
-          queryKey: ["phase7c-decision-monitor"],
-        }),
+        queryClient.invalidateQueries({ queryKey: ["phase7c-decision-monitor"] }),
         queryClient.invalidateQueries({ queryKey: ["phase7c-lifecycle"] }),
       ]);
     },
   });
 
   const lifecycleData = lifecycle.data;
-  const brokerModeSupported =
-    lifecycleData?.bridge.accountMode === "demo" ||
-    lifecycleData?.bridge.accountMode === "real";
+  const brokerModeSupported = lifecycleData?.bridge.accountMode === "demo" || lifecycleData?.bridge.accountMode === "real";
   const detectedAccountLabel =
     lifecycleData?.bridge.accountMode === "real"
       ? "LIVE"
@@ -198,8 +194,7 @@ export function Phase7CControlCenterPage() {
   const currency = decision?.account.currency ?? "USD";
   const position = decision?.position;
   const preTrade = decision?.preTrade;
-  const managing =
-    position?.state === "MANAGING" || position?.state === "UNMANAGED";
+  const managing = position?.state === "MANAGING" || position?.state === "UNMANAGED";
   const displayedEntry = managing ? position?.entry : preTrade?.entry;
   const displayedStop = managing ? position?.stopLoss : preTrade?.stopLoss;
   const displayedTp1 = managing ? position?.tp1 : preTrade?.tp1;
@@ -210,9 +205,8 @@ export function Phase7CControlCenterPage() {
   const entryReason = managing
     ? (position?.entryReason ?? "Chưa có lý do vào lệnh.")
     : mode === "PAUSE"
-      ? "Bot đang PAUSE; không mở lệnh mới. Nhấn BẬT BOT sau khi hoàn tất kiểm tra an toàn."
-      : (preTrade?.decisionReason ??
-        "Chưa có setup hợp lệ; tiếp tục chờ tín hiệu.");
+      ? "Bot đang PAUSE; executor vẫn chạy nhưng không mở kế hoạch giao dịch mới. Chỉ bật AUTO thủ công từ Web sau khi hoàn tất kiểm tra an toàn."
+      : (preTrade?.decisionReason ?? "Chưa có setup hợp lệ; tiếp tục chờ tín hiệu.");
   const holdReason = managing
     ? (position?.holdReason ?? "Executor đang kiểm tra điều kiện giữ lệnh.")
     : "Chưa có vị thế đang mở; executor tiếp tục chờ setup hợp lệ.";
@@ -222,191 +216,140 @@ export function Phase7CControlCenterPage() {
     bridgeReady &&
     lifecycleData?.bridge.accountMode === "demo" &&
     (lifecycleData?.bridge.openXauusdPositions ?? 0) === 0;
+  const canEnableAuto =
+    lifecycleData?.ready === true &&
+    lifecycleData?.controlEnabled === true &&
+    bridgeReady &&
+    brokerModeSupported &&
+    lifecycleData?.bridge.tradingEnabled === true &&
+    lifecycleData?.bridge.terminalTradeAllowed === true &&
+    lifecycleData?.bridge.expertTradeAllowed === true &&
+    (lifecycleData?.bridge.openXauusdPositions ?? 0) === 0 &&
+    mode !== "AUTO";
+  const canPause =
+    lifecycleData?.running === true &&
+    lifecycleData?.controlEnabled === true &&
+    mode !== "PAUSE";
 
   return (
     <Stack spacing={2}>
-      <Card
-        sx={{
-          border: "1px solid",
-          borderColor: lifecycleData?.ready ? "success.main" : "divider",
-        }}
-      >
+      <Card sx={{ border: "1px solid", borderColor: lifecycleData?.ready ? "success.main" : "divider" }}>
         <CardContent>
-          <Stack
-            direction={{ xs: "column", lg: "row" }}
-            justifyContent="space-between"
-            gap={2.5}
-            alignItems={{ lg: "center" }}
-          >
+          <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" gap={2.5} alignItems={{ lg: "center" }}>
             <Box>
-              <Stack
-                direction="row"
-                spacing={1}
-                alignItems="center"
-                flexWrap="wrap"
-                useFlexGap
-              >
-                <Typography variant="h6" fontWeight={950}>
-                  Điều khiển Bot DEMO / LIVE
-                </Typography>
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography variant="h6" fontWeight={950}>Điều khiển Bot DEMO / LIVE</Typography>
                 <Chip
-                  color={
-                    lifecycleData?.ready
-                      ? "success"
-                      : lifecycleData?.running
-                        ? "warning"
-                        : "default"
-                  }
-                  label={
-                    lifecycleData?.ready
-                      ? "BOT READY"
-                      : lifecycleData?.running
-                        ? "ĐANG KHỞI ĐỘNG"
-                        : "BOT ĐÃ DỪNG"
-                  }
+                  color={lifecycleData?.ready ? "success" : lifecycleData?.running ? "warning" : "default"}
+                  label={lifecycleData?.ready ? "BOT READY" : lifecycleData?.running ? "ĐANG KHỞI ĐỘNG" : "BOT ĐÃ DỪNG"}
                   size="small"
                 />
-                <Chip
-                  color={bridgeReady ? "success" : "warning"}
-                  label={bridgeReady ? "MT5 CONNECTED" : "MT5 RECONNECTING"}
-                  size="small"
-                  variant="outlined"
-                />
-                <Chip
-                  color={lifecycleData?.bridge.accountMode === "real" ? "warning" : "default"}
-                  label={`ACCOUNT ${detectedAccountLabel}`}
-                  size="small"
-                  variant="outlined"
-                />
-                <Chip
-                  icon={<TelegramRounded />}
-                  color={lifecycleData?.telegramReady ? "success" : "default"}
-                  label={
-                    lifecycleData?.telegramReady
-                      ? "TELEGRAM READY"
-                      : "TELEGRAM OFFLINE"
-                  }
-                  size="small"
-                  variant="outlined"
-                />
+                <Chip color={bridgeReady ? "success" : "warning"} label={bridgeReady ? "MT5 CONNECTED" : "MT5 RECONNECTING"} size="small" variant="outlined" />
+                <Chip color={lifecycleData?.bridge.accountMode === "real" ? "warning" : "default"} label={`ACCOUNT ${detectedAccountLabel}`} size="small" variant="outlined" />
+                <Chip icon={<TelegramRounded />} color={lifecycleData?.telegramReady ? "success" : "default"} label={lifecycleData?.telegramReady ? "TELEGRAM READY" : "TELEGRAM OFFLINE"} size="small" variant="outlined" />
                 <Chip label={`MODE ${mode}`} size="small" variant="outlined" />
               </Stack>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                Một nút BẬT BOT tự nhận diện tài khoản MT5 đang đăng nhập: DEMO
-                chạy DEMO; LIVE chạy LIVE chỉ khi tài khoản LIVE đó đã được cấp
-                quyền trước. Web không tự cấp quyền/ARM LIVE lần đầu. Hệ thống
-                giữ PAUSE trong preflight và chỉ chuyển AUTO sau khi toàn bộ cổng
-                an toàn đạt.
+                BẬT BOT chỉ khởi động/khôi phục executors và luôn kết thúc ở PAUSE. AUTO không còn được bật từ lifecycle hay Telegram; chỉ nút BẬT AUTO trên Web mới có quyền kích hoạt AUTO sau khi toàn bộ cổng an toàn đạt.
               </Typography>
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: "block", mt: 0.7 }}
-              >
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.7 }}>
                 {detectedAccountLabel}
-                {lifecycleData?.bridge.server
-                  ? ` · ${lifecycleData.bridge.server}`
-                  : ""}
+                {lifecycleData?.bridge.server ? ` · ${lifecycleData.bridge.server}` : ""}
                 {` · XAUUSD positions ${lifecycleData?.bridge.openXauusdPositions ?? "—"}`}
                 {` · Lot ${configuredTrendLot.toFixed(2)} / ${configuredSidewayRisk.toFixed(2)}% / ${configuredSidewayMaxLot.toFixed(2)}`}
               </Typography>
             </Box>
 
-            <Stack
-              direction={{ xs: "column", sm: "row" }}
-              spacing={1.5}
-              sx={{ minWidth: { lg: 390 } }}
-            >
-              <Button
-                fullWidth
-                variant="contained"
-                color="success"
-                size="large"
-                startIcon={<PlayArrowRounded />}
-                disabled={
-                  lifecycleAction.isPending ||
-                  lifecycleData?.actionInProgress ||
-                  lifecycleData?.ready ||
-                  !lifecycleData?.controlEnabled ||
-                  !bridgeReady ||
-                  !brokerModeSupported ||
-                  lifecycleData?.bridge.tradingEnabled !== true ||
-                  lifecycleData?.bridge.terminalTradeAllowed !== true ||
-                  lifecycleData?.bridge.expertTradeAllowed !== true ||
-                  (lifecycleData?.bridge.openXauusdPositions ?? 0) > 0 ||
-                  !lifecycleData?.telegramConfigured
-                }
-                onClick={() => lifecycleAction.mutate("start")}
-                sx={{ fontWeight: 950, minWidth: 190 }}
-              >
-                {lifecycleAction.isPending &&
-                lifecycleAction.variables === "start"
-                  ? "ĐANG BẬT..."
-                  : lifecycleData?.running
-                    ? "KHÔI PHỤC BOT"
-                    : "BẬT BOT"}
-              </Button>
-              <Button
-                fullWidth
-                variant="outlined"
-                color="error"
-                size="large"
-                startIcon={<StopRounded />}
-                disabled={
-                  lifecycleAction.isPending ||
-                  lifecycleData?.actionInProgress ||
-                  !lifecycleData?.running ||
-                  !lifecycleData?.controlEnabled ||
-                  (lifecycleData?.bridge.openXauusdPositions ?? 0) > 0
-                }
-                onClick={() => lifecycleAction.mutate("stop")}
-                sx={{ fontWeight: 900, minWidth: 170 }}
-              >
-                {lifecycleAction.isPending &&
-                lifecycleAction.variables === "stop"
-                  ? "ĐANG DỪNG..."
-                  : "DỪNG BOT"}
-              </Button>
+            <Stack spacing={1.2} sx={{ minWidth: { lg: 430 } }}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2}>
+                <Button
+                  fullWidth
+                  variant="contained"
+                  color="success"
+                  size="large"
+                  startIcon={<PlayArrowRounded />}
+                  disabled={
+                    lifecycleAction.isPending || lifecycleData?.actionInProgress || lifecycleData?.ready ||
+                    !lifecycleData?.controlEnabled || !bridgeReady || !brokerModeSupported ||
+                    lifecycleData?.bridge.tradingEnabled !== true ||
+                    lifecycleData?.bridge.terminalTradeAllowed !== true ||
+                    lifecycleData?.bridge.expertTradeAllowed !== true ||
+                    (lifecycleData?.bridge.openXauusdPositions ?? 0) > 0 ||
+                    !lifecycleData?.telegramConfigured
+                  }
+                  onClick={() => lifecycleAction.mutate("start")}
+                  sx={{ fontWeight: 950 }}
+                >
+                  {lifecycleAction.isPending && lifecycleAction.variables === "start"
+                    ? "ĐANG BẬT..."
+                    : lifecycleData?.running ? "KHÔI PHỤC BOT" : "BẬT BOT"}
+                </Button>
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  color="error"
+                  size="large"
+                  startIcon={<StopRounded />}
+                  disabled={
+                    lifecycleAction.isPending || lifecycleData?.actionInProgress || !lifecycleData?.running ||
+                    !lifecycleData?.controlEnabled || (lifecycleData?.bridge.openXauusdPositions ?? 0) > 0
+                  }
+                  onClick={() => lifecycleAction.mutate("stop")}
+                  sx={{ fontWeight: 900 }}
+                >
+                  {lifecycleAction.isPending && lifecycleAction.variables === "stop" ? "ĐANG DỪNG..." : "DỪNG HỆ THỐNG"}
+                </Button>
+              </Stack>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2}>
+                <Button
+                  fullWidth
+                  variant="contained"
+                  color="primary"
+                  disabled={!canEnableAuto || botModeAction.isPending}
+                  onClick={() => botModeAction.mutate("AUTO")}
+                  sx={{ fontWeight: 950 }}
+                >
+                  {botModeAction.isPending && botModeAction.variables === "AUTO" ? "ĐANG BẬT AUTO..." : "BẬT AUTO"}
+                </Button>
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  color="warning"
+                  disabled={!canPause || botModeAction.isPending}
+                  onClick={() => botModeAction.mutate("PAUSE")}
+                  sx={{ fontWeight: 950 }}
+                >
+                  {botModeAction.isPending && botModeAction.variables === "PAUSE" ? "ĐANG PAUSE..." : "TẠM DỪNG"}
+                </Button>
+              </Stack>
             </Stack>
           </Stack>
 
           {!bridgeReady ? (
             <Alert severity="warning" sx={{ mt: 2 }}>
-              MT5 đang tắt hoặc Bridge đang tự kết nối lại. Web vẫn hoạt động;
-              nút BẬT BOT được khóa cho tới khi MT5 DEMO/LIVE và Algo Trading
-              sẵn sàng.
+              MT5 đang tắt hoặc Bridge đang tự kết nối lại. Web vẫn hoạt động; nút BẬT BOT/AUTO được khóa cho tới khi MT5 DEMO/LIVE và Algo Trading sẵn sàng.
             </Alert>
           ) : !brokerModeSupported ? (
             <Alert severity="warning" sx={{ mt: 2 }}>
-              Loại tài khoản MT5 hiện tại không được Phase7C hỗ trợ. Chỉ DEMO
-              hoặc LIVE/real được phép; Bot giữ PAUSE.
+              Loại tài khoản MT5 hiện tại không được Phase7C hỗ trợ. Chỉ DEMO hoặc LIVE/real được phép; Bot giữ PAUSE.
             </Alert>
           ) : lifecycleData?.bridge.accountMode === "real" ? (
             <Alert severity="warning" sx={{ mt: 2 }}>
-              Đang nhận diện tài khoản LIVE. Nút BẬT BOT chỉ chạy LIVE nếu quyền
-              LIVE đã được xác nhận trước; nếu chưa có quyền, backend sẽ chặn và
-              giữ PAUSE. Web không đổi tài khoản MT5 và không tự ARM LIVE lần đầu.
+              Đang nhận diện tài khoản LIVE. Web không tự ARM LIVE lần đầu. Sau khi executors READY, hệ thống vẫn giữ PAUSE cho tới khi người vận hành bấm BẬT AUTO riêng.
             </Alert>
           ) : null}
-          {lifecycle.error ? (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              {friendlyError(lifecycle.error)}
-            </Alert>
-          ) : null}
-          {lifecycleAction.isSuccess ? (
+          {lifecycle.error ? <Alert severity="error" sx={{ mt: 2 }}>{friendlyError(lifecycle.error)}</Alert> : null}
+          {lifecycleAction.isSuccess ? <Alert severity="success" sx={{ mt: 2 }}>{lifecycleAction.data.message}</Alert> : null}
+          {lifecycleAction.error ? <Alert severity="error" sx={{ mt: 2 }}>{friendlyError(lifecycleAction.error)}</Alert> : null}
+          {botModeAction.isSuccess ? (
             <Alert severity="success" sx={{ mt: 2 }}>
-              {lifecycleAction.data.message}
+              Mode đã chuyển sang {botModeAction.data.state.mode}. Nguồn canonical: {botModeAction.data.state.updatedBy}.
             </Alert>
           ) : null}
-          {lifecycleAction.error ? (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              {friendlyError(lifecycleAction.error)}
-            </Alert>
-          ) : null}
+          {botModeAction.error ? <Alert severity="error" sx={{ mt: 2 }}>{friendlyError(botModeAction.error)}</Alert> : null}
           {(lifecycleData?.bridge.openXauusdPositions ?? 0) > 0 ? (
             <Alert severity="info" sx={{ mt: 2 }}>
-              Đang có vị thế XAUUSD; nút DỪNG BOT bị khóa để executor tiếp tục
-              quản lý lệnh.
+              Đang có vị thế XAUUSD; DỪNG HỆ THỐNG và BẬT AUTO bị khóa. TẠM DỪNG mode vẫn khả dụng và không dừng executor quản lý vị thế.
             </Alert>
           ) : null}
         </CardContent>
@@ -414,209 +357,75 @@ export function Phase7CControlCenterPage() {
 
       <Card>
         <CardContent>
-          <Stack
-            direction={{ xs: "column", md: "row" }}
-            justifyContent="space-between"
-            gap={2}
-          >
+          <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2}>
             <Box>
-              <Typography fontWeight={950}>
-                Quyết định hiện tại · Web đồng bộ panel MT5
-              </Typography>
+              <Typography fontWeight={950}>Quyết định hiện tại · Web đồng bộ panel MT5</Typography>
               <Typography variant="caption" color="text.secondary">
-                Một snapshot canonical cho Regime, Entry, SL, TP, Lot, P/L và lý
-                do quyết định.
+                Một snapshot canonical cho Regime, Entry, SL, TP, Lot, P/L và lý do quyết định.
               </Typography>
             </Box>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              <Chip
-                label={`${decision?.mode.active ?? mode} → ${decision?.mode.effectiveStrategy ?? "—"}`}
-                variant="outlined"
-              />
-              <Chip
-                label={`${decision?.engine.regime ?? "ĐANG ĐỌC"} · ${decision?.engine.confidence ?? "—"}`}
-                variant="outlined"
-              />
-              <Chip
-                color={preTrade?.approved ? "success" : "warning"}
-                label={
-                  managing ? position?.state : (preTrade?.stage ?? "ĐANG ĐỌC")
-                }
-              />
+              <Chip label={`${decision?.mode.active ?? mode} → ${decision?.mode.effectiveStrategy ?? "—"}`} variant="outlined" />
+              <Chip label={`${decision?.engine.regime ?? "ĐANG ĐỌC"} · ${decision?.engine.confidence ?? "—"}`} variant="outlined" />
+              <Chip color={preTrade?.approved ? "success" : "warning"} label={managing ? position?.state : (preTrade?.stage ?? "ĐANG ĐỌC")} />
             </Stack>
           </Stack>
 
           {!bridgeReady ? (
-            <Alert severity="info" sx={{ mt: 2 }}>
-              Đang chờ MT5 kết nối lại; dữ liệu giao dịch mới sẽ tự xuất hiện
-              tại đây và trên panel MT5.
-            </Alert>
+            <Alert severity="info" sx={{ mt: 2 }}>Đang chờ MT5 kết nối lại; dữ liệu giao dịch mới sẽ tự xuất hiện tại đây và trên panel MT5.</Alert>
           ) : decisionMonitor.error ? (
-            <Alert severity="warning" sx={{ mt: 2 }}>
-              {friendlyError(decisionMonitor.error)}
-            </Alert>
+            <Alert severity="warning" sx={{ mt: 2 }}>{friendlyError(decisionMonitor.error)}</Alert>
           ) : !decision ? (
             <LinearProgress sx={{ mt: 2 }} />
           ) : (
             <>
               <Grid container spacing={2} sx={{ mt: 0.5 }}>
                 <Grid size={{ xs: 12, sm: 6, xl: 2 }}>
-                  <MetricCard
-                    label="Trạng thái"
-                    value={
-                      managing
-                        ? `${position?.side ?? "—"} · ${position?.state}`
-                        : preTrade?.approved
-                          ? "SETUP HỢP LỆ"
-                          : "CHỜ SETUP"
-                    }
-                    detail={`${decision.mode.effectiveStrategy} · ${preTrade?.setup ?? "WAIT"}`}
-                    tone={
-                      managing || preTrade?.approved
-                        ? "success.main"
-                        : "warning.main"
-                    }
-                  />
+                  <MetricCard label="Trạng thái" value={managing ? `${position?.side ?? "—"} · ${position?.state}` : preTrade?.approved ? "SETUP HỢP LỆ" : "CHỜ SETUP"} detail={`${decision.mode.effectiveStrategy} · ${preTrade?.setup ?? "WAIT"}`} tone={managing || preTrade?.approved ? "success.main" : "warning.main"} />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, xl: 2 }}>
-                  <MetricCard
-                    label="Entry / Giá hiện tại"
-                    value={price(displayedEntry)}
-                    detail={
-                      managing
-                        ? `Hiện tại ${price(position?.currentPrice)}`
-                        : `${preTrade?.side ?? "—"} · ${preTrade?.source ?? "canonical"}`
-                    }
-                  />
+                  <MetricCard label="Entry / Giá hiện tại" value={price(displayedEntry)} detail={managing ? `Hiện tại ${price(position?.currentPrice)}` : `${preTrade?.side ?? "—"} · ${preTrade?.source ?? "canonical"}`} />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, xl: 2 }}>
-                  <MetricCard
-                    label="Stop Loss"
-                    value={price(displayedStop)}
-                    detail={`${managing ? position?.favorableDistance : (preTrade?.stopDistance ?? "—")} giá`}
-                    tone="error.main"
-                  />
+                  <MetricCard label="Stop Loss" value={price(displayedStop)} detail={`${managing ? position?.favorableDistance : (preTrade?.stopDistance ?? "—")} giá`} tone="error.main" />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, xl: 2 }}>
-                  <MetricCard
-                    label="TP1 / TP2"
-                    value={`${price(displayedTp1)} / ${price(displayedTp2)}`}
-                    detail="BE +6 · chốt 1/3 tại +10"
-                    tone="success.main"
-                  />
+                  <MetricCard label="TP1 / TP2" value={`${price(displayedTp1)} / ${price(displayedTp2)}`} detail="BE +6 · chốt 1/3 tại +10" tone="success.main" />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, xl: 2 }}>
-                  <MetricCard
-                    label="Lot"
-                    value={
-                      Number.isFinite(displayedLot)
-                        ? `${Number(displayedLot).toFixed(2)} lot`
-                        : "—"
-                    }
-                    detail={
-                      managing
-                        ? `Ticket ${position?.ticket ?? "—"}`
-                        : `Raw ${preTrade?.rawLot == null ? "—" : preTrade.rawLot.toFixed(4)} · cap ${preTrade?.lotCap == null ? "—" : preTrade.lotCap.toFixed(2)}`
-                    }
-                  />
+                  <MetricCard label="Lot" value={Number.isFinite(displayedLot) ? `${Number(displayedLot).toFixed(2)} lot` : "—"} detail={managing ? `Ticket ${position?.ticket ?? "—"}` : `Raw ${preTrade?.rawLot == null ? "—" : preTrade.rawLot.toFixed(4)} · cap ${preTrade?.lotCap == null ? "—" : preTrade.lotCap.toFixed(2)}`} />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, xl: 2 }}>
-                  <MetricCard
-                    label={managing ? "Lãi / Lỗ đang chạy" : "Rủi ro dự kiến"}
-                    value={money(
-                      managing ? displayedPnl : displayedRisk,
-                      currency,
-                    )}
-                    detail={
-                      managing
-                        ? `${position?.floatingPnlPercent == null ? "—" : position.floatingPnlPercent.toFixed(3)}% equity`
-                        : `${preTrade?.estimatedRiskPercent == null ? "—" : preTrade.estimatedRiskPercent.toFixed(3)}% balance`
-                    }
-                    tone={
-                      (managing ? (displayedPnl ?? 0) : 0) < 0
-                        ? "error.main"
-                        : "success.main"
-                    }
-                  />
+                  <MetricCard label={managing ? "Lãi / Lỗ đang chạy" : "Rủi ro dự kiến"} value={money(managing ? displayedPnl : displayedRisk, currency)} detail={managing ? `${position?.floatingPnlPercent == null ? "—" : position.floatingPnlPercent.toFixed(3)}% equity` : `${preTrade?.estimatedRiskPercent == null ? "—" : preTrade.estimatedRiskPercent.toFixed(3)}% balance`} tone={(managing ? (displayedPnl ?? 0) : 0) < 0 ? "error.main" : "success.main"} />
                 </Grid>
               </Grid>
 
               <Grid container spacing={2} sx={{ mt: 0.25 }}>
-                <Grid size={{ xs: 12, lg: 6 }}>
-                  <ReasonBox title="LÝ DO VÀO LỆNH / CHỜ LỆNH">
-                    {entryReason}
-                  </ReasonBox>
-                </Grid>
-                <Grid size={{ xs: 12, lg: 6 }}>
-                  <ReasonBox title="LÝ DO VẪN GIỮ">{holdReason}</ReasonBox>
-                </Grid>
+                <Grid size={{ xs: 12, lg: 6 }}><ReasonBox title="LÝ DO VÀO LỆNH / CHỜ LỆNH">{entryReason}</ReasonBox></Grid>
+                <Grid size={{ xs: 12, lg: 6 }}><ReasonBox title="LÝ DO VẪN GIỮ">{holdReason}</ReasonBox></Grid>
               </Grid>
 
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: "block", mt: 1.5 }}
-              >
-                Engine:{" "}
-                {decision.engine.reasons.length > 0
-                  ? decision.engine.reasons.join(" · ")
-                  : "Chưa có diễn giải"}
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>
+                Engine: {decision.engine.reasons.length > 0 ? decision.engine.reasons.join(" · ") : "Chưa có diễn giải"}
                 {` · Snapshot ${dateTime(decision.generatedAt)} · MT5 panel order permission ${decision.safety.mt5PanelOrderPermission}`}
               </Typography>
 
-              <Typography fontWeight={900} sx={{ mt: 2 }}>
-                Nhật ký quyết định gần nhất
-              </Typography>
+              <Typography fontWeight={900} sx={{ mt: 2 }}>Nhật ký quyết định gần nhất</Typography>
               <TableContainer sx={{ mt: 1 }}>
                 <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Thời gian</TableCell>
-                      <TableCell>Bot / Trạng thái</TableCell>
-                      <TableCell>Lot</TableCell>
-                      <TableCell>SL</TableCell>
-                      <TableCell>Risk</TableCell>
-                      <TableCell>Lý do</TableCell>
-                    </TableRow>
-                  </TableHead>
+                  <TableHead><TableRow><TableCell>Thời gian</TableCell><TableCell>Bot / Trạng thái</TableCell><TableCell>Lot</TableCell><TableCell>SL</TableCell><TableCell>Risk</TableCell><TableCell>Lý do</TableCell></TableRow></TableHead>
                   <TableBody>
                     {decision.recentDecisions.slice(0, 6).map((row, index) => (
-                      <TableRow
-                        key={`${row.timestamp}-${row.strategy}-${row.event}-${index}`}
-                      >
+                      <TableRow key={`${row.timestamp}-${row.strategy}-${row.event}-${index}`}>
                         <TableCell>{dateTime(row.timestamp)}</TableCell>
-                        <TableCell>
-                          <b>{row.strategy}</b>
-                          <br />
-                          <Typography component="span" variant="caption">
-                            {row.event} · {row.stage}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          {row.sizing?.finalLot == null
-                            ? "—"
-                            : Number(row.sizing.finalLot).toFixed(2)}
-                        </TableCell>
-                        <TableCell>
-                          {row.plan?.stopDistance == null
-                            ? "—"
-                            : `${Number(row.plan.stopDistance).toFixed(2)} giá`}
-                        </TableCell>
-                        <TableCell>
-                          {money(row.sizing?.estimatedRiskUsd, currency)}
-                        </TableCell>
-                        <TableCell sx={{ minWidth: 280 }}>
-                          {row.reason}
-                        </TableCell>
+                        <TableCell><b>{row.strategy}</b><br /><Typography component="span" variant="caption">{row.event} · {row.stage}</Typography></TableCell>
+                        <TableCell>{row.sizing?.finalLot == null ? "—" : Number(row.sizing.finalLot).toFixed(2)}</TableCell>
+                        <TableCell>{row.plan?.stopDistance == null ? "—" : `${Number(row.plan.stopDistance).toFixed(2)} giá`}</TableCell>
+                        <TableCell>{money(row.sizing?.estimatedRiskUsd, currency)}</TableCell>
+                        <TableCell sx={{ minWidth: 280 }}>{row.reason}</TableCell>
                       </TableRow>
                     ))}
-                    {decision.recentDecisions.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={6}>
-                          Chưa có quyết định mới trong phiên này.
-                        </TableCell>
-                      </TableRow>
-                    ) : null}
+                    {decision.recentDecisions.length === 0 ? <TableRow><TableCell colSpan={6}>Chưa có quyết định mới trong phiên này.</TableCell></TableRow> : null}
                   </TableBody>
                 </Table>
               </TableContainer>
@@ -627,71 +436,20 @@ export function Phase7CControlCenterPage() {
 
       <Card>
         <CardContent>
-          <Typography fontWeight={950}>
-            Kết quả ngày & Daily Recovery
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            Tách riêng kết quả đã chốt khỏi quyết định entry để tránh hiển thị
-            trùng Regime và Lot.
-          </Typography>
-
+          <Typography fontWeight={950}>Kết quả ngày & Daily Recovery</Typography>
+          <Typography variant="caption" color="text.secondary">Tách riêng kết quả đã chốt khỏi quyết định entry để tránh hiển thị trùng Regime và Lot.</Typography>
           {!bridgeReady ? (
-            <Alert severity="info" sx={{ mt: 2 }}>
-              Lịch sử P/L sẽ tự tải lại sau khi MT5 kết nối.
-            </Alert>
+            <Alert severity="info" sx={{ mt: 2 }}>Lịch sử P/L sẽ tự tải lại sau khi MT5 kết nối.</Alert>
           ) : dailyRecovery.error ? (
-            <Alert severity="warning" sx={{ mt: 2 }}>
-              {friendlyError(dailyRecovery.error)}
-            </Alert>
+            <Alert severity="warning" sx={{ mt: 2 }}>{friendlyError(dailyRecovery.error)}</Alert>
           ) : !dailyRecovery.data ? (
             <LinearProgress sx={{ mt: 2 }} />
           ) : (
             <Grid container spacing={2} sx={{ mt: 0.5 }}>
-              <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-                <MetricCard
-                  label="P/L đã chốt hôm nay"
-                  value={money(dailyRecovery.data.dailyNetPnl, currency)}
-                  detail={`${dailyRecovery.data.dealCount} deal · broker history`}
-                  tone={
-                    dailyRecovery.data.dailyNetPnl < 0
-                      ? "error.main"
-                      : "success.main"
-                  }
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-                <MetricCard
-                  label="Daily Mode"
-                  value={dailyRecovery.data.dailyMode}
-                  detail={dailyRecovery.data.nextEntryManagement}
-                  tone={
-                    dailyRecovery.data.dailyMode === "RECOVERY_TP"
-                      ? "warning.main"
-                      : "success.main"
-                  }
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-                <MetricCard
-                  label="Cần phục hồi"
-                  value={money(
-                    dailyRecovery.data.preview.requiredUsd,
-                    currency,
-                  )}
-                  detail="Không tăng lot · không ép entry"
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-                <MetricCard
-                  label="TP Recovery dự kiến"
-                  value={
-                    dailyRecovery.data.preview.tpDistance == null
-                      ? "REGIME NATIVE"
-                      : `${dailyRecovery.data.preview.tpDistance.toFixed(2)} giá`
-                  }
-                  detail={`${dailyRecovery.data.preview.volume.toFixed(2)} lot · ${dailyRecovery.data.preview.canRecoverInOneTrade ? "đủ trong 1 lệnh" : "không ép mục tiêu"}`}
-                />
-              </Grid>
+              <Grid size={{ xs: 12, sm: 6, xl: 3 }}><MetricCard label="P/L đã chốt hôm nay" value={money(dailyRecovery.data.dailyNetPnl, currency)} detail={`${dailyRecovery.data.dealCount} deal · broker history`} tone={dailyRecovery.data.dailyNetPnl < 0 ? "error.main" : "success.main"} /></Grid>
+              <Grid size={{ xs: 12, sm: 6, xl: 3 }}><MetricCard label="Daily Mode" value={dailyRecovery.data.dailyMode} detail={dailyRecovery.data.nextEntryManagement} tone={dailyRecovery.data.dailyMode === "RECOVERY_TP" ? "warning.main" : "success.main"} /></Grid>
+              <Grid size={{ xs: 12, sm: 6, xl: 3 }}><MetricCard label="Cần phục hồi" value={money(dailyRecovery.data.preview.requiredUsd, currency)} detail="Không tăng lot · không ép entry" /></Grid>
+              <Grid size={{ xs: 12, sm: 6, xl: 3 }}><MetricCard label="TP Recovery dự kiến" value={dailyRecovery.data.preview.tpDistance == null ? "REGIME NATIVE" : `${dailyRecovery.data.preview.tpDistance.toFixed(2)} giá`} detail={`${dailyRecovery.data.preview.volume.toFixed(2)} lot · ${dailyRecovery.data.preview.canRecoverInOneTrade ? "đủ trong 1 lệnh" : "không ép mục tiêu"}`} /></Grid>
             </Grid>
           )}
         </CardContent>
@@ -699,133 +457,39 @@ export function Phase7CControlCenterPage() {
 
       <Card>
         <CardContent>
-          <Stack
-            direction={{ xs: "column", md: "row" }}
-            justifyContent="space-between"
-            gap={2}
-          >
+          <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2}>
             <Box>
-              <Typography fontWeight={950}>
-                Cấu hình Risk & Lot cho lệnh mới
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                DEMO only · không martingale · không thay đổi vị thế đang quản
-                lý.
-              </Typography>
+              <Typography fontWeight={950}>Cấu hình Risk & Lot cho lệnh mới</Typography>
+              <Typography variant="caption" color="text.secondary">DEMO only · không martingale · không thay đổi vị thế đang quản lý.</Typography>
             </Box>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              <Chip
-                label={`Trend ${configuredTrendLot.toFixed(2)} lot`}
-                variant="outlined"
-              />
-              <Chip
-                label={`Sideway ${configuredSidewayRisk.toFixed(2)}%`}
-                variant="outlined"
-              />
-              <Chip
-                label={`Cap ${configuredSidewayMaxLot.toFixed(2)} lot`}
-                variant="outlined"
-              />
-              <Button
-                component={RouterLink}
-                to="/phase7b-pattern-check"
-                size="small"
-                variant="outlined"
-              >
-                Xem điều kiện tín hiệu
-              </Button>
+              <Chip label={`Trend ${configuredTrendLot.toFixed(2)} lot`} variant="outlined" />
+              <Chip label={`Sideway ${configuredSidewayRisk.toFixed(2)}%`} variant="outlined" />
+              <Chip label={`Cap ${configuredSidewayMaxLot.toFixed(2)} lot`} variant="outlined" />
+              <Button component={RouterLink} to="/phase7b-pattern-check" size="small" variant="outlined">Xem điều kiện tín hiệu</Button>
             </Stack>
           </Stack>
 
           <Grid container spacing={2} sx={{ mt: 0.5 }}>
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField
-                fullWidth
-                size="small"
-                type="number"
-                label="Trend fixed lot"
-                value={trendFixedLot}
-                onChange={(event) =>
-                  updateLotDraft({ trendFixedLot: Number(event.target.value) })
-                }
-                slotProps={{ htmlInput: { min: 0.03, max: 0.3, step: 0.03 } }}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField
-                fullWidth
-                size="small"
-                type="number"
-                label="Sideway risk / lệnh (%)"
-                value={sidewayRiskPercent}
-                onChange={(event) =>
-                  updateLotDraft({
-                    sidewayRiskPercent: Number(event.target.value),
-                  })
-                }
-                slotProps={{ htmlInput: { min: 0.01, max: 1, step: 0.01 } }}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField
-                fullWidth
-                size="small"
-                type="number"
-                label="Sideway max lot"
-                value={sidewayMaxLot}
-                onChange={(event) =>
-                  updateLotDraft({ sidewayMaxLot: Number(event.target.value) })
-                }
-                slotProps={{ htmlInput: { min: 0.03, max: 0.3, step: 0.03 } }}
-              />
-            </Grid>
+            <Grid size={{ xs: 12, sm: 4 }}><TextField fullWidth size="small" type="number" label="Trend fixed lot" value={trendFixedLot} onChange={(event) => updateLotDraft({ trendFixedLot: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0.03, max: 0.3, step: 0.03 } }} /></Grid>
+            <Grid size={{ xs: 12, sm: 4 }}><TextField fullWidth size="small" type="number" label="Sideway risk / lệnh (%)" value={sidewayRiskPercent} onChange={(event) => updateLotDraft({ sidewayRiskPercent: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0.01, max: 1, step: 0.01 } }} /></Grid>
+            <Grid size={{ xs: 12, sm: 4 }}><TextField fullWidth size="small" type="number" label="Sideway max lot" value={sidewayMaxLot} onChange={(event) => updateLotDraft({ sidewayMaxLot: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0.03, max: 0.3, step: 0.03 } }} /></Grid>
           </Grid>
 
-          <Stack
-            direction={{ xs: "column", sm: "row" }}
-            spacing={1.5}
-            alignItems={{ sm: "center" }}
-            sx={{ mt: 2 }}
-          >
-            <Button
-              variant="contained"
-              disabled={
-                !canChangeLot || saveLotSettings.isPending || !lotSettings.data
-              }
-              onClick={() =>
-                saveLotSettings.mutate({
-                  trendFixedLot,
-                  sidewayRiskPercent,
-                  sidewayMaxLot,
-                })
-              }
-            >
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }} sx={{ mt: 2 }}>
+            <Button variant="contained" disabled={!canChangeLot || saveLotSettings.isPending || !lotSettings.data} onClick={() => saveLotSettings.mutate({ trendFixedLot, sidewayRiskPercent, sidewayMaxLot })}>
               {saveLotSettings.isPending ? "Đang lưu..." : "Lưu cấu hình lot"}
             </Button>
-            <Typography variant="caption" color="text.secondary">
-              Chỉ lưu khi Mode PAUSE, MT5 DEMO kết nối và không có vị thế
-              XAUUSD.
-            </Typography>
+            <Typography variant="caption" color="text.secondary">Chỉ lưu khi Mode PAUSE, MT5 DEMO kết nối và không có vị thế XAUUSD.</Typography>
           </Stack>
 
-          {saveLotSettings.error ? (
-            <Alert severity="error" sx={{ mt: 1.5 }}>
-              {friendlyError(saveLotSettings.error)}
-            </Alert>
-          ) : null}
+          {saveLotSettings.error ? <Alert severity="error" sx={{ mt: 1.5 }}>{friendlyError(saveLotSettings.error)}</Alert> : null}
           {lotSettings.error ? (
-            <Alert severity="error" sx={{ mt: 1.5 }}>
-              {friendlyError(lotSettings.error)}
-            </Alert>
+            <Alert severity="error" sx={{ mt: 1.5 }}>{friendlyError(lotSettings.error)}</Alert>
           ) : lotSettings.data?.restartRequired ? (
-            <Alert severity="warning" sx={{ mt: 1.5 }}>
-              Cấu hình đã lưu nhưng chưa active. Giữ PAUSE rồi nhấn KHÔI PHỤC
-              BOT để nạp cấu hình mới.
-            </Alert>
+            <Alert severity="warning" sx={{ mt: 1.5 }}>Cấu hình đã lưu nhưng chưa active. Giữ PAUSE rồi nhấn KHÔI PHỤC BOT để nạp cấu hình mới.</Alert>
           ) : lotSettings.data?.activeAlive ? (
-            <Alert severity="success" sx={{ mt: 1.5 }}>
-              Executor đang dùng đúng cấu hình đã lưu.
-            </Alert>
+            <Alert severity="success" sx={{ mt: 1.5 }}>Executor đang dùng đúng cấu hình đã lưu.</Alert>
           ) : null}
         </CardContent>
       </Card>
