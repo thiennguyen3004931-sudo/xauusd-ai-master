@@ -1,0 +1,107 @@
+name: Temporary Phase7B LIVE Status Patch
+
+on:
+  push:
+    branches:
+      - fix/phase7b-live-status-runtime
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[runtime-status-patched]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/phase7b-live-status-runtime
+          fetch-depth: 0
+
+      - name: Patch Phase7B status route
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('apps/api/src/routes/phase7b-demo.route.ts')
+          s = p.read_text(encoding='utf-8')
+
+          old_import = 'import { shouldComputePhase7BEntryDiagnostics } from "../services/phase7b-entry-diagnostics-account-mode";\n'
+          new_import = old_import + 'import { phase7BForwardRuntimeDirName } from "../services/phase7b-status-runtime-account-mode";\n'
+          if new_import not in s:
+              if old_import not in s:
+                  raise SystemExit('expected diagnostics import not found')
+              s = s.replace(old_import, new_import, 1)
+
+          old_start = '    const demoDir = findLatestDemoDir();\n    const telemetry = await getMt5Telemetry("XAUUSD");\n'
+          new_start = '    const telemetry = await getMt5Telemetry("XAUUSD");\n    const demoDir = findLatestDemoDir(telemetry.health?.accountMode ?? null);\n'
+          if new_start not in s:
+              if old_start not in s:
+                  raise SystemExit('expected route start not found')
+              s = s.replace(old_start, new_start, 1)
+
+          replacement = '''function findLatestDemoDir(brokerAccountMode: string | null | undefined): string | null {
+            const forwardDirName = phase7BForwardRuntimeDirName(brokerAccountMode);
+            const runtimeRoot = process.env.PHASE7C_RUNTIME_ROOT?.trim();
+            if (runtimeRoot) {
+              const candidate = path.resolve(runtimeRoot, forwardDirName);
+              if (fs.existsSync(candidate)) return candidate;
+            }
+
+            const configured = process.env.PHASE7B_DEMO_WORK_DIR?.trim();
+            if (configured) {
+              const resolved = path.resolve(configured);
+              const configuredBase = path.basename(resolved).toLowerCase();
+              const siblingCandidate = configuredBase === forwardDirName
+                ? resolved
+                : path.join(path.dirname(resolved), forwardDirName);
+              if (fs.existsSync(siblingCandidate)) return siblingCandidate;
+
+              const nestedCandidate = path.join(resolved, forwardDirName);
+              if (fs.existsSync(nestedCandidate)) return nestedCandidate;
+            }
+
+            const bases = [
+              path.resolve(process.cwd(), "data", "historical-replay"),
+              path.resolve(process.cwd(), "apps", "api", "data", "historical-replay"),
+              path.resolve(process.cwd(), "..", "..", "apps", "api", "data", "historical-replay"),
+            ];
+
+            const found: Array<{ dir: string; mtimeMs: number }> = [];
+            for (const base of [...new Set(bases)]) {
+              if (!fs.existsSync(base)) continue;
+              for (const entry of fs.readdirSync(base, { withFileTypes: true })) {
+                if (!entry.isDirectory()) continue;
+                const runtimeDir = path.join(base, entry.name, forwardDirName);
+                if (!fs.existsSync(runtimeDir)) continue;
+                const runtime = path.join(runtimeDir, "phase7b-demo-runtime.json");
+                const state = path.join(runtimeDir, "phase7b-demo-state.json");
+                const journal = path.join(runtimeDir, "phase7b-demo-events.jsonl");
+                const probe = fs.existsSync(runtime) ? runtime : fs.existsSync(journal) ? journal : fs.existsSync(state) ? state : runtimeDir;
+                found.push({ dir: runtimeDir, mtimeMs: fs.statSync(probe).mtimeMs });
+              }
+            }
+
+            found.sort((a, b) => b.mtimeMs - a.mtimeMs);
+            return found[0]?.dir ?? null;
+          }
+
+          function isPidAlive'''
+
+          pattern = r'function findLatestDemoDir\(\): string \| null \{[\s\S]*?\n\}\n\nfunction isPidAlive'
+          s2, count = re.subn(pattern, replacement, s, count=1)
+          if count != 1:
+              raise SystemExit(f'expected one runtime-dir function, replaced={count}')
+
+          p.write_text(s2, encoding='utf-8')
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/api/src/routes/phase7b-demo.route.ts
+          git diff --cached --check
+          git commit -m "fix: use LIVE Phase7B status runtime [runtime-status-patched]"
+          git push origin HEAD:fix/phase7b-live-status-runtime
