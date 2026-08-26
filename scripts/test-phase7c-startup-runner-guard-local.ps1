@@ -2,9 +2,11 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $GuardLibrary = Join-Path $PSScriptRoot "lib\phase7c-startup-runner-guard.ps1"
 $Runner = Join-Path $PSScriptRoot "run-phase7c-executor-task-runner-local.ps1"
+$Supervisor = Join-Path $PSScriptRoot "run-phase7c-executors-local.ps1"
 
 if (-not (Test-Path -LiteralPath $GuardLibrary)) { throw "Missing startup runner guard: $GuardLibrary" }
 if (-not (Test-Path -LiteralPath $Runner)) { throw "Missing startup runner: $Runner" }
+if (-not (Test-Path -LiteralPath $Supervisor)) { throw "Missing executor supervisor: $Supervisor" }
 . $GuardLibrary
 
 function Assert-True([bool]$Value, [string]$Message) {
@@ -86,6 +88,7 @@ try {
 
   Assert-PowerShellSyntax $GuardLibrary
   Assert-PowerShellSyntax $Runner
+  Assert-PowerShellSyntax $Supervisor
 
   $runnerText = Get-Content -LiteralPath $Runner -Raw
   Assert-True ($runnerText -match 'phase7c-startup-runner-guard\.ps1') "runner must load the singleton guard library"
@@ -93,6 +96,28 @@ try {
   Assert-True ($runnerText -match 'Write-Phase7CJsonAtomic') "runner status writes must use atomic replacement"
   Assert-True ($runnerText -match 'PHASE7C_EXECUTOR_TASK_RUNNER_LOCK=BLOCKED') "duplicate runner attempts must be observable"
   Assert-True ($runnerText -match '\$runnerLock\.Dispose\(\)') "runner must release its lock on graceful exit"
+
+  # Startup is a safety boundary: once dependencies are ready, the canonical
+  # control API must be forced to PAUSE before either trading controller starts.
+  # AUTO must remain an explicit operator/Web action after startup.
+  $supervisorText = Get-Content -LiteralPath $Supervisor -Raw
+  Assert-True ($supervisorText -match 'function\s+Set-Phase7CStartupPause') "supervisor must define an explicit startup PAUSE transition"
+  Assert-True ($supervisorText -match '(?s)Set-Phase7CStartupPause.*Invoke-RestMethod.*?/api/v1/phase7c/bot-mode') "startup PAUSE must go through the canonical bot-mode API"
+  Assert-True ($supervisorText -match '(?s)Set-Phase7CStartupPause.*?mode\s*=\s*["'']PAUSE["'']') "startup transition must request PAUSE"
+  Assert-True ($supervisorText -match '(?s)Set-Phase7CStartupPause.*?source\s*=\s*["'']startup-scheduled-task["'']') "startup PAUSE must identify its provenance source"
+  Assert-True ($supervisorText -match '(?s)Set-Phase7CStartupPause.*?state\.mode.*?PAUSE') "startup must verify the API persisted PAUSE"
+
+  $dependencyCall = [regex]::Match($supervisorText, '(?m)^\s{2}Wait-Phase7CDependencies\s*$')
+  $pauseCall = [regex]::Match($supervisorText, '(?m)^\s{2}Set-Phase7CStartupPause\s*$')
+  $trendLaunch = [regex]::Match($supervisorText, '(?m)^\s{2}\$trend\s*=\s*Start-Process\b')
+  $sidewayLaunch = [regex]::Match($supervisorText, '(?m)^\s{2}\$sideway\s*=\s*Start-Process\b')
+  Assert-True $dependencyCall.Success "supervisor must wait for dependencies before the startup PAUSE transition"
+  Assert-True $pauseCall.Success "supervisor must invoke the startup PAUSE transition"
+  Assert-True $trendLaunch.Success "test contract must locate the Trend launch boundary"
+  Assert-True $sidewayLaunch.Success "test contract must locate the Sideway launch boundary"
+  Assert-True ($dependencyCall.Index -lt $pauseCall.Index) "startup PAUSE must happen after dependency readiness"
+  Assert-True ($pauseCall.Index -lt $trendLaunch.Index) "startup PAUSE must happen before Trend launch"
+  Assert-True ($pauseCall.Index -lt $sidewayLaunch.Index) "startup PAUSE must happen before Sideway launch"
 
   Write-Host "PHASE7C_STARTUP_RUNNER_GUARD_TEST=PASS"
 } finally {
