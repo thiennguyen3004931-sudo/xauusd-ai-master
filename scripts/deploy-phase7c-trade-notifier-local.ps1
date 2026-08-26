@@ -204,8 +204,7 @@ while ((Get-Date) -lt $deadline) {
       -TelegramEnvFile $TelegramEnvFile `
       -AccountMode $AccountMode `
       -DeploymentGate `
-      -RequireMigratedTask `
-      -RequireTelegram *>&1
+      -RequireMigratedTask *>&1
     $verificationText = $verificationOutput | Out-String
     if ($verificationText -notmatch 'PHASE7C_VERIFY_DEPLOYMENT_GATE=PASS') {
       throw "Deployment verifier returned without PASS marker.`n$verificationText"

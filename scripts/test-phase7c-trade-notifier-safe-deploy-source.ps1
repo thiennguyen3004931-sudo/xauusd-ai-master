@@ -30,7 +30,7 @@ Assert-True ($source.Contains('/T')) 'Supervisor termination must include the ch
 Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY_NEW_SUPERVISOR_PID')) 'Deploy script must prove a new supervisor PID is running.'
 Assert-True ($source.Contains('-DeploymentGate')) 'Deploy script must invoke the canonical deployment verifier gate.'
 Assert-True ($source.Contains('-RequireMigratedTask')) 'Deploy script must require the owned startup-runner task.'
-Assert-True ($source.Contains('-RequireTelegram')) 'Deploy script must require Telegram services after restart.'
+Assert-True (-not $source.Contains('-RequireTelegram')) 'Trade notifier deploy gate must not depend on telegram-mode/regime-notifier readiness.'
 Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY=PASS')) 'Deploy script must emit an explicit final PASS marker.'
 
 $forbiddenTaskCommands = @('Start-ScheduledTask', 'Stop-ScheduledTask', 'Register-ScheduledTask', 'Set-ScheduledTask')
