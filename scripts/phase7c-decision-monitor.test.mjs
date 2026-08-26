@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import {
   buildPhase7CDecisionMonitor,
@@ -239,4 +240,21 @@ test("desktop lifecycle validates the selected account mode and all MT5 trading 
 
   const algoOff = { ...ready, health: { ...ready.health, expertTradeAllowed: false } };
   assert.throws(() => assertPhase7CSelectedAccountReady(algoOff), /Algo\/Expert Trading chưa bật/);
+});
+
+test("Daily Recovery follows the canonical Phase7C account mode instead of requiring DEMO telemetry", () => {
+  const source = fs.readFileSync(
+    new URL("../apps/api/src/services/phase7c-daily-recovery-view.service.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /getPhase7CAccountModeState/);
+  assert.match(source, /accountModeAllowsBroker/);
+  assert.doesNotMatch(source, /telemetry\.health\?\.accountMode\s*!==\s*["']demo["']/);
+  assert.match(
+    source,
+    /accountModeAllowsBroker\(\s*telemetry\.health\?\.accountMode,\s*accountModeState\s*\)/s,
+  );
+  assert.match(source, /MT5_LIVE_READ_ONLY/);
+  assert.match(source, /MT5_DEMO_READ_ONLY/);
 });
