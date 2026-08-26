@@ -1,8 +1,7 @@
 param(
   [string]$WorkDir = ".runtime",
   [string]$ControlApiUrl = "http://127.0.0.1:3711",
-  [string]$EnvFile = "",
-  [int]$ArmMinutes = 120
+  [string]$EnvFile = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -118,7 +117,6 @@ $arm = Write-Phase7CLiveArmState `
   -Login $expectedLogin `
   -Server $expectedServer `
   -TerminalPath $terminalPath `
-  -ArmMinutes $ArmMinutes `
   -ArmedBy "$env:USERDOMAIN\$env:USERNAME"
 
 $confirmed = Invoke-BridgeJson "/health"
@@ -131,5 +129,5 @@ Write-Host "PHASE7C_LIVE_ARM_ACCOUNT_MODE=LIVE"
 Write-Host "PHASE7C_LIVE_ARM_ACCOUNT_LOGIN=$expectedLogin"
 Write-Host "PHASE7C_LIVE_ARM_SERVER=$expectedServer"
 Write-Host "PHASE7C_LIVE_ARM_BRIDGE_SESSION=$($arm.bridgeSessionId)"
-Write-Host "PHASE7C_LIVE_ARM_EXPIRES_AT=$($arm.expiresAt)"
+Write-Host "PHASE7C_LIVE_ARM_SCOPE=BRIDGE_SESSION"
 Write-Host "PHASE7C_LIVE_ARM_STATUS=ARMED"
