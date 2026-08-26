@@ -90,6 +90,27 @@ def write_valid_arm(path: Path, session_id: str, *, expires_delta_ms: int = 1200
     )
 
 
+def write_session_arm(path: Path, session_id: str) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "armed": True,
+                "scope": "BRIDGE_SESSION",
+                "accountMode": "LIVE",
+                "bridgeSessionId": session_id,
+                "accountLogin": 900001,
+                "server": "Broker-Live",
+                "profileFingerprint": profile_fingerprint(
+                    "LIVE", 900001, "Broker-Live", r"C:\MT5-LIVE\terminal64.exe"
+                ),
+                "armedAt": int(time.time() * 1000),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 class LiveArmTests(unittest.TestCase):
     def test_compatibility_flag_alone_is_not_an_arm(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -107,7 +128,7 @@ class LiveArmTests(unittest.TestCase):
             self.assertFalse(decision.armed)
             self.assertEqual(decision.reason, "ARM_FILE_MISSING")
 
-    def test_missing_corrupt_expired_and_mismatched_arm_fail_closed(self):
+    def test_missing_corrupt_expired_and_mismatched_legacy_arm_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             arm = root / "live-arm.json"
@@ -134,7 +155,30 @@ class LiveArmTests(unittest.TestCase):
             wrong_login = {**common, "account_login": 900002}
             self.assertEqual(evaluate_live_arm(**wrong_login).reason, "ARM_LOGIN_MISMATCH")
 
-    def test_exact_current_arm_passes_and_bridge_restart_invalidates_it(self):
+    def test_session_arm_remains_valid_for_same_bridge_session_without_ttl(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            arm = root / "live-arm.json"
+            common = dict(
+                path=arm,
+                configured_account_mode="LIVE",
+                account_login=900001,
+                account_server="Broker-Live",
+                terminal_path=r"C:\MT5-LIVE\terminal64.exe",
+                compatibility_enabled=True,
+            )
+
+            write_session_arm(arm, "session-a")
+            decision = evaluate_live_arm(bridge_session_id="session-a", **common)
+            self.assertTrue(decision.armed)
+            self.assertEqual(decision.reason, "ARMED")
+            self.assertEqual(decision.state.get("scope"), "BRIDGE_SESSION")
+
+            restarted = evaluate_live_arm(bridge_session_id="session-b", **common)
+            self.assertFalse(restarted.armed)
+            self.assertEqual(restarted.reason, "ARM_BRIDGE_SESSION_MISMATCH")
+
+    def test_exact_current_legacy_arm_passes_and_bridge_restart_invalidates_it(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             arm = root / "live-arm.json"
