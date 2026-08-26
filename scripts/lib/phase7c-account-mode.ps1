@@ -324,23 +324,21 @@ function Write-Phase7CLiveArmState(
   [long]$Login,
   [string]$Server,
   [string]$TerminalPath,
-  [int]$ArmMinutes = 120,
   [string]$ArmedBy = "local-operator"
 ) {
   Set-StrictMode -Version Latest
   if ([string]::IsNullOrWhiteSpace($BridgeSessionId)) { throw "BridgeSessionId is required to arm LIVE." }
-  if ($ArmMinutes -lt 1 -or $ArmMinutes -gt 480) { throw "ArmMinutes must be between 1 and 480." }
   $now = [DateTimeOffset]::UtcNow
   $state = [pscustomobject]@{
-    version = 1
+    version = 2
     armed = $true
+    scope = "BRIDGE_SESSION"
     accountMode = "LIVE"
     bridgeSessionId = $BridgeSessionId
     accountLogin = $Login
     server = $Server
     profileFingerprint = Get-Phase7CLiveProfileFingerprint -Login $Login -Server $Server -TerminalPath $TerminalPath
     armedAt = $now.ToUnixTimeMilliseconds()
-    expiresAt = $now.AddMinutes($ArmMinutes).ToUnixTimeMilliseconds()
     armedBy = $ArmedBy
   }
   Write-Phase7CAccountJsonAtomic -Path (Get-Phase7CLiveArmPath $WorkDir) -Value $state -Depth 5

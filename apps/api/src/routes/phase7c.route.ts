@@ -152,6 +152,11 @@ router.get("/lifecycle", async (req: Request, res: Response) => {
         tradingEnabled: telemetry.health?.tradingEnabled ?? null,
         terminalTradeAllowed: telemetry.health?.terminalTradeAllowed ?? null,
         expertTradeAllowed: telemetry.health?.expertTradeAllowed ?? null,
+        liveExecutionArmed: telemetry.health?.liveExecutionArmed ?? null,
+        liveArmStatus: telemetry.health?.liveArmStatus ?? null,
+        liveArmReason: telemetry.health?.liveArmReason ?? null,
+        liveArmScope: telemetry.health?.liveArmScope ?? null,
+        liveRiskReductionAllowedWhenDisarmed: telemetry.health?.liveRiskReductionAllowedWhenDisarmed ?? null,
         openXauusdPositions: telemetry.positions.length,
       },
     });

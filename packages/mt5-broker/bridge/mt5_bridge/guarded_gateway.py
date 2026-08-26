@@ -7,16 +7,18 @@ from .config import Settings
 from .errors import BridgeError
 from .ledger import IdempotencyLedger
 from .live_arm import LiveArmDecision, evaluate_live_arm
+from .models import CloseRequest, ModifyRequest
 from .mt5_gateway import Mt5Gateway
 
 
 class GuardedMt5Gateway(Mt5Gateway):
-    """MT5 gateway with a process-bound fail-closed guard for REAL mutations.
+    """MT5 gateway with a process-bound fail-closed guard for REAL exposure.
 
     The legacy real-account environment flags remain capability prerequisites,
-    but they never authorize a REAL order by themselves. Every mutation still
-    flows through Mt5Gateway._require_trading(), which dynamically dispatches
-    to this override before order_send/order_check is reached.
+    but they never authorize new REAL exposure by themselves. A valid LIVE arm
+    is required for exposure-increasing mutations. Risk-reducing management of
+    an already-open position remains available while DISARMED, but every base
+    trading/account/allowlist/AutoTrading check still applies.
     """
 
     def __init__(
@@ -54,6 +56,13 @@ class GuardedMt5Gateway(Mt5Gateway):
         elif connected and self.settings.account_mode == "LIVE":
             decision = LiveArmDecision(False, "ACCOUNT_MODE_MISMATCH")
 
+        arm_scope = None
+        if decision.state:
+            if int(decision.state.get("version", 0) or 0) == 2:
+                arm_scope = str(decision.state.get("scope") or "") or None
+            elif int(decision.state.get("version", 0) or 0) == 1:
+                arm_scope = "LEGACY_TTL"
+
         return {
             **base,
             "configuredAccountMode": self.settings.account_mode,
@@ -62,6 +71,8 @@ class GuardedMt5Gateway(Mt5Gateway):
             "liveExecutionArmed": bool(decision.armed),
             "liveArmStatus": "ARMED" if decision.armed else ("NOT_REQUIRED" if decision.reason == "NOT_REQUIRED" else "DISARMED"),
             "liveArmReason": decision.reason,
+            "liveArmScope": arm_scope,
+            "liveRiskReductionAllowedWhenDisarmed": True,
         }
 
     def pending_orders(self, canonical_symbol: str | None = None) -> list[dict[str, Any]]:
@@ -93,7 +104,120 @@ class GuardedMt5Gateway(Mt5Gateway):
             for row in rows
         ]
 
-    def _require_trading(self) -> None:
+    def close_position(self, ticket: str, request: CloseRequest) -> dict[str, Any]:
+        """Reduce or close existing exposure even if the LIVE arm is absent."""
+        key = f"command:{request.commandId}"
+        replay = self._reserve_or_replay(key)
+        if replay is not None:
+            return replay
+        try:
+            self._require_trading("REDUCE_RISK")
+            with self._lock:
+                positions = self.mt5.positions_get(ticket=int(ticket))
+                if not positions:
+                    raise BridgeError(f"Position {ticket} was not found", 404, "POSITION_NOT_FOUND")
+                position = positions[0]
+                info = self.mt5.symbol_info(position.symbol)
+                tick = self.mt5.symbol_info_tick(position.symbol)
+                if info is None or tick is None:
+                    raise BridgeError("Position symbol data is unavailable", 503)
+                position_is_buy = int(position.type) == int(getattr(self.mt5, "POSITION_TYPE_BUY", 0))
+                close_type = self.mt5.ORDER_TYPE_SELL if position_is_buy else self.mt5.ORDER_TYPE_BUY
+                price = float(tick.bid if position_is_buy else tick.ask)
+                volume = min(float(request.volume), float(position.volume))
+                payload = {
+                    "action": self.mt5.TRADE_ACTION_DEAL,
+                    "symbol": position.symbol,
+                    "position": int(position.ticket),
+                    "volume": volume,
+                    "type": close_type,
+                    "price": price,
+                    "deviation": self.settings.deviation_points,
+                    "magic": self.settings.magic_number,
+                    "comment": self._comment(request.commandId),
+                    "type_time": self.mt5.ORDER_TIME_GTC,
+                    "type_filling": self._resolve_filling(info, "IOC", pending=False),
+                }
+                result = self.mt5.order_send(payload)
+            response = self._command_from_result(request.commandId, result, f"Closed {volume} lots from {ticket}")
+            self.ledger.complete(key, response)
+            return response
+        except Exception:
+            self.ledger.release(key)
+            raise
+
+    def modify_position(self, ticket: str, request: ModifyRequest) -> dict[str, Any]:
+        """Allow only non-loosening protection changes while LIVE is DISARMED."""
+        key = f"command:{request.commandId}"
+        replay = self._reserve_or_replay(key)
+        if replay is not None:
+            return replay
+        try:
+            self._require_trading("REDUCE_RISK")
+            with self._lock:
+                positions = self.mt5.positions_get(ticket=int(ticket))
+                if not positions:
+                    raise BridgeError(f"Position {ticket} was not found", 404, "POSITION_NOT_FOUND")
+                position = positions[0]
+                self._authorize_position_modify(position, request)
+                payload = {
+                    "action": self.mt5.TRADE_ACTION_SLTP,
+                    "symbol": position.symbol,
+                    "position": int(position.ticket),
+                    "sl": float(request.stopLoss),
+                    "tp": float(request.takeProfit if request.takeProfit is not None else position.tp),
+                    "magic": self.settings.magic_number,
+                    "comment": self._comment(request.commandId),
+                }
+                result = self.mt5.order_send(payload)
+            response = self._command_from_result(request.commandId, result, f"Modified protection for {ticket}")
+            self.ledger.complete(key, response)
+            return response
+        except Exception:
+            self.ledger.release(key)
+            raise
+
+    def _authorize_position_modify(self, position: Any, request: ModifyRequest) -> None:
+        """Fail closed on any protection change that can increase LIVE risk."""
+        with self._lock:
+            _, account = self._connection_snapshot_locked(reconnect=True)
+        if account is None:
+            raise BridgeError("MT5 terminal is disconnected", 503, "TERMINAL_DISCONNECTED")
+
+        if self._account_mode(int(account.trade_mode)) != "real":
+            return
+        if self._live_arm_decision(account).armed:
+            return
+
+        current_tp = float(getattr(position, "tp", 0.0) or 0.0)
+        requested_tp = current_tp if request.takeProfit is None else float(request.takeProfit)
+        if abs(requested_tp - current_tp) > 1e-9:
+            raise BridgeError(
+                "DISARMED LIVE protection change cannot alter take-profit",
+                423,
+                "LIVE_RISK_INCREASE_BLOCKED",
+            )
+
+        current_sl = float(getattr(position, "sl", 0.0) or 0.0)
+        requested_sl = float(request.stopLoss)
+        if current_sl <= 0.0:
+            return
+
+        position_type = int(getattr(position, "type", -1))
+        buy_type = int(getattr(self.mt5, "POSITION_TYPE_BUY", 0))
+        sell_type = int(getattr(self.mt5, "POSITION_TYPE_SELL", 1))
+        if position_type == buy_type and requested_sl + 1e-9 >= current_sl:
+            return
+        if position_type == sell_type and requested_sl - 1e-9 <= current_sl:
+            return
+
+        raise BridgeError(
+            "DISARMED LIVE protection change would loosen stop-loss",
+            423,
+            "LIVE_RISK_INCREASE_BLOCKED",
+        )
+
+    def _require_trading(self, mutation: str = "OPEN_RISK") -> None:
         # Preserve every existing bridge-level check first: trading switch,
         # connectivity, allowlist, real-account capability and AutoTrading.
         super()._require_trading()
@@ -117,9 +241,13 @@ class GuardedMt5Gateway(Mt5Gateway):
             return
 
         decision = self._live_arm_decision(account)
-        if not decision.armed:
-            raise BridgeError(
-                f"LIVE execution is DISARMED: {decision.reason}",
-                423,
-                "LIVE_EXECUTION_DISARMED",
-            )
+        if decision.armed:
+            return
+        if str(mutation).upper() == "REDUCE_RISK":
+            return
+
+        raise BridgeError(
+            f"LIVE execution is DISARMED: {decision.reason}",
+            423,
+            "LIVE_EXECUTION_DISARMED",
+        )

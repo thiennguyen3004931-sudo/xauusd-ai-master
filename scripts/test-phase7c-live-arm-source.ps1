@@ -24,7 +24,8 @@ Assert-Text "packages/mt5-broker/bridge/mt5_bridge/live_arm.py" 'ARM_BRIDGE_SESS
 Assert-Text "packages/mt5-broker/bridge/mt5_bridge/live_arm.py" 'ARM_LOGIN_MISMATCH' "wrong login must fail closed"
 Assert-Text "packages/mt5-broker/bridge/mt5_bridge/live_arm.py" 'ARM_SERVER_MISMATCH' "wrong server must fail closed"
 Assert-Text "packages/mt5-broker/bridge/mt5_bridge/live_arm.py" 'ARM_PROFILE_MISMATCH' "wrong terminal/profile fingerprint must fail closed"
-Assert-Text "packages/mt5-broker/bridge/mt5_bridge/live_arm.py" 'ARM_EXPIRED' "expired arms must fail closed"
+Assert-Text "packages/mt5-broker/bridge/mt5_bridge/live_arm.py" 'ARM_EXPIRED' "legacy v1 expired arms must still fail closed"
+Assert-Text "packages/mt5-broker/bridge/mt5_bridge/live_arm.py" 'BRIDGE_SESSION' "v2 arm must be bridge-session scoped"
 Assert-Text "packages/mt5-broker/bridge/mt5_bridge/config.py" 'XAUUSD_PHASE7C_ALLOW_LIVE_TRADING' "legacy LIVE env gate must be capability-only input"
 Assert-Text "packages/mt5-broker/bridge/mt5_bridge/config.py" 'MT5_LIVE_ARM_STATE_PATH' "bridge must receive arm file path separately"
 
@@ -46,6 +47,12 @@ Assert-Text "scripts/arm-phase7c-live-local.ps1" '/v1/orders\?symbol=XAUUSD' "ar
 Assert-Text "scripts/arm-phase7c-live-local.ps1" 'phase7c-execution\.lock' "arm must reject active execution lock"
 Assert-Text "scripts/arm-phase7c-live-local.ps1" 'bridgeSessionId -ne \[string\]\$health\.bridgeSessionId' "arm must recheck bridge session before persistence"
 Assert-Text "scripts/arm-phase7c-live-local.ps1" 'Write-Phase7CLiveArmState' "arm command must use atomic arm helper"
+Assert-Text "scripts/arm-phase7c-live-local.ps1" 'PHASE7C_LIVE_ARM_SCOPE=BRIDGE_SESSION' "operator output must state session lifetime"
+Assert-NotText "scripts/arm-phase7c-live-local.ps1" 'ArmMinutes' "operator arm command must not expose a fixed TTL"
+Assert-Text "scripts/lib/phase7c-account-mode.ps1" 'scope = "BRIDGE_SESSION"' "arm state writer must persist bridge-session scope"
+Assert-Text "scripts/lib/phase7c-account-mode.ps1" 'version = 2' "arm state writer must use session-bound state version"
+Assert-NotText "scripts/lib/phase7c-account-mode.ps1" 'expiresAt = \$now\.AddMinutes' "session-bound arm writer must not persist expiry"
+Assert-NotText "scripts/lib/phase7c-account-mode.ps1" '\[int\]\$ArmMinutes' "session-bound arm writer must not accept a TTL"
 Assert-Text "scripts/disarm-phase7c-live-local.ps1" 'Clear-Phase7CLiveArmState' "operator disarm must be idempotent"
 Assert-Text "scripts/get-phase7c-live-arm-local.ps1" 'liveArmStatus' "status command must report bridge-confirmed arm status"
 

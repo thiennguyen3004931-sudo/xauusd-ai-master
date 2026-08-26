@@ -210,6 +210,10 @@ export function Phase7CControlCenterPage() {
   const holdReason = managing
     ? (position?.holdReason ?? "Executor đang kiểm tra điều kiện giữ lệnh.")
     : "Chưa có vị thế đang mở; executor tiếp tục chờ setup hợp lệ.";
+  const isLiveAccount = lifecycleData?.bridge.accountMode === "real";
+  const liveArmArmed = lifecycleData?.bridge.liveExecutionArmed === true;
+  const liveArmScope = lifecycleData?.bridge.liveArmScope ?? "—";
+  const liveArmReason = lifecycleData?.bridge.liveArmReason ?? "UNKNOWN";
 
   const canChangeLot =
     mode === "PAUSE" &&
@@ -221,6 +225,7 @@ export function Phase7CControlCenterPage() {
     lifecycleData?.controlEnabled === true &&
     bridgeReady &&
     brokerModeSupported &&
+    (!isLiveAccount || liveArmArmed) &&
     lifecycleData?.bridge.tradingEnabled === true &&
     lifecycleData?.bridge.terminalTradeAllowed === true &&
     lifecycleData?.bridge.expertTradeAllowed === true &&
@@ -245,6 +250,14 @@ export function Phase7CControlCenterPage() {
                 />
                 <Chip color={bridgeReady ? "success" : "warning"} label={bridgeReady ? "MT5 CONNECTED" : "MT5 RECONNECTING"} size="small" variant="outlined" />
                 <Chip color={lifecycleData?.bridge.accountMode === "real" ? "warning" : "default"} label={`ACCOUNT ${detectedAccountLabel}`} size="small" variant="outlined" />
+                {isLiveAccount ? (
+                  <Chip
+                    color={liveArmArmed ? "success" : "error"}
+                    label={liveArmArmed ? "ARM LIVE" : "ARM DISARMED"}
+                    size="small"
+                    variant={liveArmArmed ? "filled" : "outlined"}
+                  />
+                ) : null}
                 <Chip icon={<TelegramRounded />} color={lifecycleData?.telegramReady ? "success" : "default"} label={lifecycleData?.telegramReady ? "TELEGRAM READY" : "TELEGRAM OFFLINE"} size="small" variant="outlined" />
                 <Chip label={`MODE ${mode}`} size="small" variant="outlined" />
               </Stack>
@@ -254,6 +267,7 @@ export function Phase7CControlCenterPage() {
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.7 }}>
                 {detectedAccountLabel}
                 {lifecycleData?.bridge.server ? ` · ${lifecycleData.bridge.server}` : ""}
+                {isLiveAccount ? ` · ARM ${lifecycleData?.bridge.liveArmStatus ?? "UNKNOWN"} · ${liveArmScope}` : ""}
                 {` · XAUUSD positions ${lifecycleData?.bridge.openXauusdPositions ?? "—"}`}
                 {` · Lot ${configuredTrendLot.toFixed(2)} / ${configuredSidewayRisk.toFixed(2)}% / ${configuredSidewayMaxLot.toFixed(2)}`}
               </Typography>
@@ -332,9 +346,13 @@ export function Phase7CControlCenterPage() {
             <Alert severity="warning" sx={{ mt: 2 }}>
               Loại tài khoản MT5 hiện tại không được Phase7C hỗ trợ. Chỉ DEMO hoặc LIVE/real được phép; Bot giữ PAUSE.
             </Alert>
-          ) : lifecycleData?.bridge.accountMode === "real" ? (
-            <Alert severity="warning" sx={{ mt: 2 }}>
-              Đang nhận diện tài khoản LIVE. Chỉ tài khoản LIVE đã được cấp quyền trước mới được phép khởi động; Web không tự cấp quyền/ARM LIVE lần đầu. Sau khi executors READY, hệ thống vẫn giữ PAUSE cho tới khi người vận hành bấm BẬT AUTO riêng.
+          ) : isLiveAccount && !liveArmArmed ? (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              ARM DISARMED · {liveArmReason} · scope {liveArmScope}. LIVE không mở lệnh mới và nút BẬT AUTO bị khóa. Nếu đang có vị thế, bridge vẫn cho phép giảm rủi ro bằng partial/full close và BE/siết SL; không cho phép nới SL hoặc thay TP khi DISARMED. ARM mới dùng scope BRIDGE_SESSION và sẽ tự mất hiệu lực khi bridge khởi động lại.
+            </Alert>
+          ) : isLiveAccount ? (
+            <Alert severity="success" sx={{ mt: 2 }}>
+              ARM LIVE · {liveArmScope === "BRIDGE_SESSION" ? "BRIDGE_SESSION" : liveArmScope}. LIVE entry được mở khóa cho đúng phiên bridge hiện tại. Web không tự cấp quyền/ARM LIVE lần đầu; sau khi executors READY hệ thống vẫn giữ PAUSE cho tới khi người vận hành bấm BẬT AUTO riêng.
             </Alert>
           ) : null}
           {lifecycle.error ? <Alert severity="error" sx={{ mt: 2 }}>{friendlyError(lifecycle.error)}</Alert> : null}
