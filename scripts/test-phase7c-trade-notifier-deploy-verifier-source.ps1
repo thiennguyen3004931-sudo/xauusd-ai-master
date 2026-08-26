@@ -40,6 +40,8 @@ Assert-True ($source.Contains('PHASE7C_VERIFY_TRADE_NOTIFIER_DEPLOYMENT=PASS')) 
 Assert-True ($source.Contains('Deployment gate requires bot mode PAUSE')) 'Deployment gate must require PAUSE.'
 Assert-True ($source.Contains('PHASE7C_VERIFY_DEPLOYMENT_ACCOUNT_MODE')) 'Deployment gate must report the requested account mode.'
 Assert-True ($source.Contains('PHASE7C_VERIFY_DEPLOYMENT_GATE=PASS')) 'Deployment gate must emit a final PASS marker.'
+Assert-True (-not $source.Contains('Deployment gate requires trade notifier runtime status RUNNING.')) 'Deployment gate must not duplicate the RUNNING check already enforced by tradeNotifierReady.'
+Assert-True (-not $source.Contains('Deployment gate requires trade notifier orderPermission NONE.')) 'Deployment gate must not duplicate the orderPermission=NONE check already enforced by tradeNotifierReady.'
 Assert-True ($source.Contains('if ($AccountMode -eq "LIVE")')) 'Verifier must explicitly handle LIVE mode.'
 Assert-True (-not ($source -match '(?i)/v1/orders(?:/|\?|"|`)')) 'Verifier must not contain broker order endpoints.'
 Assert-True (-not ($source -match '(?i)mode\s*=\s*["'']AUTO["'']')) 'Verifier must never force AUTO.'
