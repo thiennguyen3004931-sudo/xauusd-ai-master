@@ -335,7 +335,7 @@ export function Phase7CControlCenterPage() {
             </Alert>
           ) : lifecycleData?.bridge.accountMode === "real" ? (
             <Alert severity="warning" sx={{ mt: 2 }}>
-              Đang nhận diện tài khoản LIVE. Web không tự ARM LIVE lần đầu. Sau khi executors READY, hệ thống vẫn giữ PAUSE cho tới khi người vận hành bấm BẬT AUTO riêng.
+              Đang nhận diện tài khoản LIVE. Chỉ tài khoản LIVE đã được cấp quyền trước mới được phép khởi động; Web không tự cấp quyền/ARM LIVE lần đầu. Sau khi executors READY, hệ thống vẫn giữ PAUSE cho tới khi người vận hành bấm BẬT AUTO riêng.
             </Alert>
           ) : null}
           {lifecycle.error ? <Alert severity="error" sx={{ mt: 2 }}>{friendlyError(lifecycle.error)}</Alert> : null}
