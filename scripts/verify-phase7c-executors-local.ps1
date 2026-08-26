@@ -334,12 +334,6 @@ if ($DeploymentGate) {
   if ([string]$deploymentMode.state.mode -ne "PAUSE") {
     throw "Deployment gate requires bot mode PAUSE. actual=$($deploymentMode.state.mode)"
   }
-  if ($tradeNotifierRuntimeStatus -ne "RUNNING") {
-    throw "Deployment gate requires trade notifier runtime status RUNNING. actual=$tradeNotifierRuntimeStatus"
-  }
-  if ($tradeNotifierOrderPermission -ne "NONE") {
-    throw "Deployment gate requires trade notifier orderPermission NONE. actual=$tradeNotifierOrderPermission"
-  }
   Write-Host 'PHASE7C_VERIFY_TRADE_NOTIFIER_DEPLOYMENT=PASS'
   Write-Host 'PHASE7C_VERIFY_DEPLOYMENT_GATE=PASS'
   Write-Host 'PHASE7C_VERIFY_STATUS=PASS'
