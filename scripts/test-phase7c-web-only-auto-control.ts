@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   isPhase7CAutoActivationSourceAllowed,
 } from "../apps/api/src/services/phase7c-bot-mode.service.ts";
@@ -9,7 +10,7 @@ import {
   telegramModeForCommand,
 } from "./phase7c-telegram-mode-logic.mjs";
 
-const root = process.cwd();
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (relativePath: string) => fs.readFileSync(path.resolve(root, relativePath), "utf8");
 
 // AUTO is a privileged transition: only the dedicated Web control may activate it.
