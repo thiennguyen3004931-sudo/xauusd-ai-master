@@ -11,7 +11,7 @@ Assert-True (Test-Path -LiteralPath $Deploy -PathType Leaf) 'Safe trade notifier
 
 $tokens = $null
 $errors = $null
-[void][System.Management.Automation.Language.Parser]::ParseFile($Deploy, [ref]$tokens, [ref]$errors)
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Deploy, [ref]$tokens, [ref]$errors)
 if ($errors.Count -ne 0) { throw "Deploy script syntax error: $($errors[0].Message)" }
 
 $source = Get-Content -LiteralPath $Deploy -Raw
@@ -33,7 +33,18 @@ Assert-True ($source.Contains('-RequireMigratedTask')) 'Deploy script must requi
 Assert-True ($source.Contains('-RequireTelegram')) 'Deploy script must require Telegram services after restart.'
 Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY=PASS')) 'Deploy script must emit an explicit final PASS marker.'
 
-Assert-True (-not ($source -match '(?i)Start-ScheduledTask|Stop-ScheduledTask|Register-ScheduledTask|Set-ScheduledTask')) 'Deploy script must not mutate or directly restart the Scheduled Task.'
+$forbiddenTaskCommands = @('Start-ScheduledTask', 'Stop-ScheduledTask', 'Register-ScheduledTask', 'Set-ScheduledTask')
+$commandAsts = @($ast.FindAll({
+  param($node)
+  $node -is [System.Management.Automation.Language.CommandAst]
+}, $true))
+foreach ($commandAst in $commandAsts) {
+  $commandName = $commandAst.GetCommandName()
+  if (-not [string]::IsNullOrWhiteSpace($commandName)) {
+    Assert-True ($forbiddenTaskCommands -notcontains $commandName) "Deploy script must not invoke Scheduled Task mutation command: $commandName"
+  }
+}
+
 Assert-True (-not ($source -match '(?i)/v1/orders(?:/|\?|"|`)')) 'Deploy script must not contain broker order endpoints.'
 Assert-True (-not ($source -match '(?i)mode\s*=\s*["'']AUTO["'']')) 'Deploy script must never enable AUTO.'
 Assert-True (-not ($source -match '(?i)sendMessage|ZIQ_TELEGRAM_SEND_TEST')) 'Deploy script must not send Telegram test messages.'
