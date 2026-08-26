@@ -10,8 +10,9 @@ function Assert-True([bool]$Condition, [string]$Message) {
 
 function Get-NoDrift { return }
 
-# Reproduce the production failure mode: the array expression inside the if branch
-# is emitted to the statement pipeline and becomes $null when it contains no items.
+# Production incident regression: deploy inherited StrictMode while verifier task drift was empty.
+# Reproduce the failure mode: the array expression inside the if branch is emitted to the
+# statement pipeline and becomes $null when it contains no items.
 $legacyFailed = $false
 try {
   $legacy = if ($true) { @(Get-NoDrift) } else { @() }
