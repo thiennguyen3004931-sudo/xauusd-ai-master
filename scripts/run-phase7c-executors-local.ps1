@@ -212,6 +212,24 @@ function Wait-Phase7CDependencies {
   throw "Phase 7C dependencies were not ready within $DependencyWaitSeconds seconds. Bridge=[$lastBridgeError] ControlAPI=[$lastApiError]"
 }
 
+function Set-Phase7CStartupPause {
+  $body = @{
+    mode = "PAUSE"
+    source = "startup-scheduled-task"
+  } | ConvertTo-Json -Compress
+  try {
+    $response = Invoke-RestMethod -Uri "$($ControlApiUrl.TrimEnd('/'))/api/v1/phase7c/bot-mode" -Method Post -ContentType "application/json" -Body $body -TimeoutSec 5
+  } catch {
+    throw "Phase 7C startup safety transition to PAUSE failed. No executor will launch. $($_.Exception.Message)"
+  }
+  $persistedMode = [string]$response.state.mode
+  if ($persistedMode -ne "PAUSE") {
+    throw "Phase 7C startup safety transition did not persist PAUSE. No executor will launch. Actual=$persistedMode"
+  }
+  Write-Host "PHASE7C_STARTUP_BOT_MODE=PAUSE"
+  Write-Host "PHASE7C_STARTUP_BOT_MODE_SOURCE=startup-scheduled-task"
+}
+
 $TelegramConfigured = $false
 if (-not $DisableTelegram -and (Test-Path $TelegramEnvFile)) {
   $telegramToken = Read-EnvValueFromFile $TelegramEnvFile "ZIQ_TELEGRAM_BOT_TOKEN"
@@ -320,6 +338,7 @@ $telegramMode = $null
 $regimeNotifier = $null
 try {
   Wait-Phase7CDependencies
+  Set-Phase7CStartupPause
   $trend = Start-Process -FilePath "powershell.exe" -ArgumentList ($common + $trendArgs) -WorkingDirectory $ProjectRoot -RedirectStandardOutput $TrendOut -RedirectStandardError $TrendErr -PassThru
   Set-Content -LiteralPath $TrendPidPath -Value $trend.Id -Encoding ascii
   Write-Host "PHASE7C_TREND_PID=$($trend.Id)"
