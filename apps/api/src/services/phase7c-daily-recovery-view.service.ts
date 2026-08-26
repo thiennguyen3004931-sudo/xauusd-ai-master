@@ -1,4 +1,8 @@
 import { getMt5Telemetry } from "./mt5.service";
+import {
+  accountModeAllowsBroker,
+  getPhase7CAccountModeState,
+} from "./phase7c-account-mode.service";
 
 const TREND_MAGIC_NUMBER = Number(
   process.env.MT5_MAGIC_NUMBER ?? "270713",
@@ -111,15 +115,24 @@ export async function getPhase7CDailyRecoveryView(
 
   const telemetry =
     await getMt5Telemetry(normalizedSymbol);
+  const accountModeState =
+    getPhase7CAccountModeState();
 
   if (
     !telemetry.reachable ||
-    telemetry.health?.accountMode !== "demo" ||
+    !accountModeAllowsBroker(
+      telemetry.health?.accountMode,
+      accountModeState,
+    ) ||
     !telemetry.quote ||
     !telemetry.spec
   ) {
+    const expectedMode =
+      accountModeState.accountMode === "LIVE"
+        ? "LIVE/real"
+        : "DEMO/demo";
     throw new Error(
-      "Daily Recovery view requires connected MT5 DEMO telemetry.",
+      `Daily Recovery view requires connected ${expectedMode} MT5 telemetry matching the configured Phase 7C account mode.`,
     );
   }
 
@@ -227,8 +240,13 @@ export async function getPhase7CDailyRecoveryView(
         DAILY_RECOVERY_MAX_TP_DISTANCE +
           1e-9;
 
+  const telemetrySource =
+    accountModeState.accountMode === "LIVE"
+      ? ("MT5_LIVE_READ_ONLY" as const)
+      : ("MT5_DEMO_READ_ONLY" as const);
+
   return {
-    source: "MT5_DEMO_READ_ONLY" as const,
+    source: telemetrySource,
     readOnly: true as const,
     generatedAt: Date.now(),
 
