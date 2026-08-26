@@ -12,6 +12,7 @@ import {
 } from "../services/phase7c-auto-lot.service";
 import {
   getPhase7CBotModeOptions,
+  isPhase7CAutoActivationSourceAllowed,
   isPhase7CBotMode,
   phase7CBotModeService,
 } from "../services/phase7c-bot-mode.service";
@@ -105,6 +106,16 @@ router.post("/bot-mode", (req: Request, res: Response) => {
     return;
   }
 
+  const source = typeof req.body?.source === "string" && req.body.source.trim()
+    ? req.body.source.trim().slice(0, 80)
+    : "operator";
+  if (requestedMode === "AUTO" && !isPhase7CAutoActivationSourceAllowed(source)) {
+    res.status(403).json({
+      error: "AUTO activation is restricted to the manual Web control center.",
+    });
+    return;
+  }
+
   const accountModeState = getPhase7CAccountModeState();
   if (requestedMode !== "PAUSE" && !accountModeState.valid) {
     res.status(409).json({
@@ -112,10 +123,6 @@ router.post("/bot-mode", (req: Request, res: Response) => {
     });
     return;
   }
-
-  const source = typeof req.body?.source === "string" && req.body.source.trim()
-    ? req.body.source.trim().slice(0, 80)
-    : "operator";
 
   res.json({
     state: phase7CBotModeService.set(requestedMode, source),
