@@ -203,11 +203,46 @@ assert.match(switchSource, /Write-Phase7CLiveAuthorizationState/);
 assert.match(switchSource, /ACCOUNT_SWITCH_LIVE_AUTHORIZATION=PASS/);
 assert.match(switchSource, /accountLogin.*identity\.login|identity\.login.*accountLogin/i);
 
+const routeSource = fs.readFileSync(
+  path.join(root, "apps/api/src/routes/phase7c.route.ts"),
+  "utf8",
+);
+for (const field of [
+  "liveExecutionArmed",
+  "liveArmStatus",
+  "liveArmReason",
+  "liveArmScope",
+  "liveRiskReductionAllowedWhenDisarmed",
+]) {
+  assert.match(routeSource, new RegExp(`${field}: telemetry\\.health\\?\\.${field}`));
+}
+
+const healthTypeSource = fs.readFileSync(
+  path.join(root, "packages/mt5-broker/src/models/Mt5BridgeHealth.ts"),
+  "utf8",
+);
+assert.match(healthTypeSource, /liveArmScope\?: "BRIDGE_SESSION" \| "LEGACY_TTL"/);
+assert.match(healthTypeSource, /liveRiskReductionAllowedWhenDisarmed\?: boolean/);
+
+const lifecycleTypeSource = fs.readFileSync(
+  path.join(root, "apps/web/src/phase7c-types.ts"),
+  "utf8",
+);
+assert.match(lifecycleTypeSource, /liveExecutionArmed: boolean \| null/);
+assert.match(lifecycleTypeSource, /liveArmStatus: "ARMED" \| "DISARMED" \| "NOT_REQUIRED" \| null/);
+assert.match(lifecycleTypeSource, /liveArmScope: "BRIDGE_SESSION" \| "LEGACY_TTL" \| null/);
+assert.match(lifecycleTypeSource, /liveRiskReductionAllowedWhenDisarmed: boolean \| null/);
+
 const uiSource = fs.readFileSync(
   path.join(root, "apps/web/src/pages/Phase7CControlCenterPage.tsx"),
   "utf8",
 );
 assert.doesNotMatch(uiSource, /lifecycleData\?\.bridge\.accountMode !== "demo"/);
 assert.match(uiSource, /LIVE.*cấp quyền|cấp quyền.*LIVE/i);
+assert.match(uiSource, /ARM LIVE/);
+assert.match(uiSource, /ARM DISARMED/);
+assert.match(uiSource, /BRIDGE_SESSION/);
+assert.match(uiSource, /không mở lệnh mới/i);
+assert.match(uiSource, /giảm rủi ro/i);
 
 console.log("PHASE7C_WEB_AUTO_ACCOUNT_START_TEST=PASS");
