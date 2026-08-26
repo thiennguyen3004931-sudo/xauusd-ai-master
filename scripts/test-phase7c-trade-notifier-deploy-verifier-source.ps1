@@ -31,7 +31,7 @@ Assert-True ($source.Contains('"trade-notifier"')) 'Trade notifier must be inclu
 Assert-True ($source.Contains('wrapperPid')) 'Deployment gate must compare notifier wrapper PID with the PID file.'
 Assert-True ($source.Contains('heartbeatAt')) 'Deployment gate must verify notifier heartbeat freshness.'
 Assert-True ($source.Contains('orderPermission')) 'Deployment gate must verify notifier order permission.'
-Assert-True ($source.Contains('orderPermission -ne "NONE"')) 'Deployment gate must fail unless notifier orderPermission=NONE.'
+Assert-True ($source -match '(?i)tradeNotifierOrderPermission\s+-ne\s+"NONE"') 'Deployment gate must fail unless notifier orderPermission=NONE.'
 Assert-True ($source.Contains('trendJournal')) 'Deployment gate must verify the runtime Trend journal path.'
 Assert-True ($source.Contains('sidewayJournal')) 'Deployment gate must verify the runtime Sideway journal path.'
 Assert-True ($source.Contains('PHASE7C_VERIFY_TRADE_NOTIFIER_DEPLOYMENT=PASS')) 'Deployment gate must emit an explicit PASS marker.'
