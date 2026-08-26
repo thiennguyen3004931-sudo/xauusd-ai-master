@@ -36,9 +36,9 @@ Assert-True ($source.Contains('trendJournal')) 'Deployment gate must verify the 
 Assert-True ($source.Contains('sidewayJournal')) 'Deployment gate must verify the runtime Sideway journal path.'
 Assert-True ($source.Contains('PHASE7C_VERIFY_TRADE_NOTIFIER_DEPLOYMENT=PASS')) 'Deployment gate must emit an explicit PASS marker.'
 
-# Deployment gate must avoid unrelated runtime scans. Only supervisor + trade-notifier PID state is needed,
-# and telegram-mode heartbeat parsing remains available only outside the focused deployment gate or when explicitly required.
-Assert-True ($source.Contains('$pidNames = if ($DeploymentGate) { @("supervisor", "trade-notifier") } else { @("supervisor", "trend", "sideway", "telegram-mode", "regime-notifier", "trade-notifier") }')) 'Deployment gate must limit PID scanning to supervisor and trade-notifier.'
+# Deployment gate must avoid unrelated runtime scans. Only supervisor + trade-notifier PID state is needed
+# unless the caller explicitly asks for the broader Telegram verification contract.
+Assert-True ($source.Contains('$pidNames = if ($DeploymentGate -and -not $RequireTelegram) { @("supervisor", "trade-notifier") } else { @("supervisor", "trend", "sideway", "telegram-mode", "regime-notifier", "trade-notifier") }')) 'Deployment gate must limit PID scanning to supervisor and trade-notifier unless Telegram verification is explicitly requested.'
 Assert-True ($source.Contains('if (-not $DeploymentGate -or $RequireTelegram) {')) 'Deployment gate must skip telegram-mode heartbeat parsing unless Telegram verification is explicitly requested.'
 
 # Deploy verification is fail-closed: bot remains PAUSE and LIVE never falls into DEMO-only deep checks.
