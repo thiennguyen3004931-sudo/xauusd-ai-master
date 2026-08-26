@@ -19,6 +19,10 @@ const sidewayJournalPath =
   process.env.ZIQ_TELEGRAM_SIDEWAY_JOURNAL_PATH?.trim() || "";
 const statePath = requiredEnv("ZIQ_TELEGRAM_STATE_PATH");
 const symbol = process.env.ZIQ_TELEGRAM_SYMBOL ?? "XAUUSD";
+const accountMode = normalizeAccountMode(
+  process.env.ZIQ_PHASE7C_ACCOUNT_MODE ?? "DEMO",
+);
+const phaseBanner = `PHASE 7C · ${accountMode}`;
 const intervalMs = Math.max(1000, Number(process.env.ZIQ_TELEGRAM_INTERVAL_MS ?? "2000"));
 const tradeMessageThreadId = optionalNumber(
   process.env.ZIQ_TELEGRAM_TRADE_MESSAGE_THREAD_ID ??
@@ -33,6 +37,11 @@ const sendStartup = /^(1|true|yes|on)$/i.test(process.env.ZIQ_TELEGRAM_SEND_STAR
 const replayExisting = /^(1|true|yes|on)$/i.test(process.env.ZIQ_TELEGRAM_REPLAY_EXISTING ?? "false");
 const once = /^(1|true|yes|on)$/i.test(process.env.ZIQ_TELEGRAM_ONCE ?? "false");
 const sendTest = /^(1|true|yes|on)$/i.test(process.env.ZIQ_TELEGRAM_SEND_TEST ?? "false");
+const dryRun = /^(1|true|yes|on)$/i.test(process.env.ZIQ_TELEGRAM_DRY_RUN ?? "false");
+const dryRunSinkPath = process.env.ZIQ_TELEGRAM_DRY_RUN_SINK?.trim() ?? "";
+if (dryRun && !dryRunSinkPath) {
+  throw new Error("ZIQ_TELEGRAM_DRY_RUN_SINK is required when ZIQ_TELEGRAM_DRY_RUN=true");
+}
 
 const interestingEvents = new Set([
   "ENTRY_SUBMIT",
@@ -125,7 +134,7 @@ if (sendTest) {
   await sendHtml([
     "🧪 <b>XAUUSD AI MASTER · TELEGRAM TEST</b>",
     "",
-    `📊 <b>${esc(symbol)}</b> · Phase 7B DEMO`,
+    `📊 <b>${esc(symbol)}</b> · ${phaseBanner}`,
     "✅ Kết nối Telegram thành công",
     "🔒 Notifier chỉ đọc journal/API monitor, không có quyền đặt lệnh",
   ].join("\n"));
@@ -149,7 +158,7 @@ if (!state.initialized) {
     await sendHtml([
       "🤖 <b>XAUUSD AI MASTER · TELEGRAM ONLINE</b>",
       "",
-      `📊 <b>${esc(symbol)}</b> · Phase 7B DEMO`,
+      `📊 <b>${esc(symbol)}</b> · ${phaseBanner}`,
       "🟢 Theo dõi Trade: Trend + Sideway · chờ entry hợp lệ",
       "🧩 FVG: xác nhận bổ sung, không bắt buộc entry",
       "🔒 Read-only notifier · không điều khiển MT5",
@@ -180,6 +189,8 @@ state.offset = Number(state.offsets.trend ?? 0);
 state.version = 3;
 saveState();
 console.log("PHASE7B_TELEGRAM_NOTIFIER=RUNNING");
+console.log(`PHASE7B_TELEGRAM_ACCOUNT_MODE=${accountMode}`);
+console.log(`PHASE7B_TELEGRAM_PHASE_BANNER=${phaseBanner}`);
 console.log(`PHASE7B_TELEGRAM_JOURNAL=${trendJournalPath}`);
 console.log(
   `PHASE7B_TELEGRAM_SIDEWAY_JOURNAL=${
@@ -194,6 +205,7 @@ console.log(
 console.log(`PHASE7B_TELEGRAM_STATE=${statePath}`);
 console.log(`PHASE7B_TELEGRAM_INTERVAL_MS=${intervalMs}`);
 console.log(`PHASE7B_TELEGRAM_MONITOR_API=${monitorApiBase}`);
+console.log(`PHASE7B_TELEGRAM_DRY_RUN=${dryRun}`);
 console.log("PHASE7B_TELEGRAM_ORDER_PERMISSION=NONE_READ_ONLY_JOURNAL_AND_MONITOR");
 
 while (true) {
@@ -1860,7 +1872,7 @@ function compactTradeCard(icon, side, action, lines) {
   const sideMarker = side === "BUY" ? "🟢" : "🔴";
   return [
     `${icon} ${sideMarker} <b>${esc(side)} · ${esc(action)}</b>`,
-    "<code>PHASE 7B · DEMO</code>",
+    `<code>${phaseBanner}</code>`,
     ...lines,
   ].join("\n");
 }
@@ -1868,7 +1880,7 @@ function compactTradeCard(icon, side, action, lines) {
 function fullCard(icon, title, lines) {
   return [
     `${icon} <b>${esc(title)}</b>`,
-    "<code>PHASE 7B · DEMO ONLY</code>",
+    `<code>${phaseBanner}</code>`,
     "",
     ...lines,
   ].join("\n");
@@ -1877,6 +1889,7 @@ function fullCard(icon, title, lines) {
 function warningCard(title, message, retcode) {
   return [
     `⚠️ <b>${esc(title)}</b>`,
+    `<code>${phaseBanner}</code>`,
     `<code>${esc(String(message ?? "Kiểm tra journal"))}</code>`,
     retcode === null || retcode === undefined ? "" : `Retcode: <code>${esc(value(retcode))}</code>`,
   ].filter(Boolean).join("\n");
@@ -1901,7 +1914,11 @@ async function sendHtml(text, route = "trade") {
     ? controlMessageThreadId
     : tradeMessageThreadId;
 
-  const highContrastText = String(text)
+  const phaseTaggedText = String(text).includes(phaseBanner)
+    ? String(text)
+    : `${String(text)}\n<code>${phaseBanner}</code>`;
+
+  const highContrastText = phaseTaggedText
     .replaceAll("<code>", "<b>")
     .replaceAll("</code>", "</b>");
 
@@ -1918,7 +1935,7 @@ async function sendHtml(text, route = "trade") {
           reply_markup: {
             inline_keyboard: [[
               {
-                text: "📊 Mở Phase 7B Monitor",
+                text: "📊 Mở Phase 7C Monitor",
                 url: monitorUrl,
               },
             ]],
@@ -1926,6 +1943,21 @@ async function sendHtml(text, route = "trade") {
         }
       : {}),
   };
+
+  if (dryRun) {
+    fs.mkdirSync(path.dirname(dryRunSinkPath), { recursive: true });
+    fs.appendFileSync(
+      dryRunSinkPath,
+      JSON.stringify({
+        route,
+        text: payload.text,
+        accountMode,
+        orderPermission: "NONE",
+      }) + "\n",
+      "utf8",
+    );
+    return;
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(
@@ -2085,6 +2117,14 @@ function sidePriceMove(side, entry, price) {
 function normalizeSide(raw) {
   const value = String(raw ?? state.trade?.side ?? "BUY").toUpperCase();
   return value === "SELL" || value === "SHORT" ? "SELL" : "BUY";
+}
+
+function normalizeAccountMode(raw) {
+  const value = String(raw ?? "").trim().toUpperCase();
+  if (value !== "DEMO" && value !== "LIVE") {
+    throw new Error(`Invalid ZIQ_PHASE7C_ACCOUNT_MODE=${raw ?? ""}; expected DEMO or LIVE`);
+  }
+  return value;
 }
 
 function sideIcon(side) {
