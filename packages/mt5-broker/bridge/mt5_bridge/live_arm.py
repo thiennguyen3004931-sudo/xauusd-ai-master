@@ -79,10 +79,16 @@ def evaluate_live_arm(
         return LiveArmDecision(False, error)
     assert state is not None
 
-    if int(state.get("version", 0) or 0) != 1:
+    try:
+        version = int(state.get("version", 0) or 0)
+    except (TypeError, ValueError):
+        return LiveArmDecision(False, "ARM_VERSION_INVALID", state)
+    if version not in {1, 2}:
         return LiveArmDecision(False, "ARM_VERSION_INVALID", state)
     if state.get("armed") is not True:
         return LiveArmDecision(False, "ARM_STATE_DISARMED", state)
+    if version == 2 and str(state.get("scope") or "").strip().upper() != "BRIDGE_SESSION":
+        return LiveArmDecision(False, "ARM_SCOPE_INVALID", state)
     if normalize_account_mode(state.get("accountMode")) != "LIVE":
         return LiveArmDecision(False, "ARM_ACCOUNT_MODE_MISMATCH", state)
     if str(state.get("bridgeSessionId") or "") != str(bridge_session_id):
@@ -107,12 +113,16 @@ def evaluate_live_arm(
     if str(state.get("profileFingerprint") or "").lower() != expected_fingerprint:
         return LiveArmDecision(False, "ARM_PROFILE_MISMATCH", state)
 
-    current_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
-    try:
-        expires_at = int(state.get("expiresAt"))
-    except (TypeError, ValueError):
-        return LiveArmDecision(False, "ARM_EXPIRY_INVALID", state)
-    if expires_at <= current_ms:
-        return LiveArmDecision(False, "ARM_EXPIRED", state)
+    # Version 1 remains TTL-bound for backward compatibility. Version 2 is
+    # intentionally bound to the current bridge process session instead. A
+    # bridge restart changes bridgeSessionId and therefore invalidates v2.
+    if version == 1:
+        current_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+        try:
+            expires_at = int(state.get("expiresAt"))
+        except (TypeError, ValueError):
+            return LiveArmDecision(False, "ARM_EXPIRY_INVALID", state)
+        if expires_at <= current_ms:
+            return LiveArmDecision(False, "ARM_EXPIRED", state)
 
     return LiveArmDecision(True, "ARMED", state)
