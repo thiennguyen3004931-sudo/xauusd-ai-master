@@ -29,6 +29,16 @@ $supervisorText = Get-Content -LiteralPath $Supervisor -Raw
 $wrapperText = Get-Content -LiteralPath $Wrapper -Raw
 $notifierText = Get-Content -LiteralPath $Notifier -Raw
 
+# Startup safety invariant: force PAUSE before either executor is launched.
+Assert-True ($supervisorText.Contains('mode = "PAUSE"')) "startup supervisor must explicitly persist PAUSE"
+Assert-True (-not $supervisorText.Contains('mode = "AUTO"')) "startup supervisor must never force AUTO"
+$pauseInvocation = $supervisorText.LastIndexOf("  Set-Phase7CStartupPause")
+$trendLaunch = $supervisorText.IndexOf('$trend = Start-Process', [Math]::Max(0, $pauseInvocation))
+$sidewayLaunch = $supervisorText.IndexOf('$sideway = Start-Process', [Math]::Max(0, $pauseInvocation))
+Assert-True ($pauseInvocation -ge 0) "startup supervisor must invoke Set-Phase7CStartupPause"
+Assert-True ($trendLaunch -gt $pauseInvocation) "startup PAUSE must occur before Trend executor launch"
+Assert-True ($sidewayLaunch -gt $pauseInvocation) "startup PAUSE must occur before Sideway executor launch"
+
 # Supervisor ownership: dedicated launcher, PID, runtime heartbeat/status, logs, restart, and cleanup.
 Assert-True ($supervisorText.Contains('run-phase7b-telegram-notifier-local.ps1')) "executor supervisor must own the trade notifier launcher"
 Assert-True ($supervisorText.Contains('trade-notifier.pid')) "executor supervisor must maintain a dedicated trade notifier PID file"
