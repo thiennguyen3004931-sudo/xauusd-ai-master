@@ -7,6 +7,7 @@ import {
   type Phase7BPendingPullback,
 } from "@xauusd/risk-engine";
 import { getMt5Telemetry } from "../services/mt5.service";
+import { isPhase7BProcessAlive } from "../services/phase7b-process-liveness";
 import { shouldComputePhase7BEntryDiagnostics } from "../services/phase7b-entry-diagnostics-account-mode";
 import { phase7BForwardRuntimeDirName } from "../services/phase7b-status-runtime-account-mode";
 
@@ -162,7 +163,7 @@ router.get("/", async (_req: Request, res: Response) => {
       heartbeatAgeMs !== null &&
       heartbeatAgeMs <= heartbeatLimitMs,
     );
-    const processAlive = Boolean(runtime?.armed && isPidAlive(runtime.pid));
+    const processAlive = Boolean(runtime?.armed && isPhase7BProcessAlive(runtime.pid));
     const runtimeAlive = heartbeatAlive || processAlive;
     const managedPosition = state?.managed
       ? telemetry.positions.find((position) => String(position.ticket) === String(state.managed?.ticket)) ?? null
@@ -629,16 +630,6 @@ function findLatestDemoDir(brokerAccountMode: string | null | undefined): string
 
   found.sort((a, b) => b.mtimeMs - a.mtimeMs);
   return found[0]?.dir ?? null;
-}
-
-function isPidAlive(pid: number | null | undefined): boolean {
-  if (!Number.isInteger(pid) || (pid ?? 0) <= 0) return false;
-  try {
-    process.kill(pid as number, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function readJson<T>(file: string): T {
