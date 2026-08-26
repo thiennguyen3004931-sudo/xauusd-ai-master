@@ -153,7 +153,7 @@ if ($null -eq $task) {
   $actionText = if ($actions.Count -eq 1) { "$($actions[0].Execute) $($actions[0].Arguments)" } else { "MULTIPLE_ACTIONS" }
   $directSupervisor = $actions.Count -eq 1 -and $actionText -like "*run-phase7c-executors-local.ps1*" -and $actionText -like "*-Armed*"
   $migrated = $directSupervisor -or $startupRunner
-  $taskDrift = if ($startupRunner) { @(Get-Phase7CExecutorTaskDrift -Task $task) } else { @() }
+  $taskDrift = @(if ($startupRunner) { Get-Phase7CExecutorTaskDrift -Task $task } else { @() })
   Write-Host "PHASE7C_VERIFY_TASK_STATE=$($task.State)"
   Write-Host "PHASE7C_VERIFY_TASK_MIGRATED=$migrated"
   Write-Host "PHASE7C_VERIFY_TASK_STARTUP_RUNNER=$startupRunner"
