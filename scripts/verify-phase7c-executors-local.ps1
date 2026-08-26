@@ -4,12 +4,15 @@ param(
   [string]$ControlApiUrl = "http://127.0.0.1:3711",
   [string]$EnvFile = "packages/mt5-broker/bridge/.env.phase7b-demo",
   [string]$TelegramEnvFile = ".env.phase7b-telegram",
+  [ValidateSet("DEMO", "LIVE")] [string]$AccountMode = "DEMO",
+  [switch]$DeploymentGate,
   [switch]$RequireMigratedTask,
   [switch]$RequireTelegram
 )
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
+$AccountMode = $AccountMode.ToUpperInvariant()
 if (-not [System.IO.Path]::IsPathRooted($WorkDir)) { $WorkDir = Join-Path $ProjectRoot $WorkDir }
 if (-not (Test-Path $WorkDir)) { throw "WorkDir not found: $WorkDir" }
 $WorkDir = (Resolve-Path $WorkDir).Path
@@ -22,11 +25,22 @@ $RuntimeDir = Join-Path $WorkDir "phase7c-executors"
 $TrendStatePath = Join-Path $WorkDir "phase7b-demo-forward\phase7b-demo-state.json"
 $SidewayStatePath = Join-Path $WorkDir "phase7c-sideway-forward\phase7c-sideway-state.json"
 $TelegramModeStatusPath = Join-Path $RuntimeDir "telegram-mode-status.json"
+$TradeNotifierRuntimePath = Join-Path $RuntimeDir "trade-notifier-runtime.json"
 $StartupRunnerStatusPath = Join-Path $RuntimeDir "startup-runner-status.json"
 $StartupRunnerLockPath = Join-Path $RuntimeDir "startup-runner.lock"
 $TaskOwnershipHelperPath = Join-Path $PSScriptRoot "lib\phase7c-scheduled-task-ownership.ps1"
 if (-not (Test-Path -LiteralPath $TaskOwnershipHelperPath)) { throw "Scheduled task ownership helper not found: $TaskOwnershipHelperPath" }
 . $TaskOwnershipHelperPath
+
+if ($AccountMode -eq "LIVE") {
+  $ExpectedTrendDir = Join-Path $WorkDir "phase7b-live-forward"
+  $ExpectedSidewayDir = Join-Path $WorkDir "phase7c-sideway-live-forward"
+} else {
+  $ExpectedTrendDir = Join-Path $WorkDir "phase7b-demo-forward"
+  $ExpectedSidewayDir = Join-Path $WorkDir "phase7c-sideway-forward"
+}
+$ExpectedTrendJournal = Join-Path $ExpectedTrendDir "phase7b-demo-events.jsonl"
+$ExpectedSidewayJournal = Join-Path $ExpectedSidewayDir "phase7c-sideway-events.jsonl"
 
 function Read-EnvValueFromFile([string]$Path, [string]$Name) {
   if (-not (Test-Path $Path)) { return "" }
@@ -106,6 +120,15 @@ function Test-PendingMatchesPosition($Pending, $Position, $Spec) {
   return $true
 }
 
+function Test-SamePath([string]$Left, [string]$Right) {
+  if ([string]::IsNullOrWhiteSpace($Left) -or [string]::IsNullOrWhiteSpace($Right)) { return $false }
+  try {
+    $leftFull = [System.IO.Path]::GetFullPath($Left).TrimEnd('\', '/')
+    $rightFull = [System.IO.Path]::GetFullPath($Right).TrimEnd('\', '/')
+    return [string]::Equals($leftFull, $rightFull, [System.StringComparison]::OrdinalIgnoreCase)
+  } catch { return $false }
+}
+
 $task = $null
 try {
   $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
@@ -148,10 +171,12 @@ if ($null -eq $task) {
 $startupRunnerPid = $null
 $startupRunnerAlive = $false
 $startupRunnerLockState = 'NOT_APPLICABLE'
+$startupRunnerAccountMode = ''
 if ($null -ne $task -and $startupRunner) {
   if (Test-Path -LiteralPath $StartupRunnerStatusPath) {
     try {
       $startupRunnerStatus = Get-Content -LiteralPath $StartupRunnerStatusPath -Raw | ConvertFrom-Json
+      $startupRunnerAccountMode = [string]$startupRunnerStatus.accountMode
       if ($null -ne $startupRunnerStatus.runnerPid) {
         $startupRunnerPid = [int]$startupRunnerStatus.runnerPid
         $startupRunnerAlive = $null -ne (Get-Process -Id $startupRunnerPid -ErrorAction SilentlyContinue)
@@ -166,6 +191,7 @@ if ($null -ne $task -and $startupRunner) {
   Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_PID=$startupRunnerPid"
   Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_ALIVE=$startupRunnerAlive"
   Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_LOCK=$startupRunnerLockState"
+  Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_ACCOUNT_MODE=$startupRunnerAccountMode"
 
   if ($RequireMigratedTask -and $task.State -ne 'Running') {
     throw "Required startup-runner Scheduled Task is not Running. state=$($task.State)"
@@ -180,6 +206,7 @@ if ($null -ne $task -and $startupRunner) {
   Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_PID=$startupRunnerPid"
   Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_ALIVE=$startupRunnerAlive"
   Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_LOCK=$startupRunnerLockState"
+  Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_ACCOUNT_MODE=$startupRunnerAccountMode"
 }
 
 $telegramToken = Read-EnvValueFromFile $TelegramEnvFile "ZIQ_TELEGRAM_BOT_TOKEN"
@@ -191,7 +218,7 @@ if ($RequireTelegram -and -not $telegramConfigured) {
 }
 
 $pidStatuses = @{}
-foreach ($name in @("supervisor", "trend", "sideway", "telegram-mode", "regime-notifier")) {
+foreach ($name in @("supervisor", "trend", "sideway", "telegram-mode", "regime-notifier", "trade-notifier")) {
   $status = Read-PidStatus $name
   $pidStatuses[$name] = $status
   $label = $name.ToUpper().Replace("-", "_")
@@ -221,11 +248,106 @@ Write-Host "PHASE7C_VERIFY_TELEGRAM_MODE_READY=$telegramModeReady"
 Write-Host "PHASE7C_VERIFY_TELEGRAM_MODE_RUNTIME_STATUS=$telegramModeStatus"
 Write-Host "PHASE7C_VERIFY_TELEGRAM_MODE_HEARTBEAT_AGE_MS=$telegramModeHeartbeatAgeMs"
 
-if ($RequireTelegram -and (-not $pidStatuses["telegram-mode"].alive -or -not $pidStatuses["regime-notifier"].alive)) {
-  throw "Telegram verification requires both telegram-mode and regime-notifier processes to be alive."
+$tradeNotifierReady = $false
+$tradeNotifierRuntimeStatus = 'MISSING'
+$tradeNotifierHeartbeatAgeMs = $null
+$tradeNotifierNodePid = $null
+$tradeNotifierNodeAlive = $false
+$tradeNotifierOrderPermission = ''
+$tradeNotifierAccountMode = ''
+$tradeNotifierTrendJournal = ''
+$tradeNotifierSidewayJournal = ''
+if (Test-Path -LiteralPath $TradeNotifierRuntimePath) {
+  try {
+    $tradeNotifierRuntime = Get-Content -LiteralPath $TradeNotifierRuntimePath -Raw | ConvertFrom-Json
+    $tradeNotifierRuntimeStatus = [string]$tradeNotifierRuntime.status
+    $tradeNotifierOrderPermission = [string]$tradeNotifierRuntime.orderPermission
+    $tradeNotifierAccountMode = [string]$tradeNotifierRuntime.accountMode
+    $tradeNotifierTrendJournal = [string]$tradeNotifierRuntime.trendJournal
+    $tradeNotifierSidewayJournal = [string]$tradeNotifierRuntime.sidewayJournal
+    if ($null -ne $tradeNotifierRuntime.heartbeatAt) {
+      $tradeNotifierHeartbeatAgeMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$tradeNotifierRuntime.heartbeatAt
+    }
+    if ($null -ne $tradeNotifierRuntime.pid) {
+      $tradeNotifierNodePid = [int]$tradeNotifierRuntime.pid
+      $tradeNotifierNodeAlive = $null -ne (Get-Process -Id $tradeNotifierNodePid -ErrorAction SilentlyContinue)
+    }
+    $wrapperMatches = $pidStatuses["trade-notifier"].pidFile -and
+      $null -ne $tradeNotifierRuntime.wrapperPid -and
+      [int]$tradeNotifierRuntime.wrapperPid -eq [int]$pidStatuses["trade-notifier"].pid
+    $journalsMatch = (Test-SamePath $tradeNotifierTrendJournal $ExpectedTrendJournal) -and
+      (Test-SamePath $tradeNotifierSidewayJournal $ExpectedSidewayJournal)
+    $journalsExist = (Test-Path -LiteralPath $ExpectedTrendJournal -PathType Leaf) -and
+      (Test-Path -LiteralPath $ExpectedSidewayJournal -PathType Leaf)
+    $tradeNotifierReady = $pidStatuses["trade-notifier"].alive -and
+      $tradeNotifierRuntimeStatus -eq "RUNNING" -and
+      $wrapperMatches -and
+      $tradeNotifierNodeAlive -and
+      $null -ne $tradeNotifierHeartbeatAgeMs -and
+      $tradeNotifierHeartbeatAgeMs -ge -10000 -and
+      $tradeNotifierHeartbeatAgeMs -le 15000 -and
+      $tradeNotifierAccountMode -eq $AccountMode -and
+      $tradeNotifierOrderPermission -eq "NONE" -and
+      $journalsMatch -and
+      $journalsExist
+  } catch {
+    $tradeNotifierRuntimeStatus = 'INVALID_STATUS_FILE'
+    $tradeNotifierReady = $false
+  }
+}
+Write-Host "PHASE7C_VERIFY_TRADE_NOTIFIER_READY=$tradeNotifierReady"
+Write-Host "PHASE7C_VERIFY_TRADE_NOTIFIER_RUNTIME_STATUS=$tradeNotifierRuntimeStatus"
+Write-Host "PHASE7C_VERIFY_TRADE_NOTIFIER_HEARTBEAT_AGE_MS=$tradeNotifierHeartbeatAgeMs"
+Write-Host "PHASE7C_VERIFY_TRADE_NOTIFIER_NODE_PID=$tradeNotifierNodePid"
+Write-Host "PHASE7C_VERIFY_TRADE_NOTIFIER_NODE_ALIVE=$tradeNotifierNodeAlive"
+Write-Host "PHASE7C_VERIFY_TRADE_NOTIFIER_ACCOUNT_MODE=$tradeNotifierAccountMode"
+Write-Host "PHASE7C_VERIFY_TRADE_NOTIFIER_ORDER_PERMISSION=$tradeNotifierOrderPermission"
+Write-Host "PHASE7C_VERIFY_TRADE_NOTIFIER_TREND_JOURNAL=$tradeNotifierTrendJournal"
+Write-Host "PHASE7C_VERIFY_TRADE_NOTIFIER_SIDEWAY_JOURNAL=$tradeNotifierSidewayJournal"
+Write-Host "PHASE7C_VERIFY_EXPECTED_TREND_JOURNAL=$ExpectedTrendJournal"
+Write-Host "PHASE7C_VERIFY_EXPECTED_SIDEWAY_JOURNAL=$ExpectedSidewayJournal"
+
+if ($RequireTelegram -and (-not $pidStatuses["telegram-mode"].alive -or -not $pidStatuses["regime-notifier"].alive -or -not $pidStatuses["trade-notifier"].alive)) {
+  throw "Telegram verification requires telegram-mode, regime-notifier, and trade-notifier processes to be alive."
 }
 if ($RequireTelegram -and -not $telegramModeReady) {
   throw "Telegram mode controller process is alive but not ready/fresh. Check phase7c-executors\telegram-mode.err.log and telegram-mode-status.json."
+}
+if (($RequireTelegram -or $DeploymentGate) -and -not $tradeNotifierReady) {
+  if ($tradeNotifierRuntimeStatus -eq 'RUNNING' -and $tradeNotifierOrderPermission -ne "NONE") {
+    throw "Trade notifier orderPermission must remain NONE. actual=$tradeNotifierOrderPermission"
+  }
+  throw "Trade notifier is not ready/fresh or its account/journal mapping is incorrect. Check phase7c-executors\trade-notifier.err.log and trade-notifier-runtime.json."
+}
+
+if ($DeploymentGate) {
+  Write-Host "PHASE7C_VERIFY_DEPLOYMENT_ACCOUNT_MODE=$AccountMode"
+  if (-not $pidStatuses["supervisor"].alive) {
+    throw 'Deployment gate requires the Phase 7C supervisor process to be alive.'
+  }
+  if ($startupRunner -and -not [string]::IsNullOrWhiteSpace($startupRunnerAccountMode) -and $startupRunnerAccountMode -ne $AccountMode) {
+    throw "Deployment gate account mode mismatch. requested=$AccountMode startupRunner=$startupRunnerAccountMode"
+  }
+  $apiBase = $ControlApiUrl.TrimEnd('/')
+  $deploymentMode = Invoke-RestMethod -Uri "$apiBase/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 5
+  Write-Host "PHASE7C_VERIFY_ACTIVE_MODE=$($deploymentMode.state.mode)"
+  if ([string]$deploymentMode.state.mode -ne "PAUSE") {
+    throw "Deployment gate requires bot mode PAUSE. actual=$($deploymentMode.state.mode)"
+  }
+  if ($tradeNotifierRuntimeStatus -ne "RUNNING") {
+    throw "Deployment gate requires trade notifier runtime status RUNNING. actual=$tradeNotifierRuntimeStatus"
+  }
+  if ($tradeNotifierOrderPermission -ne "NONE") {
+    throw "Deployment gate requires trade notifier orderPermission NONE. actual=$tradeNotifierOrderPermission"
+  }
+  Write-Host 'PHASE7C_VERIFY_TRADE_NOTIFIER_DEPLOYMENT=PASS'
+  Write-Host 'PHASE7C_VERIFY_DEPLOYMENT_GATE=PASS'
+  Write-Host 'PHASE7C_VERIFY_STATUS=PASS'
+  return
+}
+
+if ($AccountMode -eq "LIVE") {
+  throw 'LIVE verification is intentionally limited to -DeploymentGate; the legacy deep verifier remains DEMO-only.'
 }
 
 $apiBase = $ControlApiUrl.TrimEnd('/')
@@ -359,7 +481,7 @@ $lockPath = Join-Path $RuntimeDir "phase7c-execution.lock"
 Write-Host "PHASE7C_VERIFY_EXECUTION_LOCK_PRESENT=$(Test-Path $lockPath)"
 Write-Host "PHASE7C_VERIFY_OWNERSHIP=PASS"
 if ($telegramConfigured) {
-  $telegramStatus = if ($pidStatuses["telegram-mode"].alive -and $pidStatuses["regime-notifier"].alive -and $telegramModeReady) { "PASS" } else { "DEGRADED_NON_FATAL" }
+  $telegramStatus = if ($pidStatuses["telegram-mode"].alive -and $pidStatuses["regime-notifier"].alive -and $pidStatuses["trade-notifier"].alive -and $telegramModeReady -and $tradeNotifierReady) { "PASS" } else { "DEGRADED_NON_FATAL" }
   Write-Host "PHASE7C_VERIFY_TELEGRAM_STATUS=$telegramStatus"
 } else {
   Write-Host "PHASE7C_VERIFY_TELEGRAM_STATUS=NOT_CONFIGURED"
