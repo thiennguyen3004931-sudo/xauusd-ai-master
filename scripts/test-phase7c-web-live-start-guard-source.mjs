@@ -9,17 +9,6 @@ function requireText(source, needle, label) {
   if (!source.includes(needle)) throw new Error(`${label}: missing ${needle}`);
 }
 
-function countText(source, needle) {
-  let count = 0;
-  let from = 0;
-  while (true) {
-    const index = source.indexOf(needle, from);
-    if (index < 0) return count;
-    count += 1;
-    from = index + needle.length;
-  }
-}
-
 const startMarker = "export async function startPhase7CFromWeb";
 const stopMarker = "export async function stopPhase7CFromWeb";
 const startIndex = lifecycle.indexOf(startMarker);
@@ -29,39 +18,42 @@ if (startIndex < 0 || stopIndex <= startIndex) {
 }
 
 const startSource = lifecycle.slice(startIndex, stopIndex);
-const accountStateNeedle = "const accountModeState = getPhase7CAccountModeState();";
-const liveGuardNeedle = 'if (accountModeState.accountMode === "LIVE")';
+const pauseNeedle = 'phase7CBotModeService.set("PAUSE", "web-control-center-preflight")';
+const accountDecisionNeedle = "resolvePhase7CWebStartAccount";
 const readyNeedle = "if (current.ready)";
-const accountStateIndex = startSource.indexOf(accountStateNeedle);
-const liveGuardIndex = startSource.indexOf(liveGuardNeedle);
+const pauseIndex = startSource.indexOf(pauseNeedle);
+const accountDecisionIndex = startSource.indexOf(accountDecisionNeedle);
 const readyIndex = startSource.indexOf(readyNeedle);
 
-if (!(accountStateIndex >= 0 && liveGuardIndex > accountStateIndex && readyIndex > liveGuardIndex)) {
+if (!(pauseIndex >= 0 && accountDecisionIndex > pauseIndex && readyIndex > accountDecisionIndex)) {
   throw new Error(
-    `LIVE Web Start guard must execute before ready-runtime AUTO handling: account=${accountStateIndex}, live=${liveGuardIndex}, ready=${readyIndex}`,
+    `Web Start must enter PAUSE before guarded account selection and ready handling: pause=${pauseIndex}, account=${accountDecisionIndex}, ready=${readyIndex}`,
   );
 }
 
 requireText(
   startSource,
-  'phase7CBotModeService.set("PAUSE", "web-control-center-live-start-blocked")',
-  "LIVE Web Start PAUSE guard",
+  'accountDecision.reason === "LIVE_NOT_PREAUTHORIZED"',
+  "LIVE Web Start must fail closed without prior authorization",
 );
 requireText(
   startSource,
-  "Web không được chuyển LIVE sang mode hoạt động.",
-  "LIVE Web Start operator boundary",
+  "Web không tự ARM LIVE lần đầu",
+  "LIVE Web Start first-time ARM boundary",
+);
+requireText(
+  startSource,
+  "liveAuthorization?.valid !== true",
+  "LIVE launcher must revalidate prior authorization",
+);
+requireText(
+  startSource,
+  'phase7CBotModeService.set("PAUSE", "web-control-center-ready-pause")',
+  "ready runtime must remain PAUSE",
 );
 
-const autoNeedle = 'phase7CBotModeService.set("AUTO", "web-control-center-start")';
-const autoCount = countText(startSource, autoNeedle);
-if (autoCount !== 2) {
-  throw new Error(`DEMO Web Start AUTO behavior must remain at exactly 2 existing writes; found ${autoCount}`);
-}
-
-const beforeLiveGuard = startSource.slice(0, liveGuardIndex);
-if (beforeLiveGuard.includes('phase7CBotModeService.set("AUTO"')) {
-  throw new Error("LIVE guard is not fail-closed: an AUTO write exists before the LIVE guard");
+if (/phase7CBotModeService\.set\(\s*["']AUTO["']/.test(startSource)) {
+  throw new Error("Web lifecycle Start must not activate AUTO; AUTO is a separate manual Web action");
 }
 
 for (const forbidden of ["/v1/orders", "order_send", "phase7c-live-arm.json"]) {
