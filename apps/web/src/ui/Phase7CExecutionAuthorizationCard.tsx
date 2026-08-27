@@ -18,6 +18,7 @@ import {
   getPhase7CLiveArmControlCapability,
   getPhase7CLiveArmControlStatus,
   type Phase7CLiveArmAction,
+  type Phase7CLiveArmPreflight,
 } from "../phase7c-execution-control";
 
 const CHECK_LABELS: Record<string, string> = {
@@ -37,7 +38,7 @@ const CHECK_LABELS: Record<string, string> = {
   currentlyArmed: "LIVE hiện ARMED",
   noControlRunning: "Không có ARM request khác đang chạy",
   selectedLiveAccount: "Account đang chọn là LIVE",
-  liveArmSatisfied: "LIVE ARM đạt hoặc DEMO không cần ARM",
+  liveArmSatisfied: "LIVE ARM đã hợp lệ",
 };
 
 function checkCount(checks: Record<string, boolean> | undefined) {
@@ -69,7 +70,7 @@ function CheckRows({ entries }: { entries: Array<[string, boolean]> }) {
 export function Phase7CExecutionAuthorizationCard() {
   const queryClient = useQueryClient();
   const [armRequestId, setArmRequestId] = useState<string | null>(null);
-  const [showArmChecks, setShowArmChecks] = useState(false);
+  const [armPreflight, setArmPreflight] = useState<Phase7CLiveArmPreflight | null>(null);
   const [showAutoChecks, setShowAutoChecks] = useState(false);
 
   const capability = useQuery({
@@ -86,22 +87,43 @@ export function Phase7CExecutionAuthorizationCard() {
     retry: false,
   });
 
+  const armPreflightMutation = useMutation({
+    mutationFn: () => createPhase7CLiveArmPreflight("ARM_LIVE"),
+    onMutate: () => setArmPreflight(null),
+    onSuccess: (result) => setArmPreflight(result),
+  });
+
   const armMutation = useMutation({
     mutationFn: async (action: Phase7CLiveArmAction) => {
-      const preflight = await createPhase7CLiveArmPreflight(action);
-      if (!preflight.approved || !preflight.preflightToken) {
-        throw new Error(
-          `${action === "ARM_LIVE" ? "ARM LIVE" : "DISARM LIVE"} bị khóa: ` +
-          `${preflight.blockedBy.join(", ") || "UNKNOWN"}.`,
-        );
+      let preflight: Phase7CLiveArmPreflight;
+      if (action === "ARM_LIVE") {
+        if (!armPreflight?.approved || !armPreflight.preflightToken) {
+          throw new Error("Hãy chạy Kiểm tra điều kiện ARM LIVE và bảo đảm kết quả PASS trước khi ARM.");
+        }
+        if (
+          armPreflight.bridgeSessionId !== capability.data?.bridgeSessionId ||
+          (armPreflight.expiresAt !== null && Date.now() >= armPreflight.expiresAt)
+        ) {
+          throw new Error("Kết quả kiểm tra ARM LIVE đã hết hiệu lực hoặc bridge session đã thay đổi. Hãy kiểm tra lại.");
+        }
+        preflight = armPreflight;
+      } else {
+        preflight = await createPhase7CLiveArmPreflight("DISARM_LIVE");
+        if (!preflight.approved || !preflight.preflightToken) {
+          throw new Error(`DISARM LIVE bị khóa: ${preflight.blockedBy.join(", ") || "UNKNOWN"}.`);
+        }
       }
+
       const message = action === "ARM_LIVE"
         ? "Xác nhận ARM tài khoản LIVE cho đúng bridge session hiện tại? Bot phải đang PAUSE; thao tác này không tự bật AUTO và không gửi order."
         : "Xác nhận DISARM LIVE? Thao tác này thu hồi quyền mở lệnh mới và không đóng vị thế đang có.";
       if (!window.confirm(message)) throw new Error("Đã hủy thao tác theo yêu cầu người vận hành.");
       return executePhase7CLiveArmAction(action, preflight.preflightToken);
     },
-    onSuccess: (result) => setArmRequestId(result.requestId),
+    onSuccess: (result) => {
+      setArmRequestId(result.requestId);
+      setArmPreflight(null);
+    },
   });
 
   const armStatus = useQuery({
@@ -130,6 +152,7 @@ export function Phase7CExecutionAuthorizationCard() {
   if (controlDone && capability.data && armRequestId) {
     queueMicrotask(() => {
       setArmRequestId(null);
+      setArmPreflight(null);
       void queryClient.invalidateQueries({ queryKey: ["phase7c-live-arm-control-capability"] });
       void queryClient.invalidateQueries({ queryKey: ["phase7c-auto-activation-status"] });
       void queryClient.invalidateQueries({ queryKey: ["phase7c-lifecycle"] });
@@ -140,10 +163,24 @@ export function Phase7CExecutionAuthorizationCard() {
   const botMode = autoStatus.data?.botMode ?? capability.data?.botMode ?? "—";
   const armed = capability.data?.liveExecutionArmed === true;
   const canAttemptAuto = botMode !== "AUTO" && !autoMutation.isPending;
-  const armCount = checkCount(capability.data?.armChecks);
-  const autoCount = checkCount(autoStatus.data?.checks);
+  const armPreflightCount = checkCount(armPreflight?.checks);
+  const autoChecks = accountMode === "DEMO"
+    ? Object.fromEntries(
+        Object.entries(autoStatus.data?.checks ?? {}).filter(([key]) => key !== "liveArmSatisfied"),
+      )
+    : autoStatus.data?.checks;
+  const autoCount = checkCount(autoChecks);
+  const autoBlockedBy = (autoStatus.data?.blockedBy ?? []).filter(
+    (key) => !(accountMode === "DEMO" && key === "liveArmSatisfied"),
+  );
   const bridgeSession = capability.data?.bridgeSessionId ?? "—";
   const positions = capability.data?.openXauusdPositions ?? 0;
+  const armPreflightReady = Boolean(
+    armPreflight?.approved &&
+    armPreflight.preflightToken &&
+    armPreflight.bridgeSessionId === capability.data?.bridgeSessionId &&
+    (armPreflight.expiresAt === null || Date.now() < armPreflight.expiresAt),
+  );
 
   return (
     <Card variant="outlined" sx={{ borderRadius: 4, borderColor: accountMode === "LIVE" ? "warning.main" : "success.main" }}>
@@ -155,22 +192,26 @@ export function Phase7CExecutionAuthorizationCard() {
             </Typography>
             <Typography variant="h6" fontWeight={950}>Ủy quyền giao dịch</Typography>
             <Typography variant="body2" color="text.secondary" mt={0.4}>
-              ARM chỉ dành cho LIVE. AUTO luôn qua backend safety guard và không có đường bypass.
+              {accountMode === "LIVE"
+                ? "ARM LIVE được scope theo bridge session hiện tại; AUTO vẫn qua backend safety guard và không có đường bypass."
+                : "DEMO chỉ dùng AUTO safety guard; không có thao tác ủy quyền LIVE."}
             </Typography>
           </Box>
           <Stack direction="row" spacing={0.8} flexWrap="wrap" useFlexGap alignItems="flex-start">
             <Chip label={`ACCOUNT ${accountMode}`} color={accountMode === "LIVE" ? "warning" : "success"} sx={{ fontWeight: 950 }} />
             <Chip label={`BOT ${botMode}`} variant="outlined" sx={{ fontWeight: 950 }} />
-            <Chip
-              label={accountMode === "DEMO" ? "DEMO · ARM KHÔNG YÊU CẦU" : armed ? "LIVE · ARMED" : "LIVE · DISARMED"}
-              color={accountMode === "DEMO" || armed ? "success" : "error"}
-              variant={accountMode === "DEMO" || armed ? "filled" : "outlined"}
-              sx={{ fontWeight: 950 }}
-            />
+            {accountMode === "LIVE" ? (
+              <Chip
+                label={armed ? "LIVE · ARMED" : "LIVE · DISARMED"}
+                color={armed ? "success" : "error"}
+                variant={armed ? "filled" : "outlined"}
+                sx={{ fontWeight: 950 }}
+              />
+            ) : null}
           </Stack>
         </Stack>
 
-        {capability.isError ? (
+        {accountMode === "LIVE" && capability.isError ? (
           <Alert severity="error" sx={{ mt: 1.5 }}>
             Không đọc được LIVE ARM capability: {capability.error instanceof Error ? capability.error.message : "UNKNOWN"}
           </Alert>
@@ -193,27 +234,34 @@ export function Phase7CExecutionAuthorizationCard() {
                 <Chip label={armed ? "ARMED" : "DISARMED"} color={armed ? "success" : "error"} size="small" sx={{ fontWeight: 950 }} />
                 <Chip label={`XAUUSD positions ${positions}`} size="small" variant="outlined" />
                 <Chip label={`Session ${bridgeSession}`} size="small" variant="outlined" />
-                <Chip
-                  label={armed ? "Điều kiện ARM: đã ARMED" : `Điều kiện ARM: ${armCount.passed}/${armCount.total} đạt`}
-                  color={!armed && capability.data?.canArm ? "success" : "default"}
-                  size="small"
-                  variant="outlined"
-                />
               </Stack>
-              <Stack direction="row" spacing={1}>
-                <Button
-                  size="small"
-                  variant="text"
-                  onClick={() => setShowArmChecks((value) => !value)}
-                  sx={{ fontWeight: 900, whiteSpace: "nowrap" }}
-                >
-                  {showArmChecks ? "ẨN ĐIỀU KIỆN ARM" : "KIỂM TRA ĐIỀU KIỆN ARM"}
-                </Button>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                {!armed ? (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={
+                      armPreflightMutation.isPending ||
+                      armMutation.isPending ||
+                      Boolean(armRequestId) ||
+                      !capability.data?.taskInstalled
+                    }
+                    onClick={() => armPreflightMutation.mutate()}
+                    sx={{ fontWeight: 950, whiteSpace: "nowrap" }}
+                  >
+                    {armPreflightMutation.isPending ? "ĐANG KIỂM TRA..." : "KIỂM TRA ĐIỀU KIỆN ARM LIVE"}
+                  </Button>
+                ) : null}
                 <Button
                   size="small"
                   variant={armed ? "outlined" : "contained"}
                   color={armed ? "error" : "success"}
-                  disabled={armMutation.isPending || Boolean(armRequestId) || !capability.data?.taskInstalled}
+                  disabled={
+                    armMutation.isPending ||
+                    Boolean(armRequestId) ||
+                    !capability.data?.taskInstalled ||
+                    (!armed && !armPreflightReady)
+                  }
                   onClick={() => armMutation.mutate(armed ? "DISARM_LIVE" : "ARM_LIVE")}
                   sx={{ fontWeight: 950, whiteSpace: "nowrap" }}
                 >
@@ -222,22 +270,34 @@ export function Phase7CExecutionAuthorizationCard() {
               </Stack>
             </Stack>
 
-            {showArmChecks ? (
+            {armPreflight ? (
               <Box mt={1.4} pt={1.3} sx={{ borderTop: "1px solid rgba(148,163,184,.14)" }}>
-                <CheckRows entries={armCount.entries} />
-                {capability.data?.armBlockedBy?.length ? (
+                <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1} mb={1.2}>
+                  <Typography fontWeight={950}>Kết quả kiểm tra ARM LIVE</Typography>
+                  <Stack direction="row" spacing={0.8}>
+                    <Chip
+                      label={armPreflight.approved ? "PASS" : "BLOCKED"}
+                      color={armPreflight.approved ? "success" : "error"}
+                      size="small"
+                      sx={{ fontWeight: 950 }}
+                    />
+                    <Chip label={`${armPreflightCount.passed}/${armPreflightCount.total} đạt`} size="small" variant="outlined" />
+                  </Stack>
+                </Stack>
+                <CheckRows entries={armPreflightCount.entries} />
+                {armPreflight.blockedBy.length ? (
                   <Typography variant="caption" color="warning.main" sx={{ display: "block", mt: 1 }}>
-                    ARM đang khóa bởi: {capability.data.armBlockedBy.join(" · ")}.
+                    ARM đang khóa bởi: {armPreflight.blockedBy.join(" · ")}.
                   </Typography>
-                ) : null}
+                ) : (
+                  <Typography variant="caption" color="success.main" sx={{ display: "block", mt: 1 }}>
+                    Điều kiện ARM LIVE đã đạt cho bridge session hiện tại. Kết quả có hiệu lực ngắn hạn.
+                  </Typography>
+                )}
               </Box>
             ) : null}
           </Box>
-        ) : (
-          <Alert severity="success" sx={{ mt: 1.8 }}>
-            DEMO · ARM KHÔNG YÊU CẦU. Chỉ cần Bot đạt Sẵn sàng rồi bật AUTO.
-          </Alert>
-        )}
+        ) : null}
 
         <Box mt={1.6} sx={{ p: 1.6, borderRadius: 3, bgcolor: "rgba(15,23,42,.28)", border: "1px solid rgba(148,163,184,.14)" }}>
           <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "center" }} gap={1.2}>
@@ -250,9 +310,9 @@ export function Phase7CExecutionAuthorizationCard() {
                 sx={{ fontWeight: 950 }}
               />
               <Chip label={`${autoCount.passed}/${autoCount.total} điều kiện đạt`} size="small" variant="outlined" />
-              {autoStatus.data?.blockedBy?.length ? (
+              {autoBlockedBy.length ? (
                 <Typography variant="caption" color="warning.main">
-                  Khóa bởi: {autoStatus.data.blockedBy.join(" · ")}
+                  Khóa bởi: {autoBlockedBy.join(" · ")}
                 </Typography>
               ) : null}
             </Stack>
@@ -288,12 +348,17 @@ export function Phase7CExecutionAuthorizationCard() {
           ) : null}
         </Box>
 
-        {armMutation.error ? (
+        {accountMode === "LIVE" && armPreflightMutation.error ? (
+          <Alert severity="error" sx={{ mt: 1.5 }}>
+            {armPreflightMutation.error instanceof Error ? armPreflightMutation.error.message : "Không kiểm tra được điều kiện ARM LIVE."}
+          </Alert>
+        ) : null}
+        {accountMode === "LIVE" && armMutation.error ? (
           <Alert severity="error" sx={{ mt: 1.5 }}>
             {armMutation.error instanceof Error ? armMutation.error.message : "ARM/DISARM bị từ chối."}
           </Alert>
         ) : null}
-        {armStatus.data ? (
+        {accountMode === "LIVE" && armStatus.data ? (
           <Alert severity={armStatus.data.status === "PASS" ? "success" : armStatus.data.status === "FAIL" ? "error" : "info"} sx={{ mt: 1.5 }}>
             {armStatus.data.action} · {armStatus.data.status} · {armStatus.data.phase} · {armStatus.data.message} · ARM {armStatus.data.finalArmStatus}
           </Alert>
