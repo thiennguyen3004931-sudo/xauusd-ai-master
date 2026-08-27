@@ -5,7 +5,8 @@ param(
   [switch]$Create,
   [string]$PrincipalUserId = '',
   [ValidateSet('', 'Interactive', 'S4U', 'ServiceAccount')]
-  [string]$PrincipalLogonType = ''
+  [string]$PrincipalLogonType = '',
+  [string]$ApiUserSid = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,6 +25,14 @@ $PowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powe
 if (-not (Test-Path -LiteralPath $PowerShellExe -PathType Leaf)) {
   throw "Windows PowerShell executable not found: $PowerShellExe"
 }
+
+$BrokerRoot = Join-Path $ProjectRoot '.runtime\phase7c-lifecycle-broker'
+$BrokerInbox = Join-Path $BrokerRoot 'inbox'
+$BrokerState = Join-Path $BrokerRoot 'state'
+$BrokerResults = Join-Path $BrokerRoot 'results'
+$BrokerLogs = Join-Path $BrokerRoot 'logs'
+$ApiSidRecord = Join-Path $BrokerState 'api-user-sid.txt'
+$BrokerHeartbeat = Join-Path $BrokerState 'heartbeat.json'
 
 function Assert-Phase7CAdministrator {
   try {
@@ -58,8 +67,113 @@ function New-Phase7CCanonicalSettings {
     -ExecutionTimeLimit ([TimeSpan]::Zero)
 }
 
+function Resolve-Phase7CApiUserSid([string]$RequestedSid) {
+  $value = ([string]$RequestedSid).Trim()
+  if ([string]::IsNullOrWhiteSpace($value) -and (Test-Path -LiteralPath $ApiSidRecord)) {
+    $value = ([string](Get-Content -LiteralPath $ApiSidRecord -Raw)).Trim()
+  }
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    Write-Host 'PHASE7C_BROKER_API_SID=REQUIRED'
+    throw 'Lifecycle broker installation requires -ApiUserSid for the Windows identity that runs the Web/API process.'
+  }
+  try {
+    return New-Object System.Security.Principal.SecurityIdentifier($value)
+  } catch {
+    throw "ApiUserSid is not a valid Windows SecurityIdentifier: $value"
+  }
+}
+
+function New-Phase7CBrokerDirectoryAcl(
+  [string]$Path,
+  [System.Security.Principal.SecurityIdentifier]$ApiSid,
+  [System.Security.AccessControl.FileSystemRights]$ApiRights
+) {
+  New-Item -ItemType Directory -Force -Path $Path | Out-Null
+
+  $acl = New-Object System.Security.AccessControl.DirectorySecurity
+  $acl.SetAccessRuleProtection($true, $false)
+  $inherit = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+  $propagation = [System.Security.AccessControl.PropagationFlags]::None
+  $allow = [System.Security.AccessControl.AccessControlType]::Allow
+  $systemSid = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::LocalSystemSid, $null)
+  $adminsSid = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
+
+  foreach ($sid in @($systemSid, $adminsSid)) {
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+      $sid,
+      [System.Security.AccessControl.FileSystemRights]::FullControl,
+      $inherit,
+      $propagation,
+      $allow
+    )
+    [void]$acl.AddAccessRule($rule)
+  }
+
+  $apiRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    $ApiSid,
+    $ApiRights,
+    $inherit,
+    $propagation,
+    $allow
+  )
+  [void]$acl.AddAccessRule($apiRule)
+  Set-Acl -LiteralPath $Path -AclObject $acl
+}
+
+function Set-Phase7CLifecycleBrokerAcl([System.Security.Principal.SecurityIdentifier]$ApiSid) {
+  # Root grants only traversal/read to the configured API identity. Child ACLs are
+  # protected independently so state/results/logs cannot inherit inbox write rights.
+  New-Phase7CBrokerDirectoryAcl -Path $BrokerRoot -ApiSid $ApiSid -ApiRights ([System.Security.AccessControl.FileSystemRights]::ReadAndExecute)
+  New-Phase7CBrokerDirectoryAcl -Path $BrokerInbox -ApiSid $ApiSid -ApiRights ([System.Security.AccessControl.FileSystemRights]::Modify)
+  New-Phase7CBrokerDirectoryAcl -Path $BrokerState -ApiSid $ApiSid -ApiRights ([System.Security.AccessControl.FileSystemRights]::ReadAndExecute)
+  New-Phase7CBrokerDirectoryAcl -Path $BrokerResults -ApiSid $ApiSid -ApiRights ([System.Security.AccessControl.FileSystemRights]::ReadAndExecute)
+  New-Phase7CBrokerDirectoryAcl -Path $BrokerLogs -ApiSid $ApiSid -ApiRights ([System.Security.AccessControl.FileSystemRights]::ReadAndExecute)
+
+  [System.IO.File]::WriteAllText($ApiSidRecord, "$($ApiSid.Value)`r`n", [System.Text.UTF8Encoding]::new($false))
+  Write-Host "PHASE7C_BROKER_ACL=PASS|API_SID=$($ApiSid.Value)"
+}
+
+function Test-Phase7CSystemPrincipal($Principal) {
+  if ($null -eq $Principal) { return $false }
+  $user = ([string]$Principal.UserId).Trim()
+  $logon = ([string]$Principal.LogonType).Trim()
+  $systemUser = $user -in @('SYSTEM', 'NT AUTHORITY\SYSTEM', 'S-1-5-18')
+  return $systemUser -and $logon -eq 'ServiceAccount' -and ([string]$Principal.RunLevel) -eq 'Highest'
+}
+
+function Test-Phase7CBrokerHeartbeatFresh {
+  if (-not (Test-Path -LiteralPath $BrokerHeartbeat)) { return $false }
+  try {
+    $heartbeat = Get-Content -LiteralPath $BrokerHeartbeat -Raw | ConvertFrom-Json
+    if ([int]$heartbeat.version -ne 1) { return $false }
+    $brokerPid = [int]$heartbeat.brokerPid
+    if ($brokerPid -le 0 -or $null -eq (Get-Process -Id $brokerPid -ErrorAction SilentlyContinue)) { return $false }
+    $updatedAt = [long]$heartbeat.updatedAt
+    $age = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $updatedAt
+    return $age -ge 0 -and $age -le 5000
+  } catch {
+    return $false
+  }
+}
+
+function Start-AndVerifyPhase7CBroker {
+  Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+  $deadline = [DateTime]::UtcNow.AddSeconds(12)
+  do {
+    if (Test-Phase7CBrokerHeartbeatFresh) {
+      Write-Host 'PHASE7C_BROKER_HEARTBEAT=PASS'
+      return
+    }
+    Start-Sleep -Milliseconds 250
+  } while ([DateTime]::UtcNow -lt $deadline)
+  Write-Host 'PHASE7C_BROKER_HEARTBEAT=FAIL'
+  throw 'Scheduled Task exists but lifecycle broker heartbeat.json did not become fresh.'
+}
+
 Assert-Phase7CAdministrator
 Import-Module ScheduledTasks -ErrorAction Stop
+$resolvedApiSid = Resolve-Phase7CApiUserSid -RequestedSid $ApiUserSid
+Set-Phase7CLifecycleBrokerAcl -ApiSid $resolvedApiSid
 
 $runnerPath = Get-Phase7CExecutorTaskRunnerPath -ProjectRoot $ProjectRoot
 if (-not (Test-Path -LiteralPath $runnerPath)) { throw "Executor task runner not found: $runnerPath" }
@@ -81,23 +195,27 @@ if ($null -eq $task) {
   Write-Host 'PHASE7C_TASK_STATE=NOT_FOUND'
   if (-not $Create) {
     Write-Host 'PHASE7C_TASK_MUTATION=BLOCKED'
-    throw "Task '$TaskName' does not exist. Re-run with -Create and explicit principal identity/logon semantics after review."
+    throw "Task '$TaskName' does not exist. Re-run with -Create, -PrincipalUserId SYSTEM, -PrincipalLogonType ServiceAccount, and -ApiUserSid after review."
   }
   if ([string]::IsNullOrWhiteSpace($PrincipalUserId)) {
     Write-Host 'PHASE7C_TASK_PRINCIPAL=REQUIRED'
-    throw '-Create requires an explicit -PrincipalUserId. No task identity is inferred.'
+    throw '-Create requires explicit -PrincipalUserId SYSTEM.'
   }
   if ([string]::IsNullOrWhiteSpace($PrincipalLogonType)) {
     Write-Host 'PHASE7C_TASK_LOGON_TYPE=REQUIRED'
-    throw '-Create requires an explicit -PrincipalLogonType (Interactive, S4U, or ServiceAccount). No logon semantics are inferred.'
+    throw '-Create requires explicit -PrincipalLogonType ServiceAccount.'
+  }
+  if ($PrincipalUserId -notin @('SYSTEM', 'NT AUTHORITY\SYSTEM', 'S-1-5-18') -or $PrincipalLogonType -ne 'ServiceAccount') {
+    Write-Host 'PHASE7C_TASK_PRINCIPAL=BLOCKED_NON_SYSTEM'
+    throw 'The canonical lifecycle broker task must run as SYSTEM with ServiceAccount logon semantics.'
   }
 
   $action = New-Phase7CCanonicalAction -RunnerPath $runnerPath
   $trigger = New-Phase7CCanonicalTrigger
   $settings = New-Phase7CCanonicalSettings
   $principal = New-ScheduledTaskPrincipal `
-    -UserId $PrincipalUserId `
-    -LogonType $PrincipalLogonType `
+    -UserId 'SYSTEM' `
+    -LogonType ServiceAccount `
     -RunLevel Highest
 
   try {
@@ -116,10 +234,14 @@ if ($null -eq $task) {
 
   $created = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
   if ([string]$created.Actions[0].Execute -ne $PowerShellExe) {
-    throw "Scheduled Task creation did not persist the canonical absolute PowerShell executable."
+    throw 'Scheduled Task creation did not persist the canonical absolute PowerShell executable.'
+  }
+  if (-not (Test-Phase7CSystemPrincipal $created.Principal)) {
+    throw 'Scheduled Task creation did not persist SYSTEM + ServiceAccount + Highest.'
   }
   Write-Host 'PHASE7C_TASK_OWNERSHIP=OWNED'
   Write-Host 'PHASE7C_TASK_CREATE=PASS'
+  Start-AndVerifyPhase7CBroker
   Write-Host 'PHASE7C_TASK_STATUS=PASS'
   exit 0
 }
@@ -130,26 +252,36 @@ if (-not $ownership.owned) {
   Write-Host 'PHASE7C_TASK_MUTATION=BLOCKED'
   throw "Task '$TaskName' ownership cannot be proven from its exact action. No mutation was attempted. reason=$($ownership.reason)"
 }
+if (-not (Test-Phase7CSystemPrincipal $task.Principal)) {
+  Write-Host 'PHASE7C_TASK_PRINCIPAL_REPAIR=BLOCKED'
+  throw 'Owned task is not SYSTEM + ServiceAccount + Highest. Automatic principal replacement is intentionally blocked.'
+}
 
 $drift = @(Get-Phase7CExecutorTaskDrift -Task $task)
 if ([string]$task.Actions[0].Execute -ne $PowerShellExe) { $drift += 'ACTION_EXECUTABLE' }
 Write-Host "PHASE7C_TASK_DRIFT=$(if ($drift.Count -eq 0) { 'NONE' } else { $drift -join ',' })"
 Write-Host "PHASE7C_TASK_PRINCIPAL_USER=$($task.Principal.UserId)"
 Write-Host "PHASE7C_TASK_PRINCIPAL_RUN_LEVEL=$($task.Principal.RunLevel)"
+Write-Host "PHASE7C_TASK_PRINCIPAL_LOGON_TYPE=$($task.Principal.LogonType)"
 
 if ($drift.Count -eq 0) {
   Write-Host 'PHASE7C_TASK_MUTATION=NOT_REQUIRED'
+  Start-AndVerifyPhase7CBroker
   Write-Host 'PHASE7C_TASK_STATUS=PASS'
   exit 0
 }
 
 if ($drift -contains 'PRINCIPAL_RUN_LEVEL') {
   Write-Host 'PHASE7C_TASK_PRINCIPAL_REPAIR=BLOCKED'
-  throw 'Task principal is not RunLevel=Highest. Automatic principal replacement is intentionally blocked; review the existing identity/logon semantics first.'
+  throw 'Task principal is not RunLevel=Highest. Automatic principal replacement is intentionally blocked.'
 }
 if (-not $Repair) {
   Write-Host 'PHASE7C_TASK_MUTATION=REPAIR_REQUIRED'
-  throw "Owned task has canonical-definition drift. Re-run with -Repair to repair trigger/settings/action while preserving the existing principal."
+  throw 'Owned task has canonical-definition drift. Re-run with -Repair after confirming PAUSE and zero XAUUSD positions.'
+}
+if ([string]$task.State -eq 'Running') {
+  Write-Host 'PHASE7C_TASK_RUNTIME_MIGRATION=BLOCKED_RUNNING'
+  throw 'Stop the existing executor runtime safely before repairing the SYSTEM task definition; installer will not terminate a running task implicitly.'
 }
 
 $action = New-Phase7CCanonicalAction -RunnerPath $runnerPath
@@ -173,10 +305,11 @@ $verified = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 $verifiedOwnership = Test-Phase7CExecutorTaskActionOwnership -Actions $verified.Actions -ExpectedRunnerPath $runnerPath
 $verifiedDrift = @(Get-Phase7CExecutorTaskDrift -Task $verified)
 if ([string]$verified.Actions[0].Execute -ne $PowerShellExe) { $verifiedDrift += 'ACTION_EXECUTABLE' }
-if (-not $verifiedOwnership.owned -or $verifiedDrift.Count -ne 0) {
+if (-not $verifiedOwnership.owned -or $verifiedDrift.Count -ne 0 -or -not (Test-Phase7CSystemPrincipal $verified.Principal)) {
   Write-Host 'PHASE7C_TASK_REPAIR=VERIFY_FAILED'
-  throw "Scheduled Task repair did not converge to the canonical owned definition. ownership=$($verifiedOwnership.reason) drift=$($verifiedDrift -join ',')"
+  throw "Scheduled Task repair did not converge to the canonical SYSTEM-owned definition. ownership=$($verifiedOwnership.reason) drift=$($verifiedDrift -join ',')"
 }
 
 Write-Host 'PHASE7C_TASK_REPAIR=PASS'
+Start-AndVerifyPhase7CBroker
 Write-Host 'PHASE7C_TASK_STATUS=PASS'

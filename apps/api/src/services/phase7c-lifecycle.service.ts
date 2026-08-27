@@ -1,7 +1,5 @@
-import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import { phase7CBotModeService } from "./phase7c-bot-mode.service";
 import { activatePhase7CAccountRiskProfile } from "./phase7c-account-profile-selection.service";
 import { phase7CLotSettingsService } from "./phase7c-lot-settings.service";
@@ -19,11 +17,16 @@ import {
 } from "./phase7c-live-authorization.service";
 import { resolvePhase7CWebStartAccount } from "./phase7c-web-account-start-policy";
 import { getMt5Telemetry, type Mt5TelemetrySnapshot } from "./mt5.service";
+import {
+  getPhase7CLifecycleBrokerClientStatus,
+  submitPhase7CLifecycleBrokerRequest,
+  type Phase7CLifecycleBrokerAction,
+  type Phase7CLifecycleBrokerReason,
+} from "./phase7c-lifecycle-broker.service";
 
-const execFileAsync = promisify(execFile);
 const START_TIMEOUT_MS = 50_000;
+const STOP_VERIFY_TIMEOUT_MS = 10_000;
 const TELEGRAM_STALE_MS = 15_000;
-const EXECUTOR_TASK = "XAUUSD-Phase7C-Executors";
 
 type TelegramModeStatus = {
   ready?: boolean;
@@ -110,6 +113,10 @@ function controlEnabled(): boolean {
   return !/^(?:0|false|no|off)$/i.test(process.env.PHASE7B_LOCAL_CONTROL_ENABLED ?? "true");
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function getPhase7CLifecycleRuntimeStatus() {
   const root = executorRuntime();
   const accountModeState = getPhase7CAccountModeState();
@@ -131,6 +138,7 @@ export function getPhase7CLifecycleRuntimeStatus() {
     regimeNotifier: { pid: regimeNotifierPid, alive: isPidAlive(regimeNotifierPid) },
   };
   const lots = phase7CLotSettingsService.get();
+  const broker = getPhase7CLifecycleBrokerClientStatus();
   const running = processes.supervisor.alive && processes.trend.alive && processes.sideway.alive;
   const telegramReady = Boolean(
     processes.telegram.alive &&
@@ -140,12 +148,13 @@ export function getPhase7CLifecycleRuntimeStatus() {
     telegramHeartbeatAgeMs !== null &&
     telegramHeartbeatAgeMs <= TELEGRAM_STALE_MS,
   );
-  const ready = accountModeState.valid && running && telegramReady && lots.activeAlive && !lots.restartRequired;
+  const ready = broker.ready && accountModeState.valid && running && telegramReady && lots.activeAlive && !lots.restartRequired;
 
   return {
     controlEnabled: controlEnabled(),
     running,
     ready,
+    broker,
     accountMode: accountModeState,
     telegramConfigured: telegramConfigured(),
     telegramReady,
@@ -194,157 +203,42 @@ export function assertPhase7CSelectedAccountReady(telemetry: Mt5TelemetrySnapsho
 
 export const assertPhase7CDemoReady = assertPhase7CSelectedAccountReady;
 
-function quotePowerShellLiteral(value: string): string {
-  return `'${String(value).replace(/'/g, "''")}'`;
-}
-
-function pairPowerShellArguments(args: string[]): string[] {
-  const output: string[] = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const value = args[index];
-    if (value.startsWith("-") && index + 1 < args.length && !args[index + 1].startsWith("-")) {
-      output.push(value, quotePowerShellLiteral(args[index + 1]));
-      index += 1;
-    } else {
-      output.push(value.startsWith("-") ? value : quotePowerShellLiteral(value));
-    }
-  }
-  return output;
-}
-
-async function launchSelectedSupervisor(
-  accountMode: Phase7CAccountMode,
-  liveAuthorization: Phase7CLiveAuthorizationStatus | null,
-): Promise<number> {
-  const accountModeState = getPhase7CAccountModeState();
-  if (!accountModeState.valid || accountModeState.accountMode !== accountMode) {
-    throw new Error(`Web launcher account state không khớp target ${accountMode}.`);
-  }
-  if (
-    accountMode === "LIVE" &&
-    (accountModeState.liveExecutionEnabled !== true || liveAuthorization?.valid !== true)
-  ) {
-    throw new Error("LIVE cold-start bị chặn vì chưa có prior LIVE authorization hợp lệ.");
-  }
-
-  const projectRoot = findProjectRoot();
-  const script = path.join(projectRoot, "scripts", "run-phase7c-executors-local.ps1");
-  const telegramEnv = path.join(projectRoot, ".env.phase7b-telegram");
-  const bridgeEnv = accountModeState.envFile
-    ? path.resolve(accountModeState.envFile)
-    : accountEnvFile(accountMode);
-  if (!fs.existsSync(script)) throw new Error(`Missing executor supervisor: ${script}`);
-  if (!fs.existsSync(bridgeEnv)) throw new Error(`Missing ${accountMode} bridge env: ${bridgeEnv}`);
-  if (!fs.existsSync(telegramEnv)) throw new Error(`Missing Telegram env: ${telegramEnv}`);
-
-  const settings = phase7CLotSettingsService.getState();
-  const runtime = executorRuntime();
-  fs.mkdirSync(runtime, { recursive: true });
-  const launcherPath = path.join(runtime, "web-lifecycle-launcher.ps1");
-  const logPath = path.join(runtime, "web-lifecycle.log");
-  const supervisorOut = path.join(runtime, "supervisor.out.log");
-  const supervisorErr = path.join(runtime, "supervisor.err.log");
-  const args = [
-    "-WorkDir", runtimeRoot(),
-    "-ControlApiUrl", `http://127.0.0.1:${Number(process.env.PORT ?? 3711) || 3711}`,
-    "-EnvFile", bridgeEnv,
-    "-TelegramEnvFile", telegramEnv,
-    "-AccountMode", accountMode,
-  ];
-  if (accountMode === "LIVE") args.push("-LiveExecutionEnabled");
-  args.push(
-    "-TrendFixedVolume", String(settings.trendFixedLot),
-    "-SidewayRiskPercent", String(settings.sidewayRiskPercent),
-    "-SidewayMaxLot", String(settings.sidewayMaxLot),
-    "-Armed",
-  );
-  const invocation = [
-    `& ${quotePowerShellLiteral(script)}`,
-    ...pairPowerShellArguments(args),
-    `1>> ${quotePowerShellLiteral(supervisorOut)}`,
-    `2>> ${quotePowerShellLiteral(supervisorErr)}`,
-  ].join(" ");
-  fs.writeFileSync(
-    launcherPath,
-    `$ErrorActionPreference = 'Stop'\r\n${invocation}\r\n`,
-    "utf8",
-  );
-  fs.appendFileSync(logPath, `\n=== WEB START ${new Date().toISOString()} MODE=${accountMode} ===\n`, "utf8");
-  fs.writeFileSync(supervisorOut, `=== WEB START ${new Date().toISOString()} MODE=${accountMode} ===\n`, "utf8");
-  fs.writeFileSync(supervisorErr, "", "utf8");
-
-  const command = [
-    "$ErrorActionPreference='Stop'",
-    `$p=Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',${quotePowerShellLiteral(launcherPath)}) -WindowStyle Hidden -PassThru`,
-    "$p.Id",
-  ].join("; ");
-  const { stdout } = await execFileAsync(
-    "powershell.exe",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
-    { windowsHide: true, timeout: 10_000, maxBuffer: 32 * 1024 },
-  );
-  const pid = Number(String(stdout).trim().split(/\r?\n/).at(-1));
-  if (!Number.isInteger(pid) || pid <= 0) {
-    throw new Error(`PowerShell launcher did not return a valid PID. Output=${String(stdout).trim()}`);
-  }
-  fs.writeFileSync(path.join(runtime, "web-lifecycle-launcher.pid"), String(pid), "ascii");
-  return pid;
-}
-
-async function runStopper(): Promise<void> {
-  const projectRoot = findProjectRoot();
-  const script = path.join(projectRoot, "scripts", "stop-phase7c-executors-local.ps1");
-  if (!fs.existsSync(script)) throw new Error(`Missing executor stopper: ${script}`);
-  try {
-    await execFileAsync("schtasks.exe", ["/End", "/TN", EXECUTOR_TASK], {
-      windowsHide: true,
-      timeout: 8_000,
-      maxBuffer: 32 * 1024,
-    });
-  } catch {
-  }
-  await execFileAsync(
-    "powershell.exe",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-WorkDir", runtimeRoot()],
-    { windowsHide: true, timeout: 25_000, maxBuffer: 128 * 1024 },
-  );
-  const launcherPid = readPid(path.join(executorRuntime(), "web-lifecycle-launcher.pid"));
-  if (isPidAlive(launcherPid)) {
-    try {
-      await execFileAsync("taskkill.exe", ["/PID", String(launcherPid), "/T", "/F"], {
-        windowsHide: true,
-        timeout: 8_000,
-        maxBuffer: 32 * 1024,
-      });
-    } catch {
-    }
-  }
-  try {
-    fs.unlinkSync(path.join(executorRuntime(), "web-lifecycle-launcher.pid"));
-  } catch {
-  }
-}
-
 async function waitForReady(timeoutMs = START_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const status = getPhase7CLifecycleRuntimeStatus();
     if (status.ready) return status;
-    await new Promise((resolve) => setTimeout(resolve, 750));
+    await sleep(500);
   }
   return null;
 }
 
-function logTail(file: string, lines = 40): string {
-  try {
-    return fs.readFileSync(file, "utf8").split(/\r?\n/).slice(-lines).join("\n").trim();
-  } catch {
-    return "";
+async function waitForStopped(timeoutMs = STOP_VERIFY_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const status = getPhase7CLifecycleRuntimeStatus();
+    if (!status.running && !Object.values(status.processes).some((entry) => entry.alive)) return status;
+    await sleep(250);
   }
+  return getPhase7CLifecycleRuntimeStatus();
 }
 
 function liveAuthorizationError(status: Phase7CLiveAuthorizationStatus): string {
   return status.error ? `${status.reason}: ${status.error}` : status.reason;
+}
+
+function chooseStartBrokerAction(current: ReturnType<typeof getPhase7CLifecycleRuntimeStatus>): {
+  action: Phase7CLifecycleBrokerAction;
+  reason: Phase7CLifecycleBrokerReason;
+} {
+  const anyExecutorAlive = current.running || Object.values(current.processes).some((entry) => entry.alive);
+  if (anyExecutorAlive) {
+    return {
+      action: "RESTART",
+      reason: current.lotSettings.restartRequired ? "LOT_SETTINGS_CHANGED" : "RECOVERY_START",
+    };
+  }
+  return { action: "START", reason: "USER_START" };
 }
 
 export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
@@ -412,7 +306,9 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
 
   const accountModeState = getPhase7CAccountModeState();
   const current = getPhase7CLifecycleRuntimeStatus();
-
+  if (!current.broker.ready) {
+    throw new Error("Lifecycle broker SYSTEM chưa READY. Bot giữ PAUSE; không thực hiện mutation từ Web user.");
+  }
   if (current.ready) {
     const mode = phase7CBotModeService.set("PAUSE", "web-control-center-ready-pause");
     return {
@@ -424,25 +320,13 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
     };
   }
 
-  if (current.running || Object.values(current.processes).some((entry) => entry.alive)) {
-    await runStopper();
-  }
-
-  const launcherPid = await launchSelectedSupervisor(
-    targetAccountMode,
-    targetAccountMode === "LIVE" ? liveAuthorization : null,
-  );
+  const brokerRequest = chooseStartBrokerAction(current);
+  const brokerResult = await submitPhase7CLifecycleBrokerRequest(brokerRequest.action, brokerRequest.reason);
   const ready = await waitForReady();
   if (!ready) {
     phase7CBotModeService.set("PAUSE", "web-control-center-start-failed");
-    await runStopper().catch(() => undefined);
-    const runtime = executorRuntime();
-    const detail = [
-      logTail(path.join(runtime, "web-lifecycle.log")),
-      logTail(path.join(runtime, "supervisor.err.log")),
-      logTail(path.join(runtime, "telegram-mode.err.log")),
-    ].filter(Boolean).join("\n");
-    throw new Error(`Bot chưa đạt READY trong ${START_TIMEOUT_MS / 1000} giây; đã giữ PAUSE và dừng executor.${detail ? `\n\nLog cuối:\n${detail}` : ""}`);
+    await submitPhase7CLifecycleBrokerRequest("STOP", "USER_STOP").catch(() => undefined);
+    throw new Error(`Bot chưa đạt READY trong ${START_TIMEOUT_MS / 1000} giây; broker đã được yêu cầu dừng executor và Bot giữ PAUSE.`);
   }
 
   try {
@@ -465,15 +349,16 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
     }
   } catch (error) {
     phase7CBotModeService.set("PAUSE", "web-control-center-final-preflight-failed");
-    await runStopper().catch(() => undefined);
-    throw new Error(`Kiểm tra cuối trước READY thất bại; executor đã dừng và giữ PAUSE. ${error instanceof Error ? error.message : String(error)}`);
+    await submitPhase7CLifecycleBrokerRequest("STOP", "USER_STOP").catch(() => undefined);
+    throw new Error(`Kiểm tra cuối trước READY thất bại; broker đã được yêu cầu dừng executor và giữ PAUSE. ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const mode = phase7CBotModeService.set("PAUSE", "web-control-center-ready-pause");
   return {
-    action: "STARTED",
+    action: brokerRequest.action === "RESTART" ? "RESTARTED" : "STARTED",
+    brokerReasonCode: brokerResult.reasonCode,
     message: `Bot ${targetAccountMode} đã RUNNING · PAUSE · Trend ${ready.lotSettings.configured.trendFixedLot.toFixed(2)} lot · Telegram READY. Bật AUTO thủ công từ Web khi sẵn sàng.`,
-    launcherPid,
+    supervisorPid: brokerResult.supervisorPid ?? ready.processes.supervisor.pid,
     accountMode: targetAccountMode,
     mode,
     lifecycle: getPhase7CLifecycleRuntimeStatus(),
@@ -489,16 +374,19 @@ export async function stopPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
 
   const accountModeState = getPhase7CAccountModeState();
   const mode = phase7CBotModeService.set("PAUSE", "web-control-center-stop");
-  await new Promise((resolve) => setTimeout(resolve, 2_000));
-  await runStopper();
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  const lifecycle = getPhase7CLifecycleRuntimeStatus();
-  if (lifecycle.running) {
-    throw new Error("Executor vẫn còn chạy sau lệnh dừng. Giữ PAUSE và kiểm tra Scheduled Task XAUUSD-Phase7C-Executors.");
+  const broker = getPhase7CLifecycleBrokerClientStatus();
+  if (!broker.ready) {
+    throw new Error("Lifecycle broker SYSTEM chưa READY; không cho Web user tự dừng privileged executor tree.");
+  }
+  const result = await submitPhase7CLifecycleBrokerRequest("STOP", "USER_STOP");
+  const lifecycle = await waitForStopped();
+  if (lifecycle.running || Object.values(lifecycle.processes).some((entry) => entry.alive)) {
+    throw new Error("Executor vẫn còn chạy sau lệnh STOP của broker. Giữ PAUSE và kiểm tra Lifecycle Broker/Scheduled Task.");
   }
   return {
     action: "STOPPED",
-    message: `Bot ${accountModeState.accountMode} đã dừng an toàn · mode PAUSE · Web/MT5 Bridge vẫn hoạt động.`,
+    brokerReasonCode: result.reasonCode,
+    message: `Bot ${accountModeState.accountMode} đã dừng an toàn · broker vẫn chạy · mode PAUSE · Web/MT5 Bridge vẫn hoạt động.`,
     accountMode: accountModeState.accountMode,
     mode,
     lifecycle,
