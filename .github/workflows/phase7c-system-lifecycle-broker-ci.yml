@@ -11,6 +11,7 @@ on:
       - "scripts/register-phase7c-executor-task-local.ps1"
       - "scripts/lib/phase7c-lifecycle-broker.ps1"
       - "scripts/test-phase7c-system-lifecycle-broker-source.ps1"
+      - "scripts/test-phase7c-system-lifecycle-broker-contract.ps1"
       - ".github/workflows/phase7c-system-lifecycle-broker-ci.yml"
   pull_request:
     paths:
@@ -20,6 +21,7 @@ on:
       - "scripts/register-phase7c-executor-task-local.ps1"
       - "scripts/lib/phase7c-lifecycle-broker.ps1"
       - "scripts/test-phase7c-system-lifecycle-broker-source.ps1"
+      - "scripts/test-phase7c-system-lifecycle-broker-contract.ps1"
       - ".github/workflows/phase7c-system-lifecycle-broker-ci.yml"
 
 permissions:
@@ -40,3 +42,18 @@ jobs:
       - name: Lifecycle broker source contract with Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-system-lifecycle-broker-source.ps1
+
+  protocol-safety-contract:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Broker protocol and safety contract with PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-system-lifecycle-broker-contract.ps1
+
+      - name: Broker protocol and safety contract with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-system-lifecycle-broker-contract.ps1
