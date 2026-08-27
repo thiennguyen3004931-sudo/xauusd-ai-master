@@ -1,0 +1,86 @@
+name: Phase7B Apply Pattern Rule V2
+
+on:
+  push:
+    branches:
+      - phase7c-sideway-supply-demand
+    paths:
+      - "scripts/apply-phase7b-pattern-rule-v2-local.mjs"
+      - "scripts/finalize-phase7b-pattern-rule-v2-local.mjs"
+      - ".github/workflows/phase7b-pattern-rule-v2-apply.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase7c-sideway-supply-demand
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply Pattern Rule V2
+        run: |
+          node scripts/apply-phase7b-pattern-rule-v2-local.mjs --apply
+          node scripts/finalize-phase7b-pattern-rule-v2-local.mjs
+
+      - name: Verify canonical formulas
+        shell: bash
+        run: |
+          for file in \
+            packages/risk-engine/src/services/Phase7BDualPatternTrendRiderService.ts \
+            scripts/run-phase7b-demo-controller.ts \
+            apps/api/src/routes/phase7b-demo.route.ts; do
+            grep -q 'Pattern Rule V2 priority: THREE -> TWO -> ENGULFING' "$file"
+            grep -q 'bcBodyTotal < anchorBody' "$file"
+            grep -q 'bcdBodyTotal > anchorBody' "$file"
+            grep -q 'bBody < anchorBody' "$file"
+            grep -q 'bcBodyTotal > anchorBody' "$file"
+          done
+          grep -q 'rejects three-candle when B+C already equals or exceeds A' packages/risk-engine/tests/Phase7BDualPatternTrendRiderService.test.ts
+
+      - name: Validate risk-engine
+        run: |
+          pnpm --filter @xauusd/risk-engine... build
+          pnpm --filter @xauusd/risk-engine typecheck
+          pnpm --filter @xauusd/risk-engine test
+
+      - name: Build API
+        run: pnpm --filter @xauusd/api... build
+
+      - name: Commit canonical source
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "PATTERN_RULE_V2_SOURCE_ALREADY_CANONICAL=YES"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            packages/risk-engine/src/services/Phase7BDualPatternTrendRiderService.ts \
+            packages/risk-engine/tests/Phase7BDualPatternTrendRiderService.test.ts \
+            scripts/run-phase7b-demo-controller.ts \
+            apps/api/src/routes/phase7b-demo.route.ts
+          git commit -m "fix(phase7b): enforce canonical two and three candle rules"
+          git push origin HEAD:phase7c-sideway-supply-demand

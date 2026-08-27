@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# XAUUSD AI MASTER
 
-## Getting Started
+Integrated pnpm/Turbo monorepo for the XAUUSD AI trading stack on MT5.
 
-First, run the development server:
+## Active architecture
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```text
+apps/web      Vite + React dashboard / control center
+apps/api      Express orchestration and read-only observability API
+packages/*    strategy, risk and MT5 broker packages
+mt5/          read-only MT5 decision panel source
+scripts/      guarded local deployment / account / verification tooling
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Phase7C supports isolated DEMO and LIVE MT5 profiles. Account selection, LIVE ARM and bot mode are separate safety operations. The Web account-switch flow is guarded and must finish a switch to LIVE as `LIVE + PAUSE + DISARMED`; it does not ARM LIVE. The MT5 decision panel is read-only with `ORDER PERMISSION = NONE`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Current operator documentation
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- [Web + MT5 synchronized dashboard and DEMO E2E](PHASE7C-WEB-MT5-SYNC-DEMO-E2E.md)
+- [Portable deployment to another Windows PC](docs/PORTABLE-DEPLOYMENT.md)
+- [Development from a phone with GitHub Codespaces](docs/MOBILE-DEVELOPMENT.md)
 
-## Learn More
+## Portable source package
 
-To learn more about Next.js, take a look at the following resources:
+Create a source-only ZIP from a clean Git commit:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\package-phase7c-portable-release.ps1 `
+  -RequiredCommit <MERGED_COMMIT_SHA>
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The ZIP intentionally excludes local `.env` profiles, `.runtime`, credentials, MT5 data directories, databases, logs, dependency folders and LIVE arm state. GitHub Actions also publishes a 30-day portable source artifact for the portable-deploy workflow.
 
-## Deploy on Vercel
+On a new Windows PC, begin with the fail-closed prerequisite check:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\bootstrap-phase7c-new-pc.ps1
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Installation/build/config actions require explicit flags. Bootstrap never performs an account switch, LIVE ARM or order send.
+
+## Phone development
+
+The repository includes `.devcontainer/devcontainer.json` for a browser-based GitHub Codespaces workspace using Node.js 24, pnpm 10.18.0 and Python 3.12. Use Codespaces on a phone for editing, source tests, builds, commits, PRs and CI review. Actual MT5 execution and final broker/runtime verification remain on a controlled Windows PC or Windows VPS.
+
+Never make the raw Control API or MT5 bridge publicly reachable just to access the project from a phone.
+
+## Local development
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm --filter @xauusd/api... build
+pnpm --filter @xauusd/web... build
+```
+
+Use the Phase7C guarded scripts for runtime deployment rather than treating the generic monorepo development commands as a trading activation path.
+
+## Safety boundary
+
+- Machine-local MT5 secrets stay in gitignored `.env` files.
+- `.runtime` and generated release artifacts are not committed.
+- DEMO/LIVE account switching is guarded and separate from LIVE ARM.
+- LIVE ARM is explicit, session-bound and fail-closed.
+- MT5 panel/Web observability do not send broker orders.
+- Portable packaging and new-PC bootstrap do not ARM LIVE, switch accounts, or send orders.
+- Strategy/risk changes require their existing source tests, CI and DEMO validation before LIVE use.

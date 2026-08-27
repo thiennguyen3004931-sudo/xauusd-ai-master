@@ -1,41 +1,99 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# Dependencies and build outputs
+node_modules/
+dist/
+.next/
+.turbo/
+coverage/
+.ignored_node_modules/
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
 
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
+# Logs and editor files
+*.log
 .DS_Store
-*.pem
+.vscode/
+.idea/
 
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
+# Locally generated portable release archives
+/artifacts/
 
-# env files (can opt-in for committing if needed)
-.env*
+# Local backups
+_backup_packages/
+*_backup/
+*_backup_pack*/
 
-# vercel
-.vercel
+# Local durable execution state
+apps/api/data/execution-state.sqlite3*
+data/execution-state.sqlite3*
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# Phase7B / Phase7C local runtime artifacts
+/phase7b-demo-forward/
+/phase7b-live-forward/
+/phase7c-executors/
+/phase7c-account-bridge/
+/phase7c-lot-settings.json
+/phase7c-lot-settings.demo.json
+/phase7c-lot-settings.live.json
+/phase7c-sideway-forward/
+/phase7c-sideway-live-forward/
+/scripts/.phase7c-trend-legacy-runtime-*.mjs
+/scripts/.phase7c-sideway-live-runtime-*.mjs
+
+# ============================================================
+# XAUUSD AI MASTER - LOCAL DATA / BACKUPS / REPLAY OUTPUT
+# ============================================================
+
+# Local backup directories
+.gate-backups/
+.xauusd-backups/
+_backup_*/
+**/_backup_*/
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.tmp
+
+# Market / replay local data
+apps/api/data/
+data/
+datasets/
+replay-data/
+backtest-data/
+
+# Generated outputs
+output/
+outputs/
+results/
+reports/
+logs/
+*.log
+
+# Databases / runtime state
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Large historical market data
+*.csv
+*.parquet
+*.feather
+
+# Node generated
+node_modules/
+.next/
+dist/
+coverage/
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+!**/.env.example
