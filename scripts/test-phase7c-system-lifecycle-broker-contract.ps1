@@ -59,6 +59,7 @@ function New-GateContext([string]$AccountMode = "DEMO") {
   [pscustomobject]@{
     accountMode = $AccountMode
     accountValid = $true
+    accountModeMatchesConfigured = $true
     botMode = "PAUSE"
     bridgeReachable = $true
     tradingEnabled = $true
@@ -74,7 +75,7 @@ function New-GateContext([string]$AccountMode = "DEMO") {
   }
 }
 
-# Position and PAUSE safety.
+# Position, account-match, and PAUSE safety.
 $stopOpen = New-GateContext
 $stopOpen.openXauusdPositions = 1
 Assert-Equal (Test-Phase7CLifecycleBrokerSafetyGate -Action "STOP" -Context $stopOpen).reasonCode "REJECT_OPEN_XAUUSD_POSITION" "STOP with open XAUUSD position must fail"
@@ -84,6 +85,9 @@ Assert-Equal (Test-Phase7CLifecycleBrokerSafetyGate -Action "STOP" -Context $sto
 $restartAuto = New-GateContext
 $restartAuto.botMode = "AUTO"
 Assert-Equal (Test-Phase7CLifecycleBrokerSafetyGate -Action "RESTART" -Context $restartAuto).reasonCode "REJECT_BOT_NOT_PAUSED" "RESTART outside PAUSE must fail"
+$mismatch = New-GateContext
+$mismatch.accountModeMatchesConfigured = $false
+Assert-Equal (Test-Phase7CLifecycleBrokerSafetyGate -Action "START" -Context $mismatch).reasonCode "REJECT_ACCOUNT_INVALID" "START with broker/config account mismatch must fail"
 
 # DEMO lifecycle never needs ARM.
 $demo = New-GateContext "DEMO"
