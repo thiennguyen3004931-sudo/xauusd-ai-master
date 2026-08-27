@@ -26,7 +26,9 @@ $TrendStatePath = Join-Path $WorkDir "phase7b-demo-forward\phase7b-demo-state.js
 $SidewayStatePath = Join-Path $WorkDir "phase7c-sideway-forward\phase7c-sideway-state.json"
 $TelegramModeStatusPath = Join-Path $RuntimeDir "telegram-mode-status.json"
 $TradeNotifierRuntimePath = Join-Path $RuntimeDir "trade-notifier-runtime.json"
-$StartupRunnerStatusPath = Join-Path $RuntimeDir "startup-runner-status.json"
+$BrokerRoot = Join-Path $WorkDir "phase7c-lifecycle-broker"
+$BrokerHeartbeatPath = Join-Path $BrokerRoot "state\heartbeat.json"
+$BrokerStatusPath = Join-Path $BrokerRoot "state\status.json"
 $StartupRunnerLockPath = Join-Path $RuntimeDir "startup-runner.lock"
 $TaskOwnershipHelperPath = Join-Path $PSScriptRoot "lib\phase7c-scheduled-task-ownership.ps1"
 if (-not (Test-Path -LiteralPath $TaskOwnershipHelperPath)) { throw "Scheduled task ownership helper not found: $TaskOwnershipHelperPath" }
@@ -172,32 +174,44 @@ $startupRunnerPid = $null
 $startupRunnerAlive = $false
 $startupRunnerLockState = 'NOT_APPLICABLE'
 $startupRunnerAccountMode = ''
+$brokerHeartbeatAgeMs = $null
 if ($null -ne $task -and $startupRunner) {
-  if (Test-Path -LiteralPath $StartupRunnerStatusPath) {
+  if ((Test-Path -LiteralPath $BrokerHeartbeatPath) -and (Test-Path -LiteralPath $BrokerStatusPath)) {
     try {
-      $startupRunnerStatus = Get-Content -LiteralPath $StartupRunnerStatusPath -Raw | ConvertFrom-Json
-      $startupRunnerAccountMode = [string]$startupRunnerStatus.accountMode
-      if ($null -ne $startupRunnerStatus.runnerPid) {
-        $startupRunnerPid = [int]$startupRunnerStatus.runnerPid
-        $startupRunnerAlive = $null -ne (Get-Process -Id $startupRunnerPid -ErrorAction SilentlyContinue)
+      $brokerHeartbeat = Get-Content -LiteralPath $BrokerHeartbeatPath -Raw | ConvertFrom-Json
+      $brokerStatus = Get-Content -LiteralPath $BrokerStatusPath -Raw | ConvertFrom-Json
+      if ([int]$brokerHeartbeat.version -ne 1 -or [int]$brokerStatus.version -ne 1) {
+        throw 'Unsupported lifecycle broker state version.'
       }
+      $startupRunnerPid = [int]$brokerHeartbeat.brokerPid
+      $statusBrokerPid = [int]$brokerStatus.brokerPid
+      if ($startupRunnerPid -le 0 -or $statusBrokerPid -ne $startupRunnerPid) {
+        throw "Lifecycle broker heartbeat/status PID mismatch. heartbeat=$startupRunnerPid status=$statusBrokerPid"
+      }
+      $brokerHeartbeatAgeMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$brokerHeartbeat.updatedAt
+      $startupRunnerAlive = $brokerHeartbeatAgeMs -ge 0 -and
+        $brokerHeartbeatAgeMs -le 5000 -and
+        $null -ne (Get-Process -Id $startupRunnerPid -ErrorAction SilentlyContinue)
+      $startupRunnerAccountMode = [string]$brokerStatus.accountMode
     } catch {
-      Write-Host 'PHASE7C_VERIFY_STARTUP_RUNNER_STATUS=INVALID'
+      Write-Host 'PHASE7C_VERIFY_LIFECYCLE_BROKER_STATUS=INVALID'
+      $startupRunnerAlive = $false
     }
   } else {
-    Write-Host 'PHASE7C_VERIFY_STARTUP_RUNNER_STATUS=MISSING'
+    Write-Host 'PHASE7C_VERIFY_LIFECYCLE_BROKER_STATUS=MISSING'
   }
   $startupRunnerLockState = Get-Phase7CStartupRunnerLockState -LockPath $StartupRunnerLockPath
   Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_PID=$startupRunnerPid"
   Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_ALIVE=$startupRunnerAlive"
   Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_LOCK=$startupRunnerLockState"
   Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_ACCOUNT_MODE=$startupRunnerAccountMode"
+  Write-Host "PHASE7C_VERIFY_BROKER_HEARTBEAT_AGE_MS=$brokerHeartbeatAgeMs"
 
   if ($RequireMigratedTask -and $task.State -ne 'Running') {
     throw "Required startup-runner Scheduled Task is not Running. state=$($task.State)"
   }
   if ($RequireMigratedTask -and -not $startupRunnerAlive) {
-    throw 'Required startup-runner task is Running but startup-runner-status.json does not identify a live runner process.'
+    throw 'Required lifecycle broker task is Running but broker heartbeat does not identify a fresh live broker process.'
   }
   if ($RequireMigratedTask -and $startupRunnerLockState -ne 'HELD') {
     throw "Required startup-runner singleton lock is not exclusively held. state=$startupRunnerLockState"
@@ -207,6 +221,7 @@ if ($null -ne $task -and $startupRunner) {
   Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_ALIVE=$startupRunnerAlive"
   Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_LOCK=$startupRunnerLockState"
   Write-Host "PHASE7C_VERIFY_STARTUP_RUNNER_ACCOUNT_MODE=$startupRunnerAccountMode"
+  Write-Host "PHASE7C_VERIFY_BROKER_HEARTBEAT_AGE_MS=$brokerHeartbeatAgeMs"
 }
 
 $telegramToken = Read-EnvValueFromFile $TelegramEnvFile "ZIQ_TELEGRAM_BOT_TOKEN"
