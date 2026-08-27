@@ -159,10 +159,12 @@ const lifecycleSource = fs.readFileSync(
 assert.match(lifecycleSource, /resolvePhase7CWebStartAccount/);
 assert.match(lifecycleSource, /ensurePhase7CLiveAuthorizationForWebStart/);
 assert.match(lifecycleSource, /preserveLegacyExplicitLiveAuthorization/);
-assert.match(lifecycleSource, /launchSelectedSupervisor/);
+assert.match(lifecycleSource, /submitPhase7CLifecycleBrokerRequest/);
+assert.match(lifecycleSource, /chooseStartBrokerAction/);
+assert.doesNotMatch(lifecycleSource, /launchSelectedSupervisor/);
 assert.doesNotMatch(lifecycleSource, /Web cold-start chỉ được phép cho DEMO/);
 assert.doesNotMatch(lifecycleSource, /web-control-center-live-start-blocked/);
-assert.match(lifecycleSource, /-LiveExecutionEnabled/);
+assert.doesNotMatch(lifecycleSource, /-LiveExecutionEnabled/);
 assert.match(lifecycleSource, /phase7CBotModeService\.set\("PAUSE", "web-control-center-preflight"\)/);
 assert.match(lifecycleSource, /finalTelemetry/);
 assert.match(lifecycleSource, /telemetry\.accountLogin/);
