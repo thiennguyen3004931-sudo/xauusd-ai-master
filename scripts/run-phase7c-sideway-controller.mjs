@@ -838,6 +838,9 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
     }
   }
 
+  if (managed.dailyMode === "RECOVERY_TP") {
+    return;
+  }
   if (!managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {
     const closeVolume = oneThirdPartialVolume(
       managed.initialVolume,

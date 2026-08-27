@@ -152,12 +152,36 @@ type RuntimeEntrySignal = Pick<
   "id" | "side" | "pattern" | "signalTimestamp" | "entry" | "patternExtreme"
 >;
 
+type PendingTrendEntry = {
+  orderId: string;
+  brokerTicket: string | null;
+  side: "BUY" | "SELL";
+  pattern: string;
+  signalTimestamp: number;
+  signalEntry: number;
+  entryState: "ENTRY_IMMEDIATE" | "PULLBACK_ENTRY";
+  referenceEntry: number;
+  volume: number;
+  stopDistance: number;
+  stopLoss: number;
+  takeProfit: number;
+  createdAt: number;
+  brokerReferenceTimestamp: number;
+  dailyMode: DailyMode;
+  dailyNetPnlAtEntry: number;
+  recoveryTargetNetPnl: number;
+  recoveryTpDistance: number;
+  recoveryTakeProfit: number;
+  recoveryDayStartTime: number;
+};
+
 type BotState = {
   version: 2;
   accountLogin: number | null;
   lastEvaluatedM15Close: number;
   lastEvaluatedM5Close: number;
   pendingPullback: Phase7BPendingPullback | null;
+  pendingEntry: PendingTrendEntry | null;
   managed: ManagedState | null;
 };
 
@@ -167,6 +191,7 @@ type PersistedBotState = {
   lastEvaluatedM15Close?: number;
   lastEvaluatedM5Close?: number;
   pendingPullback?: Phase7BPendingPullback | null;
+  pendingEntry?: PendingTrendEntry | null;
   managed?: ManagedState | null;
 };
 
@@ -398,6 +423,93 @@ async function cycle(): Promise<void> {
       return;
     }
     await managePosition(managedPosition, quote, spec, m15);
+    return;
+  }
+
+  if (state.pendingEntry) {
+    const pending = state.pendingEntry;
+    const pendingAgeMs = Math.max(0, Date.now() - pending.createdAt);
+
+    if (positions.length === 0) {
+      if (pendingAgeMs >= 60_000) {
+        journal("PENDING_ENTRY_EXPIRED_NO_POSITION", {
+          orderId: pending.orderId,
+          brokerTicket: pending.brokerTicket,
+          ageMs: pendingAgeMs,
+        });
+        state.pendingEntry = null;
+        saveState();
+        return;
+      }
+
+      journal("PENDING_ENTRY_RECOVERY_WAIT", {
+        orderId: pending.orderId,
+        brokerTicket: pending.brokerTicket,
+        ageMs: pendingAgeMs,
+      });
+      return;
+    }
+
+    if (positions.length !== 1) {
+      journal("PENDING_ENTRY_RECOVERY_BLOCK", {
+        orderId: pending.orderId,
+        brokerTicket: pending.brokerTicket,
+        reason: "PENDING_REQUIRES_EXACTLY_ONE_POSITION",
+        positions: positions.map((p) => ({
+          ticket: p.ticket,
+          side: p.side,
+          volume: p.volume,
+        })),
+      });
+      return;
+    }
+
+    const candidate = positions[0]!;
+    const recovery = matchPendingTrendPosition(
+      pending,
+      candidate,
+      spec,
+    );
+
+    if (!recovery.matched) {
+      journal("PENDING_ENTRY_RECOVERY_BLOCK", {
+        orderId: pending.orderId,
+        brokerTicket: pending.brokerTicket,
+        reason: recovery.reason,
+        candidate: {
+          ticket: candidate.ticket,
+          side: candidate.side,
+          volume: candidate.volume,
+          entry: candidate.entry,
+          stopLoss: candidate.stopLoss,
+          takeProfit: candidate.takeProfit,
+        },
+      });
+      return;
+    }
+
+    state.managed = managedFromPending(
+      pending,
+      candidate,
+    );
+
+    state.pendingEntry = null;
+    saveState();
+
+    journal("PENDING_ENTRY_RECOVERED", {
+      orderId: pending.orderId,
+      brokerTicket: pending.brokerTicket,
+      ticket: candidate.ticket,
+      side: pending.side,
+      volume: candidate.volume,
+    });
+
+    await managePosition(
+      candidate,
+      quote,
+      spec,
+      m15,
+    );
     return;
   }
 
@@ -640,6 +752,55 @@ async function submitTrendEntry(
     recoveryDealCount: dailyRecovery.dealCount,
   });
 
+  const brokerReferenceTimestamp = Number(quote.timestamp);
+
+  if (
+    !Number.isFinite(brokerReferenceTimestamp) ||
+    brokerReferenceTimestamp <= 0
+  ) {
+    journal("ENTRY_BROKER_REFERENCE_TIMESTAMP_INVALID", {
+      signalId: signal.id,
+      entryState,
+      quoteTimestamp: quote.timestamp,
+    });
+    return "REJECTED";
+  }
+
+  const pendingEntry: PendingTrendEntry = {
+    orderId,
+    brokerTicket: null,
+    side: signal.side,
+    pattern: signal.pattern,
+    signalTimestamp: signal.signalTimestamp,
+    signalEntry: signal.entry,
+    entryState,
+    referenceEntry: marketEntry,
+    volume: fixedVolume,
+    stopDistance,
+    stopLoss,
+    takeProfit,
+    createdAt: Date.now(),
+    brokerReferenceTimestamp,
+    dailyMode: dailyRecovery.mode,
+    dailyNetPnlAtEntry: dailyRecovery.dailyNetPnl,
+    recoveryTargetNetPnl: dailyRecovery.targetNetPnl,
+    recoveryTpDistance: dailyRecovery.tpDistance,
+    recoveryTakeProfit: takeProfit,
+    recoveryDayStartTime: dailyRecovery.dayStartTime,
+  };
+
+  state.pendingEntry = pendingEntry;
+  saveState();
+
+  journal("ENTRY_PENDING_DURABLE", {
+    orderId,
+    side: pendingEntry.side,
+    volume: pendingEntry.volume,
+    stopLoss: pendingEntry.stopLoss,
+    takeProfit: pendingEntry.takeProfit,
+    brokerReferenceTimestamp: pendingEntry.brokerReferenceTimestamp,
+  });
+
   const order = await post<OrderResponse>("/v1/orders", {
     symbol,
     side: signal.side,
@@ -658,16 +819,59 @@ async function submitTrendEntry(
 
   if (!order.accepted) {
     journal("ENTRY_REJECTED", { signalId: signal.id, entryState, message: order.message, retcode: order.retcode });
+    state.pendingEntry = null;
+    saveState();
     return "REJECTED";
   }
 
   let opened = order.position ?? null;
-  if (!opened) {
-    const after = await get<Position[]>(`/v1/positions?symbol=${encodeURIComponent(symbol)}`);
-    if (after.length === 1) opened = after[0]!;
+
+  if (opened) {
+    const recovery = matchPendingTrendPosition(
+      pendingEntry,
+      opened,
+      spec,
+    );
+
+    if (recovery.matched) {
+      pendingEntry.brokerTicket = String(opened.ticket);
+      state.pendingEntry = pendingEntry;
+      saveState();
+    } else {
+      opened = null;
+    }
   }
+
   if (!opened) {
-    journal("ENTRY_ACCEPTED_POSITION_NOT_RESOLVED", { signalId: signal.id, entryState, ticket: order.ticket, fillPrice: order.fillPrice });
+    const after = await get<Position[]>(
+      `/v1/positions?symbol=${encodeURIComponent(symbol)}`,
+    );
+
+    if (after.length === 1) {
+      const candidate = after[0]!;
+      const recovery = matchPendingTrendPosition(
+        pendingEntry,
+        candidate,
+        spec,
+      );
+
+      if (recovery.matched) {
+        opened = candidate;
+      }
+    }
+  }
+
+  if (!opened) {
+    journal("ENTRY_ACCEPTED_POSITION_NOT_RESOLVED", {
+      signalId: signal.id,
+      entryState,
+      ticket: order.ticket,
+      fillPrice: order.fillPrice,
+    });
+
+    state.pendingEntry = pendingEntry;
+    saveState();
+
     return "UNRESOLVED";
   }
 
@@ -698,6 +902,7 @@ async function submitTrendEntry(
     recoveryTakeProfit: takeProfit,
     recoveryDayStartTime: dailyRecovery.dayStartTime,
   };
+  state.pendingEntry = null;
   saveState();
   journal("ENTRY_FILLED", {
     signalId: signal.id,
@@ -1197,6 +1402,187 @@ function bodySize(bar: Phase7Bar): number {
   return Math.abs(bar.close - bar.open);
 }
 
+function matchPendingTrendPosition(
+  pending: PendingTrendEntry,
+  position: Position,
+  spec: SymbolSpec,
+): { matched: boolean; reason: string } {
+  if (
+    pending.brokerTicket &&
+    String(position.ticket) !== pending.brokerTicket
+  ) {
+    return {
+      matched: false,
+      reason: "PENDING_TICKET_MISMATCH",
+    };
+  }
+
+  const expectedSide =
+    pending.side === "BUY"
+      ? "LONG"
+      : "SHORT";
+
+  if (position.side !== expectedSide) {
+    return {
+      matched: false,
+      reason: "PENDING_SIDE_MISMATCH",
+    };
+  }
+
+  if (
+    !(spec.volumeStep > 0) ||
+    !(spec.point > 0)
+  ) {
+    return {
+      matched: false,
+      reason: "PENDING_BROKER_SPEC_INVALID",
+    };
+  }
+
+  if (!pending.brokerTicket) {
+    const brokerReferenceTimestamp =
+      Number(pending.brokerReferenceTimestamp);
+
+    const openedAt = Number(position.openedAt);
+
+    if (
+      !Number.isFinite(brokerReferenceTimestamp) ||
+      brokerReferenceTimestamp <= 0 ||
+      !Number.isFinite(openedAt) ||
+      openedAt <= 0
+    ) {
+      return {
+        matched: false,
+        reason: "PENDING_TIMESTAMP_INVALID",
+      };
+    }
+
+    const openTimeToleranceMs = 120_000;
+
+    if (
+      Math.abs(
+        openedAt - brokerReferenceTimestamp,
+      ) > openTimeToleranceMs
+    ) {
+      return {
+        matched: false,
+        reason: "PENDING_OPEN_TIME_MISMATCH",
+      };
+    }
+
+    const actualEntry = Number(position.entry);
+    const referenceEntry = Number(pending.referenceEntry);
+
+    if (
+      !Number.isFinite(actualEntry) ||
+      !Number.isFinite(referenceEntry)
+    ) {
+      return {
+        matched: false,
+        reason: "PENDING_ENTRY_PRICE_INVALID",
+      };
+    }
+
+    const entryTolerance =
+      Math.max(
+        spec.point * (deviationPoints + 2),
+        1e-6,
+      );
+
+    if (
+      Math.abs(position.entry - pending.referenceEntry) >
+      entryTolerance
+    ) {
+      return {
+        matched: false,
+        reason: "PENDING_ENTRY_PRICE_MISMATCH",
+      };
+    }
+  }
+
+  const volumeTolerance =
+    spec.volumeStep / 2 + 1e-9;
+
+  if (
+    Math.abs(position.volume - pending.volume) >
+    volumeTolerance
+  ) {
+    return {
+      matched: false,
+      reason: "PENDING_VOLUME_MISMATCH",
+    };
+  }
+
+  const priceTolerance =
+    Math.max(spec.point * 2, 1e-6);
+
+  if (
+    Math.abs(position.stopLoss - pending.stopLoss) >
+    priceTolerance
+  ) {
+    return {
+      matched: false,
+      reason: "PENDING_STOP_LOSS_MISMATCH",
+    };
+  }
+
+  if (
+    Math.abs(position.takeProfit - pending.takeProfit) >
+    priceTolerance
+  ) {
+    return {
+      matched: false,
+      reason: "PENDING_TAKE_PROFIT_MISMATCH",
+    };
+  }
+
+  return {
+    matched: true,
+    reason: "PENDING_POSITION_MATCHED",
+  };
+}
+
+function managedFromPending(
+  pending: PendingTrendEntry,
+  position: Position,
+): ManagedState {
+  return {
+    ticket: position.ticket,
+    side: pending.side,
+    pattern: pending.pattern,
+    signalTimestamp: pending.signalTimestamp,
+    signalEntry: pending.signalEntry,
+    entry: position.entry,
+    initialVolume: position.volume,
+    expectedRemainingVolume: position.volume,
+    stopDistance: pending.stopDistance,
+    breakEvenApplied: false,
+    partialApplied: false,
+    partialActivatedAt: null,
+    lastStructuralStop:
+      position.stopLoss || pending.stopLoss,
+    lastReversalM15CloseChecked:
+      pending.signalTimestamp,
+    lastTrendM15CloseChecked:
+      pending.signalTimestamp,
+    beAttempt: 0,
+    partialAttempt: 0,
+    exitAttempt: 0,
+    structureAttempt: 0,
+    dailyMode: pending.dailyMode,
+    dailyNetPnlAtEntry:
+      pending.dailyNetPnlAtEntry,
+    recoveryTargetNetPnl:
+      pending.recoveryTargetNetPnl,
+    recoveryTpDistance:
+      pending.recoveryTpDistance,
+    recoveryTakeProfit:
+      pending.recoveryTakeProfit,
+    recoveryDayStartTime:
+      pending.recoveryDayStartTime,
+  };
+}
+
 function improvesStop(side: "BUY" | "SELL", current: number, candidate: number): boolean {
   if (!(candidate > 0)) return false;
   if (!(current > 0)) return true;
@@ -1256,6 +1642,7 @@ function loadState(file: string): BotState {
       lastEvaluatedM15Close: 0,
       lastEvaluatedM5Close: 0,
       pendingPullback: null,
+      pendingEntry: null,
       managed: null,
     };
   }
@@ -1267,6 +1654,7 @@ function loadState(file: string): BotState {
       lastEvaluatedM15Close: parsed.lastEvaluatedM15Close ?? 0,
       lastEvaluatedM5Close: 0,
       pendingPullback: null,
+      pendingEntry: null,
       managed: parsed.managed ?? null,
     };
   }
@@ -1277,6 +1665,7 @@ function loadState(file: string): BotState {
     lastEvaluatedM15Close: parsed.lastEvaluatedM15Close ?? 0,
     lastEvaluatedM5Close: parsed.lastEvaluatedM5Close ?? 0,
     pendingPullback: parsed.pendingPullback ?? null,
+    pendingEntry: parsed.pendingEntry ?? null,
     managed: parsed.managed ?? null,
   };
 }
