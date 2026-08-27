@@ -59,7 +59,9 @@ try {
   try {
     validateTempResult();
     alreadyCanonical = true;
-  } catch {
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.log(`PHASE7B_CANONICAL_RUNNER_WINDOWS_CURRENT_CANONICAL=False|${detail}`);
     alreadyCanonical = false;
   }
 
@@ -172,6 +174,11 @@ function validateTempResult() {
     throw new Error("Temporary API is missing the Supertrend and maximum structural-stop entry gates.");
   }
   if (!api.includes("inferBrokerClockOffset")) throw new Error("Temporary API lost broker-clock normalization.");
-  if (!layout.includes("SL cấu trúc 6–10; >10 chờ hồi")) throw new Error("Temporary layout stop rule missing.");
-  if (!page.includes("Chỉ xác nhận xu hướng khung lớn")) throw new Error("Temporary page MA200 macro role missing.");
+
+  const semanticUiV2 = page.includes("SEMANTIC UI v2") && page.includes("fetchPhase7CWebStatus");
+  const layoutRoleValid = layout.includes("SL cấu trúc 6–10; >10 chờ hồi") || semanticUiV2;
+  if (!layoutRoleValid) throw new Error("Temporary layout canonical stop-rule / Semantic UI v2 marker missing.");
+
+  const pageRoleValid = page.includes("Chỉ xác nhận xu hướng khung lớn") || semanticUiV2;
+  if (!pageRoleValid) throw new Error("Temporary page canonical role / Semantic UI v2 marker missing.");
 }

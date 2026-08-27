@@ -124,6 +124,13 @@ for (const file of Object.values(files)) {
   });
 }
 
+const webPatternUiSuperseded =
+  states.get(files.web)?.source.includes("THREE_CANDLE_BODY_DOMINANCE") ||
+  (
+    states.get(files.web)?.source.includes("SEMANTIC UI v2") &&
+    states.get(files.web)?.source.includes("fetchPhase7CWebStatus")
+  );
+
 const patternRuleV2AlreadyApplied = [
   states.get(files.service)?.source.includes(
     "Pattern Rule V2 priority: THREE -> TWO -> ENGULFING.",
@@ -143,9 +150,7 @@ const patternRuleV2AlreadyApplied = [
   states.get(files.api)?.source.includes(
     "THREE_CANDLE_BODY_DOMINANCE",
   ),
-  states.get(files.web)?.source.includes(
-    "THREE_CANDLE_BODY_DOMINANCE",
-  ),
+  webPatternUiSuperseded,
 ].every(Boolean);
 
 if (patternRuleV2AlreadyApplied) {

@@ -27,6 +27,33 @@ for (const file of Object.values(files)) {
 
 const apiSource = normalized.get(files.api);
 const webSource = normalized.get(files.web);
+const semanticUiV2Superseded =
+  webSource.includes("SEMANTIC UI v2") &&
+  webSource.includes("fetchPhase7CWebStatus");
+const apiClockAlreadyApplied =
+  apiSource.includes("THREE_CANDLE_BODY_DOMINANCE") &&
+  apiSource.includes("inferBrokerClockOffset") &&
+  apiSource.includes("normalizeBrokerTimestamp") &&
+  apiSource.includes("telemetry.quote?.timestamp");
+
+if (semanticUiV2Superseded && apiClockAlreadyApplied) {
+  console.log("PHASE7B_PATTERN_UI_CLOCK_PATCH=START");
+  console.log(`PHASE7B_PATTERN_UI_CLOCK_ROOT=${root}`);
+  console.log(`PHASE7B_PATTERN_UI_CLOCK_MODE=${apply ? "APPLY" : "CHECK_ONLY"}`);
+  console.log("PHASE7B_PATTERN_UI_CLOCK_SCOPE=DISPLAY_ONLY_NO_EXECUTION_LOGIC");
+  console.log("PHASE7B_PATTERN_UI_CLOCK_SUPERSEDED=SEMANTIC_UI_V2");
+  console.log("PHASE7B_PATTERN_UI_CLOCK_CHANGES_NEEDED=0");
+  if (apply) {
+    console.log("PHASE7B_PATTERN_UI_CLOCK_APPLY=PASS");
+    console.log("PHASE7B_PATTERN_UI_CLOCK_LINE_ENDINGS=PRESERVED");
+    console.log("PHASE7B_PATTERN_UI_CLOCK_EXECUTION_MUTATION=False");
+  } else {
+    console.log("PHASE7B_PATTERN_UI_CLOCK_ORIGINAL_MUTATION=False");
+    console.log("PHASE7B_PATTERN_UI_CLOCK_CHECK=PASS");
+  }
+  process.exit(0);
+}
+
 if (!apiSource.includes("THREE_CANDLE_BODY_DOMINANCE")) {
   throw new Error("API three-candle pattern is missing. Apply the three-candle migration first.");
 }

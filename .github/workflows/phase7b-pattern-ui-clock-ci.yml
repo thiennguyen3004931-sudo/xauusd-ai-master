@@ -66,7 +66,13 @@ jobs:
           grep -q 'normalizeBrokerTimestamp(current.closeTime, brokerClockOffsetMs)' apps/api/src/routes/phase7b-demo.route.ts
           grep -q 'telemetry.quote?.timestamp' apps/api/src/routes/phase7b-demo.route.ts
           grep -q 'telemetry.health?.timestamp' apps/api/src/routes/phase7b-demo.route.ts
-          grep -q 'timeZone: "Asia/Ho_Chi_Minh"' apps/web/src/pages/Phase7BPatternCheckPage.tsx
-          grep -q 'Math.min(15 \* 60_000, rawRemainingMs)' apps/web/src/pages/Phase7BPatternCheckPage.tsx
-          grep -q 'Ba nến B+C+D > A' apps/web/src/pages/Phase7BPatternCheckPage.tsx
           grep -q 'THREE_CANDLE_BODY_DOMINANCE' apps/api/src/routes/phase7b-demo.route.ts
+          if grep -q 'SEMANTIC UI v2' apps/web/src/pages/Phase7BPatternCheckPage.tsx; then
+            grep -q 'fetchPhase7CWebStatus' apps/web/src/pages/Phase7BPatternCheckPage.tsx
+            echo 'PHASE7B_PATTERN_UI_CLOCK_WEB=SUPERSEDED_BY_SEMANTIC_UI_V2'
+          else
+            grep -q 'timeZone: "Asia/Ho_Chi_Minh"' apps/web/src/pages/Phase7BPatternCheckPage.tsx
+            grep -q 'Math.min(15 \* 60_000, rawRemainingMs)' apps/web/src/pages/Phase7BPatternCheckPage.tsx
+            grep -q 'Ba nến B+C+D > A' apps/web/src/pages/Phase7BPatternCheckPage.tsx
+            echo 'PHASE7B_PATTERN_UI_CLOCK_WEB=LEGACY_CLOCK_UI'
+          fi
