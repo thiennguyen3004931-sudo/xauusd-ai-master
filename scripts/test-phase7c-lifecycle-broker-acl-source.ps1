@@ -27,6 +27,8 @@ Assert-True ($text -match 'FullControl') "SYSTEM/Administrators must retain Full
 Assert-True ($text -match 'Modify') "Web/API SID must receive Modify on inbox"
 Assert-True ($text -match 'ReadAndExecute|Read') "Web/API SID must receive read-only state/result/log access"
 Assert-True ($text -match 'api-user-sid\.txt') "installer must record configured API SID for capability checks"
+Assert-True ($text -match 'heartbeat\.json') "installer must verify broker heartbeat after registration/migration"
+Assert-True ($text -match 'Start-ScheduledTask') "installer must start the canonical SYSTEM broker task for post-install verification"
 Assert-True ($text -match '(?i)SYSTEM') "canonical Scheduled Task must remain SYSTEM"
 Assert-True ($text -match '(?i)ServiceAccount') "canonical Scheduled Task must use ServiceAccount logon semantics"
 Assert-True ($text -match 'RunLevel\s+Highest') "canonical Scheduled Task must remain Highest"
