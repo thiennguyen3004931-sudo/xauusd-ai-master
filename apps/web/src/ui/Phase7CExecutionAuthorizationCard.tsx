@@ -323,7 +323,7 @@ export function Phase7CExecutionAuthorizationCard() {
                 onClick={() => setShowAutoChecks((value) => !value)}
                 sx={{ fontWeight: 900, whiteSpace: "nowrap" }}
               >
-                {showAutoChecks ? "ẨN CHI TIẾT AUTO" : "CHI TIẾT AUTO"}
+                {showAutoChecks ? "Ẩn chi tiết tự động" : "Chi tiết tự động"}
               </Button>
               <Button
                 variant="contained"
@@ -335,8 +335,8 @@ export function Phase7CExecutionAuthorizationCard() {
                 {autoMutation.isPending
                   ? "ĐANG KIỂM TRA..."
                   : accountMode === "DEMO"
-                    ? "BẬT AUTO DEMO"
-                    : "BẬT AUTO LIVE"}
+                    ? "Bật tự động Demo"
+                    : "Bật tự động Live"}
               </Button>
             </Stack>
           </Stack>

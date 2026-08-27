@@ -32,7 +32,6 @@ import {
   setPhase7CBotMode,
   setPhase7CLotSettings,
 } from "../api";
-import { enablePhase7CAuto } from "../phase7c-execution-control";
 import { MetricCard } from "../ui/MetricCard";
 
 function money(value: number | null | undefined, currency = "USD") {
@@ -162,8 +161,7 @@ export function Phase7CControlCenterPage() {
   });
 
   const botModeAction = useMutation({
-    mutationFn: (nextMode: "AUTO" | "PAUSE") =>
-      nextMode === "AUTO" ? enablePhase7CAuto() : setPhase7CBotMode(nextMode),
+    mutationFn: () => setPhase7CBotMode("PAUSE"),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["phase7c-lifecycle"] }),
@@ -308,23 +306,13 @@ export function Phase7CControlCenterPage() {
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2}>
                 <Button
                   fullWidth
-                  variant="contained"
-                  color="primary"
-                  disabled={mode === "AUTO" || botModeAction.isPending}
-                  onClick={() => botModeAction.mutate("AUTO")}
-                  sx={{ fontWeight: 950 }}
-                >
-                  {botModeAction.isPending && botModeAction.variables === "AUTO" ? "ĐANG KIỂM TRA AUTO..." : "BẬT AUTO"}
-                </Button>
-                <Button
-                  fullWidth
                   variant="outlined"
                   color="warning"
                   disabled={!canPause || botModeAction.isPending}
-                  onClick={() => botModeAction.mutate("PAUSE")}
+                  onClick={() => botModeAction.mutate()}
                   sx={{ fontWeight: 950 }}
                 >
-                  {botModeAction.isPending && botModeAction.variables === "PAUSE" ? "ĐANG PAUSE..." : "TẠM DỪNG"}
+                  {botModeAction.isPending ? "ĐANG PAUSE..." : "TẠM DỪNG"}
                 </Button>
               </Stack>
             </Stack>
