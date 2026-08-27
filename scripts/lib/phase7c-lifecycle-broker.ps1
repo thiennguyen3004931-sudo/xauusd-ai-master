@@ -134,6 +134,9 @@ function Test-Phase7CLifecycleBrokerSafetyGate {
   if (-not [bool](Get-Phase7CContextValue $Context "accountValid" $false)) {
     return New-Phase7CLifecycleBrokerDecision $false "REJECT_ACCOUNT_INVALID" "Configured account state is invalid."
   }
+  if (-not [bool](Get-Phase7CContextValue $Context "accountModeMatchesConfigured" $false)) {
+    return New-Phase7CLifecycleBrokerDecision $false "REJECT_ACCOUNT_INVALID" "MT5 broker account mode does not match configured lifecycle account mode."
+  }
   foreach ($flag in @("tradingEnabled", "terminalTradeAllowed", "expertTradeAllowed", "telegramConfigured", "taskConfigValid")) {
     if (-not [bool](Get-Phase7CContextValue $Context $flag $false)) {
       $reason = if ($flag -eq "telegramConfigured" -or $flag -eq "taskConfigValid") { "REJECT_ACCOUNT_INVALID" } else { "REJECT_BRIDGE_UNAVAILABLE" }
