@@ -58,6 +58,100 @@ const lifecycleEvents = [
   },
 ];
 
+const sidewayLifecycleEvents = [
+  {
+    type: "ENTRY_FILLED",
+    timestamp: "2026-08-26T05:00:00.000Z",
+    position: {
+      ticket: "SIDEWAY-SYNTHETIC-1",
+      side: "LONG",
+      entry: 4700,
+      stopLoss: 4692,
+      takeProfit: 4720,
+      volume: 0.12,
+    },
+    management: {
+      side: "BUY",
+      entry: 4700,
+      initialVolume: 0.12,
+      expectedRemainingVolume: 0.12,
+      stopLoss: 4692,
+      tp1: 4710,
+      tp1Kind: "FIXED_PLUS_10",
+      tp2: 4720,
+      breakEvenApplied: false,
+      partialApplied: false,
+      dailyMode: "NORMAL",
+    },
+  },
+  {
+    type: "PLUS6_SL_TO_ENTRY",
+    timestamp: "2026-08-26T05:01:00.000Z",
+    ticket: "SIDEWAY-SYNTHETIC-1",
+    side: "BUY",
+    favorable: 6,
+    stopLoss: 4700,
+  },
+  {
+    type: "PLUS10_PARTIAL_ONE_THIRD",
+    timestamp: "2026-08-26T05:02:00.000Z",
+    ticket: "SIDEWAY-SYNTHETIC-1",
+    side: "BUY",
+    favorable: 10,
+    stopLoss: 4700,
+    closedVolume: 0.04,
+    remainingVolume: 0.08,
+  },
+  {
+    type: "POSITION_CLOSED",
+    timestamp: "2026-08-26T05:03:00.000Z",
+    ticket: "SIDEWAY-SYNTHETIC-1",
+    side: "BUY",
+    reason: "TP2_OPPOSITE_RANGE",
+  },
+];
+
+const sidewayRecoveryEvents = [
+  {
+    type: "ENTRY_FILLED",
+    timestamp: "2026-08-26T06:00:00.000Z",
+    position: {
+      ticket: "SIDEWAY-RECOVERY-1",
+      side: "LONG",
+      entry: 4700,
+      stopLoss: 4692,
+      takeProfit: 4708,
+      volume: 0.12,
+    },
+    management: {
+      side: "BUY",
+      entry: 4700,
+      initialVolume: 0.12,
+      expectedRemainingVolume: 0.12,
+      stopLoss: 4692,
+      tp1: 4710,
+      tp2: 4708,
+      dailyMode: "RECOVERY_TP",
+      recoveryTpDistance: 8,
+      recoveryTakeProfit: 4708,
+    },
+    dailyMode: "RECOVERY_TP",
+    dailyNetPnlAtEntry: -4,
+    recoveryTargetNetPnl: 1,
+    recoveryTpDistance: 8,
+    recoveryTakeProfit: 4708,
+  },
+  {
+    type: "PLUS6_SL_TO_ENTRY",
+    timestamp: "2026-08-26T06:01:00.000Z",
+    ticket: "SIDEWAY-RECOVERY-1",
+    side: "BUY",
+    favorable: 6,
+    stopLoss: 4700,
+    dailyMode: "RECOVERY_TP",
+  },
+];
+
 const rejectedEntryEvents = [
   {
     type: "ENTRY_SUBMIT",
@@ -79,17 +173,24 @@ const rejectedEntryEvents = [
   },
 ];
 
-function runJournal(accountMode, events, label) {
+function runJournal(accountMode, events, label, journalSource = "TREND") {
   const tempDir = fs.mkdtempSync(
     path.join(os.tmpdir(), `phase7c-trade-notifier-${label}-${accountMode.toLowerCase()}-`),
   );
-  const journalPath = path.join(tempDir, "trend-events.jsonl");
+  const trendJournalPath = path.join(tempDir, "trend-events.jsonl");
+  const sidewayJournalPath = path.join(tempDir, "sideway-events.jsonl");
   const statePath = path.join(tempDir, "telegram-state.json");
   const sinkPath = path.join(tempDir, "dry-run-notifications.jsonl");
 
+  const serialized = events.map((event) => JSON.stringify(event)).join("\n") + "\n";
   fs.writeFileSync(
-    journalPath,
-    events.map((event) => JSON.stringify(event)).join("\n") + "\n",
+    trendJournalPath,
+    journalSource === "TREND" ? serialized : "",
+    "utf8",
+  );
+  fs.writeFileSync(
+    sidewayJournalPath,
+    journalSource === "SIDEWAY" ? serialized : "",
     "utf8",
   );
 
@@ -98,7 +199,8 @@ function runJournal(accountMode, events, label) {
       ...process.env,
       ZIQ_TELEGRAM_BOT_TOKEN: "synthetic-token-not-used",
       ZIQ_TELEGRAM_CHAT_ID: "synthetic-chat-not-used",
-      ZIQ_TELEGRAM_JOURNAL_PATH: journalPath,
+      ZIQ_TELEGRAM_JOURNAL_PATH: trendJournalPath,
+      ZIQ_TELEGRAM_SIDEWAY_JOURNAL_PATH: sidewayJournalPath,
       ZIQ_TELEGRAM_STATE_PATH: statePath,
       ZIQ_TELEGRAM_SYMBOL: "XAUUSD",
       ZIQ_PHASE7C_ACCOUNT_MODE: accountMode,
@@ -168,6 +270,47 @@ test("LIVE synthetic journal lifecycle uses production notifier with PHASE 7C ·
 
 test("DEMO synthetic journal lifecycle uses production notifier with PHASE 7C · DEMO", () => {
   runLifecycle("DEMO");
+});
+
+test("Sideway lifecycle is ENTRY → +6 BE → +10 close one-third → TP2 exit with canonical events", () => {
+  const notifications = runJournal(
+    "LIVE",
+    sidewayLifecycleEvents,
+    "sideway-lifecycle",
+    "SIDEWAY",
+  );
+
+  assert.equal(
+    notifications.length,
+    4,
+    "Sideway canonical lifecycle must emit ENTRY, +6 BE, +10 partial, and EXIT",
+  );
+  assert.match(notifications[0].text, /SIDEWAY FILLED/);
+  assert.match(notifications[0].text, /\+6 → BE/);
+  assert.match(notifications[0].text, /\+10 → chốt 1\/3/i);
+  assert.match(notifications[0].text, /SL không dưới BE/i);
+  assert.match(notifications[0].text, /TP2 biên đối diện/i);
+  assert.doesNotMatch(notifications[0].text, /TP1 → chốt 1\/3 → BE/i);
+  assert.match(notifications[1].text, /\+6 → BE/);
+  assert.match(notifications[2].text, /CHỐT 1\/3/);
+  assert.match(notifications[3].text, /CHỐT LỆNH|CLOSED/i);
+});
+
+test("Sideway Recovery keeps +6 BE but disables native +10 partial", () => {
+  const notifications = runJournal(
+    "LIVE",
+    sidewayRecoveryEvents,
+    "sideway-recovery",
+    "SIDEWAY",
+  );
+
+  assert.equal(notifications.length, 2, "Recovery Sideway must notify ENTRY and +6 BE");
+  assert.match(notifications[0].text, /DAILY RECOVERY/);
+  assert.match(notifications[0].text, /\+6 → BE/);
+  assert.match(notifications[0].text, /full-position Recovery TP/i);
+  assert.match(notifications[0].text, /không \+10 partial/i);
+  assert.doesNotMatch(notifications[0].text, /bỏ native TP1 partial\/BE/i);
+  assert.match(notifications[1].text, /\+6 → BE/);
 });
 
 test("ENTRY_SUBMIT is pending truthfully and ARM_FILE_MISSING rejection says MT5 did not enter", () => {
