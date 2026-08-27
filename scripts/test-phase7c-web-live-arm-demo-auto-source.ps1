@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+$PSDefaultParameterValues['Get-Content:Encoding'] = 'UTF8'
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 
 $files = @{
