@@ -57,3 +57,21 @@ jobs:
       - name: Broker protocol and safety contract with Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-system-lifecycle-broker-contract.ps1
+
+  api-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build API dependency graph
+        run: pnpm --filter @xauusd/api... build
