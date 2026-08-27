@@ -80,7 +80,13 @@ const sidewayLifecycleEvents = new Set([
   "ENTRY_ACCEPTED_POSITION_NOT_RESOLVED",
   "MANAGED_POSITION_CLOSED",
   "HOLD_POSITION",
+  "PLUS6_SL_TO_ENTRY",
+  "PLUS6_SL_REJECTED",
+  "PLUS10_PARTIAL_ONE_THIRD",
+  "PLUS10_PARTIAL_REJECTED",
 
+  // Legacy Sideway journal compatibility only. Current executor emits the
+  // canonical +6/+10 event names above.
   "TP1_PARTIAL_FILLED",
   "TP1_PARTIAL_REJECTED",
   "TP1_BREAK_EVEN_APPLIED",
@@ -747,7 +753,7 @@ async function formatEvent(event, enrichment) {
           ),
           "",
           isSideway
-            ? "<b>Rule:</b> full-position Recovery TP · bỏ native TP1 partial/BE."
+            ? "<b>Rule:</b> +6 → BE · full-position Recovery TP · không +10 partial."
             : "<b>Rule:</b> +6 → BE · full-position Recovery TP · không +10 partial/runner.",
           "🔒 <b>Lot escalation OFF</b> · martingale OFF.",
         ],
@@ -789,7 +795,7 @@ async function formatEvent(event, enrichment) {
             event.management?.tp2,
           ),
           "",
-          "<b>Rule:</b> TP1 → chốt 1/3 → BE · TP2 biên đối diện.",
+          "<b>Rule:</b> +6 → BE · +10 → chốt 1/3 · giữ 2/3 với SL không dưới BE · TP2 biên đối diện.",
         ],
       );
     }
