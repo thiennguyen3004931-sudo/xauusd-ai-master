@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   evaluateTimestampFreshness,
   inferBrokerClockOffset,
   normalizeBrokerTimestamp,
   validateAutoLotSnapshot,
 } from "./phase7c-sideway-execution-guards.mjs";
+
+const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
+const sidewayControllerSource = fs.readFileSync(
+  path.join(scriptsDir, "run-phase7c-sideway-controller.mjs"),
+  "utf8",
+);
 
 test("timestamp freshness blocks stale and future snapshots", () => {
   const now = 1_700_000_000_000;
@@ -123,4 +132,34 @@ test("auto lot snapshot fails closed on stale or unsafe payloads", () => {
   const unapproved = validPayload(now);
   unapproved.preview.approved = false;
   assert.equal(validateAutoLotSnapshot(unapproved, expected).reason, "AUTO_LOT_PREVIEW_NOT_APPROVED");
+});
+
+test("Sideway +10 partial is impossible until +6 BE succeeds and +6 uses canonical event names", () => {
+  const plus6Index = sidewayControllerSource.indexOf(
+    'if (!managed.breakEvenApplied && favorable >= 6)',
+  );
+  const plus10Index = sidewayControllerSource.indexOf(
+    'if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1))',
+  );
+
+  assert.ok(plus6Index >= 0, "Sideway +6 BE block must exist");
+  assert.ok(
+    plus10Index > plus6Index,
+    "Sideway +10 partial must execute only after breakEvenApplied is true",
+  );
+  assert.match(
+    sidewayControllerSource,
+    /journal\("PLUS6_SL_TO_ENTRY"/,
+    "Sideway +6 success must use the canonical PLUS6_SL_TO_ENTRY event",
+  );
+  assert.match(
+    sidewayControllerSource,
+    /journal\("PLUS6_SL_REJECTED"/,
+    "Sideway +6 rejection must use the canonical PLUS6_SL_REJECTED event",
+  );
+  assert.doesNotMatch(
+    sidewayControllerSource,
+    /PLUS6_BREAK_EVEN_(?:APPLIED|REJECTED)/,
+    "legacy Sideway +6 event names must not remain in the controller",
+  );
 });
