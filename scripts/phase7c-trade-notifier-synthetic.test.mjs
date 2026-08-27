@@ -58,15 +58,38 @@ const lifecycleEvents = [
   },
 ];
 
-function runLifecycle(accountMode) {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `phase7c-trade-notifier-${accountMode.toLowerCase()}-`));
+const rejectedEntryEvents = [
+  {
+    type: "ENTRY_SUBMIT",
+    timestamp: "2026-08-26T10:00:00.000Z",
+    side: "SELL",
+    pattern: "M15_BEARISH_ENGULFING",
+    signalEntry: 4720,
+    stopLoss: 4728,
+    stopDistance: 8,
+    volume: 0.12,
+  },
+  {
+    type: "ENTRY_REJECTED",
+    timestamp: "2026-08-26T10:00:00.200Z",
+    side: "SELL",
+    message: "ARM_FILE_MISSING",
+    reason: "ARM_FILE_MISSING",
+    retcode: 423,
+  },
+];
+
+function runJournal(accountMode, events, label) {
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), `phase7c-trade-notifier-${label}-${accountMode.toLowerCase()}-`),
+  );
   const journalPath = path.join(tempDir, "trend-events.jsonl");
   const statePath = path.join(tempDir, "telegram-state.json");
   const sinkPath = path.join(tempDir, "dry-run-notifications.jsonl");
 
   fs.writeFileSync(
     journalPath,
-    lifecycleEvents.map((event) => JSON.stringify(event)).join("\n") + "\n",
+    events.map((event) => JSON.stringify(event)).join("\n") + "\n",
     "utf8",
   );
 
@@ -108,6 +131,15 @@ function runLifecycle(accountMode) {
     .filter(Boolean)
     .map((line) => JSON.parse(line));
 
+  assert.match(result.stdout, /PHASE7B_TELEGRAM_ORDER_PERMISSION=NONE_READ_ONLY_JOURNAL_AND_MONITOR/);
+  assert.doesNotMatch(result.stdout + result.stderr, /\/v1\/orders/);
+
+  return notifications;
+}
+
+function runLifecycle(accountMode) {
+  const notifications = runJournal(accountMode, lifecycleEvents, "lifecycle");
+
   assert.equal(notifications.length, 5, "ENTRY → HOLD → BE → partial → EXIT must emit exactly five trade notifications");
 
   const expectedFragments = [
@@ -127,9 +159,6 @@ function runLifecycle(accountMode) {
     );
   }
 
-  assert.match(result.stdout, /PHASE7B_TELEGRAM_ORDER_PERMISSION=NONE_READ_ONLY_JOURNAL_AND_MONITOR/);
-  assert.doesNotMatch(result.stdout + result.stderr, /\/v1\/orders/);
-
   return notifications;
 }
 
@@ -139,4 +168,21 @@ test("LIVE synthetic journal lifecycle uses production notifier with PHASE 7C ·
 
 test("DEMO synthetic journal lifecycle uses production notifier with PHASE 7C · DEMO", () => {
   runLifecycle("DEMO");
+});
+
+test("ENTRY_SUBMIT is pending truthfully and ARM_FILE_MISSING rejection says MT5 did not enter", () => {
+  const notifications = runJournal("LIVE", rejectedEntryEvents, "entry-truth");
+
+  assert.equal(notifications.length, 2, "submit + reject must emit exactly two trade notifications");
+  assert.equal(notifications[0].route, "trade");
+  assert.match(notifications[0].text, /🟡/);
+  assert.match(notifications[0].text, /PENDING|ĐANG GỬI/i);
+  assert.match(notifications[0].text, /CHƯA VÀO MT5/i);
+  assert.doesNotMatch(notifications[0].text, /FILLED/i);
+
+  assert.equal(notifications[1].route, "trade");
+  assert.match(notifications[1].text, /⛔/);
+  assert.match(notifications[1].text, /KHÔNG VÀO MT5/i);
+  assert.match(notifications[1].text, /ARM_FILE_MISSING/);
+  assert.match(notifications[1].text, /423/);
 });
