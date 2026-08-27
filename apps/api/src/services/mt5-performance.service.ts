@@ -315,7 +315,7 @@ export async function getMt5PerformanceSnapshot(days = 90, symbol = "XAUUSD"): P
   const brokerNow = telemetry.quote?.timestamp ?? Date.now();
   const fromMs = Math.max(0, brokerNow - days * DAY_MS);
   const deals = (await getMt5DealHistory(fromMs, brokerNow, normalizedSymbol))
-    .filter((deal) => deal.isTradingDeal && deal.symbol === normalizedSymbol);
+    .filter((deal) => deal.isTradingDeal);
 
   const trendMagic = Number(process.env.MT5_MAGIC_NUMBER ?? defaultMt5BrokerConfig.magicNumber);
   const sidewayMagic = Number(process.env.ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER ?? 270714);
