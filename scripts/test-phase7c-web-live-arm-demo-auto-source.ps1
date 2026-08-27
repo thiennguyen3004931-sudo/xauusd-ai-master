@@ -115,8 +115,8 @@ Assert-Literal $executionCard 'canAttemptAuto' 'AUTO attempt remains clickable f
 Assert-NotContains $executionCard 'phase7c-live-arm\.json' 'Web must not touch ARM file directly'
 Assert-NotContains $executionCard 'showArmChecks' 'legacy ARM condition disclosure removed'
 
-# Compact operator-facing ARM/AUTO UI. Exact Vietnamese copy is validated by the Web build;
-# source assertions remain ASCII so Windows PowerShell 5.1 parses this test without a UTF-8 BOM.
+# Compact operator-facing ARM/AUTO UI. Exact Vietnamese copy is validated without
+# embedding non-ASCII literals so Windows PowerShell 5.1 remains deterministic.
 Assert-Literal $executionCard 'showAutoChecks' 'AUTO detail disclosure state'
 Assert-Literal $executionCard 'setShowAutoChecks' 'AUTO detail disclosure control'
 Assert-Literal $executionCard 'CheckRows' 'shared compact safety detail rows'
@@ -124,13 +124,19 @@ Assert-Literal $executionCard 'autoCount.passed' 'compact AUTO passed count'
 Assert-Literal $executionCard 'autoCount.total' 'compact AUTO total count'
 Assert-Contains $executionCard 'accountMode\s*===\s*"LIVE"\s*\?\s*\(' 'ARM condition control rendered only for LIVE'
 Assert-Literal $executionCard 'key !== "liveArmSatisfied"' 'DEMO AUTO details hide ARM-only check'
+Assert-Contains $executionCard 'Chi ti\u1EBFt t\u1EF1 \u0111\u1ED9ng' 'sentence-case AUTO detail label'
+Assert-Contains $executionCard '\u1EA8n chi ti\u1EBFt t\u1EF1 \u0111\u1ED9ng' 'sentence-case hidden AUTO detail label'
+Assert-Contains $executionCard 'B\u1EADt t\u1EF1 \u0111\u1ED9ng Demo' 'sentence-case DEMO AUTO action label'
+Assert-Contains $executionCard 'B\u1EADt t\u1EF1 \u0111\u1ED9ng Live' 'sentence-case LIVE AUTO action label'
+Assert-NotContains $executionCard 'CHI TI\u1EBET AUTO|B\u1EACT AUTO DEMO|B\u1EACT AUTO LIVE' 'legacy uppercase AUTO presentation copy'
 
 Assert-NotContains $accountSwitch 'ARM FILE' 'Account/Risk must not show ARM file status'
 Assert-NotContains $accountSwitch 'LIVE arm file' 'Account/Risk must not show final ARM file status'
 Assert-NotContains $accountSwitch 'ARM LIVE' 'Account/Risk must not show LIVE ARM guidance or control'
 
-Assert-Literal $controlCenter 'enablePhase7CAuto' 'legacy Control Center AUTO uses guarded backend'
-Assert-Contains $controlCenter 'disabled=\{[^}]*mode\s*===\s*"AUTO"[^}]*\}' 'legacy AUTO disables only when already AUTO/pending'
+Assert-NotContains $controlCenter 'enablePhase7CAuto' 'Control Center must not duplicate guarded AUTO activation'
+Assert-NotContains $controlCenter 'botModeAction\.mutate\("AUTO"\)' 'Control Center must not expose a second AUTO action'
+Assert-Literal $controlCenter 'setPhase7CBotMode("PAUSE")' 'Control Center retains PAUSE control'
 Assert-NotContains $controlCenter 'disabled=\{!canEnableAuto' 'legacy opaque AUTO disabled gate removed'
 
 Assert-Literal $controlShell 'Phase7CExecutionAuthorizationCard' 'execution card shown in Control Center'
