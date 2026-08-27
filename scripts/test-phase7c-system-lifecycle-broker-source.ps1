@@ -4,6 +4,7 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $LifecycleService = Join-Path $ProjectRoot "apps\api\src\services\phase7c-lifecycle.service.ts"
 $BrokerService = Join-Path $ProjectRoot "apps\api\src\services\phase7c-lifecycle-broker.service.ts"
 $BrokerRunner = Join-Path $PSScriptRoot "run-phase7c-executor-task-runner-local.ps1"
+$ExecutorVerifier = Join-Path $PSScriptRoot "verify-phase7c-executors-local.ps1"
 
 function Assert-True([bool]$Value, [string]$Message) {
   if (-not $Value) { throw $Message }
@@ -18,13 +19,15 @@ function Assert-PowerShellSyntax([string]$Path) {
   }
 }
 
-foreach ($required in @($LifecycleService, $BrokerRunner)) {
+foreach ($required in @($LifecycleService, $BrokerRunner, $ExecutorVerifier)) {
   Assert-True (Test-Path -LiteralPath $required) "Missing lifecycle broker source dependency: $required"
 }
 Assert-PowerShellSyntax $BrokerRunner
+Assert-PowerShellSyntax $ExecutorVerifier
 
 $lifecycle = Get-Content -LiteralPath $LifecycleService -Raw
 $runner = Get-Content -LiteralPath $BrokerRunner -Raw
+$verifier = Get-Content -LiteralPath $ExecutorVerifier -Raw
 
 # Web/API must become an unprivileged file-protocol client only.
 Assert-True (Test-Path -LiteralPath $BrokerService) "Lifecycle broker client service must exist"
@@ -59,6 +62,14 @@ Assert-True ($runner -match '(?i)STOPPED') "Broker must boot with desired execut
 Assert-True ($runner -match '(?i)IDLE') "Broker must expose IDLE state"
 Assert-True ($runner -match '(?i)PAUSE') "Broker startup/recovery must enforce PAUSE"
 Assert-True (-not ($runner -match '(?s)while\s*\(\$true\).*?Start-Process.*?run-phase7c-executors-local')) "Broker boot loop must not unconditionally launch the executor supervisor"
+
+# The migrated-task verifier must use the broker's fresh heartbeat as the runner-liveness authority.
+# startup-runner-status.json belongs to the legacy runner and may legitimately contain a stale PID after migration.
+Assert-True ($verifier -match 'phase7c-lifecycle-broker') "executor verifier must inspect the lifecycle broker runtime"
+Assert-True ($verifier -match 'heartbeat\.json') "executor verifier must read broker heartbeat.json"
+Assert-True ($verifier -match 'brokerPid') "executor verifier must use brokerPid from broker heartbeat"
+Assert-True (-not ($verifier -match 'startupRunnerStatus\.runnerPid')) "migrated-task verifier must not use legacy startup-runner-status runnerPid as liveness authority"
+Assert-True (-not ($verifier -match 'startup-runner-status\.json does not identify a live runner process')) "migrated-task verifier must not fail on a stale legacy startup-runner-status PID"
 
 # Closed request protocol and core safety reason codes must be represented in SYSTEM source.
 foreach ($requiredPattern in @(
