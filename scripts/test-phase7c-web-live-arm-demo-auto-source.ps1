@@ -11,6 +11,7 @@ $files = @{
   app = Join-Path $ProjectRoot "apps\api\src\app.ts"
   webControl = Join-Path $ProjectRoot "apps\web\src\phase7c-execution-control.ts"
   executionCard = Join-Path $ProjectRoot "apps\web\src\ui\Phase7CExecutionAuthorizationCard.tsx"
+  controlCenter = Join-Path $ProjectRoot "apps\web\src\pages\Phase7CControlCenterPage.tsx"
   controlShell = Join-Path $ProjectRoot "apps\web\src\pages\Phase7CControlCenterShellPage.tsx"
   accountRisk = Join-Path $ProjectRoot "apps\web\src\pages\Phase7CAccountRiskPage.tsx"
   router = Join-Path $ProjectRoot "apps\web\src\router.tsx"
@@ -28,6 +29,7 @@ $autoRoute = Get-Content -LiteralPath $files.autoRoute -Raw
 $app = Get-Content -LiteralPath $files.app -Raw
 $webControl = Get-Content -LiteralPath $files.webControl -Raw
 $executionCard = Get-Content -LiteralPath $files.executionCard -Raw
+$controlCenter = Get-Content -LiteralPath $files.controlCenter -Raw
 $controlShell = Get-Content -LiteralPath $files.controlShell -Raw
 $accountRisk = Get-Content -LiteralPath $files.accountRisk -Raw
 $router = Get-Content -LiteralPath $files.router -Raw
@@ -102,6 +104,12 @@ Assert-Literal $executionCard 'enablePhase7CAuto' 'DEMO AUTO uses guarded backen
 Assert-Literal $executionCard 'createPhase7CLiveArmPreflight' 'ARM uses preflight'
 Assert-Literal $executionCard 'canAttemptAuto' 'AUTO attempt remains clickable for canonical backend error'
 Assert-NotContains $executionCard 'phase7c-live-arm\.json' 'Web must not touch ARM file directly'
+
+Assert-Literal $controlCenter 'enablePhase7CAuto' 'legacy Control Center AUTO uses guarded backend'
+Assert-Literal $controlCenter 'BẬT AUTO' 'legacy Control Center AUTO button retained'
+Assert-Contains $controlCenter 'disabled=\{[^}]*mode\s*===\s*"AUTO"[^}]*\}' 'legacy AUTO disables only when already AUTO/pending'
+Assert-NotContains $controlCenter 'disabled=\{!canEnableAuto' 'legacy opaque AUTO disabled gate removed'
+
 Assert-Literal $controlShell 'Phase7CExecutionAuthorizationCard' 'execution card shown in Control Center'
 Assert-Literal $controlShell 'Phase7CControlCenterPage' 'existing Control Center preserved'
 Assert-Literal $accountRisk 'Phase7CExecutionAuthorizationCard' 'execution card shown in Account/Risk'
