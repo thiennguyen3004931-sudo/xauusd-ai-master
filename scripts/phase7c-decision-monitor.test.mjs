@@ -215,13 +215,30 @@ test("open managed position exposes broker P/L, actual protection and hold reaso
   assert.equal(snapshot.position.breakEvenApplied, true);
   assert.equal(snapshot.position.partialApplied, true);
   assert.match(snapshot.position.entryReason, /ENGULFING/);
-  assert.match(snapshot.position.holdReason, /FVG cùng hướng/);
+  assert.equal(
+    snapshot.position.holdReasonCode,
+    "HOLD_TREND_STRUCTURE_INTACT",
+  );
+  assert.equal(
+    snapshot.position.holdReason,
+    "GIỮ LỆNH: Cấu trúc xu hướng M15 vẫn còn hiệu lực; chưa có điều kiện thoát lệnh.",
+  );
 
   const payload = formatPhase7CDecisionMonitorForMt5(snapshot);
   assert.match(payload, /^positionState=MANAGING/m);
   assert.match(payload, /^floatingPnlUsd=130/m);
   assert.match(payload, /^entryReason=ENGULFING/m);
-  assert.match(payload, /^holdReason=Giữ runner:/m);
+  assert.match(
+    payload,
+    /^holdReasonCode=HOLD_TREND_STRUCTURE_INTACT$/m,
+  );
+  assert.ok(
+    payload
+      .split(/\r?\n/)
+      .includes(
+        "holdReason=GIỮ LỆNH: Cấu trúc xu hướng M15 vẫn còn hiệu lực; chưa có điều kiện thoát lệnh.",
+      ),
+  );
 });
 
 test("desktop lifecycle validates the selected account mode and all MT5 trading gates", () => {

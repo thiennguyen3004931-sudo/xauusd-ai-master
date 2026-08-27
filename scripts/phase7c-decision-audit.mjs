@@ -1,3 +1,4 @@
+import { canonicalHoldReason } from "./phase7c-hold-observability.mjs";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -51,7 +52,7 @@ function eventTimestamp(payload) {
 function eventStage(event) {
   if (STAGE_BY_EVENT.has(event)) return STAGE_BY_EVENT.get(event);
   if (BLOCK_EVENT_PATTERN.test(event)) return "BLOCKED";
-  if (/^(?:PLUS6|PLUS10|STRUCTURAL|MANAGEMENT|FVG_HOLD)/.test(event)) return "MANAGING";
+  if (/^(?:HOLD_POSITION|PLUS6|PLUS10|STRUCTURAL|MANAGEMENT|FVG_HOLD)/.test(event)) return "MANAGING";
   if (/^(?:M15_NO_ENTRY_SIGNAL|ENTRY_MODE_BLOCK|ENTRY_REGIME_BLOCK|ENTRY_LOCATION_BLOCK)/.test(event)) return "WAITING";
   return "OBSERVED";
 }
@@ -115,6 +116,16 @@ function normalizeRecord(strategy, symbol, configuration, event, payload) {
     configuration?.riskPercent,
   );
 
+  const canonicalHold =
+    canonicalHoldReason(
+      strategy,
+      payload,
+    );
+
+  const canonicalHoldEvent =
+    event === "HOLD_POSITION" ||
+    event === "FVG_HOLD_CONFIRMED";
+
   return {
     schemaVersion: 1,
     timestamp,
@@ -123,8 +134,15 @@ function normalizeRecord(strategy, symbol, configuration, event, payload) {
     symbol,
     event,
     stage: eventStage(event),
-    reasonCode: event,
-    reason: deriveReason(event, payload),
+    reasonCode:
+      canonicalHoldEvent && canonicalHold
+        ? canonicalHold.reasonCode
+        : event,
+
+    reason:
+      canonicalHoldEvent && canonicalHold
+        ? canonicalHold.reason
+        : deriveReason(event, payload),
     setup: {
       side,
       pattern: cleanText(payload?.pattern ?? payload?.confirmation),

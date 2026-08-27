@@ -1,3 +1,4 @@
+import { canonicalHoldReason } from "../../../../scripts/phase7c-hold-observability.mjs";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Mt5TelemetrySnapshot } from "./mt5.service";
@@ -480,51 +481,6 @@ function entryReason(
   return "Vị thế không khớp state của Trend/Sideway executor; panel không suy đoán lý do vào lệnh.";
 }
 
-function journalHoldReason(event: string): string | null {
-  if (event === "FVG_HOLD_CONFIRMED") {
-    return "Giữ runner: FVG cùng hướng và MA50 vẫn xác nhận xu hướng.";
-  }
-  if (event === "STRUCTURAL_SL_TIGHTEN") {
-    return "Giữ runner: SL đã được siết theo cấu trúc M15 mới nhất.";
-  }
-  if (/^PLUS10_PARTIAL_ONE_THIRD/.test(event)) {
-    return "Đã chốt 1/3 tại +10; tiếp tục giữ phần runner theo quy tắc chiến lược.";
-  }
-  if (/^PLUS6_(?:SL_TO_ENTRY|BREAK_EVEN_APPLIED)/.test(event)) {
-    return "Đã dời SL về hòa vốn tại +6; giữ để chờ mục tiêu +10.";
-  }
-  if (event === "MANAGEMENT_REGIME_FRESHNESS_SKIP") {
-    return "Giữ vị thế: regime chưa đủ mới; broker SL/TP vẫn bảo vệ lệnh.";
-  }
-  if (event === "MANAGEMENT_QUOTE_FRESHNESS_SKIP") {
-    return "Giữ vị thế: quote tạm cũ; bỏ qua quản lý động, broker SL/TP vẫn hoạt động.";
-  }
-  if (event === "MANAGEMENT_REGIME_CHECK_ERROR") {
-    return "Giữ vị thế: API regime tạm lỗi; không đóng mù, broker SL/TP vẫn bảo vệ.";
-  }
-  return null;
-}
-
-function holdReason(
-  strategy: Strategy | null,
-  managed: ManagedRuntimePosition | null,
-  latestManagement: DecisionAuditRecord | null,
-): string {
-  const exact = latestManagement ? journalHoldReason(latestManagement.event) : null;
-  if (exact) return exact;
-  if (!strategy || !managed) {
-    return "Vị thế không thuộc state executor; cần kiểm tra thủ công, không suy đoán lý do giữ.";
-  }
-  if (managed.partialApplied) {
-    return strategy === "TREND"
-      ? "Giữ runner sau khi chốt 1/3; thoát theo cấu trúc M15, MA50 hoặc FVG đảo chiều."
-      : "Giữ phần còn lại sau khi chốt 1/3; chờ TP2 ở biên đối diện hoặc regime rời range.";
-  }
-  if (managed.breakEvenApplied) {
-    return "SL đã ở hòa vốn; giữ vị thế để chờ +10 và chốt đúng 1/3.";
-  }
-  return "Broker SL đang bảo vệ; giữ vị thế để chờ +6 rồi dời SL về hòa vốn.";
-}
 
 function positionMonitor(input: {
   telemetry: Mt5TelemetrySnapshot;
@@ -555,6 +511,7 @@ function positionMonitor(input: {
       partialApplied: false,
       openedAt: null,
       entryReason: "Chưa có vị thế XAUUSD đang mở.",
+      holdReasonCode: null,
       holdReason: "Chờ setup hợp lệ; panel không có quyền gửi lệnh.",
     };
   }
@@ -612,7 +569,11 @@ function positionMonitor(input: {
     partialApplied: Boolean(managed?.partialApplied),
     openedAt: finite(position.openedAt) ?? finite(managed?.openedAt),
     entryReason: entryReason(strategy, managed, entryAudit),
-    holdReason: holdReason(strategy, managed, latestManagement),
+    holdReasonCode: canonicalHoldReason(strategy, managed)?.reasonCode ?? null,
+
+    holdReason: canonicalHoldReason(strategy, managed)?.reason
+
+      ?? "Vị thế không thuộc state executor; cần kiểm tra thủ công, không suy đoán lý do giữ.",
   };
 }
 
@@ -820,6 +781,7 @@ export function formatPhase7CDecisionMonitorForMt5(
     ["partialApplied", position.partialApplied],
     ["openedAt", position.openedAt],
     ["entryReason", position.state === "FLAT" ? mt5FlatEntryReason(snapshot) : position.entryReason],
+    ["holdReasonCode", position.holdReasonCode],
     ["holdReason", position.holdReason],
     ["source", p.source],
     ["mt5OrderPermission", snapshot.safety.mt5PanelOrderPermission],

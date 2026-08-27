@@ -535,7 +535,8 @@ export interface Phase7CDecisionMonitorSnapshot {
     partialApplied: boolean;
     openedAt: number | null;
     entryReason: string;
-    holdReason: string;
+    holdReasonCode: string | null;
+  holdReason: string;
   };
   lotSettings: Phase7CLotSettingsSnapshot;
   preTrade: {

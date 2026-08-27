@@ -8,6 +8,7 @@ import {
   type Phase7BSignal,
 } from "@xauusd/risk-engine";
 import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
+import { canonicalHoldReason } from "./phase7c-hold-observability.mjs";
 
 type Health = {
   status: "ok" | "degraded";
@@ -248,6 +249,7 @@ const decisionAudit = createPhase7CDecisionAudit({
   configuration: { fixedLot: fixedVolume },
 });
 let state = loadState(statePath);
+let lastHoldObservationKey = "";
 
 console.log("PHASE7B_DEMO_STRATEGY=M15_TRIPLE_PATTERN_SUPERTREND_STRUCTURE_RIDER_MA_CONFIDENCE_FVG_CONTEXT");
 console.log(`PHASE7B_DEMO_SYMBOL=${symbol}`);
@@ -1170,7 +1172,61 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
   }
 
   if (managed.dailyMode === "RECOVERY_TP") {
+    const hold =
+      canonicalHoldReason(
+        "TREND",
+        managed,
+      );
+
+    const holdKey =
+      hold
+        ? `${managed.ticket}|${hold.reasonCode}`
+        : "";
+
+    if (
+      hold &&
+      holdKey !== lastHoldObservationKey
+    ) {
+      lastHoldObservationKey =
+        holdKey;
+
+      journal("HOLD_POSITION", {
+        ticket: managed.ticket,
+        side: managed.side,
+        dailyMode:
+          managed.dailyMode,
+        ...hold,
+      });
+    }
+
     return;
+  }
+
+  const hold =
+    canonicalHoldReason(
+      "TREND",
+      managed,
+    );
+
+  const holdKey =
+    hold
+      ? `${managed.ticket}|${hold.reasonCode}`
+      : "";
+
+  if (
+    hold &&
+    holdKey !== lastHoldObservationKey
+  ) {
+    lastHoldObservationKey =
+      holdKey;
+
+    journal("HOLD_POSITION", {
+      ticket: managed.ticket,
+      side: managed.side,
+      dailyMode:
+        managed.dailyMode ?? null,
+      ...hold,
+    });
   }
 
   if (!managed.partialApplied && favorable >= 10) {
@@ -1257,6 +1313,10 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
 
     if (sameDirectionFvg && ma50TrendIntact) {
       journal("FVG_HOLD_CONFIRMED", {
+        ...(canonicalHoldReason(
+          "TREND",
+          managed,
+        ) ?? {}),
         ticket: managed.ticket,
         side: managed.side,
         m15CloseTime: latest.closeTime,
