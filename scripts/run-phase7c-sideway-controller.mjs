@@ -833,9 +833,9 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
       if (response.success) {
         managed.breakEvenApplied = true;
         saveState();
-        journal("PLUS6_BREAK_EVEN_APPLIED", { ticket: managed.ticket, favorable, stopLoss: managed.entry });
+        journal("PLUS6_SL_TO_ENTRY", { ticket: managed.ticket, favorable, stopLoss: managed.entry });
       } else {
-        journal("PLUS6_BREAK_EVEN_REJECTED", { ticket: managed.ticket, favorable, response });
+        journal("PLUS6_SL_REJECTED", { ticket: managed.ticket, favorable, response });
       }
     }
   }
@@ -870,7 +870,7 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
 
     return;
   }
-  if (!managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {
+  if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {
     const closeVolume = oneThirdPartialVolume(
       managed.initialVolume,
       Number(position.volume),
@@ -902,6 +902,7 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
           closedVolume: closeVolume,
           remainingVolume: managed.expectedRemainingVolume,
           favorable,
+          stopLoss: managed.entry,
         });
       } else {
         journal("PLUS10_PARTIAL_REJECTED", { ticket: managed.ticket, favorable, response });
