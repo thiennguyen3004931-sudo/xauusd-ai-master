@@ -19,6 +19,7 @@ import {
   targetReached,
 } from "./phase7c-sideway-logic.mjs";
 import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
+import { canonicalHoldReason } from "./phase7c-hold-observability.mjs";
 
 const symbol = (process.env.ZIQ_PHASE7C_SIDEWAY_SYMBOL || process.env.ZIQ_DEMO_SYMBOL || "XAUUSD").trim().toUpperCase();
 const controlApiBase = (process.env.ZIQ_PHASE7C_CONTROL_API_URL || "http://127.0.0.1:3711").trim().replace(/\/$/, "");
@@ -70,6 +71,7 @@ const decisionAudit = createPhase7CDecisionAudit({
   configuration: { riskPercent, maxLot },
 });
 let state = loadState();
+let lastHoldObservationKey = "";
 
 console.log("PHASE7C_SIDEWAY_CONTROLLER=STARTING");
 console.log(`PHASE7C_SIDEWAY_SYMBOL=${symbol}`);
@@ -839,6 +841,33 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
   }
 
   if (managed.dailyMode === "RECOVERY_TP") {
+    const hold =
+      canonicalHoldReason(
+        "SIDEWAY",
+        managed,
+      );
+
+    const holdKey =
+      hold
+        ? `${managed.ticket}|${hold.reasonCode}`
+        : "";
+
+    if (
+      hold &&
+      holdKey !== lastHoldObservationKey
+    ) {
+      lastHoldObservationKey =
+        holdKey;
+
+      journal("HOLD_POSITION", {
+        ticket: managed.ticket,
+        side: managed.side,
+        dailyMode:
+          managed.dailyMode,
+        ...hold,
+      });
+    }
+
     return;
   }
   if (!managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {
@@ -884,6 +913,33 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
   // the remainder if a bridge/broker reports the position before TP handling.
   if (targetReached(managed.side, marketPrice, managed.tp2)) {
     await closeAll(position, "TP2_OPPOSITE_RANGE");
+  } else {
+    const hold =
+      canonicalHoldReason(
+        "SIDEWAY",
+        managed,
+      );
+
+    const holdKey =
+      hold
+        ? `${managed.ticket}|${hold.reasonCode}`
+        : "";
+
+    if (
+      hold &&
+      holdKey !== lastHoldObservationKey
+    ) {
+      lastHoldObservationKey =
+        holdKey;
+
+      journal("HOLD_POSITION", {
+        ticket: managed.ticket,
+        side: managed.side,
+        dailyMode:
+          managed.dailyMode ?? null,
+        ...hold,
+      });
+    }
   }
 }
 

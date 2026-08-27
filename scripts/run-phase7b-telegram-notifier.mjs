@@ -1,3 +1,4 @@
+import { canonicalHoldReason } from "./phase7c-hold-observability.mjs";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -55,6 +56,7 @@ const interestingEvents = new Set([
   "STRUCTURAL_SL_TIGHTEN",
   "STRUCTURAL_SL_REJECTED",
   "FVG_HOLD_CONFIRMED",
+  "HOLD_POSITION",
   "FVG_ADDON_SIGNAL_SHADOW",
   "EXIT_EXECUTED",
   "EXIT_REJECTED",
@@ -77,6 +79,7 @@ const sidewayLifecycleEvents = new Set([
   "ENTRY_REJECTED",
   "ENTRY_ACCEPTED_POSITION_NOT_RESOLVED",
   "MANAGED_POSITION_CLOSED",
+  "HOLD_POSITION",
 
   "TP1_PARTIAL_FILLED",
   "TP1_PARTIAL_REJECTED",
@@ -151,6 +154,7 @@ if (!state.initialized) {
     lastEventAt: null,
     trade: null,
     hold: null,
+    holdSentKeys: {},
     systemAlerts: {},
   };
   saveState();
@@ -168,6 +172,7 @@ if (!state.initialized) {
 
 state.offsets ??= {};
 state.hold ??= null;
+state.holdSentKeys ??= {};
 
 if (!Number.isFinite(Number(state.offsets.trend))) {
   state.offsets.trend = Number.isFinite(Number(state.offset))
@@ -324,7 +329,7 @@ async function pollJournalFeed(feed) {
       }
 
       if (
-        type === "FVG_HOLD_CONFIRMED" &&
+        isHoldEvent(event) &&
         shouldSuppressHold(event)
       ) {
         continue;
@@ -355,7 +360,7 @@ async function pollJournalFeed(feed) {
       }
 
       // HOLD becomes active only AFTER the Telegram send succeeded.
-      if (type === "FVG_HOLD_CONFIRMED") {
+      if (isHoldEvent(event)) {
         markHold(event);
       }
 
@@ -950,28 +955,39 @@ async function formatEvent(event, enrichment) {
     );
   }
 
-  if (type === "FVG_HOLD_CONFIRMED") {
+  if (isHoldEvent(event)) {
     const side =
       currentSide(
         event,
         enrichment,
       );
 
-    const m = enrichment.metrics;
+    const canonical =
+      canonicalHoldReason(
+        event.journalSource,
+        {
+          dailyMode:
+            event.dailyMode ??
+            state.trade?.dailyMode ??
+            null,
+        },
+      );
+
+    const reason =
+      String(
+        event.reason ??
+        canonical?.reason ??
+        "",
+      ).trim();
+
+    if (!reason) return null;
 
     return compactTradeCard(
       "🧩",
       side,
       "HOLD CONFIRMED",
       [
-        compactStats(m),
-        `🛡 <b>SL khóa:</b> <code>${fmtSignedPrice(
-          m.slPriceMove,
-        )} giá</code> · <code>${fmtMoney(
-          m.lockedPnlUsd,
-          true,
-        )}</code>`,
-        "✅ FVG cùng hướng · tiếp tục giữ.",
+        `🧾 <b>${esc(reason)}</b>`,
       ],
     );
   }
@@ -1262,6 +1278,35 @@ function isRecoveryContext(event) {
   return recoveryMetadata(event).active;
 }
 
+function isHoldEvent(event) {
+  const type =
+    String(event?.type ?? "");
+
+  return (
+    type === "FVG_HOLD_CONFIRMED" ||
+    type === "HOLD_POSITION"
+  );
+}
+
+function holdReasonCode(event) {
+  const canonical =
+    canonicalHoldReason(
+      event?.journalSource,
+      {
+        dailyMode:
+          event?.dailyMode ??
+          state.trade?.dailyMode ??
+          null,
+      },
+    );
+
+  return String(
+    event?.reasonCode ??
+    canonical?.reasonCode ??
+    "",
+  );
+}
+
 function holdKey(event) {
   const ticket =
     String(
@@ -1270,33 +1315,35 @@ function holdKey(event) {
       "",
     );
 
-  const side =
-    normalizeSide(
-      event?.side ??
-      state.trade?.side,
-    );
-
-  return `${ticket}|${side}|FVG_MA50_HOLD`;
+  return `${ticket}|${holdReasonCode(event)}`;
 }
 
 function shouldSuppressHold(event) {
   const key =
     holdKey(event);
 
-  if (
-    state.hold?.active === true &&
-    state.hold?.key === key
-  ) {
-    state.hold.lastSeenAt =
-      String(
-        event?.timestamp ??
-        new Date().toISOString(),
-      );
+  state.holdSentKeys ??= {};
 
-    state.hold.lastM15CloseTime =
-      event?.m15CloseTime ??
-      state.hold.lastM15CloseTime ??
-      null;
+  if (
+    Object.prototype.hasOwnProperty.call(
+      state.holdSentKeys,
+      key,
+    )
+  ) {
+    if (
+      state.hold?.key === key
+    ) {
+      state.hold.lastSeenAt =
+        String(
+          event?.timestamp ??
+          new Date().toISOString(),
+        );
+
+      state.hold.lastM15CloseTime =
+        event?.m15CloseTime ??
+        state.hold.lastM15CloseTime ??
+        null;
+    }
 
     saveState();
     return true;
@@ -1329,11 +1376,27 @@ function shouldSuppressHoldAddon(event) {
 }
 
 function markHold(event) {
+  const key =
+    holdKey(event);
+
+  const reasonCode =
+    holdReasonCode(event);
+
+  const confirmedAt =
+    String(
+      event?.timestamp ??
+      new Date().toISOString(),
+    );
+
+  state.holdSentKeys ??= {};
+
+  state.holdSentKeys[key] =
+    confirmedAt;
+
   state.hold = {
     active: true,
-
-    key:
-      holdKey(event),
+    key,
+    reasonCode,
 
     ticket:
       String(
@@ -1348,17 +1411,9 @@ function markHold(event) {
         state.trade?.side,
       ),
 
-    confirmedAt:
-      String(
-        event?.timestamp ??
-        new Date().toISOString(),
-      ),
-
+    confirmedAt,
     lastSeenAt:
-      String(
-        event?.timestamp ??
-        new Date().toISOString(),
-      ),
+      confirmedAt,
 
     lastM15CloseTime:
       event?.m15CloseTime ??
@@ -2025,6 +2080,7 @@ function loadState() {
     lastEventAt: null,
     trade: null,
     hold: null,
+    holdSentKeys: {},
     systemAlerts: {},
   };
 
