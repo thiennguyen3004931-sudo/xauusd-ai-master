@@ -526,6 +526,14 @@ function Process-BrokerRequest {
       # Critical: re-read task/account/lot configuration after stop and before launch.
       $config = Read-Phase7CCanonicalLaunchConfig
       $script:accountMode = [string]$config.accountMode
+      $postStopContext = Get-BrokerSafetyContext $config
+      $postStopGate = Test-Phase7CLifecycleBrokerSafetyGate -Action "START" -Context $postStopContext
+      if (-not $postStopGate.allowed) {
+        $script:desiredExecutorState = "STOPPED"
+        Complete-Request $requestId $action "REJECTED" ([string]$postStopGate.reasonCode) ([string]$postStopGate.message) $startedAt
+        Set-BrokerState "BLOCKED" ([string]$postStopGate.reasonCode) ([string]$postStopGate.message)
+        return
+      }
     } else {
       Set-BrokerState "STARTING"
     }
