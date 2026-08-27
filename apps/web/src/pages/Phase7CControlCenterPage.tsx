@@ -32,6 +32,7 @@ import {
   setPhase7CBotMode,
   setPhase7CLotSettings,
 } from "../api";
+import { enablePhase7CAuto } from "../phase7c-execution-control";
 import { MetricCard } from "../ui/MetricCard";
 
 function money(value: number | null | undefined, currency = "USD") {
@@ -161,11 +162,13 @@ export function Phase7CControlCenterPage() {
   });
 
   const botModeAction = useMutation({
-    mutationFn: setPhase7CBotMode,
+    mutationFn: (nextMode: "AUTO" | "PAUSE") =>
+      nextMode === "AUTO" ? enablePhase7CAuto() : setPhase7CBotMode(nextMode),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["phase7c-lifecycle"] }),
         queryClient.invalidateQueries({ queryKey: ["phase7c-decision-monitor"] }),
+        queryClient.invalidateQueries({ queryKey: ["phase7c-auto-activation-status"] }),
       ]);
     },
   });
@@ -220,17 +223,6 @@ export function Phase7CControlCenterPage() {
     bridgeReady &&
     lifecycleData?.bridge.accountMode === "demo" &&
     (lifecycleData?.bridge.openXauusdPositions ?? 0) === 0;
-  const canEnableAuto =
-    lifecycleData?.ready === true &&
-    lifecycleData?.controlEnabled === true &&
-    bridgeReady &&
-    brokerModeSupported &&
-    (!isLiveAccount || liveArmArmed) &&
-    lifecycleData?.bridge.tradingEnabled === true &&
-    lifecycleData?.bridge.terminalTradeAllowed === true &&
-    lifecycleData?.bridge.expertTradeAllowed === true &&
-    (lifecycleData?.bridge.openXauusdPositions ?? 0) === 0 &&
-    mode !== "AUTO";
   const canPause =
     lifecycleData?.controlEnabled === true &&
     mode !== "PAUSE";
@@ -318,11 +310,11 @@ export function Phase7CControlCenterPage() {
                   fullWidth
                   variant="contained"
                   color="primary"
-                  disabled={!canEnableAuto || botModeAction.isPending}
+                  disabled={mode === "AUTO" || botModeAction.isPending}
                   onClick={() => botModeAction.mutate("AUTO")}
                   sx={{ fontWeight: 950 }}
                 >
-                  {botModeAction.isPending && botModeAction.variables === "AUTO" ? "ĐANG BẬT AUTO..." : "BẬT AUTO"}
+                  {botModeAction.isPending && botModeAction.variables === "AUTO" ? "ĐANG KIỂM TRA AUTO..." : "BẬT AUTO"}
                 </Button>
                 <Button
                   fullWidth
@@ -340,7 +332,7 @@ export function Phase7CControlCenterPage() {
 
           {!bridgeReady ? (
             <Alert severity="warning" sx={{ mt: 2 }}>
-              MT5 đang tắt hoặc Bridge đang tự kết nối lại. Web vẫn hoạt động; nút BẬT BOT/AUTO được khóa cho tới khi MT5 DEMO/LIVE và Algo Trading sẵn sàng.
+              MT5 đang tắt hoặc Bridge đang tự kết nối lại. Web vẫn hoạt động; BẬT BOT vẫn khóa cho tới khi MT5 DEMO/LIVE và Algo Trading sẵn sàng. Nút AUTO có thể bấm để backend trả chính xác cổng an toàn nào đang BLOCK; không có đường bypass.
             </Alert>
           ) : !brokerModeSupported ? (
             <Alert severity="warning" sx={{ mt: 2 }}>
@@ -348,7 +340,7 @@ export function Phase7CControlCenterPage() {
             </Alert>
           ) : isLiveAccount && !liveArmArmed ? (
             <Alert severity="error" sx={{ mt: 2 }}>
-              ARM DISARMED · {liveArmReason} · scope {liveArmScope}. LIVE không mở lệnh mới và nút BẬT AUTO bị khóa. Nếu đang có vị thế, bridge vẫn cho phép giảm rủi ro bằng partial/full close và BE/siết SL; không cho phép nới SL hoặc thay TP khi DISARMED. ARM mới dùng scope BRIDGE_SESSION và sẽ tự mất hiệu lực khi bridge khởi động lại.
+              ARM DISARMED · {liveArmReason} · scope {liveArmScope}. LIVE không mở lệnh mới; yêu cầu AUTO sẽ bị backend từ chối cho tới khi ARM hợp lệ. Nếu đang có vị thế, bridge vẫn cho phép giảm rủi ro bằng partial/full close và BE/siết SL; không cho phép nới SL hoặc thay TP khi DISARMED. ARM mới dùng scope BRIDGE_SESSION và sẽ tự mất hiệu lực khi bridge khởi động lại.
             </Alert>
           ) : isLiveAccount ? (
             <Alert severity="success" sx={{ mt: 2 }}>
@@ -366,7 +358,7 @@ export function Phase7CControlCenterPage() {
           {botModeAction.error ? <Alert severity="error" sx={{ mt: 2 }}>{friendlyError(botModeAction.error)}</Alert> : null}
           {(lifecycleData?.bridge.openXauusdPositions ?? 0) > 0 ? (
             <Alert severity="info" sx={{ mt: 2 }}>
-              Đang có vị thế XAUUSD; DỪNG HỆ THỐNG và BẬT AUTO bị khóa. TẠM DỪNG mode vẫn khả dụng và không dừng executor quản lý vị thế.
+              Đang có vị thế XAUUSD; DỪNG HỆ THỐNG bị khóa. Yêu cầu AUTO sẽ bị backend từ chối cho tới khi vị thế về 0. TẠM DỪNG mode vẫn khả dụng và không dừng executor quản lý vị thế.
             </Alert>
           ) : null}
         </CardContent>
