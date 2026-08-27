@@ -76,6 +76,10 @@ foreach ($requiredPattern in @(
   Assert-True ($runner -match $requiredPattern) "SYSTEM broker must expose canonical contract token=$requiredPattern"
 }
 
+# RESTART is a two-boundary mutation: after STOP and config reload, safety must be
+# re-probed immediately before START so account/MT5/trading changes fail closed.
+Assert-True ($runner -match '(?s)# Critical: re-read task/account/lot configuration after stop and before launch\.\s*\$config\s*=\s*Read-Phase7CCanonicalLaunchConfig\s*\$script:accountMode\s*=\s*\[string\]\$config\.accountMode\s*\$postStopContext\s*=\s*Get-BrokerSafetyContext\s+\$config\s*\$postStopGate\s*=\s*Test-Phase7CLifecycleBrokerSafetyGate\s+-Action\s+"START"\s+-Context\s+\$postStopContext') "RESTART must re-run the START safety gate after STOP/config reload and before launching the supervisor"
+
 # Lifecycle START/RESTART must not invent or require session ARM. AUTO ARM stays elsewhere.
 Assert-True (-not ($runner -match 'REJECT_LIVE_ARM_INVALID')) "Lifecycle broker must not require session LIVE ARM for START/RESTART"
 
