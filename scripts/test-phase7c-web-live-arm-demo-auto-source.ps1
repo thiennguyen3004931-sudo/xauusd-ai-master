@@ -11,6 +11,7 @@ $files = @{
   app = Join-Path $ProjectRoot "apps\api\src\app.ts"
   webControl = Join-Path $ProjectRoot "apps\web\src\phase7c-execution-control.ts"
   executionCard = Join-Path $ProjectRoot "apps\web\src\ui\Phase7CExecutionAuthorizationCard.tsx"
+  accountSwitch = Join-Path $ProjectRoot "apps\web\src\ui\Phase7CAccountSwitchCard.tsx"
   controlCenter = Join-Path $ProjectRoot "apps\web\src\pages\Phase7CControlCenterPage.tsx"
   controlShell = Join-Path $ProjectRoot "apps\web\src\pages\Phase7CControlCenterShellPage.tsx"
   accountRisk = Join-Path $ProjectRoot "apps\web\src\pages\Phase7CAccountRiskPage.tsx"
@@ -29,6 +30,7 @@ $autoRoute = Get-Content -LiteralPath $files.autoRoute -Raw
 $app = Get-Content -LiteralPath $files.app -Raw
 $webControl = Get-Content -LiteralPath $files.webControl -Raw
 $executionCard = Get-Content -LiteralPath $files.executionCard -Raw
+$accountSwitch = Get-Content -LiteralPath $files.accountSwitch -Raw
 $controlCenter = Get-Content -LiteralPath $files.controlCenter -Raw
 $controlShell = Get-Content -LiteralPath $files.controlShell -Raw
 $accountRisk = Get-Content -LiteralPath $files.accountRisk -Raw
@@ -95,27 +97,37 @@ Assert-Literal $webControl 'executePhase7CLiveArmAction' 'Web ARM execute API'
 Assert-Literal $webControl 'getPhase7CAutoActivationStatus' 'Web AUTO status API'
 Assert-Literal $webControl 'enablePhase7CAuto' 'Web guarded AUTO enable API'
 Assert-Literal $webControl 'Phase7CLiveArmControlCapability' 'Web ARM types'
+Assert-Literal $webControl 'Phase7CLiveArmPreflight' 'Web ARM preflight type'
 Assert-Literal $webControl 'Phase7CAutoActivationStatus' 'Web AUTO types'
 
 Assert-Literal $executionCard 'ARM LIVE' 'ARM LIVE button'
 Assert-Literal $executionCard 'DISARM LIVE' 'DISARM LIVE button'
 Assert-Literal $executionCard 'enablePhase7CAuto' 'DEMO AUTO uses guarded backend'
 Assert-Literal $executionCard 'createPhase7CLiveArmPreflight' 'ARM uses preflight'
+Assert-Literal $executionCard 'createPhase7CLiveArmPreflight("ARM_LIVE")' 'explicit ARM LIVE preflight request'
+Assert-Literal $executionCard 'armPreflight' 'ARM preflight result state'
+Assert-Literal $executionCard 'setArmPreflight' 'ARM preflight result control'
+Assert-Literal $executionCard 'armPreflightMutation' 'ARM preflight button mutation'
+Assert-Literal $executionCard 'armPreflight?.approved' 'ARM action gated by preflight'
+Assert-Literal $executionCard 'armPreflightCount.passed' 'compact ARM preflight passed count'
+Assert-Literal $executionCard 'armPreflightCount.total' 'compact ARM preflight total count'
 Assert-Literal $executionCard 'canAttemptAuto' 'AUTO attempt remains clickable for canonical backend error'
 Assert-NotContains $executionCard 'phase7c-live-arm\.json' 'Web must not touch ARM file directly'
+Assert-NotContains $executionCard 'showArmChecks' 'legacy ARM condition disclosure removed'
 
 # Compact operator-facing ARM/AUTO UI. Exact Vietnamese copy is validated by the Web build;
 # source assertions remain ASCII so Windows PowerShell 5.1 parses this test without a UTF-8 BOM.
-Assert-Literal $executionCard 'showArmChecks' 'ARM detail disclosure state'
-Assert-Literal $executionCard 'setShowArmChecks' 'ARM detail disclosure control'
 Assert-Literal $executionCard 'showAutoChecks' 'AUTO detail disclosure state'
 Assert-Literal $executionCard 'setShowAutoChecks' 'AUTO detail disclosure control'
 Assert-Literal $executionCard 'CheckRows' 'shared compact safety detail rows'
-Assert-Literal $executionCard 'armCount.passed' 'compact ARM passed count'
-Assert-Literal $executionCard 'armCount.total' 'compact ARM total count'
 Assert-Literal $executionCard 'autoCount.passed' 'compact AUTO passed count'
 Assert-Literal $executionCard 'autoCount.total' 'compact AUTO total count'
 Assert-Contains $executionCard 'accountMode\s*===\s*"LIVE"\s*\?\s*\(' 'ARM condition control rendered only for LIVE'
+Assert-Literal $executionCard 'key !== "liveArmSatisfied"' 'DEMO AUTO details hide ARM-only check'
+
+Assert-NotContains $accountSwitch 'ARM FILE' 'Account/Risk must not show ARM file status'
+Assert-NotContains $accountSwitch 'LIVE arm file' 'Account/Risk must not show final ARM file status'
+Assert-NotContains $accountSwitch 'ARM LIVE' 'Account/Risk must not show LIVE ARM guidance or control'
 
 Assert-Literal $controlCenter 'enablePhase7CAuto' 'legacy Control Center AUTO uses guarded backend'
 Assert-Contains $controlCenter 'disabled=\{[^}]*mode\s*===\s*"AUTO"[^}]*\}' 'legacy AUTO disables only when already AUTO/pending'
