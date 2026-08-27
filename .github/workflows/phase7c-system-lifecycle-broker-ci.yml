@@ -12,6 +12,7 @@ on:
       - "scripts/lib/phase7c-lifecycle-broker.ps1"
       - "scripts/test-phase7c-system-lifecycle-broker-source.ps1"
       - "scripts/test-phase7c-system-lifecycle-broker-contract.ps1"
+      - "scripts/test-phase7c-lifecycle-broker-acl-source.ps1"
       - ".github/workflows/phase7c-system-lifecycle-broker-ci.yml"
   pull_request:
     paths:
@@ -22,6 +23,7 @@ on:
       - "scripts/lib/phase7c-lifecycle-broker.ps1"
       - "scripts/test-phase7c-system-lifecycle-broker-source.ps1"
       - "scripts/test-phase7c-system-lifecycle-broker-contract.ps1"
+      - "scripts/test-phase7c-lifecycle-broker-acl-source.ps1"
       - ".github/workflows/phase7c-system-lifecycle-broker-ci.yml"
 
 permissions:
@@ -57,6 +59,21 @@ jobs:
       - name: Broker protocol and safety contract with Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-system-lifecycle-broker-contract.ps1
+
+  acl-source-contract:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lifecycle broker ACL contract with PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-lifecycle-broker-acl-source.ps1
+
+      - name: Lifecycle broker ACL contract with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-lifecycle-broker-acl-source.ps1
 
   api-build:
     runs-on: ubuntu-latest
