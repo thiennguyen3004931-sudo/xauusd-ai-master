@@ -9,8 +9,7 @@ $files = @{
   autoService = Join-Path $ProjectRoot "apps\api\src\services\phase7c-auto-activation.service.ts"
   autoRoute = Join-Path $ProjectRoot "apps\api\src\routes\phase7c-auto-activation.route.ts"
   app = Join-Path $ProjectRoot "apps\api\src\app.ts"
-  webApi = Join-Path $ProjectRoot "apps\web\src\api.ts"
-  webTypes = Join-Path $ProjectRoot "apps\web\src\phase7c-types.ts"
+  webControl = Join-Path $ProjectRoot "apps\web\src\phase7c-execution-control.ts"
   executionCard = Join-Path $ProjectRoot "apps\web\src\ui\Phase7CExecutionAuthorizationCard.tsx"
   controlShell = Join-Path $ProjectRoot "apps\web\src\pages\Phase7CControlCenterShellPage.tsx"
   accountRisk = Join-Path $ProjectRoot "apps\web\src\pages\Phase7CAccountRiskPage.tsx"
@@ -27,8 +26,7 @@ $armRoute = Get-Content -LiteralPath $files.armRoute -Raw
 $autoService = Get-Content -LiteralPath $files.autoService -Raw
 $autoRoute = Get-Content -LiteralPath $files.autoRoute -Raw
 $app = Get-Content -LiteralPath $files.app -Raw
-$webApi = Get-Content -LiteralPath $files.webApi -Raw
-$webTypes = Get-Content -LiteralPath $files.webTypes -Raw
+$webControl = Get-Content -LiteralPath $files.webControl -Raw
 $executionCard = Get-Content -LiteralPath $files.executionCard -Raw
 $controlShell = Get-Content -LiteralPath $files.controlShell -Raw
 $accountRisk = Get-Content -LiteralPath $files.accountRisk -Raw
@@ -88,19 +86,20 @@ Assert-Literal $autoRoute '/enable' 'guarded AUTO enable endpoint'
 Assert-Literal $app '/api/v1/phase7c-live-arm-control' 'ARM route mounted'
 Assert-Literal $app '/api/v1/phase7c-auto-activation' 'AUTO route mounted'
 
-Assert-Literal $webApi 'getPhase7CLiveArmControlCapability' 'Web ARM capability API'
-Assert-Literal $webApi 'createPhase7CLiveArmPreflight' 'Web ARM preflight API'
-Assert-Literal $webApi 'executePhase7CLiveArmAction' 'Web ARM execute API'
-Assert-Literal $webApi 'getPhase7CAutoActivationStatus' 'Web AUTO status API'
-Assert-Literal $webApi 'enablePhase7CAuto' 'Web guarded AUTO enable API'
-Assert-Literal $webTypes 'Phase7CLiveArmControlCapability' 'Web ARM types'
-Assert-Literal $webTypes 'Phase7CAutoActivationStatus' 'Web AUTO types'
+Assert-Literal $webControl 'getPhase7CLiveArmControlCapability' 'Web ARM capability API'
+Assert-Literal $webControl 'createPhase7CLiveArmPreflight' 'Web ARM preflight API'
+Assert-Literal $webControl 'executePhase7CLiveArmAction' 'Web ARM execute API'
+Assert-Literal $webControl 'getPhase7CAutoActivationStatus' 'Web AUTO status API'
+Assert-Literal $webControl 'enablePhase7CAuto' 'Web guarded AUTO enable API'
+Assert-Literal $webControl 'Phase7CLiveArmControlCapability' 'Web ARM types'
+Assert-Literal $webControl 'Phase7CAutoActivationStatus' 'Web AUTO types'
 
 Assert-Literal $executionCard 'ARM LIVE' 'ARM LIVE button'
 Assert-Literal $executionCard 'DISARM LIVE' 'DISARM LIVE button'
 Assert-Literal $executionCard 'BẬT AUTO DEMO' 'explicit DEMO AUTO button'
 Assert-Literal $executionCard 'enablePhase7CAuto' 'DEMO AUTO uses guarded backend'
 Assert-Literal $executionCard 'createPhase7CLiveArmPreflight' 'ARM uses preflight'
+Assert-Literal $executionCard 'canAttemptAuto' 'AUTO attempt remains clickable for canonical backend error'
 Assert-NotContains $executionCard 'phase7c-live-arm\.json' 'Web must not touch ARM file directly'
 Assert-Literal $controlShell 'Phase7CExecutionAuthorizationCard' 'execution card shown in Control Center'
 Assert-Literal $controlShell 'Phase7CControlCenterPage' 'existing Control Center preserved'
