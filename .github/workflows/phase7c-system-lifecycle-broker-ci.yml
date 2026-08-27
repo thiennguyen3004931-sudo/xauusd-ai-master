@@ -92,3 +92,72 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build API dependency graph
         run: pnpm --filter @xauusd/api... build
+
+  web-lifecycle-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Web auto-account lifecycle regression
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/test-phase7c-web-auto-account-start.ts
+      - name: Existing dual-account regression
+        run: node scripts/test-phase7c-dual-account-mode.mjs
+      - name: Web LIVE Start fail-closed source assertions
+        run: node scripts/test-phase7c-web-live-start-guard-source.mjs
+      - name: Build risk engine dependency graph
+        run: pnpm --filter @xauusd/risk-engine... build
+      - name: Build API
+        run: pnpm --filter @xauusd/api... build
+      - name: Build Web
+        run: pnpm --filter @xauusd/web... build
+
+  windows-full-regression:
+    runs-on: windows-latest
+    timeout-minutes: 24
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Prepare runtime directory
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force .runtime | Out-Null
+      - name: Sideway regime source regression
+        shell: pwsh
+        run: .\scripts\test-phase7c-sideway-regime-source.ps1
+      - name: Sideway regime runtime regression
+        shell: pwsh
+        run: .\scripts\test-phase7c-sideway-regime-runtime.ps1
+      - name: LIVE ARM safety contract
+        shell: powershell
+        run: .\scripts\test-phase7c-live-arm-contract.ps1
+      - name: Startup runner guard with PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-startup-runner-guard-local.ps1
+      - name: Startup acceptance source contract with PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-startup-acceptance-source.ps1
+      - name: Startup runner guard with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-startup-runner-guard-local.ps1
+      - name: Startup acceptance source contract with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-startup-acceptance-source.ps1
+      - name: Trade notifier source regression
+        shell: powershell
+        run: .\scripts\test-phase7c-trade-notifier-source.ps1
+      - name: Trade notifier runtime regression
+        shell: powershell
+        run: .\scripts\test-phase7c-trade-notifier-runtime.ps1
+      - name: Telegram firewall source regression
+        shell: powershell
+        run: .\scripts\test-phase7c-telegram-firewall-source.ps1
