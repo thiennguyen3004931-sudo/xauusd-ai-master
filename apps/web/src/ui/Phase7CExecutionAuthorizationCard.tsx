@@ -118,7 +118,7 @@ export function Phase7CExecutionAuthorizationCard() {
         ? "Xác nhận ARM tài khoản LIVE cho đúng bridge session hiện tại? Bot phải đang PAUSE; thao tác này không tự bật AUTO và không gửi order."
         : "Xác nhận DISARM LIVE? Thao tác này thu hồi quyền mở lệnh mới và không đóng vị thế đang có.";
       if (!window.confirm(message)) throw new Error("Đã hủy thao tác theo yêu cầu người vận hành.");
-      return executePhase7CLiveArmAction(action, preflight.preflightToken);
+      return executePhase7CLiveArmAction(action, preflight.preflightToken!);
     },
     onSuccess: (result) => {
       setArmRequestId(result.requestId);
