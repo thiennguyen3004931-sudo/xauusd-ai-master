@@ -1,7 +1,7 @@
 # Phase7C SYSTEM Lifecycle Broker Design
 
-Date: 2026-08-27
-Status: Proposed for implementation after user review
+Date: 2026-08-27  
+Status: Proposed for implementation after user review  
 Base commit: `37e71c750ca1b4d21073f4cbf03c2b5f6df37682`
 
 ## 1. Problem statement
@@ -9,10 +9,10 @@ Base commit: `37e71c750ca1b4d21073f4cbf03c2b5f6df37682`
 Phase7C currently has a privilege split that prevents Web lifecycle operations from safely restarting the executor runtime when lot settings change.
 
 Observed runtime:
-- API/Web control process runs as the interactive Windows user and is not elevated.
+- API/Web control runs as the interactive Windows user and is not elevated.
 - `XAUUSD-Phase7C-Executors` runs as `SYSTEM`, `Highest`, `ServiceAccount`.
 - Supervisor, Trend, Sideway, Telegram mode controller, regime notifier, and trade notifier are descendants of the SYSTEM task.
-- Lifecycle reports the runtime as running, but `ready=false` when `lotSettings.restartRequired=true`.
+- Lifecycle reports the executor tree as running, but `ready=false` when `lotSettings.restartRequired=true`.
 
 Current `phase7c-lifecycle.service.ts` calls `schtasks.exe /End` and then `stop-phase7c-executors-local.ps1` from the non-elevated API token. The `/End` error is swallowed. The stopper then attempts to control SYSTEM-owned processes and can fail. This leaves the bot in `PAUSE` with `runtimeReady` blocked even though the executor tree itself is healthy.
 
@@ -31,7 +31,7 @@ Web / API (non-elevated)
         |
         | atomic bounded request
         v
-.runtime/phase7c-lifecycle-broker/request.json
+.runtime/phase7c-lifecycle-broker/inbox/request.json
         |
         v
 XAUUSD-Phase7C-Executors
@@ -41,7 +41,7 @@ Lifecycle Broker Runner
         +-- validates request and safety gates
         +-- reads canonical account/task/lot configuration
         +-- START / STOP / RESTART supervisor tree
-        +-- writes status/result/heartbeat
+        +-- writes status/results/heartbeat
         |
         v
 Supervisor (SYSTEM)
@@ -52,50 +52,60 @@ Supervisor (SYSTEM)
    +-- Trade notifier
 ```
 
-The API remains non-elevated. No task ACL is broadened to grant the Web user direct SYSTEM task control.
+The API remains non-elevated. No task ACL is broadened to grant the Web user direct `/Run`, `/End`, `taskkill`, or arbitrary SYSTEM process control.
 
 ## 3. Goals
 
-1. Allow Web Control Center to start, stop, and restart Phase7C executors without Administrator prompts after one-time Scheduled Task installation.
-2. Keep the privileged lifecycle runner alive while the trading executors are stopped.
-3. Preserve the existing safety rule that Web lifecycle actions leave bot mode in `PAUSE`; AUTO remains a separate explicit Web action.
+1. Allow Web Control Center to start, stop, and restart Phase7C executors without Administrator prompts after one-time Scheduled Task installation/migration.
+2. Keep the privileged lifecycle broker alive while trading executors are stopped.
+3. Preserve the rule that every lifecycle transition is fail-safe in `PAUSE`; AUTO remains a separate explicit Web action.
 4. Preserve zero-position protection for STOP and RESTART.
 5. Re-read canonical lot settings before every START or RESTART so `lotSettings.restartRequired` clears only after the newly launched runtime actually uses the new profile.
-6. Preserve DEMO/LIVE account isolation and existing LIVE authorization/ARM requirements.
+6. Preserve DEMO/LIVE account isolation and existing LIVE authorization/ARM boundaries.
 7. Make lifecycle failures auditable instead of swallowing task-control errors.
-8. Avoid arbitrary command execution through the request channel.
+8. Avoid arbitrary command execution through the privileged request channel.
 
 ## 4. Non-goals
 
-- No change to Trend or Sideway trading strategy logic.
+- No change to Trend or Sideway strategy logic.
 - No change to entry, SL, TP, BE, partial-close, HOLD, recovery, or exit contracts.
 - No change to Telegram trade formatting.
 - No automatic AUTO activation.
 - No automatic LIVE ARM.
 - No direct MT5 order test for lifecycle validation.
 - No elevation of the API process.
-- No user-granted `/Run` or `/End` permission on the SYSTEM task.
-- No generic remote shell, script path, command line, or arbitrary argument support in lifecycle requests.
+- No user-granted direct control permission on the SYSTEM Scheduled Task.
+- No generic shell, script path, command line, PID, lot value, account secret, or arbitrary argument support in lifecycle requests.
 
-## 5. Broker files and ownership
+## 5. Broker runtime layout and ACL boundary
 
-Use a dedicated runtime directory:
+Use a dedicated broker directory with separate writable inbox and SYSTEM-owned state:
 
 ```text
 .runtime/phase7c-lifecycle-broker/
-  request.json
-  status.json
-  result.json
-  broker.log
-  heartbeat.json
+  inbox/
+    request.json
+  state/
+    status.json
+    heartbeat.json
+  results/
+    <requestId>.json
+  logs/
+    broker.log
 ```
 
-The interactive user/API may atomically replace `request.json`.
-The SYSTEM runner reads requests and owns `status.json`, `result.json`, `broker.log`, and `heartbeat.json`.
+The one-time elevated installer must apply explicit ACLs instead of relying on broad inherited `.runtime` permissions:
 
-All JSON writes must use temp-file + atomic rename/replace semantics to avoid partial reads.
+- `SYSTEM`: Full Control on the broker tree.
+- `Administrators`: Full Control on the broker tree.
+- configured Web/API Windows user SID: Modify on `inbox/` only; Read on `state/`, `results/`, and `logs/`.
+- generic `Users` / `Authenticated Users`: no additional write permission beyond what is explicitly required.
 
-The request channel is local-file-only. It is not a general IPC command channel.
+The installer records the configured Web/API user SID used for the inbox ACL. If the API later runs under a different Windows identity, lifecycle capability must fail closed until the task/broker ACL is re-registered.
+
+All JSON writes use temp-file + atomic rename/replace semantics.
+
+The request channel is local-file-only and is not a general IPC command channel.
 
 ## 6. Request contract
 
@@ -116,17 +126,24 @@ Rules:
 - `version` must equal `1`.
 - `requestId` must be a valid UUID and is the idempotency key.
 - `action` is a closed enum: `START`, `STOP`, `RESTART` only.
-- `source` is a closed enum for audit; initially only `WEB_CONTROL_CENTER`.
+- `source` is a closed enum; initially only `WEB_CONTROL_CENTER`.
 - `reason` is a closed enum used for audit only.
-- Request must not contain executable path, script path, account path, environment path, PowerShell, command line, PID, lot value, login, server, ARM data, or arbitrary arguments.
-- Unknown properties should cause rejection rather than being ignored silently.
-- Requests older than a bounded freshness window, for example 120 seconds, are rejected.
+- Unknown properties are rejected.
+- A request older than 120 seconds is rejected.
+- Only one request may be in flight. A new request while another is active is rejected with `REJECT_BROKER_BUSY`; the API must not overwrite an active inbox request.
+- Request must not contain executable path, script path, account path, environment path, PowerShell, command line, PID, lot value, login, server, ARM data, token, or arbitrary arguments.
 
-The SYSTEM runner always resolves account mode, env file, lot profile, node path, pnpm path, runtime directory, LIVE execution authorization, and other launch inputs from canonical project state/configuration, never from `request.json`.
+The SYSTEM runner resolves account mode, env file, lot profile, node path, pnpm path, runtime directory, and LIVE authorization state from canonical project state/configuration, never from `request.json`.
 
-## 7. Result contract
+## 7. Idempotency and results
 
-The runner writes one canonical result for the last handled request:
+Each handled request gets a dedicated immutable result file:
+
+```text
+results/<requestId>.json
+```
+
+Example:
 
 ```json
 {
@@ -134,7 +151,7 @@ The runner writes one canonical result for the last handled request:
   "requestId": "uuid",
   "action": "RESTART",
   "status": "SUCCEEDED | REJECTED | FAILED | NOOP",
-  "reasonCode": "...",
+  "reasonCode": "OK_RESTARTED",
   "message": "...",
   "startedAt": 1787830000100,
   "completedAt": 1787830004200,
@@ -148,20 +165,20 @@ The runner writes one canonical result for the last handled request:
 }
 ```
 
-`message` is human-readable. `reasonCode` is canonical and stable for tests/audit.
+The existence of `results/<requestId>.json` makes replay idempotent: the same request ID is never executed twice. Keep a bounded result history, for example the most recent 128 results, and remove older results only after they are outside the freshness/reconciliation window.
 
-Recommended initial reason codes:
+Initial canonical reason codes:
 - `OK_STARTED`
 - `OK_STOPPED`
 - `OK_RESTARTED`
 - `NOOP_ALREADY_RUNNING`
 - `NOOP_ALREADY_STOPPED`
+- `REJECT_BROKER_BUSY`
 - `REJECT_BOT_NOT_PAUSED`
 - `REJECT_OPEN_XAUUSD_POSITION`
 - `REJECT_ACCOUNT_INVALID`
 - `REJECT_BRIDGE_UNAVAILABLE`
 - `REJECT_LIVE_AUTH_INVALID`
-- `REJECT_LIVE_ARM_INVALID`
 - `REJECT_REQUEST_INVALID`
 - `REJECT_REQUEST_STALE`
 - `REJECT_REQUEST_DUPLICATE`
@@ -172,7 +189,7 @@ Recommended initial reason codes:
 
 ## 8. Broker state machine
 
-Canonical broker states:
+Canonical states:
 
 ```text
 BOOTING
@@ -187,37 +204,44 @@ BOOTING
   -> ERROR_RETRYING
 ```
 
-`status.json` should expose at least:
+`state/status.json` exposes at least:
 - broker state
 - broker PID
 - supervisor PID
 - desired executor state: `RUNNING | STOPPED`
 - current account mode
+- in-flight request ID/action or null
 - last handled request ID/action/result
 - last error/reason code
 - updated timestamp
 - applied lot profile or deterministic hash/version
 
-`heartbeat.json` is refreshed periodically even while executors are stopped. This distinguishes `Broker alive / executors IDLE` from `SYSTEM task dead`.
+`state/heartbeat.json` is refreshed at least every 2 seconds while the broker process is alive, including `IDLE`. This distinguishes `Broker alive / executors IDLE` from `SYSTEM task dead`.
 
-## 9. Boot behavior
+## 9. Boot policy
 
-Preserve the project startup safety policy:
-- Scheduled Task starts at system boot under SYSTEM.
-- Broker starts first and remains alive.
-- Bot mode must be `PAUSE` before executor launch.
-- Existing boot policy may launch the executor runtime automatically in PAUSE using canonical task config, matching current startup behavior.
-- Broker must never enable AUTO during boot.
-- If boot-time guards fail, broker remains alive in `IDLE` or `BLOCKED` and records the reason instead of exiting permanently.
+The new broker intentionally separates **SYSTEM service availability** from **trading executor startup**.
 
-A user Web `STOP` keeps the broker alive and stops the executor tree. A later Web `START` launches it again without an Administrator action.
+At Windows boot:
+1. `XAUUSD-Phase7C-Executors` starts the SYSTEM broker.
+2. Broker enforces/validates bot mode `PAUSE`.
+3. Broker enters `IDLE` with desired executor state `STOPPED`.
+4. Broker does **not** automatically launch Trend/Sideway/Telegram executors.
+5. User starts the executor runtime from Web with `BẬT BOT` / START.
+6. AUTO is never enabled automatically.
 
-## 10. Safety gates
+This is safer than the old task behavior and matches the approved model that Web sends START/STOP/RESTART while the privileged runner always remains alive.
 
-The API continues to perform the existing lifecycle preflight before submitting a request. The SYSTEM broker also performs independent no-bypass validation before privileged mutation.
+A broker crash/restart within the same Windows session also returns fail-safe to `IDLE / PAUSE`; it does not infer that AUTO or executor RUNNING should be restored automatically.
 
-### Common START gates
-- request valid and fresh
+## 10. Safety validation boundary
+
+The API performs existing Web preflight before it writes a request. The SYSTEM broker performs its own no-bypass validation before privileged mutation and never trusts request-supplied runtime facts.
+
+The broker may use the configured localhost `ControlApiUrl` and existing canonical read-only bridge/lifecycle probes to obtain account/MT5 state. If those probes are unavailable or ambiguous, the action is rejected; the broker does not guess.
+
+### START gates
+- request valid, fresh, and not busy
 - canonical account-mode state valid
 - bot mode is `PAUSE`
 - MT5 bridge reachable
@@ -230,62 +254,76 @@ The API continues to perform the existing lifecycle preflight before submitting 
 - canonical executor task configuration valid and armed
 
 ### STOP gates
-- bot mode is forced/confirmed `PAUSE`
+- bot mode is `PAUSE`
+- MT5/position probe reachable
 - XAUUSD open positions = 0
 
-If there is an open XAUUSD position, STOP is rejected so managed positions are not orphaned.
+If position state cannot be verified, STOP is rejected. Emergency manual Administrator recovery remains outside the Web request path.
 
 ### RESTART gates
-RESTART uses STOP gates plus START gates. It is the action used when lot settings require a restart.
+RESTART requires both STOP and START gates. It is used when lot settings or another bounded runtime change requires a fresh executor launch.
 
-### LIVE-specific gates
-For LIVE START or RESTART, preserve all existing LIVE authorization boundaries. The broker must not create or repair authorization itself.
+## 11. LIVE authorization and ARM semantics
 
-At minimum it must require canonical LIVE configuration to be valid and must revalidate the current LIVE authorization/ARM state required by the project for the current broker/bridge session. Failure remains fail-closed in PAUSE.
+Lifecycle and AUTO authorization remain separate.
+
+For LIVE START or RESTART:
+- require canonical LIVE account configuration and the existing durable/preauthorized LIVE execution boundary required to launch the LIVE executor runtime;
+- do not create, repair, or extend LIVE authorization;
+- do **not** require a session LIVE ARM merely to start/restart executors in PAUSE.
+
+LIVE ARM remains a separate session-bound gate for enabling AUTO. Therefore the intended LIVE flow remains:
+
+```text
+LIVE selected
+  -> START executors
+  -> RUNNING / PAUSE
+  -> ARM LIVE
+  -> ARMED
+  -> user explicitly enables AUTO
+```
+
+If a bridge session change invalidates an existing ARM during/after lifecycle work, the executor runtime may still be RUNNING in PAUSE, but AUTO remains blocked until the user re-ARM LIVE.
 
 DEMO remains `ARM NOT_REQUIRED`.
 
-## 11. Applying lot settings correctly
+## 12. Applying lot settings correctly
 
-This is a core requirement of the redesign.
+The SYSTEM broker must not cache effective lot values outside the per-launch path.
 
-The SYSTEM runner must not cache effective lot values outside the per-launch path.
-
-Before every START and every RESTART launch it must re-read:
+Before every START and RESTART launch it re-reads:
 1. `.runtime/phase7c-executor-task-config.json`
-2. current account-mode state
+2. current canonical account-mode state
 3. `.runtime/phase7c-lot-settings.json` when present
 4. canonical account env configuration
 
 Then it validates the effective risk profile and passes those freshly resolved values to `run-phase7c-executors-local.ps1`.
 
-After launch, API lifecycle readiness continues to compare configured vs active lot profile. `restartRequired` only becomes false when the active runtime status confirms the new profile.
+After launch, existing lifecycle readiness continues to compare configured vs active lot profile. `restartRequired` becomes false only when active runtime status confirms the new profile.
 
-## 12. START behavior
+## 13. START behavior
 
 1. API sets/keeps bot mode `PAUSE`.
-2. API performs current Web preflight.
-3. API writes atomic `START` request and waits for matching result/status.
-4. Broker validates privileged gates.
-5. If supervisor tree is already healthy and active lot/account profile matches canonical config, return `NOOP_ALREADY_RUNNING`.
-6. Otherwise launch supervisor tree as SYSTEM with freshly loaded config.
-7. Broker records supervisor PID and state `RUNNING` after process launch.
-8. API waits for existing lifecycle readiness: supervisor + Trend + Sideway + Telegram + regime notifier + active lot profile + account guard.
-9. On success Web shows RUNNING / READY / PAUSE.
-10. AUTO still requires a separate user click and existing AUTO safety gates.
+2. API performs existing account/bridge/position/Telegram preflight.
+3. API verifies broker heartbeat/capability.
+4. API atomically writes `START` and waits for the matching request result.
+5. Broker validates privileged gates.
+6. If executor runtime is already healthy and active lot/account profile matches canonical config, return `NOOP_ALREADY_RUNNING`.
+7. Otherwise broker re-reads canonical launch config and starts the supervisor tree as SYSTEM.
+8. Broker records supervisor PID/state.
+9. API waits for existing lifecycle READY: supervisor + Trend + Sideway + Telegram + regime notifier + active lot profile + account guard.
+10. Success state is `RUNNING / READY / PAUSE`.
+11. AUTO still requires a separate user click and existing AUTO safety gates.
 
-## 13. STOP behavior
+## 14. STOP behavior
 
 1. API sets bot mode `PAUSE`.
 2. API verifies zero XAUUSD positions.
-3. API writes `STOP` request.
+3. API submits `STOP`.
 4. Broker independently confirms PAUSE and zero XAUUSD positions.
 5. Broker stops the supervisor/executor tree as SYSTEM using canonical stopper logic.
-6. Broker does not exit.
-7. Broker enters `IDLE`, desired executor state `STOPPED`.
-8. API verifies executors are no longer running.
-
-Expected stable state:
+6. Broker remains alive.
+7. Stable state:
 
 ```text
 Scheduled Task: Running
@@ -294,84 +332,91 @@ Executors: STOPPED
 Bot mode: PAUSE
 ```
 
-## 14. RESTART behavior
+## 15. RESTART behavior
 
 1. API sets bot mode `PAUSE`.
-2. API verifies zero XAUUSD positions and other existing lifecycle guards.
-3. API writes `RESTART` request.
+2. API verifies zero XAUUSD positions and existing lifecycle guards.
+3. API submits `RESTART`.
 4. Broker revalidates the same safety gates.
 5. Broker stops the SYSTEM executor tree.
 6. Broker re-reads canonical task/account/lot configuration.
 7. Broker launches a fresh SYSTEM supervisor tree.
-8. API waits for READY and confirms the active lot profile now matches configured settings.
+8. API waits for READY and confirms active lot equals configured lot.
 9. Bot remains `PAUSE`.
-10. User may then explicitly enable AUTO from Web.
+10. User may then explicitly enable AUTO, subject to DEMO/LIVE AUTO gates.
 
-This replaces the current API-side `/End` + local stopper path for Web lifecycle control.
+This replaces the current API-side `/End` + local stopper path for normal Web lifecycle control.
 
-## 15. Crash and recovery behavior
+## 16. Crash and recovery behavior
 
-### Executor/supervisor crash while desired state is RUNNING
-Preserve current watchdog behavior: broker detects supervisor exit, records `ERROR_RETRYING`, waits bounded restart delay, re-reads canonical configuration, then starts a new supervisor. It remains PAUSE unless the existing mode state says otherwise; the new design must not introduce automatic AUTO mutation.
+### Supervisor/executor crash
+Any broker-detected unexpected supervisor exit is treated as a safety event:
+- broker records `ERROR_RETRYING` or `BLOCKED`;
+- bot mode is forced/confirmed `PAUSE` through the canonical mode path;
+- broker does **not** automatically restore AUTO;
+- broker may restart the executor tree only after the same START safety gates pass;
+- post-recovery state is `RUNNING / PAUSE`, requiring an explicit user AUTO action.
 
-### Executor exit while desired state is STOPPED
-Do not restart. Remain `IDLE`.
+### Executor desired state STOPPED
+Do not restart executors. Remain `IDLE`.
 
 ### Broker process/task crash
-Task Scheduler remains responsible for starting the broker at system startup. If a separate task restart-on-failure policy exists or is added, it may restart the broker itself, but the broker must always come up fail-safe and enforce PAUSE before execution startup.
+Task Scheduler restarts the broker according to the installed task/recovery policy. On broker startup, fail-safe boot policy applies: `PAUSE`, executors `STOPPED`, broker `IDLE`.
 
 ### API crash after request submission
-The broker still completes or rejects the request based on `requestId`; result is persisted. After API recovers it can read status/result and reconcile without reissuing a duplicate mutation.
+Broker completes or rejects the persisted request. After API recovery it reconciles by `requestId` from `results/` instead of reissuing the mutation.
 
 ### Duplicate request
-Same `requestId` is idempotent and must never execute twice.
+Same `requestId` returns the existing result and never executes twice.
 
-### Malformed request
-Reject and preserve the current executor desired state.
+### Malformed/stale request
+Reject and preserve current executor state.
 
-## 16. API/service changes
+## 17. API/service changes
 
-`apps/api/src/services/phase7c-lifecycle.service.ts` should stop owning privileged process mutation.
+`apps/api/src/services/phase7c-lifecycle.service.ts` stops owning privileged process mutation.
 
-Replace API-side:
+Remove from the normal Web lifecycle path:
 - `schtasks.exe /End`
 - direct execution of `stop-phase7c-executors-local.ps1`
 - user-token `launchSelectedSupervisor()`
 - user-token `taskkill` of executor lifecycle processes
 
-with a lifecycle broker client that:
-- atomically writes a bounded request
-- polls broker heartbeat/status/result by matching `requestId`
-- surfaces canonical failure reason to Web
-- preserves current preflight and final readiness verification
-
-Suggested new focused module:
+Introduce a focused file-protocol client, suggested:
 
 ```text
 apps/api/src/services/phase7c-lifecycle-broker.service.ts
 ```
 
-It is a file-protocol client only; it has no elevated behavior.
+Responsibilities:
+- verify broker heartbeat/capability
+- serialize to one in-flight request
+- atomically write the closed request schema
+- poll matching immutable result/status
+- map canonical broker reason codes to Web errors
+- preserve existing preflight and final READY verification
+- never execute elevated commands
 
-## 17. SYSTEM runner changes
+## 18. SYSTEM runner changes
 
 Evolve `scripts/run-phase7c-executor-task-runner-local.ps1` from an unconditional supervisor restart loop into the persistent lifecycle broker.
 
 Responsibilities:
 - retain startup runner single-instance lock
+- enforce fail-safe PAUSE on broker start/recovery
 - publish heartbeat/status
-- process bounded request files
+- parse/validate bounded request files
+- enforce one in-flight mutation
 - maintain desired executor state
 - re-read canonical configuration on every launch
 - launch supervisor as SYSTEM
 - stop supervisor tree as SYSTEM
-- auto-recover supervisor only while desired state is RUNNING
-- persist request results
+- persist immutable results
 - remain alive in IDLE/BLOCKED states
 
-Prefer extracting request parsing/state helpers to a PowerShell library if the runner becomes difficult to test as one file. Avoid unrelated refactoring.
+If necessary, extract parsing/state helpers into a focused PowerShell library rather than growing one untestable runner file. Avoid unrelated refactoring.
 
-## 18. Scheduled Task changes
+## 19. Scheduled Task and installer changes
 
 Keep one canonical task:
 
@@ -383,22 +428,21 @@ Trigger: At system startup
 Action: run-phase7c-executor-task-runner-local.ps1
 ```
 
-Do not add a Web-user lifecycle task and do not grant direct task-control rights to the interactive user.
+Do not add a Web-user lifecycle task and do not grant the interactive user direct task-control rights.
 
-The installer/registration script should verify:
+The elevated installer/registration path must verify:
 - SYSTEM principal
 - Highest run level
 - expected runner path
 - startup trigger
-- broker runtime directory can be used by API for request creation while privileged outputs remain writable by SYSTEM
+- broker directory ACLs and configured API user SID
+- broker heartbeat after registration/migration
 
-## 19. UI behavior
+## 20. UI behavior
 
-No new large UI section is required.
+No new large UI section is required. Control Center remains the single ARM/lifecycle surface.
 
-Control Center remains the single ARM/lifecycle surface.
-
-Lifecycle display should distinguish:
+Lifecycle display may distinguish:
 - `BROKER READY · EXECUTORS IDLE`
 - `STARTING`
 - `RUNNING · PAUSE`
@@ -406,70 +450,74 @@ Lifecycle display should distinguish:
 - `BLOCKED: <reason>`
 
 When configured lot differs from active lot:
-- display `Cần khởi động lại để áp dụng cấu hình lot`
-- `KHÔI PHỤC BOT` or equivalent Web start action results in broker `RESTART`, not direct SYSTEM process control
+- display `Cần khởi động lại để áp dụng cấu hình lot`;
+- `KHÔI PHỤC BOT` / start action resolves to broker `RESTART` when runtime is already running with stale lot settings;
+- AUTO remains blocked until lifecycle `ready=true`.
 
-AUTO remains blocked until lifecycle `ready=true`.
-
-## 20. Observability and audit
+## 21. Observability and audit
 
 Do not swallow privileged lifecycle errors.
 
-Record:
+Record without secrets:
 - request ID/action/source/reason
-- accepted/rejected timestamp
-- safety rejection reason code
-- stop/start phase transition
+- API submission timestamp
+- broker accepted/rejected timestamp
+- canonical rejection/failure reason code
+- state transition
 - supervisor PID
 - account mode
 - effective lot profile applied at launch
 - timeout/error
 
-Never log Telegram token, chat ID secrets, bridge passwords, or account env secret values.
+Never log Telegram tokens, chat IDs, bridge passwords, or account env secret values.
 
-## 21. Timeout policy
+## 22. Timeout policy
 
-Recommended bounded timeouts:
+Initial bounded timeouts:
+- broker heartbeat stale threshold: 5 seconds
 - request pickup: 5 seconds
-- graceful/forced SYSTEM executor stop: reuse existing stopper budget, with a hard upper bound
+- SYSTEM executor stop: hard upper bound 25 seconds
 - supervisor launch acknowledgement: 10 seconds
-- full lifecycle READY: retain approximately current 50-second readiness window unless tests show the broker transition requires a small extension
+- full lifecycle READY: retain current 50-second window initially
 
 On timeout:
 - bot remains `PAUSE`
 - API reports canonical timeout reason
-- broker stays alive
+- broker remains alive when possible
 - no AUTO mutation
 - no ARM mutation
 
-## 22. Testing strategy
+## 23. Testing strategy
 
-Implementation must use TDD.
+Implementation uses TDD with intentional RED before production changes.
 
-### RED contract tests first
-Add tests that fail against the current architecture and require:
-1. API lifecycle service no longer calls `schtasks /End` for Web lifecycle.
-2. API lifecycle service no longer directly launches/stops the privileged executor tree.
-3. broker request accepts only START/STOP/RESTART and rejects arbitrary fields/commands.
-4. STOP with XAUUSD position > 0 is rejected.
-5. RESTART with bot not PAUSE is rejected.
-6. DEMO START requires no ARM but preserves account/bridge guards.
-7. LIVE START/RESTART cannot bypass canonical LIVE authorization/ARM.
-8. broker remains alive after STOP and reports IDLE.
-9. START from IDLE launches executor runtime.
-10. RESTART re-reads changed lot settings and launches with the new values.
-11. duplicate requestId executes at most once.
-12. malformed/stale request is rejected without changing executor state.
-13. supervisor crash auto-restarts only when desired state is RUNNING.
-14. supervisor crash does not restart when desired state is STOPPED.
-15. boot/start always preserves PAUSE and never activates AUTO.
+### RED contracts
+Tests must require:
+1. API lifecycle service no longer uses `schtasks /End` for Web lifecycle.
+2. API no longer directly launches/stops privileged executor trees.
+3. request schema accepts only START/STOP/RESTART and rejects unknown/arbitrary command fields.
+4. inbox/state ACL contract does not make SYSTEM state writable by generic users.
+5. one in-flight request only; busy request cannot be overwritten.
+6. STOP with XAUUSD position > 0 is rejected.
+7. STOP with unverifiable position state is rejected.
+8. RESTART with bot not PAUSE is rejected.
+9. DEMO START requires no ARM while preserving normal account/bridge guards.
+10. LIVE START/RESTART requires durable LIVE authorization but does not require session ARM.
+11. LIVE AUTO still requires current session ARM through the existing AUTO gate.
+12. STOP leaves broker alive and reports IDLE.
+13. START from IDLE launches executor runtime.
+14. RESTART re-reads changed lot settings and launches with new values.
+15. duplicate request ID executes at most once.
+16. malformed/stale request is rejected without changing executor state.
+17. broker or supervisor recovery forces PAUSE and never restores AUTO automatically.
+18. broker boot starts IDLE with executors STOPPED.
 
-### Windows PowerShell compatibility
-All PowerShell source/contract tests must run on both:
+### Windows compatibility
+PowerShell source/contract tests run on both:
 - PowerShell 7
 - Windows PowerShell 5.1
 
-Avoid UTF-8-without-BOM source-test patterns that break Windows PowerShell 5.1 parsing.
+Avoid source-test encoding patterns that fail Windows PowerShell 5.1.
 
 ### Build/regression
 Require at least:
@@ -478,47 +526,40 @@ Require at least:
 - Phase7C Web lifecycle/source CI
 - Sideway Regime regression suite
 - existing unarmed/LIVE safety contracts
-- notifier regression if any shared lifecycle source affects notifier startup
+- notifier regression if shared startup source affects notifier lifecycle
 
 No LIVE MT5 order is required for validation.
 
-## 23. Deployment plan
+## 24. Deployment and one-time migration
 
-1. Merge only after RED-to-GREEN evidence and all required CI passes.
-2. On Windows, require clean working tree before sync.
+1. Merge only after RED-to-GREEN evidence and required CI passes.
+2. On Windows require a clean working tree before sync.
 3. Verify current account mode, bot mode, XAUUSD positions, bridge health, and task principal before mutation.
-4. Deploy source/build.
-5. Re-register/update `XAUUSD-Phase7C-Executors` once if installer/task action changes.
-6. First migration restart must be performed only while bot is PAUSE and XAUUSD positions = 0.
-7. Verify broker heartbeat and status.
-8. Verify `STOP` leaves broker alive and executors IDLE.
-9. Verify `START` reaches READY and remains PAUSE.
-10. Change a safe DEMO lot setting, verify `restartRequired=true`, issue Web restart, then verify active lot equals configured lot and `restartRequired=false`.
-11. Only after readiness verification allow the user to click AUTO manually.
+4. Require `PAUSE` and `XAUUSD positions = 0` for the one-time old-runner -> broker migration.
+5. Deploy source/build.
+6. Re-register/update `XAUUSD-Phase7C-Executors` and broker ACLs once under Administrator.
+7. End the old in-memory task runner and start the new broker exactly once during migration.
+8. Verify broker heartbeat and `IDLE / executors STOPPED / PAUSE`.
+9. Verify Web START reaches `READY / PAUSE`.
+10. Verify Web STOP returns to `IDLE` while the SYSTEM task/broker stays alive.
+11. Change a safe DEMO lot setting, confirm `restartRequired=true`, issue Web RESTART, then confirm active lot equals configured lot and `restartRequired=false`.
+12. Only after readiness verification may the user enable AUTO manually.
 
-No LIVE order should be generated during deployment validation.
-
-## 24. Migration compatibility
-
-During migration, the existing SYSTEM task may already be running the old runner. Updating the source file alone does not transform the in-memory runner. Therefore deployment must explicitly perform one controlled task/runner transition under Administrator/SYSTEM after verifying PAUSE and zero XAUUSD positions.
-
-After that one-time migration, normal lifecycle control is entirely Web request-driven and requires no repeated Administrator command.
-
-Existing runtime PID/status files may remain for lifecycle compatibility, but the new broker status becomes the canonical authority for broker state. Existing lifecycle readiness continues to verify actual process liveness rather than trusting broker state alone.
+No LIVE order is generated during deployment validation.
 
 ## 25. Acceptance criteria
 
-The design is complete when all of the following are true:
-
+The implementation is acceptable only when all are true:
 - API token remains non-elevated.
 - Scheduled Task remains SYSTEM + Highest.
-- Web can START, STOP, and RESTART executors without direct SYSTEM task/process control.
-- STOP leaves lifecycle broker alive.
+- SYSTEM broker remains alive independently of executor state.
+- Web can START, STOP, and RESTART without direct SYSTEM task/process control.
+- broker request surface is closed, ACL-bounded, and cannot execute arbitrary commands.
+- STOP leaves broker alive and executors IDLE.
 - START after STOP works without Administrator interaction.
-- lot-setting changes can be applied by Web RESTART and active lot reflects the new values.
-- Web lifecycle cannot stop/restart while an XAUUSD position is open.
-- LIVE cannot bypass existing authorization/ARM rules.
-- all lifecycle transitions preserve PAUSE; AUTO remains explicit.
-- broker request schema cannot execute arbitrary commands.
-- request/result/status are auditable and idempotent.
-- existing Trend/Sideway/Telegram trading contracts are unchanged.
+- lot changes can be applied by Web RESTART and active lot reflects new values.
+- Web cannot STOP/RESTART while an XAUUSD position is open or position state is unverifiable.
+- LIVE executor START does not require ARM, but LIVE AUTO still cannot bypass session ARM.
+- every lifecycle/start/recovery transition ends in PAUSE; AUTO is always explicit.
+- request handling is idempotent and auditable.
+- existing Trend/Sideway/Telegram trading contracts remain unchanged.
