@@ -3,7 +3,7 @@ name: Phase7C Web Account Semantic CI
 on:
   pull_request:
     branches:
-      - fix/phase7c-legacy-background-cleanup
+      - main
     paths:
       - "apps/api/src/services/mt5-performance.service.ts"
       - "apps/api/src/services/mt5.service.ts"
