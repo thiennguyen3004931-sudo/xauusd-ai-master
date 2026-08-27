@@ -87,6 +87,22 @@ forbidText(accountRiskPage, "Tài khoản demo đang kết nối với MT5.", "h
 forbidText(accountRiskPage, "Các khóa an toàn bắt buộc của DEMO.", "hard-coded safety subtitle");
 forbidText(accountRiskPage, 'label="Demo only"', "hard-coded DEMO safety row");
 
+const accountSwitchCard = read("apps/web/src/ui/Phase7CAccountSwitchCard.tsx");
+forbidText(accountSwitchCard, "ARM FILE CÓ", "account-risk ARM chip");
+forbidText(accountSwitchCard, "ARM FILE KHÔNG", "account-risk ARM chip");
+forbidText(accountSwitchCard, "LIVE arm file", "account-risk final ARM status");
+forbidText(accountSwitchCard, "Không ARM LIVE", "account-risk ARM guidance");
+forbidText(accountSwitchCard, "ARM ở bước riêng", "account-risk ARM guidance");
+requireText(accountSwitchCard, "Account switch không cấp quyền AUTO và không gửi order.", "account-risk neutral switch boundary");
+
+const executionAuthorization = read("apps/web/src/ui/Phase7CExecutionAuthorizationCard.tsx");
+forbidText(executionAuthorization, "DEMO · ARM KHÔNG YÊU CẦU", "DEMO ARM UI");
+requireText(executionAuthorization, "KIỂM TRA ĐIỀU KIỆN ARM LIVE", "single LIVE ARM preflight button");
+requireText(executionAuthorization, 'createPhase7CLiveArmPreflight("ARM_LIVE")', "LIVE ARM explicit preflight");
+requireText(executionAuthorization, "armPreflight?.approved", "ARM button preflight gate");
+requireText(executionAuthorization, 'accountMode === "LIVE" ? (', "LIVE-only ARM rendering");
+requireText(executionAuthorization, "DEMO chỉ dùng AUTO safety guard", "DEMO authorization copy without ARM");
+
 const performancePage = read("apps/web/src/pages/PerformancePage.tsx");
 requireText(performancePage, "MT5 {accountMode} · CHỈ ĐỌC", "performance runtime label");
 requireText(performancePage, "Trang hiệu suất chỉ đọc lịch sử của tài khoản {accountMode} hiện tại", "performance read-only boundary");
