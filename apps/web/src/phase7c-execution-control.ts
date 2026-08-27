@@ -3,6 +3,7 @@ const AUTO_BASE = "/api/v1/phase7c-auto-activation";
 const CONTROL_DIRECT = "http://127.0.0.1:3711";
 
 export type Phase7CLiveArmAction = "ARM_LIVE" | "DISARM_LIVE";
+export type Phase7CBotExecutionMode = "AUTO" | "TREND" | "SIDEWAY" | "PAUSE";
 export type Phase7CBooleanChecks = Record<string, boolean>;
 
 export type Phase7CLiveArmControlCapability = {
@@ -75,10 +76,11 @@ export type Phase7CAutoActivationStatus = {
 
 export type Phase7CAutoEnableResponse = Phase7CAutoActivationStatus & {
   state: {
-    mode: string;
+    mode: Phase7CBotExecutionMode;
     updatedAt: string;
     updatedBy: string;
   };
+  options: Phase7CBotExecutionMode[];
 };
 
 async function safeJson<T>(response: Response): Promise<T> {
@@ -139,10 +141,14 @@ export function getPhase7CAutoActivationStatus() {
   return request<Phase7CAutoActivationStatus>(AUTO_BASE, "/status");
 }
 
-export function enablePhase7CAuto() {
-  return request<Phase7CAutoEnableResponse>(AUTO_BASE, "/enable", {
+export async function enablePhase7CAuto(): Promise<Phase7CAutoEnableResponse> {
+  const payload = await request<Omit<Phase7CAutoEnableResponse, "options">>(AUTO_BASE, "/enable", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: "{}",
   });
+  return {
+    ...payload,
+    options: ["AUTO", "TREND", "SIDEWAY", "PAUSE"],
+  };
 }
