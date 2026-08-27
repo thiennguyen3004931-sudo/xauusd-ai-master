@@ -42,9 +42,19 @@ requireText(
   "LIVE Web Start first-time ARM boundary",
 );
 requireText(
-  lifecycle,
-  "liveAuthorization?.valid !== true",
-  "LIVE launcher must revalidate prior authorization",
+  startSource,
+  "!liveAuthorization.valid || !liveAuthorization.identity",
+  "LIVE Web Start must validate durable authorization before broker START",
+);
+requireText(
+  startSource,
+  "const finalAuthorization = getPhase7CLiveAuthorizationStatus",
+  "LIVE Web Start must re-read durable authorization after broker START",
+);
+requireText(
+  startSource,
+  "if (!finalAuthorization.valid)",
+  "LIVE Web Start must fail closed when final authorization is invalid",
 );
 requireText(
   startSource,
