@@ -126,7 +126,7 @@ const CHECK_LABELS: Record<string, string> = {
   noTrendPendingPullback: "Trend không có pending pullback",
   noSidewayPendingEntry: "Sideway không có pending entry",
   noExecutionLock: "Không có execution lock",
-  demoToLiveArmSafe: "Không có stale LIVE arm khi ở DEMO",
+  demoToLiveArmSafe: "Trạng thái chuyển LIVE an toàn",
   noSwitchRunning: "Không có account switch khác đang chạy",
 };
 
@@ -222,14 +222,13 @@ export function Phase7CAccountSwitchCard() {
             <Typography variant="overline" color="warning.main" fontWeight={950}>CHUYỂN TÀI KHOẢN DEMO / LIVE</Typography>
             <Typography variant="h5" fontWeight={950}>Guarded account switch · 2 bước xác nhận</Typography>
             <Typography variant="body2" color="text.secondary" mt={0.8}>
-              Web chỉ gửi yêu cầu localhost tới elevated task cố định. Không ARM LIVE, không gửi lệnh, không đổi lot/risk và không tự bật AUTO sau switch.
+              Web chỉ gửi yêu cầu localhost tới elevated task cố định. Account switch không cấp quyền AUTO và không gửi order. Lot/risk không thay đổi sau switch.
             </Typography>
           </Box>
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="flex-start">
             <Chip label={`HIỆN TẠI ${currentMode}`} color={currentMode === "LIVE" ? "warning" : "success"} sx={{ fontWeight: 950 }} />
             <Chip label={`TARGET ${targetMode}`} variant="outlined" sx={{ fontWeight: 950 }} />
             <Chip label={`BOT ${capabilityQuery.data?.currentBotMode ?? "—"}`} variant="outlined" sx={{ fontWeight: 950 }} />
-            <Chip label={capabilityQuery.data?.liveArmFilePresent ? "ARM FILE CÓ" : "ARM FILE KHÔNG"} color={capabilityQuery.data?.liveArmFilePresent ? "warning" : "success"} variant="outlined" sx={{ fontWeight: 950 }} />
           </Stack>
         </Stack>
 
@@ -256,7 +255,7 @@ export function Phase7CAccountSwitchCard() {
             color="warning"
             disabled={pauseMutation.isPending || switchRunning || capabilityQuery.data?.currentBotMode === "PAUSE"}
             onClick={() => {
-              if (window.confirm("Xác nhận chuyển bot về PAUSE? Thao tác này KHÔNG switch account và KHÔNG DISARM.")) pauseMutation.mutate();
+              if (window.confirm("Xác nhận chuyển bot về PAUSE? Thao tác này KHÔNG switch account.")) pauseMutation.mutate();
             }}
             sx={{ fontWeight: 950 }}
           >
@@ -286,7 +285,11 @@ export function Phase7CAccountSwitchCard() {
                 </Stack>
               ))}
             </Stack>
-            <Alert severity={targetMode === "LIVE" ? "warning" : "info"} sx={{ mt: 2 }}>{preflight.note}</Alert>
+            <Alert severity={targetMode === "LIVE" ? "warning" : "info"} sx={{ mt: 2 }}>
+              {preflight.approved
+                ? `Đã đủ điều kiện chuyển sang ${targetMode}.`
+                : `Chưa đủ điều kiện chuyển sang ${targetMode}; kiểm tra các mục BLOCK phía trên.`}
+            </Alert>
 
             {preflight.approved && (
               <Stack spacing={1.5} mt={2}>
@@ -307,8 +310,8 @@ export function Phase7CAccountSwitchCard() {
                   disabled={!canExecute || executeMutation.isPending}
                   onClick={() => {
                     const message = targetMode === "LIVE"
-                      ? "Xác nhận guarded switch DEMO → LIVE? Kết quả bắt buộc LIVE + PAUSE + DISARMED; KHÔNG ARM và KHÔNG AUTO."
-                      : "Xác nhận LIVE → DEMO? LIVE sẽ được DISARM trước khi switch; kết quả DEMO + PAUSE.";
+                      ? "Xác nhận guarded switch DEMO → LIVE? Kết quả bắt buộc LIVE + PAUSE; KHÔNG tự bật AUTO."
+                      : "Xác nhận LIVE → DEMO? Kết quả bắt buộc DEMO + PAUSE; KHÔNG tự bật AUTO.";
                     if (window.confirm(message)) executeMutation.mutate();
                   }}
                   sx={{ fontWeight: 950 }}
@@ -326,7 +329,7 @@ export function Phase7CAccountSwitchCard() {
               <Typography fontWeight={950}>Account switch: {status?.status ?? "RUNNING"} · {status?.phase ?? "QUEUED"}</Typography>
               <Typography variant="body2" mt={0.5}>{status?.message ?? "Elevated task đang xử lý. Không đóng API/MT5 trong lúc switch."}</Typography>
               {status?.status === "PASS" && (
-                <Typography variant="body2" mt={0.5}>Final: {status.finalAccountMode} · Bot {status.finalBotMode} · LIVE arm file {status.liveArmFilePresent ? "CÓ" : "KHÔNG"}.</Typography>
+                <Typography variant="body2" mt={0.5}>Final: {status.finalAccountMode} · Bot {status.finalBotMode}.</Typography>
               )}
             </Alert>
             {switchDone && (
@@ -336,7 +339,7 @@ export function Phase7CAccountSwitchCard() {
         )}
 
         <Typography variant="caption" color="text.secondary" display="block" mt={2.2} sx={{ lineHeight: 1.7 }}>
-          Ranh giới an toàn: account switch chỉ chạy trên localhost qua Scheduled Task RunLevel Highest. DEMO → LIVE luôn kết thúc DISARMED; muốn giao dịch LIVE phải ARM ở bước riêng. LIVE → DEMO luôn DISARM trước switch. Web account-switch không có route ARM và không có quyền gửi order.
+          Ranh giới an toàn: account switch chỉ chạy trên localhost qua Scheduled Task RunLevel Highest. Sau switch bot luôn ở PAUSE; Web account-switch không tự bật AUTO, không đổi lot/risk và không có quyền gửi order.
         </Typography>
       </CardContent>
     </Card>

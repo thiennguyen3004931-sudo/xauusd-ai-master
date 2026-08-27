@@ -13,6 +13,8 @@ on:
       - "apps/web/src/pages/Phase7BDemoPage.tsx"
       - "apps/web/src/pages/Phase7BOpsPage.tsx"
       - "apps/web/src/pages/Phase7BPatternCheckPage.tsx"
+      - "apps/web/src/ui/Phase7CAccountSwitchCard.tsx"
+      - "apps/web/src/ui/Phase7CExecutionAuthorizationCard.tsx"
       - "mt5/XAUUSD_AI_Master_Decision_Panel.mq5"
       - "apps/web/src/phase7c-panel-status.ts"
       - "apps/web/src/types.ts"
