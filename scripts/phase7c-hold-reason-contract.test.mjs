@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 import path from "node:path";
-import {
-  phase7CHoldDedupeKey,
-  resolvePhase7CHoldReason,
-} from "../apps/api/src/services/phase7c-hold-reason.service.mjs";
 
 const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptsDir, "..");
+const holdServicePath = path.join(
+  repoRoot,
+  "apps/api/src/services/phase7c-hold-reason.service.mjs",
+);
 const monitorSource = fs.readFileSync(
   path.join(repoRoot, "apps/api/src/services/phase7c-decision-monitor.service.ts"),
   "utf8",
@@ -23,7 +23,17 @@ const TREND_MESSAGE = "GIỮ LỆNH: Cấu trúc xu hướng M15 vẫn còn hi�
 const SIDEWAY_MESSAGE = "GIỮ LỆNH: Biên sideway vẫn còn hiệu lực; tiếp tục giữ đến TP2 hoặc khi có điều kiện thoát.";
 const RECOVERY_MESSAGE = "GIỮ LỆNH: Recovery TP đang hoạt động; giữ toàn bộ vị thế đến Adaptive TP hoặc SL/BE.";
 
-test("Trend HOLD uses the exact canonical code and Vietnamese backend message", () => {
+async function loadCanonicalHoldService() {
+  assert.equal(
+    fs.existsSync(holdServicePath),
+    true,
+    "backend canonical HOLD service must exist before consumers can share one reason source",
+  );
+  return import(pathToFileURL(holdServicePath).href);
+}
+
+test("Trend HOLD uses the exact canonical code and Vietnamese backend message", async () => {
+  const { resolvePhase7CHoldReason } = await loadCanonicalHoldService();
   assert.deepEqual(
     resolvePhase7CHoldReason({ strategy: "TREND", dailyMode: "TREND" }),
     {
@@ -33,7 +43,8 @@ test("Trend HOLD uses the exact canonical code and Vietnamese backend message", 
   );
 });
 
-test("Sideway HOLD uses the exact canonical code and Vietnamese backend message", () => {
+test("Sideway HOLD uses the exact canonical code and Vietnamese backend message", async () => {
+  const { resolvePhase7CHoldReason } = await loadCanonicalHoldService();
   assert.deepEqual(
     resolvePhase7CHoldReason({ strategy: "SIDEWAY", dailyMode: "SIDEWAY" }),
     {
@@ -43,7 +54,8 @@ test("Sideway HOLD uses the exact canonical code and Vietnamese backend message"
   );
 });
 
-test("Recovery HOLD has precedence over ordinary Trend and Sideway HOLD", () => {
+test("Recovery HOLD has precedence over ordinary Trend and Sideway HOLD", async () => {
+  const { resolvePhase7CHoldReason } = await loadCanonicalHoldService();
   for (const strategy of ["TREND", "SIDEWAY"]) {
     assert.deepEqual(
       resolvePhase7CHoldReason({ strategy, dailyMode: "RECOVERY_TP" }),
@@ -55,14 +67,16 @@ test("Recovery HOLD has precedence over ordinary Trend and Sideway HOLD", () => 
   }
 });
 
-test("unmanaged positions do not invent a canonical HOLD reason", () => {
+test("unmanaged positions do not invent a canonical HOLD reason", async () => {
+  const { resolvePhase7CHoldReason } = await loadCanonicalHoldService();
   assert.deepEqual(
     resolvePhase7CHoldReason({ strategy: null, dailyMode: null }),
     { holdReasonCode: null, holdReason: null },
   );
 });
 
-test("Telegram dedupe identity is exactly ticket + holdReasonCode", () => {
+test("Telegram dedupe identity is exactly ticket + holdReasonCode", async () => {
+  const { phase7CHoldDedupeKey } = await loadCanonicalHoldService();
   const trend = phase7CHoldDedupeKey("9001", "HOLD_TREND_STRUCTURE_INTACT");
   assert.equal(trend, "9001|HOLD_TREND_STRUCTURE_INTACT");
   assert.equal(
