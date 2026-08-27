@@ -4,14 +4,17 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $files = @{
   register = Join-Path $ProjectRoot "scripts\register-phase7c-live-arm-control-task-local.ps1"
   runner = Join-Path $ProjectRoot "scripts\run-phase7c-live-arm-control-task-runner-local.ps1"
-  service = Join-Path $ProjectRoot "apps\api\src\services\phase7c-live-arm-control.service.ts"
-  route = Join-Path $ProjectRoot "apps\api\src\routes\phase7c-live-arm-control.route.ts"
+  armService = Join-Path $ProjectRoot "apps\api\src\services\phase7c-live-arm-control.service.ts"
+  armRoute = Join-Path $ProjectRoot "apps\api\src\routes\phase7c-live-arm-control.route.ts"
+  autoService = Join-Path $ProjectRoot "apps\api\src\services\phase7c-auto-activation.service.ts"
+  autoRoute = Join-Path $ProjectRoot "apps\api\src\routes\phase7c-auto-activation.route.ts"
   app = Join-Path $ProjectRoot "apps\api\src\app.ts"
-  lifecycle = Join-Path $ProjectRoot "apps\api\src\services\phase7c-lifecycle.service.ts"
-  phase7cRoute = Join-Path $ProjectRoot "apps\api\src\routes\phase7c.route.ts"
   webApi = Join-Path $ProjectRoot "apps\web\src\api.ts"
   webTypes = Join-Path $ProjectRoot "apps\web\src\phase7c-types.ts"
-  controlCenter = Join-Path $ProjectRoot "apps\web\src\pages\Phase7CControlCenterPage.tsx"
+  executionCard = Join-Path $ProjectRoot "apps\web\src\ui\Phase7CExecutionAuthorizationCard.tsx"
+  controlShell = Join-Path $ProjectRoot "apps\web\src\pages\Phase7CControlCenterShellPage.tsx"
+  accountRisk = Join-Path $ProjectRoot "apps\web\src\pages\Phase7CAccountRiskPage.tsx"
+  router = Join-Path $ProjectRoot "apps\web\src\router.tsx"
 }
 foreach ($entry in $files.GetEnumerator()) {
   if (-not (Test-Path -LiteralPath $entry.Value)) { throw "Missing LIVE arm/DEMO auto source: $($entry.Key) $($entry.Value)" }
@@ -19,14 +22,17 @@ foreach ($entry in $files.GetEnumerator()) {
 
 $register = Get-Content -LiteralPath $files.register -Raw
 $runner = Get-Content -LiteralPath $files.runner -Raw
-$service = Get-Content -LiteralPath $files.service -Raw
-$route = Get-Content -LiteralPath $files.route -Raw
+$armService = Get-Content -LiteralPath $files.armService -Raw
+$armRoute = Get-Content -LiteralPath $files.armRoute -Raw
+$autoService = Get-Content -LiteralPath $files.autoService -Raw
+$autoRoute = Get-Content -LiteralPath $files.autoRoute -Raw
 $app = Get-Content -LiteralPath $files.app -Raw
-$lifecycle = Get-Content -LiteralPath $files.lifecycle -Raw
-$phase7cRoute = Get-Content -LiteralPath $files.phase7cRoute -Raw
 $webApi = Get-Content -LiteralPath $files.webApi -Raw
 $webTypes = Get-Content -LiteralPath $files.webTypes -Raw
-$controlCenter = Get-Content -LiteralPath $files.controlCenter -Raw
+$executionCard = Get-Content -LiteralPath $files.executionCard -Raw
+$controlShell = Get-Content -LiteralPath $files.controlShell -Raw
+$accountRisk = Get-Content -LiteralPath $files.accountRisk -Raw
+$router = Get-Content -LiteralPath $files.router -Raw
 
 [void][scriptblock]::Create($register)
 [void][scriptblock]::Create($runner)
@@ -57,36 +63,48 @@ Assert-Literal $runner 'disarm-phase7c-live-local.ps1' 'canonical DISARM script'
 Assert-Literal $runner 'get-phase7c-live-arm-local.ps1' 'canonical status script'
 Assert-NotContains $runner 'order_send|/v1/orders\s*$' 'runner must not submit broker orders'
 
-Assert-Literal $service 'XAUUSD-Phase7C-Live-Arm-Control' 'API uses fixed elevated task'
-Assert-Literal $service 'PREFLIGHT_TTL_MS = 45_000' 'short-lived ARM preflight'
-Assert-Literal $service 'source: "LOCAL_WEB"' 'fixed local Web request source'
-Assert-Literal $service 'schtasks.exe' 'scheduled task invocation'
-Assert-Literal $service 'ARM_LIVE' 'ARM API action'
-Assert-Literal $service 'DISARM_LIVE' 'DISARM API action'
-Assert-NotContains $service 'writeFileSync\([^\r\n]*phase7c-live-arm|order_send' 'API must not write ARM file or send order directly'
+Assert-Literal $armService 'XAUUSD-Phase7C-Live-Arm-Control' 'API uses fixed elevated task'
+Assert-Literal $armService 'PREFLIGHT_TTL_MS = 45_000' 'short-lived ARM preflight'
+Assert-Literal $armService 'source: "LOCAL_WEB"' 'fixed local Web request source'
+Assert-Literal $armService 'schtasks.exe' 'scheduled task invocation'
+Assert-Literal $armService 'ARM_LIVE' 'ARM API action'
+Assert-Literal $armService 'DISARM_LIVE' 'DISARM API action'
+Assert-NotContains $armService 'writeFileSync\([^\r\n]*phase7c-live-arm|order_send' 'API must not write ARM file or send order directly'
+Assert-Literal $armRoute 'LIVE ARM control is restricted to localhost.' 'localhost ARM API guard'
+Assert-Literal $armRoute '/preflight' 'ARM preflight endpoint'
+Assert-Literal $armRoute '/execute' 'ARM execute endpoint'
+Assert-Literal $armRoute '/status' 'ARM status endpoint'
 
-Assert-Literal $route 'LIVE ARM control is restricted to localhost.' 'localhost API guard'
-Assert-Literal $route '/preflight' 'ARM preflight endpoint'
-Assert-Literal $route '/execute' 'ARM execute endpoint'
-Assert-Literal $route '/status' 'ARM status endpoint'
+Assert-Literal $autoService 'evaluatePhase7CAutoActivation' 'server-side AUTO safety evaluation'
+Assert-Literal $autoService 'accountMode.accountMode === "LIVE"' 'LIVE-only ARM branch'
+Assert-Literal $autoService 'liveExecutionArmed' 'LIVE ARM check'
+Assert-Literal $autoService 'telemetry.positions.length === 0' 'AUTO flat-position guard'
+Assert-Literal $autoService 'lifecycle.ready' 'runtime READY guard'
+Assert-Literal $autoService 'phase7CBotModeService.set("AUTO", "web-control-center")' 'canonical Web AUTO mutation'
+Assert-Literal $autoRoute 'AUTO activation is restricted to localhost.' 'localhost AUTO API guard'
+Assert-Literal $autoRoute '/status' 'AUTO eligibility status endpoint'
+Assert-Literal $autoRoute '/enable' 'guarded AUTO enable endpoint'
+
 Assert-Literal $app '/api/v1/phase7c-live-arm-control' 'ARM route mounted'
-
-Assert-Literal $lifecycle 'assertPhase7CAutoActivationReady' 'server-side AUTO safety guard'
-Assert-Literal $lifecycle 'accountModeState.accountMode === "LIVE"' 'LIVE-only ARM requirement branch'
-Assert-Literal $lifecycle 'liveExecutionArmed' 'LIVE ARM check'
-Assert-Literal $lifecycle 'telemetry.positions.length > 0' 'AUTO flat-position guard'
-Assert-Literal $phase7cRoute 'assertPhase7CAutoActivationReady' 'AUTO route invokes server safety guard'
-Assert-Contains $phase7cRoute 'requestedMode\s*===\s*"AUTO"[\s\S]*await\s+getMt5Telemetry\("XAUUSD"\)' 'AUTO route reads fresh telemetry'
+Assert-Literal $app '/api/v1/phase7c-auto-activation' 'AUTO route mounted'
 
 Assert-Literal $webApi 'getPhase7CLiveArmControlCapability' 'Web ARM capability API'
 Assert-Literal $webApi 'createPhase7CLiveArmPreflight' 'Web ARM preflight API'
 Assert-Literal $webApi 'executePhase7CLiveArmAction' 'Web ARM execute API'
+Assert-Literal $webApi 'getPhase7CAutoActivationStatus' 'Web AUTO status API'
+Assert-Literal $webApi 'enablePhase7CAuto' 'Web guarded AUTO enable API'
 Assert-Literal $webTypes 'Phase7CLiveArmControlCapability' 'Web ARM types'
-Assert-Literal $controlCenter 'ARM LIVE' 'ARM LIVE button'
-Assert-Literal $controlCenter 'DISARM LIVE' 'DISARM LIVE button'
-Assert-Literal $controlCenter 'BẬT AUTO DEMO' 'explicit DEMO AUTO button'
-Assert-Literal $controlCenter 'canAttemptAuto' 'clickable AUTO attempt gate'
-Assert-NotContains $controlCenter 'disabled=\{!canEnableAuto' 'old opaque AUTO disabled gate removed'
-Assert-NotContains $controlCenter 'phase7c-live-arm\.json' 'Web must not touch ARM file directly'
+Assert-Literal $webTypes 'Phase7CAutoActivationStatus' 'Web AUTO types'
+
+Assert-Literal $executionCard 'ARM LIVE' 'ARM LIVE button'
+Assert-Literal $executionCard 'DISARM LIVE' 'DISARM LIVE button'
+Assert-Literal $executionCard 'BẬT AUTO DEMO' 'explicit DEMO AUTO button'
+Assert-Literal $executionCard 'enablePhase7CAuto' 'DEMO AUTO uses guarded backend'
+Assert-Literal $executionCard 'createPhase7CLiveArmPreflight' 'ARM uses preflight'
+Assert-NotContains $executionCard 'phase7c-live-arm\.json' 'Web must not touch ARM file directly'
+Assert-Literal $controlShell 'Phase7CExecutionAuthorizationCard' 'execution card shown in Control Center'
+Assert-Literal $controlShell 'Phase7CControlCenterPage' 'existing Control Center preserved'
+Assert-Literal $accountRisk 'Phase7CExecutionAuthorizationCard' 'execution card shown in Account/Risk'
+Assert-Literal $router 'Phase7CControlCenterShellPage' 'Control Center routes through execution shell'
 
 Write-Host "PHASE7C_WEB_LIVE_ARM_DEMO_AUTO_SOURCE_TEST=PASS"
