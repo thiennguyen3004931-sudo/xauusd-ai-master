@@ -105,6 +105,16 @@ Assert-Literal $executionCard 'createPhase7CLiveArmPreflight' 'ARM uses prefligh
 Assert-Literal $executionCard 'canAttemptAuto' 'AUTO attempt remains clickable for canonical backend error'
 Assert-NotContains $executionCard 'phase7c-live-arm\.json' 'Web must not touch ARM file directly'
 
+# Compact operator-facing ARM/AUTO UI. Detailed checks are opt-in instead of always expanded.
+Assert-Literal $executionCard 'showArmChecks' 'ARM detail disclosure state'
+Assert-Literal $executionCard 'showAutoChecks' 'AUTO detail disclosure state'
+Assert-Literal $executionCard 'KIỂM TRA ĐIỀU KIỆN ARM' 'explicit ARM condition button'
+Assert-Literal $executionCard 'ẨN ĐIỀU KIỆN ARM' 'ARM detail collapse button'
+Assert-Literal $executionCard 'CHI TIẾT AUTO' 'AUTO detail disclosure button'
+Assert-Literal $executionCard 'ARM KHÔNG YÊU CẦU' 'compact DEMO ARM state'
+Assert-Literal $executionCard 'Điều kiện ARM:' 'compact LIVE ARM check summary'
+Assert-Contains $executionCard 'accountMode\s*===\s*"LIVE"[^\r\n]*\?[^\r\n]*\(' 'ARM condition control rendered only for LIVE'
+
 Assert-Literal $controlCenter 'enablePhase7CAuto' 'legacy Control Center AUTO uses guarded backend'
 Assert-Literal $controlCenter 'BẬT AUTO' 'legacy Control Center AUTO button retained'
 Assert-Contains $controlCenter 'disabled=\{[^}]*mode\s*===\s*"AUTO"[^}]*\}' 'legacy AUTO disables only when already AUTO/pending'
@@ -112,7 +122,7 @@ Assert-NotContains $controlCenter 'disabled=\{!canEnableAuto' 'legacy opaque AUT
 
 Assert-Literal $controlShell 'Phase7CExecutionAuthorizationCard' 'execution card shown in Control Center'
 Assert-Literal $controlShell 'Phase7CControlCenterPage' 'existing Control Center preserved'
-Assert-Literal $accountRisk 'Phase7CExecutionAuthorizationCard' 'execution card shown in Account/Risk'
+Assert-NotContains $accountRisk 'Phase7CExecutionAuthorizationCard' 'Account/Risk must not duplicate ARM/AUTO card'
 Assert-Literal $router 'Phase7CControlCenterShellPage' 'Control Center routes through execution shell'
 
 Write-Host "PHASE7C_WEB_LIVE_ARM_DEMO_AUTO_SOURCE_TEST=PASS"
