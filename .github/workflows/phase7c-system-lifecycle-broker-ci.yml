@@ -26,9 +26,14 @@ on:
       - "scripts/test-phase7c-live-arm-source.ps1"
       - "scripts/test-phase7c-startup-runner-guard-local.ps1"
       - "scripts/test-phase7c-startup-acceptance-source.ps1"
+      - "scripts/run-phase7b-telegram-notifier-local.ps1"
+      - "scripts/run-phase7b-telegram-notifier.mjs"
+      - "scripts/run-phase7c-executors-local.ps1"
       - "scripts/test-phase7c-trade-notifier-source.ps1"
-      - "scripts/test-phase7c-trade-notifier-runtime.ps1"
-      - "scripts/test-phase7c-telegram-firewall-source.ps1"
+      - "scripts/test-phase7c-trade-notifier-wrapper.ps1"
+      - "scripts/phase7c-trade-notifier-synthetic.test.mjs"
+      - "scripts/phase7c-sideway-production-telegram-sample.test.mjs"
+      - "scripts/send-phase7c-sideway-production-telegram-sample.mjs"
       - "packages/strategy-engine/**"
       - "packages/mt5-broker/**"
       - "apps/web/**"
@@ -56,9 +61,14 @@ on:
       - "scripts/test-phase7c-live-arm-source.ps1"
       - "scripts/test-phase7c-startup-runner-guard-local.ps1"
       - "scripts/test-phase7c-startup-acceptance-source.ps1"
+      - "scripts/run-phase7b-telegram-notifier-local.ps1"
+      - "scripts/run-phase7b-telegram-notifier.mjs"
+      - "scripts/run-phase7c-executors-local.ps1"
       - "scripts/test-phase7c-trade-notifier-source.ps1"
-      - "scripts/test-phase7c-trade-notifier-runtime.ps1"
-      - "scripts/test-phase7c-telegram-firewall-source.ps1"
+      - "scripts/test-phase7c-trade-notifier-wrapper.ps1"
+      - "scripts/phase7c-trade-notifier-synthetic.test.mjs"
+      - "scripts/phase7c-sideway-production-telegram-sample.test.mjs"
+      - "scripts/send-phase7c-sideway-production-telegram-sample.mjs"
       - "packages/strategy-engine/**"
       - "packages/mt5-broker/**"
       - "apps/web/**"
@@ -242,6 +252,30 @@ jobs:
           grep -q 'ORDER PERMISSION = ' mt5/XAUUSD_AI_Master_Decision_Panel.mq5
           ! grep -Eq 'OrderSend|CTrade|PositionClose|PositionModify' mt5/XAUUSD_AI_Master_Decision_Panel.mq5
 
+  notifier-regression:
+    name: notifier-supervision-regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Supervisor, wrapper, and startup safety contract
+        shell: pwsh
+        run: ./scripts/test-phase7c-trade-notifier-source.ps1
+      - name: Notifier JavaScript syntax
+        run: node --check ./scripts/run-phase7b-telegram-notifier.mjs
+      - name: Wrapper LIVE and DEMO journal integration
+        shell: pwsh
+        run: ./scripts/test-phase7c-trade-notifier-wrapper.ps1
+      - name: Synthetic ENTRY-HOLD-BE-partial-EXIT lifecycle
+        run: node --test ./scripts/phase7c-trade-notifier-synthetic.test.mjs
+      - name: Production-format Sideway Telegram sample harness
+        run: node --test ./scripts/phase7c-sideway-production-telegram-sample.test.mjs
+
   windows-full-regression:
     runs-on: windows-latest
     timeout-minutes: 24
@@ -269,12 +303,3 @@ jobs:
       - name: Startup acceptance source contract with Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-startup-acceptance-source.ps1
-      - name: Trade notifier source regression
-        shell: powershell
-        run: .\scripts\test-phase7c-trade-notifier-source.ps1
-      - name: Trade notifier runtime regression
-        shell: powershell
-        run: .\scripts\test-phase7c-trade-notifier-runtime.ps1
-      - name: Telegram firewall source regression
-        shell: powershell
-        run: .\scripts\test-phase7c-telegram-firewall-source.ps1
