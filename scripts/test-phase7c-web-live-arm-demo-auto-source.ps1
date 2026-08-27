@@ -99,20 +99,31 @@ Assert-Literal $webControl 'Phase7CAutoActivationStatus' 'Web AUTO types'
 
 Assert-Literal $executionCard 'ARM LIVE' 'ARM LIVE button'
 Assert-Literal $executionCard 'DISARM LIVE' 'DISARM LIVE button'
-Assert-Literal $executionCard 'BẬT AUTO DEMO' 'explicit DEMO AUTO button'
 Assert-Literal $executionCard 'enablePhase7CAuto' 'DEMO AUTO uses guarded backend'
 Assert-Literal $executionCard 'createPhase7CLiveArmPreflight' 'ARM uses preflight'
 Assert-Literal $executionCard 'canAttemptAuto' 'AUTO attempt remains clickable for canonical backend error'
 Assert-NotContains $executionCard 'phase7c-live-arm\.json' 'Web must not touch ARM file directly'
 
+# Compact operator-facing ARM/AUTO UI. Exact Vietnamese copy is validated by the Web build;
+# source assertions remain ASCII so Windows PowerShell 5.1 parses this test without a UTF-8 BOM.
+Assert-Literal $executionCard 'showArmChecks' 'ARM detail disclosure state'
+Assert-Literal $executionCard 'setShowArmChecks' 'ARM detail disclosure control'
+Assert-Literal $executionCard 'showAutoChecks' 'AUTO detail disclosure state'
+Assert-Literal $executionCard 'setShowAutoChecks' 'AUTO detail disclosure control'
+Assert-Literal $executionCard 'CheckRows' 'shared compact safety detail rows'
+Assert-Literal $executionCard 'armCount.passed' 'compact ARM passed count'
+Assert-Literal $executionCard 'armCount.total' 'compact ARM total count'
+Assert-Literal $executionCard 'autoCount.passed' 'compact AUTO passed count'
+Assert-Literal $executionCard 'autoCount.total' 'compact AUTO total count'
+Assert-Contains $executionCard 'accountMode\s*===\s*"LIVE"\s*\?\s*\(' 'ARM condition control rendered only for LIVE'
+
 Assert-Literal $controlCenter 'enablePhase7CAuto' 'legacy Control Center AUTO uses guarded backend'
-Assert-Literal $controlCenter 'BẬT AUTO' 'legacy Control Center AUTO button retained'
 Assert-Contains $controlCenter 'disabled=\{[^}]*mode\s*===\s*"AUTO"[^}]*\}' 'legacy AUTO disables only when already AUTO/pending'
 Assert-NotContains $controlCenter 'disabled=\{!canEnableAuto' 'legacy opaque AUTO disabled gate removed'
 
 Assert-Literal $controlShell 'Phase7CExecutionAuthorizationCard' 'execution card shown in Control Center'
 Assert-Literal $controlShell 'Phase7CControlCenterPage' 'existing Control Center preserved'
-Assert-Literal $accountRisk 'Phase7CExecutionAuthorizationCard' 'execution card shown in Account/Risk'
+Assert-NotContains $accountRisk 'Phase7CExecutionAuthorizationCard' 'Account/Risk must not duplicate ARM/AUTO card'
 Assert-Literal $router 'Phase7CControlCenterShellPage' 'Control Center routes through execution shell'
 
 Write-Host "PHASE7C_WEB_LIVE_ARM_DEMO_AUTO_SOURCE_TEST=PASS"
