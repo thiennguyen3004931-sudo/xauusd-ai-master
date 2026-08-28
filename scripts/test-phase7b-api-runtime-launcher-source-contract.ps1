@@ -20,7 +20,8 @@ if (-not (Test-Path -LiteralPath $LauncherPath)) {
 
 $launcher = [System.IO.File]::ReadAllText($LauncherPath)
 
-if ($launcher.Contains("pnpm --filter @xauusd/api dev")) {
+$devPattern = '(?im)^\s*&?\s*pnpm\s+--filter\s+[''"]?@xauusd/api[''"]?\s+dev(?:\s|$)'
+if ($launcher -match $devPattern) {
     Fail-Contract "FORBIDDEN_API_DEV_COMMAND_PRESENT"
 }
 
@@ -28,20 +29,20 @@ if ($launcher -match '(?i)\btsx\s+watch\b') {
     Fail-Contract "FORBIDDEN_TSX_WATCH_PRESENT"
 }
 
-$buildCommand = "pnpm --filter @xauusd/api build"
-$startCommand = "pnpm --filter @xauusd/api start"
-$buildIndex = $launcher.IndexOf($buildCommand, [System.StringComparison]::Ordinal)
-$startIndex = $launcher.IndexOf($startCommand, [System.StringComparison]::Ordinal)
+$buildPattern = '(?im)^\s*&?\s*pnpm\s+--filter\s+[''"]?@xauusd/api[''"]?\s+build(?:\s|$)'
+$startPattern = '(?im)^\s*&?\s*pnpm\s+--filter\s+[''"]?@xauusd/api[''"]?\s+start(?:\s|$)'
+$buildMatch = [regex]::Match($launcher, $buildPattern)
+$startMatch = [regex]::Match($launcher, $startPattern)
 
-if ($buildIndex -lt 0) {
+if (-not $buildMatch.Success) {
     Fail-Contract "PRODUCTION_BUILD_COMMAND_MISSING"
 }
 
-if ($startIndex -lt 0) {
+if (-not $startMatch.Success) {
     Fail-Contract "PRODUCTION_START_COMMAND_MISSING"
 }
 
-if ($buildIndex -ge $startIndex) {
+if ($buildMatch.Index -ge $startMatch.Index) {
     Fail-Contract "PRODUCTION_BUILD_MUST_PRECEDE_START"
 }
 
