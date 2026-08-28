@@ -123,6 +123,34 @@ function Get-JsonArrayCount([string]$Uri, $Headers) {
   return @($parsed | Where-Object { $null -ne $_ }).Count
 }
 
+function Start-ExecutorsThroughLifecycle([string]$ExpectedMode) {
+  Start-ScheduledTask -TaskName $ExecutorTaskName -ErrorAction Stop
+  $api = $ControlApiUrl.TrimEnd('/')
+  $brokerReady = $false
+  for ($i = 1; $i -le 40; $i++) {
+    Start-Sleep -Milliseconds 500
+    try {
+      $lifecycle = Invoke-RestMethod -Uri "$api/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 5
+      if ([bool]$lifecycle.broker.ready) {
+        $brokerReady = $true
+        break
+      }
+    } catch {}
+  }
+  if (-not $brokerReady) { throw "Lifecycle broker SYSTEM did not become READY after Scheduled Task boot." }
+
+  $startResult = Invoke-RestMethod -Uri "$api/api/v1/phase7c/lifecycle/start" -Method Post -TimeoutSec 70
+  $action = ([string]$startResult.action).Trim().ToUpperInvariant()
+  $mode = ([string]$startResult.accountMode).Trim().ToUpperInvariant()
+  if ($action -notin @("STARTED", "RESTARTED", "ALREADY_RUNNING")) {
+    throw "Canonical lifecycle START returned unexpected action: $action"
+  }
+  if ($mode -ne $ExpectedMode) {
+    throw "Canonical lifecycle START account mode mismatch. Expected=$ExpectedMode Actual=$mode"
+  }
+  Write-Host "PHASE7C_DEMO_RECOVERY_LIFECYCLE_START=PASS|ACTION=$action|MODE=$mode"
+}
+
 Write-Host "PHASE7C_DEMO_RECOVERY=START"
 Set-BotPause "failed-account-switch-recovery"
 Write-Host "PHASE7C_DEMO_RECOVERY_PAUSE=PASS"
@@ -206,7 +234,7 @@ if ($positionCount -ne 0 -or $orderCount -ne 0) {
   throw "Recovered DEMO account is not flat; executors will remain stopped. Positions=$positionCount Orders=$orderCount"
 }
 
-Start-ScheduledTask -TaskName $ExecutorTaskName -ErrorAction Stop
+Start-ExecutorsThroughLifecycle "DEMO"
 $verified = $false
 for ($i = 1; $i -le 24; $i++) {
   Start-Sleep -Seconds 5
