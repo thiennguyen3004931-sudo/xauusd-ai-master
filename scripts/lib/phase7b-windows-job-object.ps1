@@ -1,6 +1,3 @@
-$ErrorActionPreference = 'Stop'
-Set-StrictMode -Version Latest
-
 if (-not ([System.Management.Automation.PSTypeName]'Phase7B.JobObject').Type) {
   Add-Type -TypeDefinition @'
 using System;
