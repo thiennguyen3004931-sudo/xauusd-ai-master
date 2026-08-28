@@ -67,7 +67,7 @@ Unknown keys, missing required keys, non-boolean condition values, or zero enabl
 
 ## 5. Default profile and migration behavior
 
-If the canonical file has never existed, the service exposes a virtual safe default that exactly matches current strategy behavior.
+If the canonical file has never existed, the service exposes a virtual safe default that exactly matches current strategy behavior. The virtual default has `version = 0`, `updatedAt = 1970-01-01T00:00:00.000Z`, and `updatedBy = safe-default`. The first successful save must therefore submit `expectedVersion = 0` and persist version 1.
 
 Default Trend configuration:
 
@@ -89,7 +89,7 @@ Default Sideway configuration:
 
 The no-file state is not an error. It is the compatibility state that preserves pre-feature behavior.
 
-If a canonical file does exist but is corrupt, incomplete, contains unknown keys, or violates A1, the service must fail closed. It must not silently fall back to defaults because doing so could unintentionally change an operator-selected strategy profile.
+If a canonical file does exist but is corrupt, incomplete, contains unknown keys, or violates A1, the service must fail closed. It must not silently fall back to defaults because doing so could unintentionally change an operator-selected strategy profile. In this scope, a malformed persisted file is not repairable through the normal Web POST path; the API exposes `valid=false` and `editable=false`, and recovery requires an explicit operational repair outside this feature.
 
 ## 6. Toggleable Trend conditions
 
@@ -166,13 +166,33 @@ Expose:
 
 ### GET
 
-GET is read-only and returns the canonical/virtual state, validity, editable state, and relevant runtime guards required by Web to render the editor.
+GET is read-only and returns the canonical or virtual state, validity, editable state, and relevant runtime guards required by Web to render the editor.
 
-A suggested response shape is:
+Example for a valid saved profile:
 
 ```json
 {
-  "state": { "version": 7, "updatedAt": "...", "updatedBy": "...", "trend": {}, "sideway": {} },
+  "state": {
+    "version": 7,
+    "updatedAt": "2026-08-28T00:00:00.000Z",
+    "updatedBy": "web-control-center",
+    "trend": {
+      "patternM15": true,
+      "supertrendM15": true,
+      "supertrendM5": false,
+      "validTrendStructure": true,
+      "ma20Ma50": false,
+      "fvg": true
+    },
+    "sideway": {
+      "rangingRegime": true,
+      "recommendedModeSideway": true,
+      "minimumRegimeConfidence": true,
+      "supplyDemandRange": true,
+      "rangeEdge": true,
+      "m5Confirmation": true
+    }
+  },
   "valid": true,
   "editable": true,
   "appliesTo": "NEW_ENTRIES_ONLY",
@@ -183,6 +203,8 @@ A suggested response shape is:
   }
 }
 ```
+
+For the virtual no-file default, the same shape is returned with `version=0`. For an invalid persisted file, `valid=false`, `editable=false`, and NEW ENTRY fails closed.
 
 ### POST
 
@@ -211,7 +233,7 @@ POST accepts the complete Trend and Sideway toggle state plus optimistic-concurr
 }
 ```
 
-POST must reject partial patches. Whole-state writes make validation, audit, concurrency, and rollback semantics explicit.
+POST must reject partial patches. Whole-state writes make validation, audit, concurrency, and rollback semantics explicit. `source` is restricted to the repository-approved operator source values; the Web client uses `web-control-center`.
 
 A successful write increments `version` by exactly one and returns the new canonical state.
 
@@ -225,6 +247,7 @@ A write is accepted only when all of the following are true at validation time:
 - BOT_MODE is exactly `PAUSE`
 - XAUUSD position count is exactly zero
 - Bridge telemetry required to prove those preconditions is available and valid
+- persisted configuration is either absent/virtual-default or currently valid
 - payload contains only the canonical whitelist and complete shape
 - all condition values are booleans
 - Trend enabled count is at least one
@@ -363,8 +386,8 @@ This preserves operator intent and prevents stale-tab overwrites.
 
 ## 18. Failure handling
 
-- No file: use E1 virtual default.
-- Existing corrupt/invalid file: fail closed for NEW ENTRY and expose `ENTRY_STRATEGY_CONFIG_INVALID`/invalid state to observability.
+- No file: use E1 virtual default with version 0.
+- Existing corrupt/invalid file: fail closed for NEW ENTRY, expose `ENTRY_STRATEGY_CONFIG_INVALID`, and disable normal Web editing until explicit operational repair.
 - Atomic write failure: keep the previous canonical file/version intact; POST fails.
 - Runtime precondition fails during save: no write, no version change.
 - Version conflict: no write, no automatic retry.
@@ -398,26 +421,27 @@ Implementation must follow RED -> prove exact RED cause -> minimal production fi
 Before production changes, RED contracts must cover at minimum:
 
 1. E1 defaults produce the same Trend and Sideway entry-gate decisions as current behavior.
-2. Each condition supports enabled+PASS, enabled+FAIL, and disabled+IGNORED semantics.
-3. D1 AND semantics require every enabled condition to pass.
-4. A1 rejects zero enabled Trend conditions and zero enabled Sideway conditions.
-5. B2 uses one shared canonical profile across DEMO and LIVE with no account-specific profile files.
-6. C1 rejects writes outside PAUSE or with XAUUSD positions > 0 and leaves persisted state unchanged.
-7. F1 rejects any attempt to alter internal parameters/thresholds through this API.
-8. Unknown/missing/non-boolean keys fail validation.
-9. Existing corrupt config fails closed rather than silently reverting to defaults.
-10. Atomic writes either produce a complete new version or leave the prior state intact.
-11. Successful writes increment version exactly once.
-12. Stale `expectedVersion` returns conflict and performs no write.
-13. Executors consume a newly saved profile on the next entry cycle without restart.
-14. A mid-cycle version change produces `ENTRY_CONFIG_VERSION_CHANGED` and no order mutation.
-15. Disabled conditions remain IGNORED and are never normalized to PASS.
-16. Safety gates have no strategy-condition toggle and remain mandatory.
-17. Existing Trend entry default regression remains GREEN.
-18. Existing Sideway entry default regression remains GREEN.
-19. HOLD/BE/+10/Recovery/exit management regressions remain GREEN.
-20. Web save/restore/default-draft/version-conflict behavior is covered.
-21. API build, Web build, existing lifecycle/broker regressions, decision-observability regressions, Trend/Sideway regressions, and Windows-compatible contract suites remain GREEN.
+2. Virtual no-file default is version 0 and first successful save persists version 1.
+3. Each condition supports enabled+PASS, enabled+FAIL, and disabled+IGNORED semantics.
+4. D1 AND semantics require every enabled condition to pass.
+5. A1 rejects zero enabled Trend conditions and zero enabled Sideway conditions.
+6. B2 uses one shared canonical profile across DEMO and LIVE with no account-specific profile files.
+7. C1 rejects writes outside PAUSE or with XAUUSD positions > 0 and leaves persisted state unchanged.
+8. F1 rejects any attempt to alter internal parameters/thresholds through this API.
+9. Unknown/missing/non-boolean keys fail validation.
+10. Existing corrupt config fails closed rather than silently reverting to defaults and is not normally editable through Web.
+11. Atomic writes either produce a complete new version or leave the prior state intact.
+12. Successful writes increment version exactly once.
+13. Stale `expectedVersion` returns conflict and performs no write.
+14. Executors consume a newly saved profile on the next entry cycle without restart.
+15. A mid-cycle version change produces `ENTRY_CONFIG_VERSION_CHANGED` and no order mutation.
+16. Disabled conditions remain IGNORED and are never normalized to PASS.
+17. Safety gates have no strategy-condition toggle and remain mandatory.
+18. Existing Trend entry default regression remains GREEN.
+19. Existing Sideway entry default regression remains GREEN.
+20. HOLD/BE/+10/Recovery/exit management regressions remain GREEN.
+21. Web save/restore/default-draft/version-conflict behavior is covered.
+22. API build, Web build, existing lifecycle/broker regressions, decision-observability regressions, Trend/Sideway regressions, and Windows-compatible contract suites remain GREEN.
 
 Testing this feature must not send LIVE or DEMO orders. Synthetic/pure contract tests are sufficient for order-boundary verification.
 
