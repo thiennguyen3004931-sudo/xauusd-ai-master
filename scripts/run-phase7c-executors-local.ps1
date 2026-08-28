@@ -35,9 +35,13 @@ if ($DependencyWaitSeconds -lt 10) { throw "DependencyWaitSeconds must be >= 10.
 if ($TrendFixedVolume -lt 0.03 -or $TrendFixedVolume -gt 0.06) { throw "TrendFixedVolume must be between 0.03 and 0.06." }
 if ($SidewayRiskPercent -lt 0.01 -or $SidewayRiskPercent -gt 1) { throw "SidewayRiskPercent must be between 0.01 and 1.00." }
 if ($SidewayMaxLot -lt 0.03 -or $SidewayMaxLot -gt 0.04) { throw "SidewayMaxLot must be between 0.03 and 0.04." }
-foreach ($managedLot in @($TrendFixedVolume, $SidewayMaxLot)) {
-  $units = $managedLot / 0.03
-  if ([math]::Abs($units - [math]::Round($units)) -gt 1e-8) { throw "Managed lot values must use 0.03 increments." }
+$trendUnits = $TrendFixedVolume / 0.03
+if ([math]::Abs($trendUnits - [math]::Round($trendUnits)) -gt 1e-8) {
+  throw "TrendFixedVolume must use 0.03 increments."
+}
+$sidewayCapUnits = $SidewayMaxLot / 0.01
+if ([math]::Abs($sidewayCapUnits - [math]::Round($sidewayCapUnits)) -gt 1e-8) {
+  throw "SidewayMaxLot must use 0.01 broker-step increments."
 }
 
 if (-not [System.IO.Path]::IsPathRooted($WorkDir)) { $WorkDir = Join-Path $ProjectRoot $WorkDir }

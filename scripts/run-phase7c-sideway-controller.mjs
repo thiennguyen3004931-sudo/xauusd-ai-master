@@ -30,9 +30,9 @@ const rawMaxLot = Number(process.env.ZIQ_PHASE7C_SIDEWAY_MAX_LOT ?? "0.03");
 if (!Number.isFinite(rawMaxLot) || rawMaxLot < 0.03 - 1e-9 || rawMaxLot > MAX_SIDEWAY_LOT + 1e-9) {
   throw new Error(`Phase 7C Sideway max lot must be between 0.03 and ${MAX_SIDEWAY_LOT}.`);
 }
-const maxLotUnits = rawMaxLot / 0.03;
+const maxLotUnits = rawMaxLot / 0.01;
 if (Math.abs(maxLotUnits - Math.round(maxLotUnits)) > 1e-8) {
-  throw new Error("Phase 7C Sideway max lot must use 0.03 increments.");
+  throw new Error("Phase 7C Sideway max lot cap must use 0.01 broker-step increments; executed volume remains exact one-third compatible.");
 }
 const maxLot = rawMaxLot;
 const minRegimeConfidence = clampNumber(process.env.ZIQ_PHASE7C_SIDEWAY_MIN_REGIME_CONFIDENCE, 60, 0, 100);

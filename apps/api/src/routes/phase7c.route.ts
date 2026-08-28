@@ -252,17 +252,22 @@ router.post("/lot-settings", async (req: Request, res: Response) => {
     const step = Number(telemetry.spec.volumeStep);
     const minVolume = Number(telemetry.spec.minVolume);
     const maxVolume = Number(telemetry.spec.maxVolume);
-    for (const [label, lot] of [
-      ["Trend fixed lot", input.trendFixedLot],
-      ["Sideway max lot", input.sidewayMaxLot],
-    ] as const) {
-      if (lot < minVolume - 1e-9 || lot > maxVolume + 1e-9) {
-        throw new Error(`${label} ${lot} is outside broker range ${minVolume}-${maxVolume}.`);
-      }
-      const units = lot / step;
-      if (Math.abs(units - Math.round(units)) > 1e-8 || Math.round(units) % 3 !== 0) {
-        throw new Error(`${label} ${lot} is not compatible with broker step ${step} and exact one-third partial close.`);
-      }
+    const trendLot = input.trendFixedLot;
+    if (trendLot < minVolume - 1e-9 || trendLot > maxVolume + 1e-9) {
+      throw new Error(`Trend fixed lot ${trendLot} is outside broker range ${minVolume}-${maxVolume}.`);
+    }
+    const trendUnits = trendLot / step;
+    if (Math.abs(trendUnits - Math.round(trendUnits)) > 1e-8 || Math.round(trendUnits) % 3 !== 0) {
+      throw new Error(`Trend fixed lot ${trendLot} is not compatible with broker step ${step} and exact one-third partial close.`);
+    }
+
+    const sidewayCap = input.sidewayMaxLot;
+    if (sidewayCap < minVolume - 1e-9 || sidewayCap > maxVolume + 1e-9) {
+      throw new Error(`Sideway max lot ${sidewayCap} is outside broker range ${minVolume}-${maxVolume}.`);
+    }
+    const sidewayCapUnits = sidewayCap / step;
+    if (Math.abs(sidewayCapUnits - Math.round(sidewayCapUnits)) > 1e-8) {
+      throw new Error(`Sideway max lot ${sidewayCap} is not compatible with broker step ${step}.`);
     }
 
     const source = typeof req.body?.source === "string" && req.body.source.trim()
