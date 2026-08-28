@@ -40,5 +40,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build API dependency graph
         run: pnpm --filter @xauusd/api... build
+      - name: Smoke production Node API runtime
+        run: node scripts/test-phase7b-api-node-production-runtime.mjs
       - name: Build Web
         run: pnpm --filter @xauusd/web build
