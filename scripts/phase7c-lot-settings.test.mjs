@@ -79,128 +79,67 @@ test("lot settings reject non-third-compatible Trend lots and excessive risk", (
   }
 });
 
-test("canonical lot bounds cap Trend at 0.06 and Sideway cap at 0.04", () => {
-  assert.equal(PHASE7C_LOT_LIMITS.maxDemoLot, 0.06, "public managed-lot ceiling must be 0.06");
-  assert.equal(PHASE7C_LOT_LIMITS.maxManagedLot, 0.06, "canonical managed-lot ceiling must be 0.06");
-  assert.equal(PHASE7C_LOT_LIMITS.maxTrendLot, 0.06, "Trend ceiling must be 0.06");
-  assert.equal(PHASE7C_LOT_LIMITS.maxSidewayLot, 0.04, "Sideway cap ceiling must be 0.04");
-
-  assert.deepEqual(
-    validatePhase7CLotSettings({
-      trendFixedLot: 0.06,
+test("canonical lot bounds allow Trend and Sideway from 0.03 to 1.20 in 0.03 increments", () => {
+  assert.equal(PHASE7C_LOT_LIMITS.maxDemoLot, 1.2);
+  assert.equal(PHASE7C_LOT_LIMITS.maxManagedLot, 1.2);
+  assert.equal(PHASE7C_LOT_LIMITS.maxTrendLot, 1.2);
+  assert.equal(PHASE7C_LOT_LIMITS.maxSidewayLot, 1.2);
+  for (const lot of [0.03, 0.06, 0.3, 0.6, 1.17, 1.2]) {
+    assert.deepEqual(validatePhase7CLotSettings({ trendFixedLot: lot, sidewayRiskPercent: 0.25, sidewayMaxLot: lot }), {
+      trendFixedLot: lot,
       sidewayRiskPercent: 0.25,
-      sidewayMaxLot: 0.04,
-    }),
-    {
-      trendFixedLot: 0.06,
-      sidewayRiskPercent: 0.25,
-      sidewayMaxLot: 0.04,
-    },
-    "0.04 is a Sideway Auto-Lot cap, not the executed managed lot",
-  );
-
-  assert.throws(
-    () => validatePhase7CLotSettings({
-      trendFixedLot: 0.09,
-      sidewayRiskPercent: 0.25,
-      sidewayMaxLot: 0.04,
-    }),
-    /Trend fixed lot.*0\.06/i,
-    "Trend must fail closed above 0.06",
-  );
-
-  assert.throws(
-    () => validatePhase7CLotSettings({
-      trendFixedLot: 0.06,
-      sidewayRiskPercent: 0.25,
-      sidewayMaxLot: 0.05,
-    }),
-    /Sideway max lot.*0\.04/i,
-    "Sideway cap must fail closed above 0.04",
-  );
+      sidewayMaxLot: lot,
+    });
+  }
+  for (const lot of [0.04, 0.05, 1.21, 1.23]) {
+    assert.throws(() => validatePhase7CLotSettings({ trendFixedLot: lot, sidewayRiskPercent: 0.25, sidewayMaxLot: 0.03 }), /0\.03.*1\.20|0\.03 increments/i);
+    assert.throws(() => validatePhase7CLotSettings({ trendFixedLot: 0.03, sidewayRiskPercent: 0.25, sidewayMaxLot: lot }), /0\.03.*1\.20|0\.03 increments/i);
+  }
 });
 
-test("execution boundaries distinguish Trend managed-lot increments from Sideway cap increments", () => {
+test("execution boundaries enforce the shared 1.20 ceiling and 0.03 increments", () => {
   const supervisor = readFileSync(path.join(scriptsDir, "run-phase7c-executors-local.ps1"), "utf8");
   const trendLauncher = readFileSync(path.join(scriptsDir, "run-phase7c-trend-controller-local.ps1"), "utf8");
   const sidewayLauncher = readFileSync(path.join(scriptsDir, "run-phase7c-sideway-controller-local.ps1"), "utf8");
   const accountModeLibrary = readFileSync(path.join(scriptsDir, "lib", "phase7c-account-mode.ps1"), "utf8");
   const trendController = readFileSync(path.join(scriptsDir, "run-phase7b-demo-controller.ts"), "utf8");
   const sidewayController = readFileSync(path.join(scriptsDir, "run-phase7c-sideway-controller.mjs"), "utf8");
-
-  assert.match(supervisor, /\$TrendFixedVolume\s+-gt\s+0\.06/, "supervisor must cap Trend at 0.06");
-  assert.match(supervisor, /\$SidewayMaxLot\s+-gt\s+0\.04/, "supervisor must cap Sideway at 0.04");
-  assert.match(supervisor, /\$TrendFixedVolume\s*\/\s*0\.03/, "supervisor must preserve Trend one-third increment");
-  assert.match(supervisor, /\$SidewayMaxLot\s*\/\s*0\.01/, "supervisor must treat Sideway max as a broker-step cap");
-  assert.match(trendLauncher, /\$FixedVolume\s+-gt\s+0\.06/, "Trend launcher must cap at 0.06");
-  assert.match(trendLauncher, /\$FixedVolume\s*\/\s*0\.03/, "Trend launcher must preserve one-third increment");
-  assert.match(sidewayLauncher, /\$MaxLot\s+-gt\s+0\.04/, "Sideway launcher must cap at 0.04");
-  assert.match(sidewayLauncher, /\$MaxLot\s*\/\s*0\.01/, "Sideway launcher must treat MaxLot as a cap increment");
-  assert.match(accountModeLibrary, /\$trend\s*\/\s*0\.03/, "shared profile must preserve Trend one-third increment");
-  assert.match(accountModeLibrary, /\$maxLot\s*\/\s*0\.01/, "shared profile must treat Sideway max as a broker-step cap");
-  assert.match(trendController, /MAX_TREND_FIXED_VOLUME\s*=\s*0\.06/, "Trend controller must retain a direct 0.06 fail-closed ceiling");
-  assert.match(sidewayController, /MAX_SIDEWAY_LOT\s*=\s*0\.04/, "Sideway controller must retain a direct 0.04 fail-closed ceiling");
-  assert.match(sidewayController, /rawMaxLot\s*\/\s*0\.01/, "Sideway controller must validate the cap at broker-step precision");
+  assert.match(supervisor, /\$TrendFixedVolume\s+-gt\s+1\.2/);
+  assert.match(supervisor, /\$SidewayMaxLot\s+-gt\s+1\.2/);
+  assert.match(supervisor, /\$TrendFixedVolume\s*\/\s*0\.03/);
+  assert.match(supervisor, /\$SidewayMaxLot\s*\/\s*0\.03/);
+  assert.match(trendLauncher, /\$FixedVolume\s+-gt\s+1\.2/);
+  assert.match(trendLauncher, /\$FixedVolume\s*\/\s*0\.03/);
+  assert.match(sidewayLauncher, /\$MaxLot\s+-gt\s+1\.2/);
+  assert.match(sidewayLauncher, /\$MaxLot\s*\/\s*0\.03/);
+  assert.match(accountModeLibrary, /\$trend\s*\/\s*0\.03/);
+  assert.match(accountModeLibrary, /\$maxLot\s*\/\s*0\.03/);
+  assert.match(trendController, /MAX_TREND_FIXED_VOLUME\s*=\s*1\.2/);
+  assert.match(sidewayController, /MAX_SIDEWAY_LOT\s*=\s*1\.2/);
+  assert.match(sidewayController, /rawMaxLot\s*\/\s*0\.03/);
 });
 
-test("activation path preserves Trend managed-lot and Sideway cap semantics", () => {
+test("activation path preserves the shared 1.20 step-0.03 contract", () => {
   const activation = readFileSync(path.join(scriptsDir, "activate-phase7c-local.ps1"), "utf8");
   const safeActivation = readFileSync(path.join(scriptsDir, "activate-phase7c-safe-local.ps1"), "utf8");
-
-  assert.match(activation, /\$TrendFixedVolume\s+-gt\s+0\.06/, "base activation must cap Trend at 0.06");
-  assert.match(activation, /\$SidewayMaxLot\s+-gt\s+0\.04/, "base activation must cap Sideway at 0.04");
-  assert.match(activation, /\$TrendFixedVolume\s*\/\s*0\.03/, "base activation must preserve Trend one-third increments");
-  assert.match(activation, /\$SidewayMaxLot\s*\/\s*0\.01/, "base activation must treat Sideway max as a broker-step cap");
-  assert.doesNotMatch(
-    activation,
-    /Assert-ManagedLot\s+\$SidewayMaxLot/,
-    "Sideway cap must not pass through the Trend executed managed-lot validator",
-  );
-  assert.match(
-    safeActivation,
-    /\$activationArgs\.SidewayMaxLot\s*=\s*\$SidewayMaxLot/,
-    "safe activation must delegate the canonical Sideway cap to base activation",
-  );
-  assert.match(
-    safeActivation,
-    /PHASE7C_SAFE_ACTIVATE_FINAL_MODE=PAUSE/,
-    "safe activation must retain its final PAUSE guard",
-  );
+  assert.match(activation, /\$TrendFixedVolume\s+-gt\s+1\.2/);
+  assert.match(activation, /\$SidewayMaxLot\s+-gt\s+1\.2/);
+  assert.match(activation, /\$TrendFixedVolume\s*\/\s*0\.03/);
+  assert.match(activation, /\$SidewayMaxLot\s*\/\s*0\.03/);
+  assert.match(safeActivation, /\$activationArgs\.SidewayMaxLot\s*=\s*\$SidewayMaxLot/);
+  assert.match(safeActivation, /PHASE7C_SAFE_ACTIVATE_FINAL_MODE=PAUSE/);
 });
 
-test("API route keeps exact one-third on Trend but treats Sideway max as a broker-step cap", () => {
+test("API route keeps exact one-third compatibility for Trend and Sideway max lot", () => {
   const route = readFileSync(path.join(projectRoot, "apps", "api", "src", "routes", "phase7c.route.ts"), "utf8");
-
-  assert.match(
-    route,
-    /Trend fixed lot[^\n]*exact one-third partial close/s,
-    "Trend broker validation must retain exact one-third compatibility",
-  );
-  assert.match(
-    route,
-    /Sideway max lot[^\n]*broker step/s,
-    "Sideway max broker validation must be cap/step validation rather than executed-lot one-third validation",
-  );
-  assert.doesNotMatch(
-    route,
-    /\["Trend fixed lot", input\.trendFixedLot\][\s\S]*\["Sideway max lot", input\.sidewayMaxLot\][\s\S]*Math\.round\(units\) % 3/,
-    "Trend and Sideway cap must not share the same one-third validator",
-  );
+  assert.match(route, /Trend fixed lot[^\n]*exact one-third partial close/s);
+  assert.match(route, /Sideway max lot[^\n]*exact one-third partial close/s);
 });
 
-test("Web lot controls expose the canonical bounds and Sideway cap step", () => {
+test("Web lot controls expose the shared 1.20 ceiling and 0.03 step", () => {
   const web = readFileSync(path.join(projectRoot, "apps", "web", "src", "pages", "Phase7CControlCenterPage.tsx"), "utf8");
-
-  assert.match(
-    web,
-    /label="Trend fixed lot"[\s\S]*?max:\s*0\.06,\s*step:\s*0\.03/,
-    "Web Trend control must expose max 0.06 with 0.03 managed-lot increments",
-  );
-  assert.match(
-    web,
-    /label="Sideway max lot"[\s\S]*?max:\s*0\.04,\s*step:\s*0\.01/,
-    "Web Sideway cap must expose max 0.04 with broker-step 0.01 increments",
-  );
+  assert.match(web, /label="Trend fixed lot"[\s\S]*?min:\s*0\.03,\s*max:\s*1\.2,\s*step:\s*0\.03/);
+  assert.match(web, /label="Sideway max lot"[\s\S]*?min:\s*0\.03,\s*max:\s*1\.2,\s*step:\s*0\.03/);
 });
 
 test("Telegram dry-run preserves journal numeric precision and remains orderPermission=NONE", () => {

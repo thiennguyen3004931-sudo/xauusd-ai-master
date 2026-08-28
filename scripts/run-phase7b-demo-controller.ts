@@ -197,7 +197,7 @@ type PersistedBotState = {
 };
 
 const symbol = process.env.ZIQ_DEMO_SYMBOL ?? "XAUUSD";
-const MAX_TREND_FIXED_VOLUME = 0.06;
+const MAX_TREND_FIXED_VOLUME = 1.2;
 const fixedVolume = Number(process.env.ZIQ_FIXED_VOLUME ?? "0.03");
 const intervalSeconds = Math.max(1, Number(process.env.ZIQ_DEMO_INTERVAL_SECONDS ?? "5"));
 const armed = /^(1|true|yes|on)$/i.test(process.env.ZIQ_DEMO_ARMED ?? "false");

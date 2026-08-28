@@ -266,8 +266,8 @@ router.post("/lot-settings", async (req: Request, res: Response) => {
       throw new Error(`Sideway max lot ${sidewayCap} is outside broker range ${minVolume}-${maxVolume}.`);
     }
     const sidewayCapUnits = sidewayCap / step;
-    if (Math.abs(sidewayCapUnits - Math.round(sidewayCapUnits)) > 1e-8) {
-      throw new Error(`Sideway max lot ${sidewayCap} is not compatible with broker step ${step}.`);
+    if (Math.abs(sidewayCapUnits - Math.round(sidewayCapUnits)) > 1e-8 || Math.round(sidewayCapUnits) % 3 !== 0) {
+      throw new Error(`Sideway max lot ${sidewayCap} is not compatible with broker step ${step} and exact one-third partial close.`);
     }
 
     const source = typeof req.body?.source === "string" && req.body.source.trim()

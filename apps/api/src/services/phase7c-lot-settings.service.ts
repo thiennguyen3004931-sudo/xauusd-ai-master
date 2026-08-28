@@ -33,10 +33,10 @@ export interface Phase7CLotSettingsInput {
 
 export const PHASE7C_LOT_LIMITS = {
   minManagedLot: 0.03,
-  maxDemoLot: 0.06,
-  maxManagedLot: 0.06,
-  maxTrendLot: 0.06,
-  maxSidewayLot: 0.04,
+  maxDemoLot: 1.2,
+  maxManagedLot: 1.2,
+  maxTrendLot: 1.2,
+  maxSidewayLot: 1.2,
   lotStep: 0.01,
   managedLotIncrement: 0.03,
   minRiskPercent: 0.01,
@@ -71,7 +71,7 @@ function isSidewayCap(value: number): boolean {
   if (!Number.isFinite(value)) return false;
   if (value < PHASE7C_LOT_LIMITS.minManagedLot - 1e-9) return false;
   if (value > PHASE7C_LOT_LIMITS.maxSidewayLot + 1e-9) return false;
-  const units = value / PHASE7C_LOT_LIMITS.lotStep;
+  const units = value / PHASE7C_LOT_LIMITS.managedLotIncrement;
   return Math.abs(units - Math.round(units)) <= 1e-8;
 }
 
@@ -84,12 +84,12 @@ export function validatePhase7CLotSettings(
 
   if (!isManagedLot(trendFixedLot, PHASE7C_LOT_LIMITS.maxTrendLot)) {
     throw new Error(
-      "Trend fixed lot must be between 0.03 and 0.06 and use 0.03 increments so +10 can close exactly one-third.",
+      "Trend fixed lot must be between 0.03 and 1.20 and use 0.03 increments so +10 can close exactly one-third.",
     );
   }
   if (!isSidewayCap(sidewayMaxLot)) {
     throw new Error(
-      "Sideway max lot must be between 0.03 and 0.04 and use 0.01 broker-step increments; executed Sideway lot remains exact one-third compatible.",
+      "Sideway max lot must be between 0.03 and 1.20 and use 0.03 increments so +10 can close exactly one-third.",
     );
   }
   if (
