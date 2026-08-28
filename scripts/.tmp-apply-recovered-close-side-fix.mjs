@@ -28,23 +28,29 @@ replaceExactlyOnce(
         state.trade?.side ??
         event?.lastKnownState?.side ??
         event?.management?.side ??
-        state.hold?.side ??
         event.side,
       );`,
   "close formatter side context",
 );
 
-replaceExactlyOnce(
-`  const side = normalizeSide(state.trade?.side ?? event.side);`,
-`  const side = normalizeSide(
-    state.trade?.side ??
-    event?.lastKnownState?.side ??
-    event?.management?.side ??
-    state.hold?.side ??
-    event.side,
-  );`,
-  "closed-trade matcher side context",
-);
+const matcherStart = source.indexOf("function matchClosedTrade(trades, event) {");
+const matcherEnd = source.indexOf("\n}\n", matcherStart);
+if (matcherStart < 0 || matcherEnd < 0) {
+  throw new Error("closed-trade matcher scope not found");
+}
+const matcherBlock = source.slice(matcherStart, matcherEnd + 2);
+const oldMatcherSide = `  const side = normalizeSide(state.trade?.side ?? event.side);`;
+const newMatcherSide = `  const side = normalizeSide(\n    state.trade?.side ??\n    event?.lastKnownState?.side ??\n    event?.management?.side ??\n    event.side,\n  );`;
+if (!matcherBlock.includes(oldMatcherSide)) {
+  throw new Error("closed-trade matcher side marker not found in matcher scope");
+}
+if (matcherBlock.indexOf(oldMatcherSide) !== matcherBlock.lastIndexOf(oldMatcherSide)) {
+  throw new Error("closed-trade matcher side marker matched more than once in matcher scope");
+}
+source =
+  source.slice(0, matcherStart) +
+  matcherBlock.replace(oldMatcherSide, newMatcherSide) +
+  source.slice(matcherEnd + 2);
 
 fs.writeFileSync(notifierPath, source, "utf8");
 console.log("RECOVERED_CLOSE_SIDE_PATCH=PASS");
