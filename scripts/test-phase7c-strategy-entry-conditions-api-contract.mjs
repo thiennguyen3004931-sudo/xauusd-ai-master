@@ -188,13 +188,21 @@ try {
   assert.match(routeSource, /status\(409\)/);
   assert.match(routeSource, /status\(400\)/);
 
+  const guardHelperSection = routeSource.slice(
+    routeSource.indexOf("async function getStrategyEntryConditionGuards"),
+    routeSource.indexOf('router.get("/account-mode"'),
+  );
+  assert.ok(guardHelperSection.length > 0, "strategy entry telemetry guard helper must exist");
+  assert.match(guardHelperSection, /catch[\s\S]*bridgeReachable:\s*false/);
+  assert.match(guardHelperSection, /accountModeMatches:\s*false/);
+  assert.match(guardHelperSection, /openXauusdPositions:\s*null/);
+
   const strategyRouteSection = routeSource.slice(
     routeSource.indexOf('router.get("/strategy-entry-conditions"'),
     routeSource.indexOf('router.get("/live-regime"'),
   );
   assert.ok(strategyRouteSection.length > 0, "strategy entry route section must exist before live-regime route");
-  assert.match(strategyRouteSection, /catch[\s\S]*bridgeReachable:\s*false/);
-  assert.doesNotMatch(strategyRouteSection, /catch[\s\S]{0,500}status\(503\)/);
+  assert.doesNotMatch(strategyRouteSection, /status\(503\)/);
   assert.match(strategyRouteSection, /if\s*\(!read\.valid\)[\s\S]*status\(409\)/);
   assert.match(strategyRouteSection, /phase7CStrategyEntryConditionsService\.set\(req\.body\)/);
 
