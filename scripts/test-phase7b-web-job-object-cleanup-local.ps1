@@ -83,6 +83,7 @@ while ($true) { Start-Sleep -Seconds 1 }
 param(
   [string]$HelperPath,
   [string]$ChildScript,
+  [string]$GrandchildScript,
   [string]$ChildPidFile,
   [string]$GrandchildPidFile,
   [string]$ContainmentFile
@@ -120,6 +121,7 @@ try {
     '-File', ('"{0}"' -f $supervisorScript),
     '-HelperPath', ('"{0}"' -f $helperPath),
     '-ChildScript', ('"{0}"' -f $childScript),
+    '-GrandchildScript', ('"{0}"' -f $grandchildScript),
     '-ChildPidFile', ('"{0}"' -f $childPidFile),
     '-GrandchildPidFile', ('"{0}"' -f $grandchildPidFile),
     '-ContainmentFile', ('"{0}"' -f $containmentFile)
