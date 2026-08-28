@@ -30,9 +30,12 @@ if (-not [System.IO.Path]::IsPathRooted($WorkDir)) { $WorkDir = Join-Path $Proje
 if (-not (Test-Path $WorkDir)) { throw "WorkDir not found: $WorkDir" }
 $WorkDir = (Resolve-Path $WorkDir).Path
 $RuntimeDir = Join-Path $WorkDir "phase7c-executors"
+$LifecycleBrokerRoot = Join-Path $WorkDir "phase7c-lifecycle-broker"
+$LifecycleBrokerStateDir = Join-Path $LifecycleBrokerRoot "state"
+$BrokerHeartbeatPath = Join-Path $LifecycleBrokerStateDir "heartbeat.json"
+$BrokerStatusPath = Join-Path $LifecycleBrokerStateDir "status.json"
 $AccountStatePath = Join-Path $ProjectRoot ".runtime\phase7c-account-mode.json"
 $TaskConfigPath = Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.json"
-$RunnerStatusPath = Join-Path $RuntimeDir "startup-runner-status.json"
 $RunnerLockPath = Join-Path $RuntimeDir "startup-runner.lock"
 
 if (-not (Test-Path $AccountStatePath)) { throw "Account-mode state not found: $AccountStatePath" }
@@ -110,6 +113,11 @@ if ((ConvertTo-Phase7CAccountMode ([string]$taskConfig.accountMode)) -ne $Expect
 if ([bool]$taskConfig.armed -ne $true) { throw "Executor task config must remain armed=true." }
 if ($ExpectedAccountMode -eq "LIVE" -and -not [bool]$taskConfig.liveExecutionEnabled) { throw "LIVE executor task config is not explicitly enabled." }
 if ($ExpectedAccountMode -eq "DEMO" -and [bool]$taskConfig.liveExecutionEnabled) { throw "DEMO executor task config cannot have LIVE enabled." }
+foreach ($toolPath in @([string]$taskConfig.nodePath, [string]$taskConfig.pnpmPath)) {
+  if ([string]::IsNullOrWhiteSpace($toolPath) -or -not (Test-Path -LiteralPath $toolPath -PathType Leaf)) {
+    throw "Executor task tool path is missing or invalid: $toolPath"
+  }
+}
 
 function Read-PidStatus([string]$Name) {
   $path = Join-Path $RuntimeDir "$Name.pid"
@@ -131,13 +139,69 @@ foreach ($required in @("supervisor", "trend", "sideway")) {
   if (-not $pidStatuses[$required].alive) { throw "Required Phase7C process is not alive: $required" }
 }
 
-if (-not (Test-Path $RunnerStatusPath)) { throw "Startup runner status not found." }
-$runnerStatus = Get-Content -LiteralPath $RunnerStatusPath -Raw | ConvertFrom-Json
-if ((ConvertTo-Phase7CAccountMode ([string]$runnerStatus.accountMode)) -ne $ExpectedAccountMode) { throw "Startup runner accountMode mismatch." }
-$runnerPid = [int]$runnerStatus.runnerPid
-if ($null -eq (Get-Process -Id $runnerPid -ErrorAction SilentlyContinue)) { throw "Startup runner status PID is not alive." }
-$runnerAgeMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$runnerStatus.updatedAt
-if ($runnerAgeMs -lt -10000 -or $runnerAgeMs -gt 60000) { throw "Startup runner status is stale. ageMs=$runnerAgeMs" }
+foreach ($brokerStatePath in @($BrokerHeartbeatPath, $BrokerStatusPath)) {
+  if (-not (Test-Path -LiteralPath $brokerStatePath)) {
+    throw "Lifecycle broker state file not found: $brokerStatePath"
+  }
+}
+$brokerHeartbeat = Get-Content -LiteralPath $BrokerHeartbeatPath -Raw | ConvertFrom-Json
+$brokerStatus = Get-Content -LiteralPath $BrokerStatusPath -Raw | ConvertFrom-Json
+if ([int]$brokerHeartbeat.version -ne 1) { throw "Lifecycle broker heartbeat version must be 1." }
+if ([int]$brokerStatus.version -ne 1) { throw "Lifecycle broker status version must be 1." }
+
+$brokerPid = [int]$brokerHeartbeat.brokerPid
+$statusBrokerPid = [int]$brokerStatus.brokerPid
+if ($brokerPid -le 0 -or $statusBrokerPid -le 0 -or $brokerPid -ne $statusBrokerPid) {
+  throw "Lifecycle broker PID identity mismatch. Heartbeat=$brokerPid Status=$statusBrokerPid"
+}
+if ($null -eq (Get-Process -Id $brokerPid -ErrorAction SilentlyContinue)) {
+  throw "Lifecycle broker PID is not alive. PID=$brokerPid"
+}
+
+$nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$brokerHeartbeatAgeMs = $nowMs - [long]$brokerHeartbeat.updatedAt
+if ($brokerHeartbeatAgeMs -lt -10000 -or $brokerHeartbeatAgeMs -gt 10000) {
+  throw "Lifecycle broker heartbeat is stale. ageMs=$brokerHeartbeatAgeMs"
+}
+$statusUpdatedAt = [long]$brokerStatus.updatedAt
+if ($statusUpdatedAt -le 0 -or $statusUpdatedAt -gt ($nowMs + 10000)) {
+  throw "Lifecycle broker status timestamp is invalid. updatedAt=$statusUpdatedAt"
+}
+
+$heartbeatState = ([string]$brokerHeartbeat.state).Trim().ToUpperInvariant()
+$statusState = ([string]$brokerStatus.state).Trim().ToUpperInvariant()
+$heartbeatDesired = ([string]$brokerHeartbeat.desiredExecutorState).Trim().ToUpperInvariant()
+$statusDesired = ([string]$brokerStatus.desiredExecutorState).Trim().ToUpperInvariant()
+if ($heartbeatState -ne "RUNNING" -or $statusState -ne "RUNNING") {
+  throw "Lifecycle broker is not in RUNNING state. Heartbeat=$heartbeatState Status=$statusState"
+}
+if ($heartbeatDesired -ne "RUNNING" -or $statusDesired -ne "RUNNING") {
+  throw "Lifecycle broker desiredExecutorState is not RUNNING. Heartbeat=$heartbeatDesired Status=$statusDesired"
+}
+if ((ConvertTo-Phase7CAccountMode ([string]$brokerStatus.accountMode)) -ne $ExpectedAccountMode) {
+  throw "Lifecycle broker accountMode mismatch. Expected=$ExpectedAccountMode Actual=$($brokerStatus.accountMode)"
+}
+
+$actualSupervisorPid = [int]$pidStatuses["supervisor"].pid
+$brokerStatusSupervisorPid = [int]$brokerStatus.supervisorPid
+$brokerSupervisorMatch = `
+  $brokerStatusSupervisorPid -gt 0 -and
+  $brokerStatusSupervisorPid -eq $actualSupervisorPid
+if (-not $brokerSupervisorMatch) {
+  throw "Lifecycle broker supervisor PID does not match the active supervisor PID. Broker=$brokerStatusSupervisorPid Actual=$actualSupervisorPid"
+}
+
+Write-Host "PHASE7C_ACCOUNT_VERIFY_SYSTEM_BROKER_PID=$brokerPid"
+Write-Host "PHASE7C_ACCOUNT_VERIFY_SYSTEM_BROKER_HEARTBEAT_AGE_MS=$brokerHeartbeatAgeMs"
+Write-Host "PHASE7C_ACCOUNT_VERIFY_SYSTEM_BROKER_STATE=$statusState"
+Write-Host "PHASE7C_ACCOUNT_VERIFY_SYSTEM_BROKER_DESIRED_EXECUTOR_STATE=$statusDesired"
+Write-Host "PHASE7C_ACCOUNT_VERIFY_SYSTEM_BROKER_ACCOUNT_MODE=$($brokerStatus.accountMode)"
+Write-Host "PHASE7C_ACCOUNT_VERIFY_SYSTEM_BROKER_SUPERVISOR_PID=$brokerStatusSupervisorPid"
+Write-Host "PHASE7C_ACCOUNT_VERIFY_SYSTEM_BROKER_SUPERVISOR_MATCH=$brokerSupervisorMatch"
+
+# Keep the historic variable/output names for downstream diagnostics while the
+# canonical identity now comes from lifecycle-broker heartbeat/status.
+$runnerPid = $brokerPid
 
 $probe = $null
 $lockHeld = $false
@@ -146,7 +210,7 @@ try {
 } catch [System.IO.IOException] { $lockHeld = $true }
 finally { if ($null -ne $probe) { $probe.Dispose() } }
 Write-Host "PHASE7C_ACCOUNT_VERIFY_STARTUP_RUNNER_LOCK_HELD=$lockHeld"
-if (-not $lockHeld) { throw "Startup runner singleton lock is not held." }
+if (-not $lockHeld) { throw "SYSTEM lifecycle broker singleton lock is not held." }
 
 $runnerProcess = Get-CimInstance `
   Win32_Process `
@@ -154,7 +218,7 @@ $runnerProcess = Get-CimInstance `
   -ErrorAction Stop
 
 if ($null -eq $runnerProcess) {
-  throw "Startup runner process metadata is unavailable."
+  throw "SYSTEM lifecycle broker process metadata is unavailable."
 }
 
 $runnerProcessName = [string]$runnerProcess.Name
@@ -168,13 +232,13 @@ Write-Host "PHASE7C_ACCOUNT_VERIFY_STARTUP_RUNNER_PROCESS_NAME=$runnerProcessNam
 Write-Host "PHASE7C_ACCOUNT_VERIFY_STARTUP_RUNNER_IS_POWERSHELL=$runnerIsWindowsPowerShell"
 
 if (-not $runnerIsWindowsPowerShell) {
-  throw "Startup runner process is not Windows PowerShell."
+  throw "SYSTEM lifecycle broker process is not Windows PowerShell."
 }
 
 $runnerParentPid = [int]$runnerProcess.ParentProcessId
 
 if ($runnerParentPid -le 0) {
-  throw "Startup runner parent PID is invalid."
+  throw "SYSTEM lifecycle broker parent PID is invalid."
 }
 
 $scheduleService = Get-CimInstance `
@@ -201,57 +265,7 @@ Write-Host "PHASE7C_ACCOUNT_VERIFY_RUNNER_PARENT_PID=$runnerParentPid"
 Write-Host "PHASE7C_ACCOUNT_VERIFY_RUNNER_PARENT_IS_SCHEDULE=$runnerParentIsSchedule"
 
 if (-not $runnerParentIsSchedule) {
-  throw "Startup runner is not directly owned by the running Windows Task Scheduler service."
-}
-
-if ([string]$runnerStatus.status -ne "SUPERVISOR_RUNNING") {
-  throw "Startup runner status is not SUPERVISOR_RUNNING. Actual=$($runnerStatus.status)"
-}
-
-if (-not [bool]$runnerStatus.armed) {
-  throw "Startup runner status must remain armed=true."
-}
-
-if (
-  $ExpectedAccountMode -eq "LIVE" -and
-  -not [bool]$runnerStatus.liveExecutionEnabled
-) {
-  throw "LIVE startup runner status does not have liveExecutionEnabled=true."
-}
-
-if (
-  $ExpectedAccountMode -eq "DEMO" -and
-  [bool]$runnerStatus.liveExecutionEnabled
-) {
-  throw "DEMO startup runner status cannot have liveExecutionEnabled=true."
-}
-
-if (
-  [string]$runnerStatus.nodePath -ne
-  [string]$taskConfig.nodePath
-) {
-  throw "Startup runner nodePath does not match executor task config."
-}
-
-if (
-  [string]$runnerStatus.pnpmPath -ne
-  [string]$taskConfig.pnpmPath
-) {
-  throw "Startup runner pnpmPath does not match executor task config."
-}
-
-$runnerStatusSupervisorPid = [int]$runnerStatus.supervisorPid
-$actualSupervisorPid = [int]$pidStatuses["supervisor"].pid
-
-$runnerSupervisorMatch = `
-  $runnerStatusSupervisorPid -gt 0 -and
-  $runnerStatusSupervisorPid -eq $actualSupervisorPid
-
-Write-Host "PHASE7C_ACCOUNT_VERIFY_RUNNER_STATUS_SUPERVISOR_PID=$runnerStatusSupervisorPid"
-Write-Host "PHASE7C_ACCOUNT_VERIFY_RUNNER_STATUS_SUPERVISOR_MATCH=$runnerSupervisorMatch"
-
-if (-not $runnerSupervisorMatch) {
-  throw "Startup runner supervisor PID does not match the active supervisor PID."
+  throw "SYSTEM lifecycle broker is not directly owned by the running Windows Task Scheduler service."
 }
 
 $supervisorProcess = Get-CimInstance `
@@ -282,7 +296,7 @@ if (-not $supervisorIsPowerShell) {
 }
 
 if (-not $supervisorParentIsRunner) {
-  throw "Supervisor is not a direct child of the verified startup runner."
+  throw "Supervisor is not a direct child of the verified SYSTEM lifecycle broker."
 }
 
 # Some Windows/WMI configurations return an empty CommandLine for processes
