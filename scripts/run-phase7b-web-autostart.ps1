@@ -11,6 +11,9 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $WorkDir = (Resolve-Path $WorkDir).Path
 $ApiRunner = Join-Path $PSScriptRoot "run-phase7b-api-runtime-local.ps1"
 if (-not (Test-Path -LiteralPath $ApiRunner)) { throw "Phase 7B API runtime launcher not found: $ApiRunner" }
+$JobObjectHelper = Join-Path $PSScriptRoot "lib\phase7b-windows-job-object.ps1"
+if (-not (Test-Path -LiteralPath $JobObjectHelper)) { throw "Phase 7B Job Object helper not found: $JobObjectHelper" }
+. $JobObjectHelper
 
 if ([string]::IsNullOrWhiteSpace($BridgeEnv)) {
   $BridgeEnv = Join-Path $ProjectRoot "packages\mt5-broker\bridge\.env.phase7b-demo"
@@ -24,6 +27,10 @@ if ($ApiPort -eq $WebPort) { throw "ApiPort and WebPort must be different." }
 if ($StartupTimeoutSeconds -lt 30 -or $StartupTimeoutSeconds -gt 300) {
   throw "StartupTimeoutSeconds must be between 30 and 300."
 }
+
+$runtimeJob = New-Phase7BKillOnCloseJob -Name ("Phase7B-Web-{0}-{1}" -f $PID, [guid]::NewGuid().ToString('N'))
+Add-Phase7BProcessToJob -Job $runtimeJob -ProcessId $PID
+Write-Host "PHASE7B_WEB_JOB_OBJECT=ACTIVE"
 
 function Test-PortListening([int]$Port) {
   $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
