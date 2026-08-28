@@ -116,7 +116,7 @@ test("decision monitor preserves canonical Sideway entry conditions from the aud
 
   const snapshot = buildPhase7CDecisionMonitor(input);
   assert.equal(snapshot.preTrade.strategy, "SIDEWAY");
-  assert.deepEqual(snapshot.preTrade.entryConditions, entryConditions);
+  assert.deepEqual(snapshot.strategyEntryConditions.sideway, entryConditions);
 });
 
 test("AUTO permits a canonical Trend entry during confirmed REVERSAL instead of collapsing to PAUSE", () => {
