@@ -59,6 +59,16 @@ test("Trend and Sideway lot controls accept 0.03 through 1.20 only in 0.03 incre
       `Sideway lot ${lot} must fail the 0.03..1.20 step-0.03 contract`,
     );
   }
+
+  assert.throws(
+    () => validatePhase7CLotSettings({
+      trendFixedLot: 0.03,
+      sidewayRiskPercent: 1.01,
+      sidewayMaxLot: 0.03,
+    }),
+    /1(?:\.00)?%|risk percent|0\.01.*1/i,
+    "Sideway risk percent must remain capped at 1.00%",
+  );
 });
 
 test("all execution boundaries use the same 1.20 ceiling and 0.03 lot increment", () => {
@@ -95,9 +105,10 @@ test("all execution boundaries use the same 1.20 ceiling and 0.03 lot increment"
   assert.match(sidewayController, /rawMaxLot\s*\/\s*0\.03/);
 });
 
-test("API broker validation and Web controls preserve the 1.20 step-0.03 contract", () => {
+test("API broker validation and all Web lot controls preserve the 1.20 step-0.03 contract", () => {
   const route = source("apps/api/src/routes/phase7c.route.ts");
-  const web = source("apps/web/src/pages/Phase7CControlCenterPage.tsx");
+  const controlCenter = source("apps/web/src/pages/Phase7CControlCenterPage.tsx");
+  const accountRisk = source("apps/web/src/pages/Phase7BOpsPage.tsx");
 
   assert.match(
     route,
@@ -110,12 +121,21 @@ test("API broker validation and Web controls preserve the 1.20 step-0.03 contrac
     "Sideway max lot must now use the same 0.03 one-third-compatible increment",
   );
 
-  assert.match(
-    web,
-    /label="Trend fixed lot"[\s\S]*?min:\s*0\.03,\s*max:\s*1\.2,\s*step:\s*0\.03/,
-  );
-  assert.match(
-    web,
-    /label="Sideway max lot"[\s\S]*?min:\s*0\.03,\s*max:\s*1\.2,\s*step:\s*0\.03/,
-  );
+  for (const [label, web] of [["Control Center", controlCenter], ["Account & Risk", accountRisk]]) {
+    assert.match(
+      web,
+      /label="Trend fixed lot"[\s\S]*?min:\s*0\.03,\s*max:\s*1\.2,\s*step:\s*(?:0\.03|MANAGED_LOT_STEP)/,
+      `${label} Trend fixed lot must expose max 1.20 with step 0.03`,
+    );
+    assert.match(
+      web,
+      /label="Sideway max lot"[\s\S]*?min:\s*0\.03,\s*max:\s*1\.2,\s*step:\s*(?:0\.03|MANAGED_LOT_STEP)/,
+      `${label} Sideway max lot must expose max 1.20 with step 0.03`,
+    );
+  }
+
+  assert.match(accountRisk, /Trend fixed lot phải trong khoảng 0\.03–1\.20\./);
+  assert.match(accountRisk, /Sideway max lot phải trong khoảng 0\.03–1\.20\./);
+  assert.match(accountRisk, /Sideway risk percent phải trong khoảng 0\.01–1\.00%\./);
+  assert.doesNotMatch(accountRisk, /0\.03–0\.30/);
 });
