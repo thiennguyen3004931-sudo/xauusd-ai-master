@@ -1,6 +1,7 @@
+import { requestLocalControlJson } from "./local-control-request";
+
 const LIVE_ARM_BASE = "/api/v1/phase7c-live-arm-control";
 const AUTO_BASE = "/api/v1/phase7c-auto-activation";
-const CONTROL_DIRECT = "http://127.0.0.1:3711";
 
 export type Phase7CLiveArmAction = "ARM_LIVE" | "DISARM_LIVE";
 export type Phase7CBotExecutionMode = "AUTO" | "TREND" | "SIDEWAY" | "PAUSE";
@@ -83,36 +84,12 @@ export type Phase7CAutoEnableResponse = Phase7CAutoActivationStatus & {
   options: Phase7CBotExecutionMode[];
 };
 
-async function safeJson<T>(response: Response): Promise<T> {
-  const text = await response.text();
-  let payload: any = {};
-  try { payload = text ? JSON.parse(text) : {}; } catch { payload = {}; }
-  if (!response.ok) {
-    throw new Error(typeof payload.error === "string" ? payload.error : `HTTP ${response.status}`);
-  }
-  return payload as T;
-}
-
-async function request<T>(base: string, path: string, init?: RequestInit): Promise<T> {
-  const urls = [`${base}${path}`, `${CONTROL_DIRECT}${base}${path}`];
-  const errors: string[] = [];
-  for (const url of urls) {
-    try {
-      const response = await fetch(url, { cache: "no-store", ...init });
-      return await safeJson<T>(response);
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : "Không kết nối được");
-    }
-  }
-  throw new Error(errors.join(" | "));
-}
-
 export function getPhase7CLiveArmControlCapability() {
-  return request<Phase7CLiveArmControlCapability>(LIVE_ARM_BASE, "/capability");
+  return requestLocalControlJson<Phase7CLiveArmControlCapability>(`${LIVE_ARM_BASE}/capability`);
 }
 
 export function createPhase7CLiveArmPreflight(action: Phase7CLiveArmAction) {
-  return request<Phase7CLiveArmPreflight>(LIVE_ARM_BASE, "/preflight", {
+  return requestLocalControlJson<Phase7CLiveArmPreflight>(`${LIVE_ARM_BASE}/preflight`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action }),
@@ -123,7 +100,7 @@ export function executePhase7CLiveArmAction(
   action: Phase7CLiveArmAction,
   preflightToken: string,
 ) {
-  return request<Phase7CLiveArmExecuteResponse>(LIVE_ARM_BASE, "/execute", {
+  return requestLocalControlJson<Phase7CLiveArmExecuteResponse>(`${LIVE_ARM_BASE}/execute`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action, preflightToken, confirmation: action }),
@@ -131,18 +108,17 @@ export function executePhase7CLiveArmAction(
 }
 
 export function getPhase7CLiveArmControlStatus(requestId: string) {
-  return request<Phase7CLiveArmControlStatus>(
-    LIVE_ARM_BASE,
-    `/status?requestId=${encodeURIComponent(requestId)}`,
+  return requestLocalControlJson<Phase7CLiveArmControlStatus>(
+    `${LIVE_ARM_BASE}/status?requestId=${encodeURIComponent(requestId)}`,
   );
 }
 
 export function getPhase7CAutoActivationStatus() {
-  return request<Phase7CAutoActivationStatus>(AUTO_BASE, "/status");
+  return requestLocalControlJson<Phase7CAutoActivationStatus>(`${AUTO_BASE}/status`);
 }
 
 export async function enablePhase7CAuto(): Promise<Phase7CAutoEnableResponse> {
-  const payload = await request<Omit<Phase7CAutoEnableResponse, "options">>(AUTO_BASE, "/enable", {
+  const payload = await requestLocalControlJson<Omit<Phase7CAutoEnableResponse, "options">>(`${AUTO_BASE}/enable`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: "{}",
