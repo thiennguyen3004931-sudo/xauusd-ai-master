@@ -1059,6 +1059,8 @@ async function formatEvent(event, enrichment) {
       normalizeSide(
         closed?.side ??
         state.trade?.side ??
+        event?.lastKnownState?.side ??
+        event?.management?.side ??
         event.side,
       );
 
@@ -1909,7 +1911,12 @@ async function findClosedTradeWithRetry(event) {
 function matchClosedTrade(trades, event) {
   if (!Array.isArray(trades) || trades.length === 0) return null;
   const ticket = String(event.ticket ?? state.trade?.ticket ?? "");
-  const side = normalizeSide(state.trade?.side ?? event.side);
+  const side = normalizeSide(
+    state.trade?.side ??
+    event?.lastKnownState?.side ??
+    event?.management?.side ??
+    event.side,
+  );
   const eventAt = Date.parse(String(event.timestamp ?? new Date().toISOString()));
 
   const exact = ticket
