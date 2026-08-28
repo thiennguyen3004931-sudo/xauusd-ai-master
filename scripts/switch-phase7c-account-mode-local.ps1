@@ -328,6 +328,31 @@ function Start-TargetBridge($EnvInfo, [string]$Mode) {
 
 function Start-ExecutorsAndVerify([string]$Mode) {
   Start-ScheduledTask -TaskName $ExecutorTaskName -ErrorAction Stop
+  $api = $ControlApiUrl.TrimEnd('/')
+  $brokerReady = $false
+  for ($i = 1; $i -le 40; $i++) {
+    Start-Sleep -Milliseconds 500
+    try {
+      $lifecycle = Invoke-RestMethod -Uri "$api/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 5
+      if ([bool]$lifecycle.broker.ready) {
+        $brokerReady = $true
+        break
+      }
+    } catch {}
+  }
+  if (-not $brokerReady) { throw "Lifecycle broker SYSTEM did not become READY after Scheduled Task boot." }
+
+  $startResult = Invoke-RestMethod -Uri "$api/api/v1/phase7c/lifecycle/start" -Method Post -TimeoutSec 70
+  $action = ([string]$startResult.action).Trim().ToUpperInvariant()
+  $accountMode = ([string]$startResult.accountMode).Trim().ToUpperInvariant()
+  if ($action -notin @("STARTED", "RESTARTED", "ALREADY_RUNNING")) {
+    throw "Canonical lifecycle START returned unexpected action: $action"
+  }
+  if ($accountMode -ne $Mode) {
+    throw "Canonical lifecycle START account mode mismatch. Expected=$Mode Actual=$accountMode"
+  }
+  Write-Host "PHASE7C_ACCOUNT_SWITCH_LIFECYCLE_START=PASS|ACTION=$action|MODE=$accountMode"
+
   for ($i = 1; $i -le 18; $i++) {
     Start-Sleep -Seconds 5
     try {
@@ -368,6 +393,13 @@ try {
   Write-SelectedRuntimeFiles $TargetMode $targetEnv $targetRisk
   Write-Host "PHASE7C_ACCOUNT_SWITCH_RUNTIME_CONFIG=PASS|MODE=$TargetMode"
   Start-TargetBridge $targetEnv $TargetMode
+  if ($TargetMode -eq "LIVE") {
+    [void](Write-Phase7CLiveAuthorizationState `
+      -WorkDir $WorkDir `
+      -LiveEnvFile $LiveEnvFile `
+      -AuthorizedBy "switch-phase7c-account-mode-local:-ConfirmLiveExecution")
+    Write-Host "PHASE7C_ACCOUNT_SWITCH_LIVE_AUTHORIZATION=PASS"
+  }
   Start-ExecutorsAndVerify $TargetMode
   [void](Set-BotPause "account-mode-switch-complete")
 
@@ -378,14 +410,6 @@ try {
 
   $finalMode = Invoke-RestMethod -Uri "$($ControlApiUrl.TrimEnd('/'))/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 5
   if ([string]$finalMode.state.mode -ne "PAUSE") { throw "Account switch must finish in PAUSE." }
-
-  if ($TargetMode -eq "LIVE") {
-    [void](Write-Phase7CLiveAuthorizationState `
-      -WorkDir $WorkDir `
-      -LiveEnvFile $LiveEnvFile `
-      -AuthorizedBy "switch-phase7c-account-mode-local:-ConfirmLiveExecution")
-    Write-Host "PHASE7C_ACCOUNT_SWITCH_LIVE_AUTHORIZATION=PASS"
-  }
 
   Write-Host "PHASE7C_ACCOUNT_SWITCH_FINAL_ACCOUNT_MODE=$TargetMode"
   Write-Host "PHASE7C_ACCOUNT_SWITCH_FINAL_BOT_MODE=PAUSE"
@@ -402,7 +426,7 @@ try {
       Wait-ExclusiveLockReleased -Path $BridgeRunnerLockPath -TimeoutSeconds 15
       Write-SelectedRuntimeFiles $previousMode $previousCurrent.env $previousRisk
       Start-TargetBridge $previousCurrent.env $previousMode
-      Start-ScheduledTask -TaskName $ExecutorTaskName -ErrorAction Stop
+      Start-ExecutorsAndVerify $previousMode
       [void](Set-BotPause "account-mode-switch-rollback")
       Write-Host "PHASE7C_ACCOUNT_SWITCH_ROLLBACK=PASS|BOT_MODE=PAUSE"
     } catch {

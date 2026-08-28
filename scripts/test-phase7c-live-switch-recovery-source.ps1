@@ -3,9 +3,10 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Preflight = Join-Path $PSScriptRoot "preflight-phase7c-live-switch-local.ps1"
 $Recovery = Join-Path $PSScriptRoot "recover-phase7c-demo-after-failed-switch-local.ps1"
 $GuardedSwitch = Join-Path $PSScriptRoot "switch-phase7c-live-guarded-local.ps1"
+$AccountSwitcher = Join-Path $PSScriptRoot "switch-phase7c-account-mode-local.ps1"
 $ExecutorStopper = Join-Path $PSScriptRoot "stop-phase7c-executors-local.ps1"
 
-foreach ($target in @($Preflight, $Recovery, $GuardedSwitch, $ExecutorStopper)) {
+foreach ($target in @($Preflight, $Recovery, $GuardedSwitch, $AccountSwitcher, $ExecutorStopper)) {
   if (-not (Test-Path -LiteralPath $target)) { throw "Required source file missing: $target" }
   $tokens = $null
   $errors = $null
@@ -16,6 +17,7 @@ foreach ($target in @($Preflight, $Recovery, $GuardedSwitch, $ExecutorStopper)) 
 $preflight = Get-Content -LiteralPath $Preflight -Raw
 $recovery = Get-Content -LiteralPath $Recovery -Raw
 $guarded = Get-Content -LiteralPath $GuardedSwitch -Raw
+$accountSwitcher = Get-Content -LiteralPath $AccountSwitcher -Raw
 $stopper = Get-Content -LiteralPath $ExecutorStopper -Raw
 
 function Require([string]$Text, [string]$Pattern, [string]$Message) {
@@ -48,11 +50,21 @@ Require $recovery 'liveExecutionEnabled = \$false' "Recovery must restore accoun
 Require $recovery '\$configOut\["accountMode"\] = "DEMO"' "Recovery must restore DEMO task config."
 Require $recovery '\$configOut\["liveExecutionEnabled"\] = \$false' "Recovery must disable LIVE in task config."
 Require $recovery 'Start-ScheduledTask -TaskName \$BridgeTaskName' "Recovery must restart DEMO bridge task."
-Require $recovery 'Start-ScheduledTask -TaskName \$ExecutorTaskName' "Recovery must restart DEMO executor task."
+Require $recovery 'Start-ScheduledTask -TaskName \$ExecutorTaskName' "Recovery must boot the SYSTEM lifecycle broker task."
+Require $recovery 'api/v1/phase7c/lifecycle' "Recovery must wait for canonical lifecycle broker readiness."
+Require $recovery 'broker\.ready' "Recovery must prove lifecycle broker READY before executor START."
+Require $recovery 'api/v1/phase7c/lifecycle/start' "Recovery must request executor START through the canonical lifecycle API."
+Require $recovery 'PHASE7C_DEMO_RECOVERY_LIFECYCLE_START=PASS' "Recovery must audit successful canonical lifecycle START."
 Require $recovery 'ExpectedAccountMode DEMO' "Recovery must strictly verify DEMO runtime."
 Require $recovery 'PHASE7C_DEMO_RECOVERY_STATUS=PASS' "Recovery PASS marker is missing."
 Forbid $recovery 'arm-phase7c-live-local\.ps1|Write-Phase7CLiveArmState' "Recovery must never arm LIVE."
 Forbid $recovery 'order_send|/v1/orders/place|/v1/positions/close|/v1/positions/modify' "Recovery must not send broker mutations."
+
+Require $accountSwitcher 'Start-ScheduledTask -TaskName \$ExecutorTaskName' "Account switch must be able to boot the SYSTEM lifecycle broker task."
+Require $accountSwitcher 'api/v1/phase7c/lifecycle' "Account switch must wait for canonical lifecycle broker readiness."
+Require $accountSwitcher 'broker\.ready' "Account switch must prove lifecycle broker READY before executor START."
+Require $accountSwitcher 'api/v1/phase7c/lifecycle/start' "Account switch must request executor START through the canonical lifecycle API."
+Require $accountSwitcher 'PHASE7C_ACCOUNT_SWITCH_LIFECYCLE_START=PASS' "Account switch must audit successful canonical lifecycle START."
 
 Require $guarded '\[switch\]\$ConfirmLiveExecution' "Guarded switch must require explicit confirmation."
 Require $guarded 'if \(-not \$ConfirmLiveExecution\)' "Guarded switch confirmation must fail closed."
