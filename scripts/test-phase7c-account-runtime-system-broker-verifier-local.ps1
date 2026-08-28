@@ -24,10 +24,12 @@ function Forbid([string]$Pattern, [string]$Code) {
 Forbid 'startup-runner-status\.json' 'LEGACY_STARTUP_RUNNER_STATUS_PATH_FORBIDDEN'
 Forbid 'SUPERVISOR_RUNNING' 'LEGACY_SUPERVISOR_RUNNING_STATUS_FORBIDDEN'
 
-# Canonical verifier identity/state must come from lifecycle broker state.
-Require 'phase7c-lifecycle-broker' 'LIFECYCLE_BROKER_ROOT_MISSING'
-Require 'heartbeat\.json' 'LIFECYCLE_BROKER_HEARTBEAT_MISSING'
-Require 'status\.json' 'LIFECYCLE_BROKER_STATUS_MISSING'
+# Canonical verifier identity/state must come specifically from lifecycle broker state.
+Require '\$LifecycleBrokerRoot\s*=\s*Join-Path\s+\$WorkDir\s+"phase7c-lifecycle-broker"' 'LIFECYCLE_BROKER_ROOT_MISSING'
+Require '\$BrokerHeartbeatPath\s*=\s*Join-Path\s+\$LifecycleBrokerStateDir\s+"heartbeat\.json"' 'LIFECYCLE_BROKER_HEARTBEAT_MISSING'
+Require '\$BrokerStatusPath\s*=\s*Join-Path\s+\$LifecycleBrokerStateDir\s+"status\.json"' 'LIFECYCLE_BROKER_STATUS_MISSING'
+Require '\$brokerHeartbeat\s*=\s*Get-Content\s+-LiteralPath\s+\$BrokerHeartbeatPath' 'BROKER_HEARTBEAT_READ_MISSING'
+Require '\$brokerStatus\s*=\s*Get-Content\s+-LiteralPath\s+\$BrokerStatusPath' 'BROKER_STATUS_READ_MISSING'
 Require 'brokerPid' 'BROKER_PID_CHECK_MISSING'
 Require 'desiredExecutorState' 'DESIRED_EXECUTOR_STATE_CHECK_MISSING'
 Require 'supervisorPid' 'BROKER_SUPERVISOR_PID_CHECK_MISSING'
