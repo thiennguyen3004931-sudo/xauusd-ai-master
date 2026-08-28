@@ -36,6 +36,11 @@ import {
   startPhase7CFromWeb,
   stopPhase7CFromWeb,
 } from "../services/phase7c-lifecycle.service";
+import {
+  Phase7CStrategyEntryConfigError,
+  evaluatePhase7CStrategyEntrySaveGuard,
+  phase7CStrategyEntryConditionsService,
+} from "../services/phase7c-strategy-entry-conditions.service";
 
 const router = Router();
 let lifecycleActionInProgress = false;
@@ -54,6 +59,31 @@ function canChangeBotMode(req: Request): boolean {
   if (!configuredToken) return false;
   const providedToken = String(req.header("x-phase7c-token") ?? "").trim();
   return providedToken === configuredToken;
+}
+
+async function getStrategyEntryConditionGuards() {
+  const mode = phase7CBotModeService.get().mode;
+  const accountModeState = getPhase7CAccountModeState();
+  try {
+    const telemetry = await getMt5Telemetry("XAUUSD");
+    const bridgeReachable = telemetry.reachable === true;
+    return {
+      mode,
+      accountStateValid: accountModeState.valid,
+      bridgeReachable,
+      accountModeMatches:
+        bridgeReachable && accountModeAllowsBroker(telemetry.health?.accountMode, accountModeState),
+      openXauusdPositions: bridgeReachable ? telemetry.positions.length : null,
+    };
+  } catch {
+    return {
+      mode,
+      accountStateValid: accountModeState.valid,
+      bridgeReachable: false,
+      accountModeMatches: false,
+      openXauusdPositions: null,
+    };
+  }
 }
 
 router.get("/account-mode", (_req: Request, res: Response) => {
@@ -277,6 +307,71 @@ router.post("/lot-settings", async (req: Request, res: Response) => {
   } catch (error) {
     res.status(400).json({
       error: error instanceof Error ? error.message : "Phase 7C lot settings update failed.",
+    });
+  }
+});
+
+router.get("/strategy-entry-conditions", async (_req: Request, res: Response) => {
+  const read = phase7CStrategyEntryConditionsService.read();
+  const guards = await getStrategyEntryConditionGuards();
+  const guard = evaluatePhase7CStrategyEntrySaveGuard(guards);
+  res.setHeader("cache-control", "no-store");
+  res.json({
+    state: read.valid ? read.state : null,
+    valid: read.valid,
+    persisted: read.persisted,
+    editable: read.valid && guard.allowed,
+    error: read.error,
+    appliesTo: "NEW_ENTRIES_ONLY",
+    sharedAcrossAccounts: true,
+    mandatory: {
+      trend: ["patternM15"],
+      sideway: ["rangeEdge"],
+    },
+    guards,
+    safety: {
+      requiresPause: true,
+      requiresZeroXauusdPositions: true,
+    },
+  });
+});
+
+router.post("/strategy-entry-conditions", async (req: Request, res: Response) => {
+  if (!canChangeBotMode(req)) {
+    res.status(403).json({
+      code: "STRATEGY_PROFILE_MUTATION_FORBIDDEN",
+      error: "Strategy entry condition changes are restricted to localhost unless PHASE7C_BOT_MODE_TOKEN is configured.",
+    });
+    return;
+  }
+
+  const read = phase7CStrategyEntryConditionsService.read();
+  if (!read.valid) {
+    res.status(409).json({
+      code: "ENTRY_STRATEGY_CONFIG_INVALID",
+      error: read.error ?? "Persisted strategy entry condition config is invalid.",
+    });
+    return;
+  }
+
+  const guards = await getStrategyEntryConditionGuards();
+  const guard = evaluatePhase7CStrategyEntrySaveGuard(guards);
+  if (!guard.allowed) {
+    res.status(409).json({ code: guard.code, error: guard.message, guards });
+    return;
+  }
+
+  try {
+    res.json(phase7CStrategyEntryConditionsService.set(req.body));
+  } catch (error) {
+    if (error instanceof Phase7CStrategyEntryConfigError) {
+      const status = error.code === "CONFIG_VERSION_CONFLICT" ? 409 : 400;
+      res.status(status).json({ code: error.code, error: error.message });
+      return;
+    }
+    res.status(400).json({
+      code: "ENTRY_STRATEGY_CONFIG_INVALID",
+      error: error instanceof Error ? error.message : "Phase 7C strategy entry condition update failed.",
     });
   }
 });
