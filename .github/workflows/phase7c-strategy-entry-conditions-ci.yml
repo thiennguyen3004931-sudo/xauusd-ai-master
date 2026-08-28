@@ -1,0 +1,34 @@
+name: Phase7C Strategy Entry Conditions CI
+
+on:
+  push:
+    branches:
+      - feat/phase7c-strategy-entry-conditions
+    paths:
+      - "scripts/phase7c-strategy-entry-conditions.mjs"
+      - "scripts/phase7c-strategy-entry-conditions.d.mts"
+      - "scripts/test-phase7c-strategy-entry-conditions-*.mjs"
+      - ".github/workflows/phase7c-strategy-entry-conditions-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "scripts/phase7c-strategy-entry-conditions.mjs"
+      - "scripts/phase7c-strategy-entry-conditions.d.mts"
+      - "scripts/test-phase7c-strategy-entry-conditions-*.mjs"
+      - ".github/workflows/phase7c-strategy-entry-conditions-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  core-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Strategy entry condition core contract
+        run: node scripts/test-phase7c-strategy-entry-conditions-core-contract.mjs
