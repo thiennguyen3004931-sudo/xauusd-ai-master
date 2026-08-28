@@ -22,6 +22,7 @@ import {
   raw,
   value,
 } from "../phase7c-panel-status";
+import { resolveConfiguredLotSettings } from "../phase7c-lot-settings";
 
 type LotInput = {
   trendFixedLot: number;
@@ -140,9 +141,9 @@ function lotEquals(a: LotInput, b: LotInput) {
 
 export function Phase7BOpsPage() {
   const queryClient = useQueryClient();
-  const [trendFixedLot, setTrendFixedLot] = useState("0.12");
-  const [sidewayRiskPercent, setSidewayRiskPercent] = useState("1");
-  const [sidewayMaxLot, setSidewayMaxLot] = useState("0.30");
+  const [trendFixedLot, setTrendFixedLot] = useState("");
+  const [sidewayRiskPercent, setSidewayRiskPercent] = useState("");
+  const [sidewayMaxLot, setSidewayMaxLot] = useState("");
 
   const query = useQuery({
     queryKey: ["phase7c-web-status-account-risk-v6"],
@@ -178,7 +179,9 @@ export function Phase7BOpsPage() {
   const notifier = asRecord(processes.regimeNotifier);
   const lotRuntime = asRecord(lifecycle.lotSettings);
   const mode = asRecord(lifecycle.mode);
-  const configuredLot = asRecord(data?.lotSettings);
+  const resolvedConfiguredLot = resolveConfiguredLotSettings(data?.lotSettings, configuration);
+  const hasConfiguredLot = resolvedConfiguredLot !== null;
+  const configuredLot = asRecord(resolvedConfiguredLot);
   const currency = clean(account.accountCurrency, "USD");
   const accountModeRaw = pickText(raw(panel, "accountMode"), account.accountMode, bridge.accountMode);
   const accountModeKey = accountModeRaw.trim().toLowerCase();
@@ -192,28 +195,26 @@ export function Phase7BOpsPage() {
   const openPositions = pickText(bridge.openXauusdPositions, raw(panel, "positionCount"));
   const canSafelyApply = activeMode === "PAUSE" && Number(openPositions) === 0;
 
-  const savedLot = clampLotInputs({
-    trendFixedLot: Number(configuredLot.trendFixedLot ?? configuration.configuredTrendFixedLot ?? 0.12),
-    sidewayRiskPercent: Number(configuredLot.sidewayRiskPercent ?? configuration.configuredSidewayRiskPercent ?? 1),
-    sidewayMaxLot: Number(configuredLot.sidewayMaxLot ?? configuration.configuredSidewayMaxLot ?? 0.3),
-  });
+  const savedLot = resolvedConfiguredLot ? clampLotInputs(resolvedConfiguredLot) : null;
   const draftLot = clampLotInputs({
     trendFixedLot: Number(trendFixedLot),
     sidewayRiskPercent: Number(sidewayRiskPercent),
     sidewayMaxLot: Number(sidewayMaxLot),
   });
   const validationErrors = validateLotInput(draftLot);
-  const hasChanges = validationErrors.length === 0 && !lotEquals(savedLot, draftLot);
+  const hasChanges = savedLot !== null && validationErrors.length === 0 && !lotEquals(savedLot, draftLot);
 
   useEffect(() => {
-    const nextTrend = numberText(configuredLot.trendFixedLot ?? configuration.configuredTrendFixedLot, trendFixedLot);
-    const nextRisk = numberText(configuredLot.sidewayRiskPercent ?? configuration.configuredSidewayRiskPercent, sidewayRiskPercent);
-    const nextMaxLot = numberText(configuredLot.sidewayMaxLot ?? configuration.configuredSidewayMaxLot, sidewayMaxLot);
-    setTrendFixedLot(nextTrend);
-    setSidewayRiskPercent(nextRisk);
-    setSidewayMaxLot(nextMaxLot);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configuredLot.trendFixedLot, configuredLot.sidewayRiskPercent, configuredLot.sidewayMaxLot, configuration.configuredTrendFixedLot, configuration.configuredSidewayRiskPercent, configuration.configuredSidewayMaxLot]);
+    if (!resolvedConfiguredLot) {
+      setTrendFixedLot("");
+      setSidewayRiskPercent("");
+      setSidewayMaxLot("");
+      return;
+    }
+    setTrendFixedLot(numberText(resolvedConfiguredLot.trendFixedLot, ""));
+    setSidewayRiskPercent(numberText(resolvedConfiguredLot.sidewayRiskPercent, ""));
+    setSidewayMaxLot(numberText(resolvedConfiguredLot.sidewayMaxLot, ""));
+  }, [resolvedConfiguredLot?.trendFixedLot, resolvedConfiguredLot?.sidewayRiskPercent, resolvedConfiguredLot?.sidewayMaxLot]);
 
   if (query.isLoading) return <LoadingState />;
   if (query.isError && !query.data) {
@@ -221,7 +222,7 @@ export function Phase7BOpsPage() {
   }
 
   const onSubmit = () => {
-    if (!canSafelyApply || validationErrors.length > 0 || !hasChanges) return;
+    if (!savedLot || !hasConfiguredLot || !canSafelyApply || validationErrors.length > 0 || !hasChanges) return;
     const confirmed = window.confirm(
       `Xác nhận lưu cấu hình lot cho LỆNH MỚI?\n\nTrend: ${savedLot.trendFixedLot.toFixed(2)} → ${draftLot.trendFixedLot.toFixed(2)}\nSideway risk: ${savedLot.sidewayRiskPercent.toFixed(2)}% → ${draftLot.sidewayRiskPercent.toFixed(2)}%\nSideway max lot: ${savedLot.sidewayMaxLot.toFixed(2)} → ${draftLot.sidewayMaxLot.toFixed(2)}\n\nKhông thay đổi vị thế đang mở.`,
     );
@@ -230,6 +231,7 @@ export function Phase7BOpsPage() {
   };
 
   const resetToSaved = () => {
+    if (!savedLot) return;
     setTrendFixedLot(savedLot.trendFixedLot.toFixed(2));
     setSidewayRiskPercent(savedLot.sidewayRiskPercent.toFixed(2));
     setSidewayMaxLot(savedLot.sidewayMaxLot.toFixed(2));
@@ -260,6 +262,11 @@ export function Phase7BOpsPage() {
       {!canSafelyApply && (
         <Alert severity="warning">
           Khóa chỉnh lot đang bật. Chuyển bot về PAUSE và đảm bảo XAUUSD positions = 0. Hiện tại: mode {activeMode}, positions {openPositions}.
+        </Alert>
+      )}
+      {!hasConfiguredLot && (
+        <Alert severity="warning">
+          Chưa đọc được cấu hình lot đã lưu. Web không tự điền lot mặc định và khóa thao tác lưu cho đến khi nguồn cấu hình canonical sẵn sàng.
         </Alert>
       )}
       {validationErrors.length > 0 && <Alert severity="error">{validationErrors.join(" ")}</Alert>}
@@ -323,17 +330,17 @@ export function Phase7BOpsPage() {
               />
 
               <Box sx={{ p: 1.5, borderRadius: 2.5, bgcolor: "rgba(15,23,42,.55)", border: "1px solid rgba(148,163,184,.12)" }}>
-                <InfoRow label="Giá trị đã lưu" valueText={`${savedLot.trendFixedLot.toFixed(2)} / ${savedLot.sidewayRiskPercent.toFixed(2)}% / ${savedLot.sidewayMaxLot.toFixed(2)}`} />
-                <InfoRow label="Giá trị đang nhập" valueText={`${draftLot.trendFixedLot.toFixed(2)} / ${draftLot.sidewayRiskPercent.toFixed(2)}% / ${draftLot.sidewayMaxLot.toFixed(2)}`} />
+                <InfoRow label="Giá trị đã lưu" valueText={savedLot ? `${savedLot.trendFixedLot.toFixed(2)} / ${savedLot.sidewayRiskPercent.toFixed(2)}% / ${savedLot.sidewayMaxLot.toFixed(2)}` : "Chưa có dữ liệu"} />
+                <InfoRow label="Giá trị đang nhập" valueText={`${numberText(trendFixedLot, "—")} / ${numberText(sidewayRiskPercent, "—")}% / ${numberText(sidewayMaxLot, "—")}`} />
                 <InfoRow label="Có thay đổi" valueText={hasChanges ? "Yes" : "No"} />
-                <InfoRow label="Safety gate" valueText={canSafelyApply ? "PASS" : "LOCKED"} strong />
+                <InfoRow label="Safety gate" valueText={canSafelyApply && hasConfiguredLot ? "PASS" : "LOCKED"} strong />
               </Box>
 
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2}>
-                <Button variant="contained" size="large" onClick={onSubmit} disabled={mutation.isPending || !canSafelyApply || validationErrors.length > 0 || !hasChanges} sx={{ fontWeight: 950, flex: 1 }}>
+                <Button variant="contained" size="large" onClick={onSubmit} disabled={mutation.isPending || !hasConfiguredLot || !canSafelyApply || validationErrors.length > 0 || !hasChanges} sx={{ fontWeight: 950, flex: 1 }}>
                   {mutation.isPending ? "Đang lưu..." : "Lưu cấu hình lot"}
                 </Button>
-                <Button variant="outlined" size="large" onClick={resetToSaved} disabled={mutation.isPending || !hasChanges} sx={{ fontWeight: 900 }}>
+                <Button variant="outlined" size="large" onClick={resetToSaved} disabled={mutation.isPending || !hasConfiguredLot || !hasChanges} sx={{ fontWeight: 900 }}>
                   Khôi phục
                 </Button>
               </Stack>
@@ -347,9 +354,9 @@ export function Phase7BOpsPage() {
 
         <Grid size={{ xs: 12, lg: 4 }}>
           <SectionCard title="Cấu hình Lot/Risk hiện tại" subtitle="Giá trị đang cấu hình và trạng thái active.">
-            <InfoRow label="Trend fixed lot" valueText={pickText(configuredLot.trendFixedLot, configuration.configuredTrendFixedLot, configuration.activeTrendFixedLot)} strong />
-            <InfoRow label="Sideway risk percent" valueText={`${pickText(configuredLot.sidewayRiskPercent, configuration.configuredSidewayRiskPercent)}%`} />
-            <InfoRow label="Sideway max lot" valueText={pickText(configuredLot.sidewayMaxLot, configuration.configuredSidewayMaxLot)} />
+            <InfoRow label="Trend fixed lot" valueText={pickText(configuredLot.trendFixedLot)} strong />
+            <InfoRow label="Sideway risk percent" valueText={hasConfiguredLot ? `${pickText(configuredLot.sidewayRiskPercent)}%` : "—"} />
+            <InfoRow label="Sideway max lot" valueText={pickText(configuredLot.sidewayMaxLot)} />
             <InfoRow label="Target risk USD" valueText={money(configuration.targetRiskUsd, currency)} />
             <InfoRow label="Lot restart required" valueText={boolText(configuration.lotSettingsRestartRequired ?? lotRuntime.restartRequired)} />
             <InfoRow label="Applies to" valueText="NEW POSITIONS ONLY" />
