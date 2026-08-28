@@ -74,7 +74,10 @@ Write-Host "PHASE7B_API_BOT_MODE_FILE=$($env:PHASE7C_BOT_MODE_FILE)"
 
 Push-Location $ProjectRoot
 try {
-  & pnpm --filter '@xauusd/api' dev
+  & pnpm --filter '@xauusd/api' build
+  if ($LASTEXITCODE -ne 0) { throw "Phase 7B API build failed with code $LASTEXITCODE" }
+
+  & pnpm --filter '@xauusd/api' start
   if ($LASTEXITCODE -ne 0) { throw "Phase 7B API exited with code $LASTEXITCODE" }
 } finally {
   Pop-Location
