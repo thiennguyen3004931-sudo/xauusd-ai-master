@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { resolveConfiguredLotSettings } from "../apps/web/src/phase7c-lot-settings.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -59,7 +60,8 @@ assert(
   "partial canonical state must not be treated as a complete configured profile",
 );
 
-const pagePath = path.join(process.cwd(), "apps/web/src/pages/Phase7BOpsPage.tsx");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const pagePath = path.join(root, "apps/web/src/pages/Phase7BOpsPage.tsx");
 const page = fs.readFileSync(pagePath, "utf8");
 
 for (const needle of [
