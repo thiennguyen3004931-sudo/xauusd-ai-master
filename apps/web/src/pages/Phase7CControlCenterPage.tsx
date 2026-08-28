@@ -468,9 +468,9 @@ export function Phase7CControlCenterPage() {
           </Stack>
 
           <Grid container spacing={2} sx={{ mt: 0.5 }}>
-            <Grid size={{ xs: 12, sm: 4 }}><TextField fullWidth size="small" type="number" label="Trend fixed lot" value={trendFixedLot} onChange={(event) => updateLotDraft({ trendFixedLot: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0.03, max: 0.06, step: 0.03 } }} /></Grid>
+            <Grid size={{ xs: 12, sm: 4 }}><TextField fullWidth size="small" type="number" label="Trend fixed lot" value={trendFixedLot} onChange={(event) => updateLotDraft({ trendFixedLot: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0.03, max: 1.2, step: 0.03 } }} /></Grid>
             <Grid size={{ xs: 12, sm: 4 }}><TextField fullWidth size="small" type="number" label="Sideway risk / lệnh (%)" value={sidewayRiskPercent} onChange={(event) => updateLotDraft({ sidewayRiskPercent: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0.01, max: 1, step: 0.01 } }} /></Grid>
-            <Grid size={{ xs: 12, sm: 4 }}><TextField fullWidth size="small" type="number" label="Sideway max lot" value={sidewayMaxLot} onChange={(event) => updateLotDraft({ sidewayMaxLot: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0.03, max: 0.04, step: 0.01 } }} /></Grid>
+            <Grid size={{ xs: 12, sm: 4 }}><TextField fullWidth size="small" type="number" label="Sideway max lot" value={sidewayMaxLot} onChange={(event) => updateLotDraft({ sidewayMaxLot: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0.03, max: 1.2, step: 0.03 } }} /></Grid>
           </Grid>
 
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }} sx={{ mt: 2 }}>

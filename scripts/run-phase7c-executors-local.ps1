@@ -32,16 +32,16 @@ if ($AccountMode -eq "LIVE" -and -not $LiveExecutionEnabled) {
   throw "LIVE executor supervisor requires -LiveExecutionEnabled."
 }
 if ($DependencyWaitSeconds -lt 10) { throw "DependencyWaitSeconds must be >= 10." }
-if ($TrendFixedVolume -lt 0.03 -or $TrendFixedVolume -gt 0.06) { throw "TrendFixedVolume must be between 0.03 and 0.06." }
+if ($TrendFixedVolume -lt 0.03 -or $TrendFixedVolume -gt 1.2) { throw "TrendFixedVolume must be between 0.03 and 1.20." }
 if ($SidewayRiskPercent -lt 0.01 -or $SidewayRiskPercent -gt 1) { throw "SidewayRiskPercent must be between 0.01 and 1.00." }
-if ($SidewayMaxLot -lt 0.03 -or $SidewayMaxLot -gt 0.04) { throw "SidewayMaxLot must be between 0.03 and 0.04." }
+if ($SidewayMaxLot -lt 0.03 -or $SidewayMaxLot -gt 1.2) { throw "SidewayMaxLot must be between 0.03 and 1.20." }
 $trendUnits = $TrendFixedVolume / 0.03
 if ([math]::Abs($trendUnits - [math]::Round($trendUnits)) -gt 1e-8) {
   throw "TrendFixedVolume must use 0.03 increments."
 }
-$sidewayCapUnits = $SidewayMaxLot / 0.01
+$sidewayCapUnits = $SidewayMaxLot / 0.03
 if ([math]::Abs($sidewayCapUnits - [math]::Round($sidewayCapUnits)) -gt 1e-8) {
-  throw "SidewayMaxLot must use 0.01 broker-step increments."
+  throw "SidewayMaxLot must use 0.03 increments."
 }
 
 if (-not [System.IO.Path]::IsPathRooted($WorkDir)) { $WorkDir = Join-Path $ProjectRoot $WorkDir }

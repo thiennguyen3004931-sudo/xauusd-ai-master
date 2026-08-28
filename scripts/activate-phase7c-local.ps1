@@ -37,20 +37,20 @@ if ($lotSettingsExists) {
   }
 }
 
-if ($TrendFixedVolume -lt 0.03 -or $TrendFixedVolume -gt 0.06) {
-  throw "TrendFixedVolume must be between 0.03 and 0.06 lot."
+if ($TrendFixedVolume -lt 0.03 -or $TrendFixedVolume -gt 1.2) {
+  throw "TrendFixedVolume must be between 0.03 and 1.20 lot."
 }
 $trendUnits = $TrendFixedVolume / 0.03
 if ([math]::Abs($trendUnits - [math]::Round($trendUnits)) -gt 1e-8) {
   throw "TrendFixedVolume must use 0.03 increments so +10 can close exactly one-third."
 }
 
-if ($SidewayMaxLot -lt 0.03 -or $SidewayMaxLot -gt 0.04) {
-  throw "SidewayMaxLot must be between 0.03 and 0.04 lot as the Auto-Lot cap."
+if ($SidewayMaxLot -lt 0.03 -or $SidewayMaxLot -gt 1.2) {
+  throw "SidewayMaxLot must be between 0.03 and 1.20 lot."
 }
-$sidewayCapUnits = $SidewayMaxLot / 0.01
+$sidewayCapUnits = $SidewayMaxLot / 0.03
 if ([math]::Abs($sidewayCapUnits - [math]::Round($sidewayCapUnits)) -gt 1e-8) {
-  throw "SidewayMaxLot must use the 0.01 broker step; executed Sideway volume remains exact-one-third compatible through Auto Lot."
+  throw "SidewayMaxLot must use 0.03 increments so +10 can close exactly one-third."
 }
 if ($SidewayRiskPercent -lt 0.01 -or $SidewayRiskPercent -gt 1) { throw "SidewayRiskPercent must be between 0.01 and 1.00 for DEMO." }
 

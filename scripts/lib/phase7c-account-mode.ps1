@@ -111,19 +111,19 @@ function Assert-Phase7CRiskProfile($Profile, [string]$Label = "Phase7C risk prof
   $trend = [double]$Profile.trendFixedLot
   $risk = [double]$Profile.sidewayRiskPercent
   $maxLot = [double]$Profile.sidewayMaxLot
-  if ($trend -lt 0.03 -or $trend -gt 0.06) {
-    throw "$Label trendFixedLot must be between 0.03 and 0.06."
+  if ($trend -lt 0.03 -or $trend -gt 1.20) {
+    throw "$Label trendFixedLot must be between 0.03 and 1.20."
   }
-  if ($maxLot -lt 0.03 -or $maxLot -gt 0.04) {
-    throw "$Label sidewayMaxLot must be between 0.03 and 0.04."
+  if ($maxLot -lt 0.03 -or $maxLot -gt 1.20) {
+    throw "$Label sidewayMaxLot must be between 0.03 and 1.20."
   }
   $trendUnits = $trend / 0.03
   if ([math]::Abs($trendUnits - [math]::Round($trendUnits)) -gt 1e-8) {
     throw "$Label trendFixedLot must use 0.03 increments."
   }
-  $sidewayCapUnits = $maxLot / 0.01
+  $sidewayCapUnits = $maxLot / 0.03
   if ([math]::Abs($sidewayCapUnits - [math]::Round($sidewayCapUnits)) -gt 1e-8) {
-    throw "$Label sidewayMaxLot must use 0.01 broker-step increments."
+    throw "$Label sidewayMaxLot must use 0.03 increments."
   }
   if ($risk -lt 0.01 -or $risk -gt 1.0) {
     throw "$Label sidewayRiskPercent must be between 0.01 and 1.00."

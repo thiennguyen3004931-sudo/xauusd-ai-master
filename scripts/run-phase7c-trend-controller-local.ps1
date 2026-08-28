@@ -21,7 +21,7 @@ $mode = ConvertTo-Phase7CAccountMode $AccountMode
 if ($mode -eq "LIVE" -and -not $LiveExecutionEnabled) {
   throw "LIVE Trend execution requires -LiveExecutionEnabled."
 }
-if ($FixedVolume -lt 0.03 -or $FixedVolume -gt 0.06) { throw "FixedVolume must be between 0.03 and 0.06." }
+if ($FixedVolume -lt 0.03 -or $FixedVolume -gt 1.2) { throw "FixedVolume must be between 0.03 and 1.20." }
 $fixedUnits = $FixedVolume / 0.03
 if ([math]::Abs($fixedUnits - [math]::Round($fixedUnits)) -gt 1e-8) {
   throw "FixedVolume must use 0.03 increments so +10 can close exactly one-third."
