@@ -46,6 +46,17 @@ function getHealth() {
   });
 }
 
+function waitForExit(milliseconds) {
+  if (exited) return Promise.resolve(true);
+  return new Promise((resolveExit) => {
+    const timer = setTimeout(() => resolveExit(false), milliseconds);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolveExit(true);
+    });
+  });
+}
+
 const child = spawn(process.execPath, [entry], {
   cwd: projectRoot,
   env: {
@@ -93,13 +104,14 @@ if (!ready) {
 }
 
 child.kill("SIGTERM");
-await new Promise((resolveExit) => {
-  const timer = setTimeout(resolveExit, 2000);
-  child.once("exit", () => {
-    clearTimeout(timer);
-    resolveExit();
-  });
-});
+const stoppedGracefully = await waitForExit(2000);
+if (!stoppedGracefully) {
+  child.kill("SIGKILL");
+  await waitForExit(2000);
+}
+
+child.stdout.destroy();
+child.stderr.destroy();
 
 console.log("PHASE7B_API_NODE_PRODUCTION_RUNTIME=PASS");
 console.log("ENTRY=node apps/api/dist/index.js");
