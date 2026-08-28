@@ -19,9 +19,10 @@ export function resolvePhase7CDailyRecoveryMagicNumbers(input: {
   const trendDefault =
     input.accountMode === "LIVE" ? "270715" : "270713";
 
-  const trendMagicNumber = Number(
-    env.MT5_MAGIC_NUMBER ?? trendDefault,
-  );
+  const trendMagicNumber =
+    input.accountMode === "LIVE"
+      ? Number(trendDefault)
+      : Number(env.MT5_MAGIC_NUMBER ?? trendDefault);
 
   const sidewayMagicNumber = Number(
     env.ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER ?? "270714",
