@@ -43,6 +43,22 @@ interface Phase7BDemoStatus {
   entryDiagnosticsError?: string | null;
 }
 
+interface EntryConditionsDecision {
+  configVersion: number;
+  side: "BUY" | "SELL";
+  anchorCondition: string;
+  enabledCount: number;
+  allEnabledPassed: boolean;
+  failedConditions: string[];
+  conditions: Array<{
+    id: string;
+    enabled: boolean;
+    mandatory: boolean;
+    status: "PASS" | "FAIL" | "IGNORED";
+    observed: unknown;
+  }>;
+}
+
 interface DecisionAuditRecord {
   schemaVersion?: number;
   timestamp: number;
@@ -53,6 +69,7 @@ interface DecisionAuditRecord {
   stage: string;
   reasonCode?: string;
   reason: string;
+  entryConditions?: EntryConditionsDecision | null;
   setup?: {
     side?: string | null;
     pattern?: string | null;
@@ -481,7 +498,6 @@ function entryReason(
   return "Vị thế không khớp state của Trend/Sideway executor; panel không suy đoán lý do vào lệnh.";
 }
 
-
 function positionMonitor(input: {
   telemetry: Mt5TelemetrySnapshot;
   audit: DecisionAuditRecord[];
@@ -570,9 +586,7 @@ function positionMonitor(input: {
     openedAt: finite(position.openedAt) ?? finite(managed?.openedAt),
     entryReason: entryReason(strategy, managed, entryAudit),
     holdReasonCode: canonicalHoldReason(strategy, managed)?.reasonCode ?? null,
-
     holdReason: canonicalHoldReason(strategy, managed)?.reason
-
       ?? "Vị thế không thuộc state executor; cần kiểm tra thủ công, không suy đoán lý do giữ.",
   };
 }
@@ -635,6 +649,10 @@ export function buildPhase7CDecisionMonitor(input: {
     entryDiagnostics: {
       trend: input.demo?.entryDiagnostics ?? null,
       trendError: input.demo?.entryDiagnosticsError ?? null,
+    },
+    strategyEntryConditions: {
+      trend: input.audit.find((row) => row.strategy === "TREND" && row.entryConditions)?.entryConditions ?? null,
+      sideway: input.audit.find((row) => row.strategy === "SIDEWAY" && row.entryConditions)?.entryConditions ?? null,
     },
     recentDecisions: input.audit.slice(0, 40).map(({ raw: _raw, ...row }) => row),
     safety: {
