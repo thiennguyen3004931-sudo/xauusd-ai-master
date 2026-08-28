@@ -143,6 +143,31 @@ test("execution boundaries distinguish Trend managed-lot increments from Sideway
   assert.match(sidewayController, /rawMaxLot\s*\/\s*0\.01/, "Sideway controller must validate the cap at broker-step precision");
 });
 
+test("activation path preserves Trend managed-lot and Sideway cap semantics", () => {
+  const activation = readFileSync(path.join(scriptsDir, "activate-phase7c-local.ps1"), "utf8");
+  const safeActivation = readFileSync(path.join(scriptsDir, "activate-phase7c-safe-local.ps1"), "utf8");
+
+  assert.match(activation, /\$TrendFixedVolume\s+-gt\s+0\.06/, "base activation must cap Trend at 0.06");
+  assert.match(activation, /\$SidewayMaxLot\s+-gt\s+0\.04/, "base activation must cap Sideway at 0.04");
+  assert.match(activation, /\$TrendFixedVolume\s*\/\s*0\.03/, "base activation must preserve Trend one-third increments");
+  assert.match(activation, /\$SidewayMaxLot\s*\/\s*0\.01/, "base activation must treat Sideway max as a broker-step cap");
+  assert.doesNotMatch(
+    activation,
+    /Assert-ManagedLot\s+\$SidewayMaxLot/,
+    "Sideway cap must not pass through the Trend executed managed-lot validator",
+  );
+  assert.match(
+    safeActivation,
+    /\$activationArgs\.SidewayMaxLot\s*=\s*\$SidewayMaxLot/,
+    "safe activation must delegate the canonical Sideway cap to base activation",
+  );
+  assert.match(
+    safeActivation,
+    /PHASE7C_SAFE_ACTIVATE_FINAL_MODE=PAUSE/,
+    "safe activation must retain its final PAUSE guard",
+  );
+});
+
 test("API route keeps exact one-third on Trend but treats Sideway max as a broker-step cap", () => {
   const route = readFileSync(path.join(projectRoot, "apps", "api", "src", "routes", "phase7c.route.ts"), "utf8");
 
