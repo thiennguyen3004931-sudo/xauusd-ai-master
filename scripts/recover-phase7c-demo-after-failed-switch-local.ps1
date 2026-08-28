@@ -11,12 +11,11 @@ param(
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $AccountLibrary = Join-Path $PSScriptRoot "lib\phase7c-account-mode.ps1"
-$ExecutorStopper = Join-Path $PSScriptRoot "stop-phase7c-executors-local.ps1"
 $Verifier = Join-Path $PSScriptRoot "verify-phase7c-account-runtime-local.ps1"
 $AccountStatePath = Join-Path $ProjectRoot ".runtime\phase7c-account-mode.json"
 $TaskConfigPath = Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.json"
 
-foreach ($required in @($AccountLibrary, $ExecutorStopper, $Verifier, $AccountStatePath, $TaskConfigPath)) {
+foreach ($required in @($AccountLibrary, $Verifier, $AccountStatePath, $TaskConfigPath)) {
   if (-not (Test-Path -LiteralPath $required)) { throw "DEMO recovery required file not found: $required" }
 }
 . $AccountLibrary
@@ -32,7 +31,6 @@ $WorkDir = (Resolve-Path -LiteralPath $WorkDir).Path
 $DemoEnvFile = Resolve-ProjectPath $DemoEnvFile
 $LiveEnvFile = Resolve-ProjectPath $LiveEnvFile
 $CanonicalRiskPath = Join-Path $WorkDir "phase7c-lot-settings.json"
-$ExecutorLockPath = Join-Path $WorkDir "phase7c-executors\startup-runner.lock"
 $BridgeLockPath = Join-Path $WorkDir "phase7c-account-bridge\startup-runner.lock"
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -123,22 +121,85 @@ function Get-JsonArrayCount([string]$Uri, $Headers) {
   return @($parsed | Where-Object { $null -ne $_ }).Count
 }
 
-function Start-ExecutorsThroughLifecycle([string]$ExpectedMode) {
-  Start-ScheduledTask -TaskName $ExecutorTaskName -ErrorAction Stop
+function Get-ExecutorDesiredState($Lifecycle) {
+  $desired = ([string]$Lifecycle.broker.status.desiredExecutorState).Trim().ToUpperInvariant()
+  if ([string]::IsNullOrWhiteSpace($desired)) {
+    $desired = ([string]$Lifecycle.broker.heartbeat.desiredExecutorState).Trim().ToUpperInvariant()
+  }
+  return $desired
+}
+
+function Test-ExecutorRuntimeAlive($Lifecycle) {
+  if ([bool]$Lifecycle.running) { return $true }
+  foreach ($name in @("supervisor", "trend", "sideway", "telegram", "regimeNotifier")) {
+    $entry = $Lifecycle.processes.$name
+    if ($null -ne $entry -and [bool]$entry.alive) { return $true }
+  }
+  return $false
+}
+
+function Assert-ExecutorLifecycleBrokerReady([string]$ExpectedDesiredState = "") {
+  $task = Get-ScheduledTask -TaskName $ExecutorTaskName -ErrorAction Stop
+  $actions = @($task.Actions)
+  $text = if ($actions.Count -eq 1) { "$($actions[0].Execute) $($actions[0].Arguments)" } else { "MULTIPLE_ACTIONS" }
+  if ($actions.Count -ne 1 -or $text -notlike "*run-phase7c-executor-task-runner-local.ps1*") {
+    throw "Executor Scheduled Task is not the verified SYSTEM lifecycle broker runner."
+  }
+  if ($task.State -ne "Running") {
+    throw "Executor SYSTEM lifecycle broker Scheduled Task is not Running. Current=$($task.State). Refusing implicit task boot."
+  }
+
   $api = $ControlApiUrl.TrimEnd('/')
-  $brokerReady = $false
+  $lifecycle = Invoke-RestMethod -Uri "$api/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 5
+  if (-not [bool]$lifecycle.broker.ready) { throw "Lifecycle broker SYSTEM is not READY. Refusing DEMO recovery mutation." }
+  $brokerPid = [int]$lifecycle.broker.heartbeat.brokerPid
+  if ($brokerPid -le 0) { throw "Lifecycle broker SYSTEM did not publish a valid broker PID." }
+  $desired = Get-ExecutorDesiredState $lifecycle
+  if ([string]::IsNullOrWhiteSpace($desired)) { throw "Lifecycle broker SYSTEM did not publish desiredExecutorState." }
+  if (-not [string]::IsNullOrWhiteSpace($ExpectedDesiredState) -and $desired -ne $ExpectedDesiredState.Trim().ToUpperInvariant()) {
+    throw "Lifecycle broker desiredExecutorState mismatch. Expected=$ExpectedDesiredState Actual=$desired"
+  }
+  return $lifecycle
+}
+
+function Ensure-ExecutorsStoppedThroughLifecycle {
+  $api = $ControlApiUrl.TrimEnd('/')
+  $before = Assert-ExecutorLifecycleBrokerReady
+  $desiredBefore = Get-ExecutorDesiredState $before
+  if ($desiredBefore -eq "STOPPED" -and -not (Test-ExecutorRuntimeAlive $before)) {
+    Write-Host "PHASE7C_DEMO_RECOVERY_LIFECYCLE_STOP=PASS|ACTION=ALREADY_STOPPED|DESIRED=STOPPED"
+    return
+  }
+  if ($desiredBefore -ne "RUNNING") {
+    throw "DEMO recovery requires executor desired state RUNNING or safely STOPPED. Actual=$desiredBefore"
+  }
+
+  try {
+    $stopResult = Invoke-RestMethod -Uri "$api/api/v1/phase7c/lifecycle/stop" -Method Post -TimeoutSec 45
+  } catch {
+    throw "Canonical lifecycle STOP was rejected while executor runtime is active. Recovery fails closed instead of stopping the Scheduled Task. $($_.Exception.Message)"
+  }
+  $action = ([string]$stopResult.action).Trim().ToUpperInvariant()
+  if ($action -ne "STOPPED") { throw "Canonical lifecycle STOP returned unexpected action: $action" }
+
   for ($i = 1; $i -le 40; $i++) {
     Start-Sleep -Milliseconds 500
     try {
-      $lifecycle = Invoke-RestMethod -Uri "$api/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 5
-      if ([bool]$lifecycle.broker.ready) {
-        $brokerReady = $true
-        break
+      $status = Assert-ExecutorLifecycleBrokerReady
+      if ((Get-ExecutorDesiredState $status) -eq "STOPPED" -and -not (Test-ExecutorRuntimeAlive $status)) {
+        Write-Host "PHASE7C_DEMO_RECOVERY_LIFECYCLE_STOP=PASS|ACTION=$action|DESIRED=STOPPED"
+        return
       }
-    } catch {}
+    } catch {
+      if ($_.Exception.Message -match 'Scheduled Task is not Running|not READY|valid broker PID') { throw }
+    }
   }
-  if (-not $brokerReady) { throw "Lifecycle broker SYSTEM did not become READY after Scheduled Task boot." }
+  throw "Executor runtime did not reach canonical STOPPED while SYSTEM broker remained Running."
+}
 
+function Start-ExecutorsThroughLifecycle([string]$ExpectedMode) {
+  $api = $ControlApiUrl.TrimEnd('/')
+  [void](Assert-ExecutorLifecycleBrokerReady "STOPPED")
   $startResult = Invoke-RestMethod -Uri "$api/api/v1/phase7c/lifecycle/start" -Method Post -TimeoutSec 70
   $action = ([string]$startResult.action).Trim().ToUpperInvariant()
   $mode = ([string]$startResult.accountMode).Trim().ToUpperInvariant()
@@ -158,15 +219,11 @@ Clear-Phase7CLiveArmState -WorkDir $WorkDir -Reason "failed-account-switch-recov
 Write-Host "PHASE7C_DEMO_RECOVERY_LIVE_ARM=DISARMED"
 
 Assert-LegacyTaskSafeToStop
-Stop-ScheduledTask -TaskName $ExecutorTaskName -ErrorAction SilentlyContinue
+Ensure-ExecutorsStoppedThroughLifecycle
+Write-Host "PHASE7C_DEMO_RECOVERY_EXECUTORS_STOPPED=PASS"
 Stop-ScheduledTask -TaskName $BridgeTaskName -ErrorAction SilentlyContinue
 Stop-ScheduledTask -TaskName $LegacyBridgeTaskName -ErrorAction SilentlyContinue
-Write-Host "PHASE7C_DEMO_RECOVERY_TASKS_STOP_REQUESTED=PASS"
-
-Wait-ExclusiveLockReleased $ExecutorLockPath
-& $ExecutorStopper -WorkDir $WorkDir
-if ($LASTEXITCODE -ne 0) { throw "Executor cleanup failed during DEMO recovery." }
-Write-Host "PHASE7C_DEMO_RECOVERY_EXECUTORS_STOPPED=PASS"
+Write-Host "PHASE7C_DEMO_RECOVERY_BRIDGE_TASKS_STOP_REQUESTED=PASS"
 
 Wait-ExclusiveLockReleased $BridgeLockPath
 Stop-VerifiedBridgeListener
@@ -240,7 +297,11 @@ for ($i = 1; $i -le 24; $i++) {
   Start-Sleep -Seconds 5
   try {
     & $Verifier -WorkDir $WorkDir -ExpectedAccountMode DEMO -ControlApiUrl $ControlApiUrl -RequireTelegram
-    if ($LASTEXITCODE -eq 0) { $verified = $true; break }
+    if ($LASTEXITCODE -eq 0) {
+      [void](Assert-ExecutorLifecycleBrokerReady "RUNNING")
+      $verified = $true
+      break
+    }
   } catch {}
 }
 if (-not $verified) { throw "Recovered DEMO executor runtime did not pass strict verification within 120 seconds." }
