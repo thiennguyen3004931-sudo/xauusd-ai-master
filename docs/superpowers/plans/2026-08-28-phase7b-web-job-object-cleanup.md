@@ -4,7 +4,7 @@
 
 **Goal:** Ensure forced termination of the `XAUUSD-Phase7B-Web` supervisor cannot leave API/Web descendant processes or listeners orphaned.
 
-**Architecture:** Add a Windows Job Object helper configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. The Phase7B Web supervisor creates the job and assigns itself to it before spawning API/Web children so all descendants inherit containment; existing `finally` cleanup remains for normal shutdown, while kernel-level job cleanup covers forced supervisor termination.
+**Architecture:** Add a Windows Job Object helper configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. The Phase7B Web supervisor creates the job and assigns itself to it before spawning API/Web children so all descendants inherit containment; existing `finally` cleanup remains for normal shutdown, while kernel-level job cleanup covers forced supervisor termination. The native Job Object handle remains open for the supervisor lifetime so `KILL_ON_JOB_CLOSE` is triggered by supervisor process exit rather than by an explicit close while the supervisor is still running.
 
 **Tech Stack:** Windows PowerShell 5.1, PowerShell 7, Win32 Job Objects via `Add-Type`/PInvoke, GitHub Actions Windows runners.
 
@@ -19,6 +19,8 @@
 - Do not submit MT5 orders or synthetic order tests.
 - Keep existing normal-shutdown `finally` child cleanup.
 - Job Object setup or assignment failure must fail closed before API/Web children are started.
+- Keep the native Job Object handle open for the supervisor lifetime; do not close the last handle while the supervisor is alive.
+- A dot-sourced Job Object helper must not mutate the caller's `$ErrorActionPreference` or StrictMode.
 - Support Windows PowerShell 5.1 and PowerShell 7.
 
 ---
@@ -75,21 +77,21 @@ test(phase7b): reproduce forced web supervisor orphan cleanup
 - Test: `scripts/test-phase7b-web-job-object-cleanup-local.ps1`
 
 **Interfaces:**
-- Produces: `New-Phase7BKillOnCloseJob -Name <string>` returning a disposable job handle.
+- Produces: `New-Phase7BKillOnCloseJob -Name <string>` returning a native Job Object handle kept open for the supervisor lifetime.
 - Produces: `Add-Phase7BProcessToJob -Job <handle> -ProcessId <int>` assigning a process to the Job Object.
 - Consumes: `$PID` of the Web supervisor before any API/Web `Start-Process` call.
 
 - [ ] **Step 1: Implement Win32 Job Object helper**
 
-Use `CreateJobObject`, `SetInformationJobObject(JobObjectExtendedLimitInformation)`, and `AssignProcessToJobObject`; set `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and throw with Win32 error details on any failure.
+Use `CreateJobObject`, `SetInformationJobObject(JobObjectExtendedLimitInformation)`, and `AssignProcessToJobObject`; set `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and throw with Win32 error details on any failure. Do not alter caller shell preferences when the helper is dot-sourced.
 
 - [ ] **Step 2: Integrate before child start**
 
-Dot-source the helper, create the kill-on-close job, assign the current supervisor process `$PID`, and only then start API/Web children. Keep the returned handle rooted for the supervisor lifetime.
+Dot-source the helper, create the kill-on-close job, assign the current supervisor process `$PID`, and only then start API/Web children. Keep the returned native handle rooted for the supervisor lifetime.
 
-- [ ] **Step 3: Preserve graceful cleanup**
+- [ ] **Step 3: Preserve graceful cleanup and handle lifetime**
 
-Keep existing `finally { Stop-ProcessTree ... }`. Dispose the Job Object handle after normal child cleanup; abnormal supervisor death relies on OS handle closure.
+Keep existing `finally { Stop-ProcessTree ... }`. Do not close the last Job Object handle while the supervisor is alive: on normal shutdown, clean children first and then allow supervisor process exit to close its native handles; on forced supervisor death, Windows closes the process handles and `KILL_ON_JOB_CLOSE` terminates any remaining descendants.
 
 - [ ] **Step 4: Verify GREEN in both shells**
 
@@ -99,6 +101,7 @@ Expected:
 PHASE7B_WEB_JOB_OBJECT_CLEANUP_TEST=PASS
 FORCED_SUPERVISOR_TERMINATION=DESCENDANTS_CLEANED
 AUTOSTART_JOB_OBJECT_ASSIGNMENT=BEFORE_CHILD_START
+JOB_OBJECT_HELPER_CALLER_STATE=PRESERVED
 ```
 
 - [ ] **Step 5: Commit minimal production fix**
