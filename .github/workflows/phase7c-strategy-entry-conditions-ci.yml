@@ -5,6 +5,7 @@ on:
     branches:
       - feat/phase7c-strategy-entry-conditions
     paths:
+      - "apps/api/src/routes/phase7c.route.ts"
       - "apps/api/src/services/phase7c-strategy-entry-conditions.service.ts"
       - "scripts/phase7c-strategy-entry-conditions.mjs"
       - "scripts/phase7c-strategy-entry-conditions.d.mts"
@@ -14,6 +15,7 @@ on:
     branches:
       - main
     paths:
+      - "apps/api/src/routes/phase7c.route.ts"
       - "apps/api/src/services/phase7c-strategy-entry-conditions.service.ts"
       - "scripts/phase7c-strategy-entry-conditions.mjs"
       - "scripts/phase7c-strategy-entry-conditions.d.mts"
@@ -42,5 +44,5 @@ jobs:
         run: node scripts/test-phase7c-strategy-entry-conditions-core-contract.mjs
       - name: Build API dependency graph
         run: pnpm --filter @xauusd/api... build
-      - name: Strategy entry condition API persistence contract
+      - name: Strategy entry condition API persistence and route contract
         run: node scripts/test-phase7c-strategy-entry-conditions-api-contract.mjs
