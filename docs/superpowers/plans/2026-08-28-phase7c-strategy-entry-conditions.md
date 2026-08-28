@@ -2,32 +2,34 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add one canonical, versioned, Web-editable strategy-entry-condition profile for Phase 7C Trend and Sideway that applies on the next NEW ENTRY cycle without executor restart, preserves current defaults exactly, keeps mandatory directional anchors locked, and cannot weaken safety/risk/orchestration gates.
+**Goal:** Add one canonical, versioned, Web-editable strategy-entry-condition profile for Phase 7C Trend and Sideway that applies on the next NEW ENTRY evaluation without executor restart, preserves E1 defaults exactly, locks the required directional anchors, and never weakens safety/risk/orchestration gates.
 
-**Architecture:** A shared pure ESM contract module under `scripts/` owns condition IDs, defaults, mandatory-anchor rules, validation, PASS/FAIL/IGNORED composition, and version comparison. The API owns the single persisted `.runtime/phase7c-strategy-entry-conditions.json` file and whole-state optimistic-concurrency writes. Trend and Sideway consume immutable snapshots per entry cycle, recheck config version immediately before order mutation, and write the normalized condition result into the existing decision-audit channel. Web Control Center edits only non-mandatory toggles and renders `patternM15` / `rangeEdge` as checked locked anchors.
+**Architecture:** A shared pure ESM module under `scripts/` owns condition IDs, defaults, mandatory-anchor rules, validation, PASS/FAIL/IGNORED composition, and config-version comparison. The API owns the single persisted `.runtime/phase7c-strategy-entry-conditions.json` file and guarded whole-state writes. Trend and Sideway read one immutable config snapshot per NEW ENTRY evaluation, keep their approved directional anchors as the sole side origin, and recheck config validity/version at the final order boundary. Web edits only non-mandatory toggles and reads condition telemetry from the existing decision-monitor/audit channel.
 
-**Tech Stack:** Node.js ESM/MJS, TypeScript 5.9 API, Express 4, React 19, MUI 7, TanStack Query 5, pnpm 10.18, repository Node contract scripts, GitHub Actions.
+**Tech Stack:** Node.js ESM/MJS, TypeScript 5.9 API, Express 4, React 19, MUI 7, TanStack Query 5, pnpm 10.18, repository Node/PowerShell contract tests, GitHub Actions.
 
-**Spec:** `docs/superpowers/specs/2026-08-28-phase7c-strategy-entry-conditions-design.md` at approved spec commit `4f56cda197ff40b3515b0b7ae6e41b8c47bbe62a`.
+**Spec:** `docs/superpowers/specs/2026-08-28-phase7c-strategy-entry-conditions-design.md`, approved amended spec commit `4f56cda197ff40b3515b0b7ae6e41b8c47bbe62a`.
 
 ## Global Constraints
 
-- Implementation branch starts from exact approved design HEAD `4f56cda197ff40b3515b0b7ae6e41b8c47bbe62a`; do not start from a stale `main` checkout.
-- NEW ENTRY only. HOLD, BE +6, one-third partial +10, structural trailing, TP2, Recovery TP, exit logic, lot/risk, LIVE ARM, account-switch, lifecycle-broker, and Telegram control semantics remain unchanged.
-- DEMO and LIVE share exactly one strategy-condition profile; do not create `.demo.json` / `.live.json` strategy-condition files.
-- Saving is allowed only while `BOT_MODE=PAUSE`, account state is valid, Bridge telemetry is usable, and XAUUSD position count is `0`.
-- Trend `patternM15=true` is mandatory and is the only strategy-profile origin of Trend BUY/SELL.
-- Sideway `rangeEdge=true` is mandatory and is the only strategy-profile origin of Sideway BUY/SELL.
-- Sideway `m5Confirmation` remains toggleable and only confirms the side already selected by `rangeEdge`.
-- All enabled conditions use logical AND; disabled non-mandatory conditions report `IGNORED`, never `PASS`.
-- Internal parameters/thresholds remain canonical and are not editable through this feature.
-- No executor restart is required to apply a successful strategy-condition save.
-- A config version change between entry evaluation and final order boundary blocks the order with `ENTRY_CONFIG_VERSION_CHANGED`; no stale-signal retry.
-- Invalid persisted config fails closed for NEW ENTRY and is not silently replaced with defaults.
-- The no-file state is valid virtual E1 default version `0`; first save persists version `1`.
-- No LIVE or DEMO order is sent for testing. Use pure/synthetic contracts and order-boundary stubs only.
-- Preserve runtime safety while source work is performed: do not ARM, do not AUTO, do not restart Bridge/executors, and do not mutate an existing position as part of these tasks.
-- TDD order is mandatory per task: RED test -> prove exact RED cause -> minimum production change -> GREEN -> commit. Full CI occurs only after all focused tests are GREEN.
+- Create implementation branch `feat/phase7c-strategy-entry-conditions` from `design/phase7c-strategy-entry-conditions` after this reviewed plan is committed. Before code, run `git merge-base --is-ancestor 4f56cda197ff40b3515b0b7ae6e41b8c47bbe62a HEAD` and verify this plan file exists in `HEAD`.
+- NEW ENTRY only. Do not change HOLD, BE +6, one-third partial +10, structural trailing, TP2, Recovery TP, exit logic, lot/risk, LIVE ARM, account-switch, lifecycle-broker, or Telegram-control semantics.
+- DEMO and LIVE share exactly one strategy-condition file. Do not create account-specific strategy-condition profiles.
+- Save only when account state is valid, `BOT_MODE=PAUSE`, Bridge/account-mode guards are provable, and XAUUSD positions are exactly `0`.
+- Trend `patternM15=true` is mandatory, non-toggleable, and the sole strategy-profile source of Trend BUY/SELL.
+- Sideway `rangeEdge=true` is mandatory, non-toggleable, and the sole strategy-profile source of Sideway BUY/SELL.
+- Sideway `m5Confirmation` stays independently toggleable and may only confirm the side already selected by `rangeEdge`.
+- All enabled conditions use AND. Disabled non-mandatory conditions are `IGNORED`, never `PASS`.
+- `recommendedModeSideway` may be disabled only as a strategy observation; canonical `resolveSidewayPermission(...)` routing remains mandatory and outside the profile.
+- Internal indicator parameters/thresholds are not editable.
+- No executor restart is required for a successful condition-profile save.
+- Mid-cycle config invalidation/version change blocks order mutation with `ENTRY_STRATEGY_CONFIG_INVALID` or `ENTRY_CONFIG_VERSION_CHANGED`. Never retry a stale signal.
+- No-file state is virtual E1 version `0`; first successful save persists version `1`.
+- An existing malformed/invalid persisted file fails closed and normal Web POST cannot silently repair it.
+- Only `source="web-control-center"` is accepted by this feature's normal POST path.
+- No LIVE or DEMO order test. Use pure/synthetic contracts and order-boundary stubs only.
+- During source work do not ARM, enable AUTO, restart Bridge/executors, or mutate positions.
+- Every implementation task follows RED -> prove exact RED cause -> minimum production change -> GREEN -> commit.
 
 ---
 
@@ -35,37 +37,37 @@
 
 ### Create
 
-- `scripts/phase7c-strategy-entry-conditions.mjs` — canonical condition catalog, E1 defaults, mandatory-anchor rules, schema validation, evaluator, version comparator.
-- `scripts/phase7c-strategy-entry-conditions.d.mts` — TypeScript declarations for the shared MJS module imported by API TypeScript.
-- `apps/api/src/services/phase7c-strategy-entry-conditions.service.ts` — canonical file read/write service, virtual-default behavior, invalid-file fail-closed behavior, versioned atomic persistence.
+- `scripts/phase7c-strategy-entry-conditions.mjs` — canonical IDs/defaults/validation/evaluator/version guard.
+- `scripts/phase7c-strategy-entry-conditions.d.mts` — declarations for API TypeScript import.
+- `apps/api/src/services/phase7c-strategy-entry-conditions.service.ts` — canonical persistence plus pure save-guard evaluation.
 - `apps/web/src/ui/Phase7CStrategyEntryConditionsCard.tsx` — dedicated Control Center editor/status card.
-- `scripts/test-phase7c-strategy-entry-conditions-core-contract.mjs` — pure shared-module RED/GREEN contracts.
-- `scripts/test-phase7c-strategy-entry-conditions-api-contract.mjs` — service/route source and persistence contracts.
-- `scripts/test-phase7c-strategy-entry-conditions-audit-contract.mjs` — audit/monitor normalized payload contracts.
-- `scripts/test-phase7c-trend-strategy-entry-conditions-contract.mjs` — Trend default-equivalence, toggle, anchor, and version-race contracts.
-- `scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs` — Sideway default-equivalence, `rangeEdge`, M5 toggle, and version-race contracts.
-- `scripts/test-phase7c-strategy-entry-conditions-web-contract.mjs` — Web/API-client locked-anchor, runtime-lock, stale-version, restore/default draft contracts.
-- `.github/workflows/phase7c-strategy-entry-conditions-ci.yml` — focused feature CI plus API/Web builds and selected safety regressions.
+- `scripts/test-phase7c-strategy-entry-conditions-core-contract.mjs`
+- `scripts/test-phase7c-strategy-entry-conditions-api-contract.mjs`
+- `scripts/test-phase7c-strategy-entry-conditions-audit-contract.mjs`
+- `scripts/test-phase7c-trend-strategy-entry-conditions-contract.mjs`
+- `scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs`
+- `scripts/test-phase7c-strategy-entry-conditions-web-contract.mjs`
+- `.github/workflows/phase7c-strategy-entry-conditions-ci.yml`
 
 ### Modify
 
-- `apps/api/src/routes/phase7c.route.ts` — add GET/POST `/strategy-entry-conditions` with authorization and runtime save guards.
-- `scripts/phase7c-decision-audit.mjs` — preserve `entryConditions` normalized telemetry and new entry strategy reason codes in the existing audit record.
-- `apps/api/src/services/phase7c-decision-monitor.service.ts` — expose latest Trend/Sideway `entryConditions` without replacing later safety block reasons.
-- `scripts/run-phase7b-demo-controller.ts` — read one config snapshot per NEW ENTRY cycle, use `patternM15` anchor, compose toggles, final version recheck before order mutation.
-- `scripts/run-phase7c-sideway-controller.mjs` — read one config snapshot per NEW ENTRY cycle, keep `rangeEdge` as side origin, make M5 optional, final version recheck before order mutation.
-- `apps/web/src/phase7c-types.ts` — add strategy-condition state/snapshot/audit UI types.
-- `apps/web/src/api.ts` — add GET/POST client functions for strategy-entry conditions.
-- `apps/web/src/pages/Phase7CControlCenterShellPage.tsx` — render the new card in Control Center, separate from Account & Risk and LIVE ARM card.
+- `apps/api/src/routes/phase7c.route.ts`
+- `scripts/phase7c-decision-audit.mjs`
+- `apps/api/src/services/phase7c-decision-monitor.service.ts`
+- `scripts/run-phase7b-demo-controller.ts`
+- `scripts/run-phase7c-sideway-controller.mjs`
+- `apps/web/src/phase7c-types.ts`
+- `apps/web/src/api.ts`
+- `apps/web/src/pages/Phase7CControlCenterShellPage.tsx`
 
 ### Explicitly Do Not Modify
 
-- Lot limits or lot settings behavior.
-- LIVE ARM authorization logic.
-- lifecycle START/STOP implementation.
-- account-switch/recovery implementation.
-- HOLD/BE/partial/Recovery TP management state machines.
-- MT5 Bridge order permission to create a test order.
+- lot-limit behavior or lot-settings semantics;
+- LIVE ARM authorization;
+- account-switch/recovery implementation;
+- lifecycle START/STOP implementation;
+- MT5 Bridge trading permission;
+- position-management state machines.
 
 ---
 
@@ -77,12 +79,29 @@
 - Test: `scripts/test-phase7c-strategy-entry-conditions-core-contract.mjs`
 
 **Interfaces:**
-- Produces `TREND_STRATEGY_CONDITION_IDS`, `SIDEWAY_STRATEGY_CONDITION_IDS`, `STRATEGY_ENTRY_MANDATORY`, `createVirtualStrategyEntryConditionState()`, `validateStrategyEntryConditionState(value, options)`, `evaluateStrategyEntryConditions(input)`, and `compareStrategyEntryConfigVersion(cycleSnapshot, currentSnapshot)`.
-- `evaluateStrategyEntryConditions` consumes a canonical side already produced by the adapter and a complete observation map. It never invents an alternate side.
 
-- [ ] **Step 1: Write the failing pure contract first**
+```ts
+export type Phase7CStrategyName = "TREND" | "SIDEWAY";
+export type Phase7CEntrySide = "BUY" | "SELL";
+export type Phase7CStrategyConditionStatus = "PASS" | "FAIL" | "IGNORED";
+export type Phase7CVersionSnapshot = { version: number; valid: boolean };
+```
 
-Create `scripts/test-phase7c-strategy-entry-conditions-core-contract.mjs` with assertions equivalent to:
+Public exports:
+
+```js
+TREND_STRATEGY_CONDITION_IDS
+SIDEWAY_STRATEGY_CONDITION_IDS
+STRATEGY_ENTRY_MANDATORY
+createVirtualStrategyEntryConditionState()
+validateStrategyEntryConditionState(value, options)
+evaluateStrategyEntryConditions(input)
+compareStrategyEntryConfigVersion(cycleSnapshot, currentSnapshot)
+```
+
+- [ ] **Step 1: Write RED core contract**
+
+Create `scripts/test-phase7c-strategy-entry-conditions-core-contract.mjs` with these essential assertions:
 
 ```js
 import assert from "node:assert/strict";
@@ -96,14 +115,22 @@ import {
 
 const defaults = createVirtualStrategyEntryConditionState();
 assert.equal(defaults.version, 0);
-assert.equal(defaults.trend.patternM15, true);
-assert.equal(defaults.trend.supertrendM15, true);
-assert.equal(defaults.trend.supertrendM5, true);
-assert.equal(defaults.trend.validTrendStructure, true);
-assert.equal(defaults.trend.ma20Ma50, false);
-assert.equal(defaults.trend.fvg, false);
-assert.equal(defaults.sideway.rangeEdge, true);
-assert.equal(defaults.sideway.m5Confirmation, true);
+assert.deepEqual(defaults.trend, {
+  patternM15: true,
+  supertrendM15: true,
+  supertrendM5: true,
+  validTrendStructure: true,
+  ma20Ma50: false,
+  fvg: false,
+});
+assert.deepEqual(defaults.sideway, {
+  rangingRegime: true,
+  recommendedModeSideway: true,
+  minimumRegimeConfidence: true,
+  supplyDemandRange: true,
+  rangeEdge: true,
+  m5Confirmation: true,
+});
 assert.deepEqual(STRATEGY_ENTRY_MANDATORY, {
   TREND: ["patternM15"],
   SIDEWAY: ["rangeEdge"],
@@ -113,7 +140,7 @@ assert.equal(validateStrategyEntryConditionState(defaults, { allowVirtualVersion
 assert.equal(validateStrategyEntryConditionState({ ...defaults, trend: { ...defaults.trend, patternM15: false } }, { allowVirtualVersionZero: true }).valid, false);
 assert.equal(validateStrategyEntryConditionState({ ...defaults, sideway: { ...defaults.sideway, rangeEdge: false } }, { allowVirtualVersionZero: true }).valid, false);
 
-const trend = evaluateStrategyEntryConditions({
+const result = evaluateStrategyEntryConditions({
   strategy: "TREND",
   config: defaults,
   side: "BUY",
@@ -126,10 +153,10 @@ const trend = evaluateStrategyEntryConditions({
     fvg: { passed: false, observed: "NONE" },
   },
 });
-assert.equal(trend.allEnabledPassed, false);
-assert.equal(trend.conditions.find((row) => row.id === "supertrendM5").status, "FAIL");
-assert.equal(trend.conditions.find((row) => row.id === "ma20Ma50").status, "IGNORED");
-assert.equal(trend.conditions.find((row) => row.id === "patternM15").mandatory, true);
+assert.equal(result.allEnabledPassed, false);
+assert.equal(result.conditions.find((row) => row.id === "supertrendM5").status, "FAIL");
+assert.equal(result.conditions.find((row) => row.id === "ma20Ma50").status, "IGNORED");
+assert.equal(result.conditions.find((row) => row.id === "patternM15").mandatory, true);
 
 assert.deepEqual(
   compareStrategyEntryConfigVersion({ version: 7, valid: true }, { version: 8, valid: true }),
@@ -141,21 +168,19 @@ assert.deepEqual(
 );
 ```
 
-Also include negative assertions for unknown key, missing key, non-boolean value, `version < 0`, persisted `version=0` when `allowVirtualVersionZero=false`, and zero enabled condition sets.
+Add explicit failures for unknown keys, missing keys, non-boolean conditions, negative version, persisted `version=0`, and zero-enabled invalid sets.
 
-- [ ] **Step 2: Run RED and prove the exact cause**
-
-Run:
+- [ ] **Step 2: Prove RED**
 
 ```bash
 node scripts/test-phase7c-strategy-entry-conditions-core-contract.mjs
 ```
 
-Expected RED: Node fails because `scripts/phase7c-strategy-entry-conditions.mjs` does not exist. Record that the failure is absence of the approved canonical module, not an unrelated runtime/network failure.
+Expected: module-not-found for `scripts/phase7c-strategy-entry-conditions.mjs`. Record that exact failure.
 
-- [ ] **Step 3: Implement the minimum shared module**
+- [ ] **Step 3: Implement minimum shared module**
 
-Create `scripts/phase7c-strategy-entry-conditions.mjs` with these exact public names and semantics:
+Use exact IDs/defaults:
 
 ```js
 export const TREND_STRATEGY_CONDITION_IDS = Object.freeze([
@@ -168,33 +193,9 @@ export const STRATEGY_ENTRY_MANDATORY = Object.freeze({
   TREND: Object.freeze(["patternM15"]),
   SIDEWAY: Object.freeze(["rangeEdge"]),
 });
-
-export function createVirtualStrategyEntryConditionState() {
-  return {
-    version: 0,
-    updatedAt: new Date(0).toISOString(),
-    updatedBy: "safe-default",
-    trend: {
-      patternM15: true,
-      supertrendM15: true,
-      supertrendM5: true,
-      validTrendStructure: true,
-      ma20Ma50: false,
-      fvg: false,
-    },
-    sideway: {
-      rangingRegime: true,
-      recommendedModeSideway: true,
-      minimumRegimeConfidence: true,
-      supplyDemandRange: true,
-      rangeEdge: true,
-      m5Confirmation: true,
-    },
-  };
-}
 ```
 
-Validation must whitelist exact keys, require booleans, require `patternM15 === true` and `rangeEdge === true`, and return a structured object rather than silently coercing data:
+`validateStrategyEntryConditionState(...)` returns only:
 
 ```js
 { valid: true, state }
@@ -202,7 +203,7 @@ Validation must whitelist exact keys, require booleans, require `patternM15 === 
 { valid: false, reasonCode: "ENTRY_STRATEGY_CONFIG_INVALID", error: "..." }
 ```
 
-Evaluator output shape is fixed:
+`evaluateStrategyEntryConditions(...)` returns:
 
 ```js
 {
@@ -216,19 +217,17 @@ Evaluator output shape is fixed:
 }
 ```
 
-`compareStrategyEntryConfigVersion` returns `{ ok: true }`, `ENTRY_CONFIG_VERSION_CHANGED`, or `ENTRY_STRATEGY_CONFIG_INVALID` only.
+Mandatory anchors can only be PASS/FAIL. Disabled non-mandatory fields are IGNORED.
 
-Create `scripts/phase7c-strategy-entry-conditions.d.mts` declaring the same exports so API TypeScript can import the MJS module without `any` drift.
-
-- [ ] **Step 4: Run focused GREEN**
+- [ ] **Step 4: GREEN**
 
 ```bash
 node scripts/test-phase7c-strategy-entry-conditions-core-contract.mjs
 ```
 
-Expected: PASS with an explicit final line such as `PHASE7C_STRATEGY_ENTRY_CORE_CONTRACT=PASS`.
+Expected final marker: `PHASE7C_STRATEGY_ENTRY_CORE_CONTRACT=PASS`.
 
-- [ ] **Step 5: Commit Task 1**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add scripts/phase7c-strategy-entry-conditions.mjs scripts/phase7c-strategy-entry-conditions.d.mts scripts/test-phase7c-strategy-entry-conditions-core-contract.mjs
@@ -237,20 +236,33 @@ git commit -m "feat(strategy): add canonical entry condition contract"
 
 ---
 
-### Task 2: Canonical Persistence Service
+### Task 2: Canonical Persistence and Pure Save Guards
 
 **Files:**
 - Create: `apps/api/src/services/phase7c-strategy-entry-conditions.service.ts`
-- Modify only if required for TypeScript resolution: `apps/api/tsconfig.json`
 - Test: `scripts/test-phase7c-strategy-entry-conditions-api-contract.mjs`
 
 **Interfaces:**
-- Consumes shared validation/defaults from `../../../../scripts/phase7c-strategy-entry-conditions.mjs`.
-- Produces `Phase7CStrategyEntryConditionsService`, singleton `phase7CStrategyEntryConditionsService`, typed error `Phase7CStrategyEntryConfigError`, and methods `read()` / `set(input)`.
 
-- [ ] **Step 1: Extend the API contract test for persistence RED**
+```ts
+export class Phase7CStrategyEntryConditionsService {
+  constructor(filePath?: string);
+  read(): Phase7CStrategyEntryReadResult;
+  set(input: Phase7CStrategyEntryWriteInput): Phase7CStrategyEntryReadResult;
+}
 
-In `scripts/test-phase7c-strategy-entry-conditions-api-contract.mjs`, use a temporary directory and dynamically import the service after API build. Assert these cases:
+export function evaluatePhase7CStrategyEntrySaveGuard(input: {
+  mode: string;
+  accountStateValid: boolean;
+  bridgeReachable: boolean;
+  accountModeMatches: boolean;
+  openXauusdPositions: number | null;
+}): { allowed: true } | { allowed: false; httpStatus: 409; code: string; message: string };
+```
+
+- [ ] **Step 1: Add persistence/guard RED assertions**
+
+The API contract must instantiate the service against a temp file:
 
 ```js
 const service = new Phase7CStrategyEntryConditionsService(tempFile);
@@ -267,170 +279,134 @@ const saved = service.set({
 });
 assert.equal(saved.state.version, 1);
 assert.equal(saved.state.sideway.m5Confirmation, false);
-assert.equal(fs.existsSync(tempFile), true);
 ```
 
-Then assert stale version performs no write, `patternM15=false` and `rangeEdge=false` are rejected, unknown keys are rejected, an existing malformed file returns `valid=false`, and `set()` refuses to repair that malformed file through the normal path.
+Also test: stale version leaves file unchanged; only source `web-control-center` is accepted; mandatory-anchor false is rejected; malformed persisted file returns `valid=false` and cannot be repaired through `set`; atomic write results in complete JSON only; save guard rejects non-PAUSE, invalid account state, unreachable/mismatched Bridge, unknown position count, and positions > 0.
 
-- [ ] **Step 2: Run RED**
+- [ ] **Step 2: Prove RED**
 
 ```bash
-pnpm --filter @xauusd/api build
+pnpm --filter @xauusd/api... build
 node scripts/test-phase7c-strategy-entry-conditions-api-contract.mjs
 ```
 
-Expected RED: service module/import is missing. The API build before implementation may pass; the focused contract must fail specifically because the new service does not exist.
+Expected focused failure: new service/export missing.
 
-- [ ] **Step 3: Implement the persistence service minimally**
+- [ ] **Step 3: Implement minimum persistence**
 
-Use a constructor with an injectable path:
+Constructor path:
 
 ```ts
-export class Phase7CStrategyEntryConditionsService {
-  constructor(
-    filePath = process.env.PHASE7C_STRATEGY_ENTRY_CONDITIONS_FILE,
-  ) {
-    this.filePath = filePath?.trim()
-      ? resolve(filePath)
-      : resolve(process.cwd(), ".runtime", "phase7c-strategy-entry-conditions.json");
-  }
-
-  read(): Phase7CStrategyEntryReadResult { /* exact validation behavior below */ }
-  set(input: Phase7CStrategyEntryWriteInput): Phase7CStrategyEntryReadResult { /* exact write behavior below */ }
-}
+this.filePath = filePath?.trim()
+  ? resolve(filePath)
+  : resolve(process.cwd(), ".runtime", "phase7c-strategy-entry-conditions.json");
 ```
 
-`read()` behavior:
+`read()` contract:
 
 ```ts
 // no file
 { state: createVirtualStrategyEntryConditionState(), valid: true, persisted: false, error: null }
-
 // valid file
-{ state: parsedValidatedState, valid: true, persisted: true, error: null }
-
+{ state: parsedState, valid: true, persisted: true, error: null }
 // existing invalid file
-{ state: null, valid: false, persisted: true, error: validation.error }
+{ state: null, valid: false, persisted: true, error: "..." }
 ```
 
-`set()` must first call `read()`. If persisted state is invalid, throw `Phase7CStrategyEntryConfigError("ENTRY_STRATEGY_CONFIG_INVALID", ...)`. Require exact `expectedVersion`. Build the persisted next state with `version: current.version + 1`, current ISO timestamp, restricted source, and validated whole Trend/Sideway shape. Persist through same-directory temp file + `renameSync`, matching the repository atomic lot-settings pattern.
+`set()` must call `read()`, reject invalid persisted state, require `expectedVersion === current.version`, require `source === "web-control-center"`, validate complete Trend/Sideway payload, increment version exactly once, and write same-directory temp + `renameSync`.
 
-Define typed error codes:
+Error codes:
 
 ```ts
-export type Phase7CStrategyEntryConfigErrorCode =
-  | "ENTRY_STRATEGY_CONFIG_INVALID"
-  | "CONFIG_VERSION_CONFLICT";
+"ENTRY_STRATEGY_CONFIG_INVALID" | "CONFIG_VERSION_CONFLICT"
 ```
 
-Do not add account-specific strategy-condition profile files.
-
-- [ ] **Step 4: Run GREEN and API build**
+- [ ] **Step 4: GREEN**
 
 ```bash
-pnpm --filter @xauusd/api build
+pnpm --filter @xauusd/api... build
 node scripts/test-phase7c-strategy-entry-conditions-api-contract.mjs
 ```
 
-Expected: both PASS.
-
-- [ ] **Step 5: Commit Task 2**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api/src/services/phase7c-strategy-entry-conditions.service.ts scripts/test-phase7c-strategy-entry-conditions-api-contract.mjs apps/api/tsconfig.json
+git add apps/api/src/services/phase7c-strategy-entry-conditions.service.ts scripts/test-phase7c-strategy-entry-conditions-api-contract.mjs
 git commit -m "feat(api): persist strategy entry condition profiles"
 ```
 
-Only add `apps/api/tsconfig.json` to the commit if an actual MJS declaration-resolution change was required; otherwise leave it untouched.
-
 ---
 
-### Task 3: GET/POST API With Runtime Save Guards
+### Task 3: Guarded GET/POST API
 
 **Files:**
 - Modify: `apps/api/src/routes/phase7c.route.ts`
 - Test: `scripts/test-phase7c-strategy-entry-conditions-api-contract.mjs`
 
 **Interfaces:**
-- `GET /api/v1/phase7c/strategy-entry-conditions`
-- `POST /api/v1/phase7c/strategy-entry-conditions`
-- Reuses existing `canChangeBotMode`, `phase7CBotModeService`, `getPhase7CAccountModeState`, `getMt5Telemetry`, and `accountModeAllowsBroker`.
-
-- [ ] **Step 1: Add route-source and route-behavior RED assertions**
-
-The focused script must assert the route exposes both endpoints and that POST checks authorization, PAUSE, valid account state, matching/healthy Bridge telemetry, zero XAUUSD positions, whole-state payload, expected version, and mandatory anchors before calling `set()`.
-
-Expected response semantics:
 
 ```text
-403  mutation not authorized
-400  malformed/schema-invalid payload or mandatory anchor false
-409  mode != PAUSE
-409  invalid account state
-409  Bridge/account-mode guard cannot be proven
-409  positions > 0
-409  CONFIG_VERSION_CONFLICT
-409  existing persisted config invalid / non-editable
-200  successful save
+GET  /api/v1/phase7c/strategy-entry-conditions
+POST /api/v1/phase7c/strategy-entry-conditions
 ```
 
-GET must be read-only. If Bridge telemetry is unavailable, still return the config state plus `editable=false` and guard status; do not mutate anything.
+- [ ] **Step 1: Extend API contract to RED on route behavior/source**
 
-- [ ] **Step 2: Run RED**
+Require these response classes:
+
+```text
+403 mutation authorization fails
+400 schema invalid / mandatory anchor false / unsupported source
+409 mode != PAUSE
+409 invalid account state
+409 Bridge/account-mode/position guard cannot be proven
+409 XAUUSD positions > 0
+409 CONFIG_VERSION_CONFLICT
+409 existing persisted config invalid
+200 successful whole-state save
+```
+
+GET remains read-only and, if Bridge telemetry is unavailable, returns config validity plus `editable=false` rather than mutating or substituting config.
+
+- [ ] **Step 2: Prove RED**
 
 ```bash
 node scripts/test-phase7c-strategy-entry-conditions-api-contract.mjs
 ```
 
-Expected RED: route declarations/guard contract are absent.
+Expected: route endpoints/guard wiring absent.
 
-- [ ] **Step 3: Add the routes minimally**
+- [ ] **Step 3: Implement route wiring**
 
-Import the singleton/error type and implement GET response shape:
+Reuse existing `canChangeBotMode(req)`, `phase7CBotModeService`, `getPhase7CAccountModeState`, `getMt5Telemetry`, and `accountModeAllowsBroker`.
+
+GET shape:
 
 ```ts
 {
   state: read.valid ? read.state : null,
   valid: read.valid,
+  persisted: read.persisted,
   editable,
   error: read.error,
   appliesTo: "NEW_ENTRIES_ONLY",
   sharedAcrossAccounts: true,
   mandatory: { trend: ["patternM15"], sideway: ["rangeEdge"] },
-  guards: {
-    mode,
-    accountStateValid,
-    bridgeReachable,
-    accountModeMatches,
-    openXauusdPositions,
-  },
+  guards: { mode, accountStateValid, bridgeReachable, accountModeMatches, openXauusdPositions },
   safety: { requiresPause: true, requiresZeroXauusdPositions: true },
 }
 ```
 
-POST body is whole-state only:
+POST sends the complete body into the service only after authorization and `evaluatePhase7CStrategyEntrySaveGuard(...)` pass. Do not accept partial patches or threshold/parameter fields. Do not start/restart executors.
 
-```ts
-const input = {
-  expectedVersion: Number(req.body?.expectedVersion),
-  trend: req.body?.trend,
-  sideway: req.body?.sideway,
-  source: req.body?.source,
-};
-```
-
-Do not accept threshold/parameter fields. Do not silently retry `CONFIG_VERSION_CONFLICT`. Do not create or start executors from this route.
-
-- [ ] **Step 4: Run GREEN and build**
+- [ ] **Step 4: GREEN**
 
 ```bash
 node scripts/test-phase7c-strategy-entry-conditions-api-contract.mjs
-pnpm --filter @xauusd/api build
+pnpm --filter @xauusd/api... build
 ```
 
-Expected: PASS.
-
-- [ ] **Step 5: Commit Task 3**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add apps/api/src/routes/phase7c.route.ts scripts/test-phase7c-strategy-entry-conditions-api-contract.mjs
@@ -439,7 +415,7 @@ git commit -m "feat(api): expose guarded strategy entry condition API"
 
 ---
 
-### Task 4: Decision Audit and Monitor Observability
+### Task 4: Audit and Decision-Monitor Observability
 
 **Files:**
 - Modify: `scripts/phase7c-decision-audit.mjs`
@@ -447,49 +423,57 @@ git commit -m "feat(api): expose guarded strategy entry condition API"
 - Test: `scripts/test-phase7c-strategy-entry-conditions-audit-contract.mjs`
 
 **Interfaces:**
-- Audit payload field `entryConditions` keeps the evaluator result.
-- New canonical entry reason/event codes: `ENTRY_STRATEGY_CONDITION_BLOCK`, `ENTRY_STRATEGY_CONDITIONS_PASS`, `ENTRY_CONFIG_VERSION_CHANGED`, `ENTRY_STRATEGY_CONFIG_INVALID`.
-- Monitor exposes latest entry-condition result for each strategy without treating `ENTRY_STRATEGY_CONDITIONS_PASS` as permission to trade.
+
+```ts
+entryConditions: {
+  configVersion: number;
+  side: "BUY" | "SELL";
+  anchorCondition: "patternM15" | "rangeEdge";
+  enabledCount: number;
+  allEnabledPassed: boolean;
+  failedConditions: string[];
+  conditions: Array<{
+    id: string;
+    enabled: boolean;
+    mandatory: boolean;
+    status: "PASS" | "FAIL" | "IGNORED";
+    observed: unknown;
+  }>;
+} | null;
+```
+
+Decision monitor adds:
+
+```ts
+strategyEntryConditions: {
+  trend: EntryConditionsDecision | null;
+  sideway: EntryConditionsDecision | null;
+};
+```
 
 - [ ] **Step 1: Write audit RED**
 
-Test `__test.normalizeRecord` with:
+Test `__test.normalizeRecord` preserves the full `entryConditions` object for `ENTRY_STRATEGY_CONDITION_BLOCK`, and that a later safety block keeps its own safety `reasonCode` even if an earlier `ENTRY_STRATEGY_CONDITIONS_PASS` exists.
+
+Example:
 
 ```js
-const record = __test.normalizeRecord("TREND", "XAUUSD", {}, "ENTRY_STRATEGY_CONDITION_BLOCK", {
-  side: "BUY",
-  reason: "Enabled condition failed",
-  entryConditions: {
-    configVersion: 3,
-    side: "BUY",
-    anchorCondition: "patternM15",
-    enabledCount: 4,
-    allEnabledPassed: false,
-    failedConditions: ["supertrendM5"],
-    conditions: [
-      { id: "patternM15", enabled: true, mandatory: true, status: "PASS", observed: "BULLISH_ENGULFING" },
-      { id: "supertrendM5", enabled: true, mandatory: false, status: "FAIL", observed: "SELL" },
-    ],
-  },
-});
 assert.equal(record.reasonCode, "ENTRY_STRATEGY_CONDITION_BLOCK");
 assert.equal(record.entryConditions.configVersion, 3);
 assert.deepEqual(record.entryConditions.failedConditions, ["supertrendM5"]);
 ```
 
-Also assert an existing safety-block event that occurs after a strategy-pass retains its safety `reasonCode`; strategy-pass must not overwrite final block reason.
-
-- [ ] **Step 2: Run RED**
+- [ ] **Step 2: Prove RED**
 
 ```bash
 node scripts/test-phase7c-strategy-entry-conditions-audit-contract.mjs
 ```
 
-Expected RED: normalized audit does not yet preserve `entryConditions`.
+Expected: audit does not yet preserve/expose strategy-condition telemetry.
 
-- [ ] **Step 3: Extend audit and monitor minimally**
+- [ ] **Step 3: Implement minimum audit/monitor extension**
 
-In `normalizeRecord`, add:
+In `normalizeRecord` add:
 
 ```js
 entryConditions: payload?.entryConditions && typeof payload.entryConditions === "object"
@@ -497,18 +481,27 @@ entryConditions: payload?.entryConditions && typeof payload.entryConditions === 
   : null,
 ```
 
-Do not change canonical HOLD translations. Update monitor `DecisionAuditRecord` type and snapshot assembly so the newest Trend and Sideway audit row containing `entryConditions` can be returned for Web observability. Keep final `preTrade` safety decision logic independent.
+In `buildPhase7CDecisionMonitor`, select the newest audit row per strategy that contains `entryConditions`:
 
-- [ ] **Step 4: Run GREEN and API build**
+```ts
+strategyEntryConditions: {
+  trend: input.audit.find((row) => row.strategy === "TREND" && row.entryConditions)?.entryConditions ?? null,
+  sideway: input.audit.find((row) => row.strategy === "SIDEWAY" && row.entryConditions)?.entryConditions ?? null,
+},
+```
+
+Do not change canonical HOLD reason translations and do not make strategy-pass equivalent to trade approval.
+
+- [ ] **Step 4: GREEN plus existing audit/monitor regressions**
 
 ```bash
 node scripts/test-phase7c-strategy-entry-conditions-audit-contract.mjs
-pnpm --filter @xauusd/api build
+node --test scripts/phase7c-decision-audit.test.mjs
+pnpm --dir apps/api exec tsx ../../scripts/phase7c-decision-monitor.test.mjs
+pnpm --filter @xauusd/api... build
 ```
 
-Expected: PASS.
-
-- [ ] **Step 5: Commit Task 4**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add scripts/phase7c-decision-audit.mjs apps/api/src/services/phase7c-decision-monitor.service.ts scripts/test-phase7c-strategy-entry-conditions-audit-contract.mjs
@@ -517,120 +510,105 @@ git commit -m "feat(observability): report strategy entry condition decisions"
 
 ---
 
-### Task 5: Trend Executor Integration
+### Task 5: Trend Executor Integration, Including Pending Pullback
 
 **Files:**
 - Modify: `scripts/run-phase7b-demo-controller.ts`
 - Test: `scripts/test-phase7c-trend-strategy-entry-conditions-contract.mjs`
-- Regression inputs: existing Trend entry/pullback/recovery contract scripts and `phase7b-supertrend-entry-gates-ci.yml` / `phase7b-wait-pullback-ci.yml` commands.
 
 **Interfaces:**
-- Reads one config snapshot at the beginning of each NEW ENTRY evaluation.
-- `patternM15` remains the sole side origin.
-- Optional Trend confirmations only confirm/reject anchor side.
-- Before any order POST, re-read config and call `compareStrategyEntryConfigVersion`.
+- `patternM15` remains the only side origin.
+- Existing `hasRelevantFvg(m15, index, side, 12)` is the FVG observation; do not create a second FVG definition.
+- Existing MA20/MA50 and Supertrend 10,3 calculations are reused unchanged.
+- Structural stop/risk-plan validity remains mandatory as a computational/safety prerequisite even if the explicit `validTrendStructure` strategy checkbox is disabled.
+- Both immediate entry and a later `PULLBACK_ENTRY` are NEW ENTRY evaluations and must read the current profile for that cycle.
 
-- [ ] **Step 1: Write Trend RED contracts before changing controller**
+- [ ] **Step 1: Write Trend RED contract**
 
-The new contract script must statically/dynamically prove all of these:
+Require:
 
 ```text
-E1 default == existing Trend gate:
-patternM15 AND supertrendM15 AND supertrendM5 AND validTrendStructure
-ma20Ma50 disabled
-fvg disabled
-
-patternM15 is mandatory and never IGNORED
-supertrendM15 disabled => IGNORED and no longer blocks
-supertrendM5 disabled => IGNORED and no longer blocks
-ma20Ma50 enabled + disagreement => FAIL
-fvg enabled + missing/same-side false => FAIL
-all enabled PASS => strategy gate PASS
-config invalid => ENTRY_STRATEGY_CONFIG_INVALID and no order mutation
-mid-cycle version mismatch => ENTRY_CONFIG_VERSION_CHANGED and no order mutation
+E1 == current pattern + M15 ST + M5 ST + valid-structure behavior
+patternM15 never IGNORED and owns side
+supertrendM15 disabled => IGNORED
+supertrendM5 disabled => IGNORED
+ma20Ma50 enabled + direction disagreement => FAIL
+fvg enabled + hasRelevantFvg(...)=false => FAIL
+all enabled conditions PASS => strategy-pass event
+immediate path uses one cycle config snapshot
+pending-pullback path re-reads current profile on the later pullback cycle
+config invalid => no order boundary call
+version change before immediate order => ENTRY_CONFIG_VERSION_CHANGED
+version change before pullback order => ENTRY_CONFIG_VERSION_CHANGED
 ```
 
-Use pure helpers/stubs; no Bridge order endpoint may be called.
+The test must stub/inspect the order boundary; it must never call a real Bridge.
 
-- [ ] **Step 2: Run Trend RED and prove exact failure**
+- [ ] **Step 2: Prove RED**
 
 ```bash
 node scripts/test-phase7c-trend-strategy-entry-conditions-contract.mjs
 ```
 
-Expected RED: controller has hard-coded Trend entry gating and no strategy-condition snapshot/version recheck.
+Expected: current controller hard-codes Supertrend gates and has no profile/version handling.
 
-- [ ] **Step 3: Refactor only NEW ENTRY evaluation**
+- [ ] **Step 3: Refactor candidate detection without changing indicator definitions**
 
-Import shared helpers. At the point the current M15 trigger is available, construct anchor first:
+Replace the hard pre-evaluator Supertrend rejection in `latestSignal(...)` with a raw candidate stage that originates side only from `detectEntryPattern(...)`, calculates existing observations, and passes them into the shared evaluator.
 
-```ts
-const trigger = detectEntryPattern(m15, index);
-if (!trigger) return null;
-const cycleConfig = readStrategyEntrySnapshotOrFailClosed();
-const side = trigger.side;
-```
-
-Compute existing canonical observations without changing indicator parameters:
+Observation mapping:
 
 ```ts
 const observations = {
-  patternM15: { passed: true, observed: `${side}:${trigger.pattern}` },
-  supertrendM15: { passed: m15Direction === side, observed: m15Direction },
-  supertrendM5: { passed: m5Direction === side, observed: m5Direction },
+  patternM15: { passed: true, observed: `${trigger.side}:${trigger.pattern}` },
+  supertrendM15: { passed: m15Direction === trigger.side, observed: m15Direction },
+  supertrendM5: { passed: m5Direction === trigger.side, observed: m5Direction },
   validTrendStructure: { passed: structuralStopDistance > 0, observed: structuralStopDistance > 0 ? "VALID" : "INVALID" },
-  ma20Ma50: { passed: side === "BUY" ? ma20 > ma50 : ma20 < ma50, observed: ma20 > ma50 ? "BUY" : ma20 < ma50 ? "SELL" : "FLAT" },
-  fvg: { passed: sameDirectionFvgConfirmed, observed: sameDirectionFvgConfirmed ? side : "NONE" },
+  ma20Ma50: {
+    passed: trigger.side === "BUY" ? ma20 > ma50 : ma20 < ma50,
+    observed: ma20 > ma50 ? "BUY" : ma20 < ma50 ? "SELL" : "FLAT",
+  },
+  fvg: {
+    passed: hasRelevantFvg(m15, index, trigger.side, 12),
+    observed: hasRelevantFvg(m15, index, trigger.side, 12) ? trigger.side : "NONE",
+  },
 };
 ```
 
-Use the existing FVG detector/diagnostic value; do not introduce a new FVG definition. If the exact existing observation is produced elsewhere in the controller, wire that value into this map rather than duplicating detector logic.
+Compute `hasRelevantFvg(...)` once into a local boolean before building this object.
 
-Evaluate:
+When the strategy gate fails:
 
 ```ts
-const entryConditions = evaluateStrategyEntryConditions({
-  strategy: "TREND",
-  config: cycleConfig.state,
-  side,
-  observations,
+journal("ENTRY_STRATEGY_CONDITION_BLOCK", {
+  side: trigger.side,
+  entryConditions,
+  reason: entryConditions.failedConditions.join(","),
 });
-if (!entryConditions.allEnabledPassed) {
-  journal("ENTRY_STRATEGY_CONDITION_BLOCK", { side, entryConditions, reason: entryConditions.failedConditions.join(",") });
-  return null;
-}
-journal("ENTRY_STRATEGY_CONDITIONS_PASS", { side, entryConditions });
 ```
 
-Immediately before the existing order mutation boundary, re-read only the strategy config and block on mismatch/invalid:
+When it passes, journal `ENTRY_STRATEGY_CONDITIONS_PASS` but continue through all existing safety/risk/pullback logic.
 
-```ts
-const versionGuard = compareStrategyEntryConfigVersion(
-  { version: cycleConfig.state.version, valid: true },
-  readCurrentStrategyEntryVersion(),
-);
-if (!versionGuard.ok) {
-  journal(versionGuard.reasonCode, { side, entryConditions });
-  return;
-}
-```
+For `state.pendingPullback`, the stored pending side/pattern remains the anchor candidate, but each later M5 evaluation cycle must read current strategy config and recalculate the toggleable confirmations from current canonical data before allowing `PULLBACK_ENTRY`.
 
-Do not move/relax Bridge, account, position, spread, lot, ARM, or final market safety gates.
+Immediately before the existing `/v1/orders` mutation in `submitTrendEntry`, compare the cycle version to a fresh strategy-config read. Block on invalid/mismatch before mutation.
 
-- [ ] **Step 4: Run focused GREEN plus existing Trend regressions**
+- [ ] **Step 4: GREEN plus exact Trend regressions**
 
 ```bash
 node scripts/test-phase7c-trend-strategy-entry-conditions-contract.mjs
 node scripts/test-phase7c-trend-entry-recovery-contract.mjs
-node scripts/test-phase7c-reversal-entry-gate-contract.mjs
-pnpm --filter @xauusd/api build
+pnpm --filter @xauusd/risk-engine... build
+pnpm --filter @xauusd/risk-engine typecheck
+pnpm --filter @xauusd/risk-engine test
+pnpm --dir apps/api exec tsx ../../scripts/phase7b-live-entry-diagnostics.test.mjs
+pnpm --dir apps/api exec tsx ../../scripts/phase7c-decision-monitor.test.mjs
+node --test scripts/phase7c-trend-mode-gate.test.mjs
+node --test scripts/phase7c-trend-entry-block-classification.test.mjs
+pnpm --filter @xauusd/api... build
 ```
 
-If an existing script has a different exact filename on the execution checkout, list `scripts/test-phase7c-*trend*` / workflow commands first and run the repository's canonical equivalent; do not skip the regression category.
-
-Expected: all selected Trend contracts GREEN and no test sends an order.
-
-- [ ] **Step 5: Commit Task 5**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add scripts/run-phase7b-demo-controller.ts scripts/test-phase7c-trend-strategy-entry-conditions-contract.mjs
@@ -644,42 +622,40 @@ git commit -m "feat(trend): apply configurable entry condition profile"
 **Files:**
 - Modify: `scripts/run-phase7c-sideway-controller.mjs`
 - Test: `scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs`
-- Regression inputs: existing Sideway regime/recovery/management contracts and `phase7c-sideway-regime-ci.yml` commands.
 
 **Interfaces:**
-- `rangeEdge` stays mandatory and uses existing `chooseRangeSide(...)` as sole side origin.
-- `m5Confirmation=false` yields IGNORED and does not call M5 confirmation as a required gate.
-- Mandatory orchestration `resolveSidewayPermission(...)` remains outside the editable strategy profile even if `recommendedModeSideway` is disabled as an observation.
+- Existing `chooseRangeSide(...)` remains mandatory side origin.
+- Existing `detectM5Confirmation(m5, side)` is optional when `m5Confirmation=false`.
+- Existing `resolveSidewayPermission(...)`, freshness, spread, auto-lot, range-dependent plan construction, and final side-consistency checks stay mandatory.
 
-- [ ] **Step 1: Write Sideway RED contracts**
+- [ ] **Step 1: Write Sideway RED contract**
 
-Assert:
+Require:
 
 ```text
-E1 default == existing Sideway strategy entry behavior
-rangeEdge=false is invalid before executor evaluation
-rangeEdge cannot be IGNORED
-rangeEdge chooses BUY/SELL using current chooseRangeSide logic
-m5Confirmation=true + matching confirmation => PASS
-m5Confirmation=true + no matching confirmation => FAIL
-m5Confirmation=false => IGNORED and does not block
-rangingRegime / recommendedModeSideway / confidence / supplyDemandRange each become IGNORED when disabled
-missing usable range still makes mandatory rangeEdge FAIL even if supplyDemandRange toggle is disabled
-resolveSidewayPermission remains mandatory and cannot be disabled
-version mismatch before order boundary => no order mutation
+E1 == current Sideway strategy behavior
+rangeEdge cannot be false/IGNORED
+rangeEdge uses chooseRangeSide for BUY/SELL
+m5Confirmation enabled + match => PASS
+m5Confirmation enabled + no match => FAIL
+m5Confirmation disabled => IGNORED and does not block
+rangingRegime/recommendedModeSideway/minimumRegimeConfidence/supplyDemandRange may become IGNORED when disabled
+missing usable range still makes mandatory rangeEdge FAIL
+resolveSidewayPermission remains mandatory even if recommendedModeSideway strategy observation is disabled
+version mismatch/invalid config before order => no order mutation
 ```
 
-- [ ] **Step 2: Run Sideway RED**
+- [ ] **Step 2: Prove RED**
 
 ```bash
 node scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs
 ```
 
-Expected RED: current controller hard-codes all regime/range/M5 conditions and has no config snapshot/version recheck.
+Expected: current Sideway controller hard-codes all strategy gates and has no profile/version guard.
 
 - [ ] **Step 3: Implement minimum Sideway composition**
 
-At new-entry cycle start, read config snapshot together with market/control inputs or immediately before strategic evaluation. Keep the existing mandatory permission first or separately mandatory:
+Keep mandatory mode routing outside the evaluator:
 
 ```js
 const permission = resolveSidewayPermission(activeMode, regime?.recommendedMode);
@@ -689,45 +665,47 @@ if (!permission.allowed) {
 }
 ```
 
-Resolve mandatory side with existing code:
+Resolve side only with existing range-edge logic:
 
 ```js
 const side = regime?.supplyDemandRange
   ? chooseRangeSide(regime.supplyDemandRange, Number(quote.bid), Number(quote.ask))
   : null;
+const confirmation = side ? detectM5Confirmation(m5, side) : null;
 ```
 
-Build observations:
+Observation mapping:
 
 ```js
-const confirmation = side ? detectM5Confirmation(m5, side) : null;
 const observations = {
   rangingRegime: { passed: regime?.regime === "RANGING", observed: regime?.regime ?? null },
   recommendedModeSideway: { passed: regime?.recommendedMode === "SIDEWAY", observed: regime?.recommendedMode ?? null },
   minimumRegimeConfidence: { passed: Number(regime?.confidence ?? 0) >= minRegimeConfidence, observed: regime?.confidence ?? null },
-  supplyDemandRange: { passed: Boolean(regime?.supplyDemandRange), observed: Boolean(regime?.supplyDemandRange) ? "VALID" : "MISSING" },
+  supplyDemandRange: { passed: Boolean(regime?.supplyDemandRange), observed: regime?.supplyDemandRange ? "VALID" : "MISSING" },
   rangeEdge: { passed: side === "BUY" || side === "SELL", observed: side },
   m5Confirmation: { passed: Boolean(confirmation && Number(confirmation.closeTime) === closeTime), observed: confirmation?.pattern ?? null },
 };
 ```
 
-Evaluate through the shared module. Disabled M5 becomes `IGNORED`; do not require its pass in controller branches outside the evaluator. Keep `rangeEdge` mandatory.
+Do not retain a separate unconditional `if (!confirmation) return` branch after evaluator integration; the evaluator owns the optional M5 strategy gate. Keep final mandatory mode, freshness, spread, range/plan, auto-lot, and final-side checks.
 
-At final market recheck, preserve existing final permission, freshness, spread, and side-consistency checks. Add config version recheck before order mutation. Do not make disabled `recommendedModeSideway` bypass `resolveSidewayPermission`.
+Immediately before order mutation, re-read profile and apply config-version guard.
 
-- [ ] **Step 4: Run focused GREEN plus Sideway regressions**
+- [ ] **Step 4: GREEN plus exact Sideway regressions**
 
 ```bash
 node scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs
 node scripts/test-phase7c-sideway-recovery-management-contract.mjs
-node scripts/test-phase7c-sideway-execution-guards.mjs
+node --test scripts/phase7c-sideway-logic.test.mjs
+node --test scripts/phase7c-sideway-execution-guards.test.mjs
+node --test scripts/phase7c-execution-lock.test.mjs
+node --test scripts/phase7c-forward-report.test.mjs
+node --test scripts/phase7c-decision-audit.test.mjs
+pnpm --dir apps/api exec tsx ../../scripts/phase7c-decision-monitor.test.mjs
+pnpm --filter @xauusd/api... build
 ```
 
-If the execution checkout names the guard test differently, run the exact test command referenced by `.github/workflows/phase7c-sideway-regime-ci.yml`; do not omit guard coverage.
-
-Expected: GREEN and no Bridge order mutation.
-
-- [ ] **Step 5: Commit Task 6**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add scripts/run-phase7c-sideway-controller.mjs scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs
@@ -746,45 +724,56 @@ git commit -m "feat(sideway): apply configurable entry condition profile"
 - Test: `scripts/test-phase7c-strategy-entry-conditions-web-contract.mjs`
 
 **Interfaces:**
-- `getPhase7CStrategyEntryConditions()` returns canonical/virtual state plus guards.
-- `setPhase7CStrategyEntryConditions(input)` sends one POST only, with `expectedVersion` and complete state.
-- Card has locked Trend `patternM15`, locked Sideway `rangeEdge`, editable remaining toggles, `Khôi phục`, `Khôi phục mặc định chiến lược`, and `Lưu cấu hình`.
+
+```ts
+getPhase7CStrategyEntryConditions(): Promise<Phase7CStrategyEntryConditionsSnapshot>
+setPhase7CStrategyEntryConditions(input: Phase7CStrategyEntryConditionsWriteInput): Promise<Phase7CStrategyEntryConditionsSnapshot>
+```
+
+Dedicated mutation error:
+
+```ts
+export class Phase7CStrategyEntryConditionsApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly code: string | null,
+    message: string,
+  ) { super(message); }
+}
+```
 
 - [ ] **Step 1: Write Web RED contract**
 
-Source/behavior assertions must require:
+Require source/behavior for:
 
 ```text
-section title: Điều kiện vào lệnh
-shared scope copy: Dùng chung DEMO / LIVE
-NEW ENTRY ONLY copy
-patternM15 rendered checked + disabled/locked
-rangeEdge rendered checked + disabled/locked
-m5Confirmation rendered editable when runtime save guards allow editing
-Save disabled unless valid && editable && draft changed && anchors true
-Restore saved resets draft only
-Restore default resets draft to E1 only; no POST until Save
+section title "Điều kiện vào lệnh"
+copy "Dùng chung DEMO / LIVE" and "NEW ENTRY ONLY"
+patternM15 checked + locked
+rangeEdge checked + locked
+m5Confirmation editable when backend says editable=true
+save blocked if canonical state invalid, runtime not editable, draft unchanged, or anchors not true
+Khôi phục reloads saved draft only
+Khôi phục mặc định chiến lược changes draft only, never POSTs automatically
 POST includes expectedVersion and complete Trend/Sideway state
-CONFIG_VERSION_CONFLICT triggers reload and explicit user-facing stale-version message; no automatic retry
-PAUSE + positions=0 runtime lock is visible
-PASS / FAIL / IGNORED rendered from latest decision-monitor condition telemetry when available
-no input for Supertrend parameters, MA periods, confidence threshold, FVG parameters, or range thresholds
+CONFIG_VERSION_CONFLICT reloads latest canonical state and never auto-retries
+PASS/FAIL/IGNORED from decision monitor is visible when present
+no fields for Supertrend parameters, MA periods, confidence threshold, FVG parameters, or range thresholds
 ```
 
-- [ ] **Step 2: Run Web RED**
+- [ ] **Step 2: Prove RED**
 
 ```bash
 node scripts/test-phase7c-strategy-entry-conditions-web-contract.mjs
 ```
 
-Expected RED: component/client/types do not exist.
+Expected: component/types/client missing.
 
-- [ ] **Step 3: Add Web types and API client**
+- [ ] **Step 3: Add exact Web types and API client**
 
-In `phase7c-types.ts`, add exact core UI types:
+State type:
 
 ```ts
-export type Phase7CStrategyConditionStatus = "PASS" | "FAIL" | "IGNORED";
 export interface Phase7CStrategyEntryConditionState {
   version: number;
   updatedAt: string;
@@ -808,13 +797,13 @@ export interface Phase7CStrategyEntryConditionState {
 }
 ```
 
-Add snapshot guard fields matching API Task 3. Add API functions using the existing single `API_BASE` transport pattern; do not add the old two-URL mutation fallback.
+Snapshot `state` is nullable when persisted config is invalid. Its `guards` must match Task 3. Extend `Phase7CDecisionMonitorSnapshot` with `strategyEntryConditions.trend/sideway` matching Task 4.
 
-- [ ] **Step 4: Implement the dedicated editor card**
+For this POST use the existing single `API_BASE` transport only. Parse error JSON so `CONFIG_VERSION_CONFLICT` survives as `Phase7CStrategyEntryConditionsApiError.code`; do not add the old two-URL mutation fallback.
 
-Use TanStack Query for config, and either its own decision-monitor query or shared cache key `phase7c-decision-monitor` for live statuses. Keep local draft separate from canonical query state.
+- [ ] **Step 4: Implement editor card**
 
-Condition metadata is static UI presentation only:
+Static row metadata:
 
 ```ts
 const TREND_ROWS = [
@@ -825,6 +814,7 @@ const TREND_ROWS = [
   ["ma20Ma50", "MA20/MA50 xác nhận", false],
   ["fvg", "FVG xác nhận", false],
 ] as const;
+
 const SIDEWAY_ROWS = [
   ["rangeEdge", "Giá nằm đúng vùng biên Range", true],
   ["rangingRegime", "Regime = RANGING", false],
@@ -835,13 +825,11 @@ const SIDEWAY_ROWS = [
 ] as const;
 ```
 
-Mandatory rows remain checked/disabled and show `Bắt buộc · xác định hướng BUY/SELL`.
+Mandatory rows show checked/disabled plus `Bắt buộc · xác định hướng BUY/SELL`. On version conflict: invalidate config query, discard stale draft after reload, show explicit warning, require another manual edit/save.
 
-Use mutation error handling that detects backend `CONFIG_VERSION_CONFLICT`; invalidate/reload config, clear stale draft, and display a warning requiring a fresh edit. Never auto-resubmit.
+- [ ] **Step 5: Mount and GREEN**
 
-- [ ] **Step 5: Mount card in Control Center shell and run GREEN**
-
-Mount between authorization and main control content:
+Shell order:
 
 ```tsx
 <Stack spacing={3}>
@@ -855,12 +843,12 @@ Run:
 
 ```bash
 node scripts/test-phase7c-strategy-entry-conditions-web-contract.mjs
-pnpm --filter @xauusd/web build
+pnpm --filter @xauusd/web... build
+pnpm --filter @xauusd/api... build
+pnpm --filter @xauusd/api exec tsx ../../scripts/test-phase7c-web-mutation-single-transport.ts
 ```
 
-Expected: PASS.
-
-- [ ] **Step 6: Commit Task 7**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/ui/Phase7CStrategyEntryConditionsCard.tsx apps/web/src/phase7c-types.ts apps/web/src/api.ts apps/web/src/pages/Phase7CControlCenterShellPage.tsx scripts/test-phase7c-strategy-entry-conditions-web-contract.mjs
@@ -869,47 +857,19 @@ git commit -m "feat(web): add strategy entry condition editor"
 
 ---
 
-### Task 8: Focused CI, Full Regression, and Completion Evidence
+### Task 8: Focused CI, Safety Regression, Exact SHA
 
 **Files:**
 - Create: `.github/workflows/phase7c-strategy-entry-conditions-ci.yml`
-- Modify only if exact existing workflow integration requires it: no other workflow should be edited merely for duplication.
 
 **Interfaces:**
-- Feature workflow runs all six new focused contract scripts plus API/Web builds and selected existing regressions.
-- Completion evidence includes exact branch HEAD SHA, clean status, file diff, focused GREEN output, full CI conclusion, and explicit `ORDER_TEST=NONE` / runtime mutation statement.
+- Ubuntu job runs all feature contracts plus exact existing Node/TypeScript regressions.
+- Windows job runs exact lifecycle/LIVE-ARM source safety contracts in PowerShell 7 and Windows PowerShell 5.1.
+- No job needs MT5 credentials or calls a live/demo order endpoint.
 
-- [ ] **Step 1: Write the focused workflow before calling the feature complete**
+- [ ] **Step 1: Write exact Ubuntu CI commands**
 
-Workflow commands must include at minimum:
-
-```yaml
-- run: node scripts/test-phase7c-strategy-entry-conditions-core-contract.mjs
-- run: node scripts/test-phase7c-strategy-entry-conditions-api-contract.mjs
-- run: node scripts/test-phase7c-strategy-entry-conditions-audit-contract.mjs
-- run: node scripts/test-phase7c-trend-strategy-entry-conditions-contract.mjs
-- run: node scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs
-- run: node scripts/test-phase7c-strategy-entry-conditions-web-contract.mjs
-- run: pnpm --filter @xauusd/api build
-- run: pnpm --filter @xauusd/web build
-```
-
-Also call the exact existing regression commands referenced by these workflows or their canonical test scripts:
-
-```text
-.github/workflows/phase7b-supertrend-entry-gates-ci.yml
-.github/workflows/phase7b-wait-pullback-ci.yml
-.github/workflows/phase7c-sideway-regime-ci.yml
-.github/workflows/phase7c-reversal-entry-gate-ci.yml
-.github/workflows/phase7c-system-lifecycle-broker-ci.yml
-.github/workflows/phase7c-web-mutation-single-transport-ci.yml
-.github/workflows/phase7c-web-live-arm-demo-auto-ci.yml
-.github/workflows/phase7c-lot-range-120-ci.yml
-```
-
-The focused workflow must not require MT5 credentials and must not invoke a real Bridge order endpoint.
-
-- [ ] **Step 2: Run the complete local/source verification set**
+After checkout/setup/install, workflow must run:
 
 ```bash
 node scripts/test-phase7c-strategy-entry-conditions-core-contract.mjs
@@ -918,50 +878,79 @@ node scripts/test-phase7c-strategy-entry-conditions-audit-contract.mjs
 node scripts/test-phase7c-trend-strategy-entry-conditions-contract.mjs
 node scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs
 node scripts/test-phase7c-strategy-entry-conditions-web-contract.mjs
-pnpm --filter @xauusd/api build
-pnpm --filter @xauusd/web build
+node scripts/test-phase7c-trend-entry-recovery-contract.mjs
+node scripts/test-phase7c-sideway-recovery-management-contract.mjs
+pnpm --filter @xauusd/risk-engine... build
+pnpm --filter @xauusd/risk-engine typecheck
+pnpm --filter @xauusd/risk-engine test
+pnpm --filter @xauusd/strategy-engine... build
+pnpm --filter @xauusd/strategy-engine typecheck
+pnpm --filter @xauusd/strategy-engine test
+node --test scripts/phase7c-sideway-logic.test.mjs
+node --test scripts/phase7c-sideway-execution-guards.test.mjs
+node --test scripts/phase7c-execution-lock.test.mjs
+node --test scripts/phase7c-forward-report.test.mjs
+node --test scripts/phase7c-lot-settings.test.mjs
+node --test scripts/phase7c-lot-range-120.test.mjs
+node --test scripts/phase7c-decision-audit.test.mjs
+pnpm --dir apps/api exec tsx ../../scripts/phase7b-live-entry-diagnostics.test.mjs
+pnpm --dir apps/api exec tsx ../../scripts/phase7c-decision-monitor.test.mjs
+node --test scripts/phase7c-trend-mode-gate.test.mjs
+node --test scripts/phase7c-trend-entry-block-classification.test.mjs
+node --test scripts/phase7c-web-autostart-contract.test.mjs
+pnpm --filter @xauusd/api exec tsx ../../scripts/test-phase7c-web-mutation-single-transport.ts
+pnpm --filter @xauusd/api... build
+node scripts/test-phase7b-api-node-production-runtime.mjs
+pnpm --filter @xauusd/web... build
 ```
 
-Then run the existing canonical regression commands extracted from the eight workflows listed above. Every command must be recorded with exit code `0` before proceeding.
+- [ ] **Step 2: Write exact Windows safety jobs**
 
-- [ ] **Step 3: Verify scope isolation**
+Run each with both `pwsh` and `powershell` where the existing workflow does so:
 
-Run:
+```powershell
+.\scripts\test-phase7c-system-lifecycle-broker-source.ps1
+.\scripts\test-phase7c-system-lifecycle-broker-contract.ps1
+.\scripts\test-phase7c-lifecycle-broker-acl-source.ps1
+.\scripts\test-phase7c-web-live-arm-demo-auto-source.ps1
+```
+
+These are source/protocol safety contracts only; do not invoke lifecycle START or any order test.
+
+- [ ] **Step 3: Run complete local/source verification before push**
+
+Run the exact Ubuntu command block from Step 1 on the implementation checkout. Run the Windows source contracts on the Windows verification host when available. Every executed command must exit `0` before PR creation.
+
+- [ ] **Step 4: Verify scope isolation and clean tree**
 
 ```bash
-git diff --name-only 4f56cda197ff40b3515b0b7ae6e41b8c47bbe62a...HEAD
-git diff --stat 4f56cda197ff40b3515b0b7ae6e41b8c47bbe62a...HEAD
+git diff --name-only design/phase7c-strategy-entry-conditions...HEAD
+git diff --stat design/phase7c-strategy-entry-conditions...HEAD
 git status --short
 ```
 
-Check that no unrelated ARM, account-switch, lifecycle, lot-limit, management, or Bridge trading-permission file changed outside the explicit file map. `git status --short` must be empty before final SHA capture.
+Allowed implementation diff is limited to the file map in this plan. `git status --short` must be empty before final SHA capture.
 
-- [ ] **Step 4: Commit CI wiring**
+- [ ] **Step 5: Commit CI wiring**
 
 ```bash
 git add .github/workflows/phase7c-strategy-entry-conditions-ci.yml
 git commit -m "ci: verify configurable strategy entry conditions"
 ```
 
-- [ ] **Step 5: Push/open PR and wait for full CI**
+- [ ] **Step 6: Push PR and require GREEN before merge**
 
-Use a feature branch name:
+PR branch: `feat/phase7c-strategy-entry-conditions`.
 
-```text
-feat/phase7c-strategy-entry-conditions
-```
-
-PR description must state:
+PR safety text must include:
 
 ```text
-Safety: no LIVE/DEMO order test; NEW ENTRY configuration only; defaults preserve current behavior; patternM15/rangeEdge anchors are mandatory; no executor restart required for config changes; mandatory safety/risk/orchestration gates remain immutable.
+NEW ENTRY configuration only. E1 defaults preserve current behavior. patternM15/rangeEdge are mandatory anchors. m5Confirmation remains optional. Safety/risk/orchestration gates are immutable. No executor restart is required for profile changes. No LIVE/DEMO order test was used.
 ```
 
-Do not merge while any required or feature-relevant CI check is pending/failing.
+Do not merge while feature-relevant CI is pending/failing.
 
-- [ ] **Step 6: Capture exact completion evidence before merge claim**
-
-Record:
+- [ ] **Step 7: Capture exact completion evidence**
 
 ```bash
 git rev-parse HEAD
@@ -969,41 +958,44 @@ git status --short
 git log -1 --oneline
 ```
 
-Required evidence fields in the implementation report:
+Implementation report fields:
 
 ```text
-RED_PROOF=<focused failing contract + exact reason before production code>
+RED_PROOF=<focused failing contract and exact cause recorded before production code>
 FOCUSED_GREEN=PASS
 API_BUILD=PASS
 WEB_BUILD=PASS
 REGRESSION_GREEN=PASS
 GITHUB_CI=PASS
-HEAD_SHA=<40-char exact SHA>
+HEAD_SHA=<exact 40-character feature HEAD>
 ORDER_TEST=NONE
 LIVE_ORDER_TEST=NONE
 DEMO_ORDER_TEST=NONE
 ARM_MUTATION=NONE
 AUTO_MUTATION=NONE
-EXECUTOR_RESTART_FOR_CONFIG=NONE
 BRIDGE_RESTART=NONE
+EXECUTOR_RESTART_FOR_CONFIG=NONE
 ```
 
-Only after CI is green and the exact SHA is captured should the PR be merged according to the repository's normal merge workflow.
+Only after this evidence and CI GREEN may the PR be merged through the repository's normal merge workflow.
 
 ---
 
-## Self-Review Checklist for This Plan
+## Plan Self-Review Results
 
-- Spec sections A1/B2/C1/D1/E1/F1/G1/G2a are each mapped to explicit tests and implementation tasks.
-- Both mandatory anchors are represented in shared validation, API validation, executor semantics, Web rendering, and tests.
-- Sideway M5 stays toggleable but never becomes a side origin.
-- Sideway `recommendedModeSideway` toggle cannot disable mandatory `resolveSidewayPermission` routing.
-- Missing Supply/Demand data still fails mandatory `rangeEdge` even when the explicit `supplyDemandRange` observation is disabled.
-- Default E1 behavior is regression-tested before optional gates are permitted to change composition.
-- Invalid persisted config is fail-closed and normal Web POST cannot silently repair it.
-- Version `0` is virtual-only; first persisted version is `1`.
-- Optimistic concurrency and final pre-order version race are both tested.
-- `ENTRY_STRATEGY_CONDITIONS_PASS` remains observability only and does not override a later safety block reason.
-- No management-state or risk-rule behavior is in feature scope.
-- No LIVE/DEMO order is needed to prove any contract.
-- Plan contains no placeholder implementation steps; each task has exact files, interfaces, RED command, minimum implementation shape, GREEN command, and commit boundary.
+- Spec A1/B2/C1/D1/E1/F1/G1/G2a each maps to explicit RED contracts and production boundaries.
+- Trend `patternM15` and Sideway `rangeEdge` are enforced in shared validation, API, executor semantics, Web UI, and tests.
+- Sideway M5 remains toggleable but never becomes a side origin.
+- `recommendedModeSideway` cannot disable mandatory `resolveSidewayPermission` routing.
+- Missing Supply/Demand data still blocks mandatory `rangeEdge`, even if the explicit `supplyDemandRange` observation is disabled.
+- Pending Trend pullback is explicitly treated as a later NEW ENTRY evaluation and cannot use stale config.
+- Trend optional FVG reuses existing `hasRelevantFvg(...)`; no duplicate detector is introduced.
+- Structural-stop/risk-plan validity remains mandatory as a computational/safety requirement regardless of strategy-checkbox composition.
+- Existing invalid persisted config is fail-closed and cannot be silently repaired via normal Web POST.
+- Virtual version `0` is never persisted; first persisted version is `1`.
+- Optimistic concurrency and final pre-order version race are both covered.
+- Web version conflict is typed and never auto-retried.
+- Decision monitor exposes a fixed `strategyEntryConditions` shape; strategy-pass remains observability only.
+- Exact existing regression commands are listed; no guessed fallback filenames remain.
+- No `TBD`, `TODO`, “similar to Task N”, or unresolved implementation placeholder remains.
+- No LIVE/DEMO order is required by any task.
