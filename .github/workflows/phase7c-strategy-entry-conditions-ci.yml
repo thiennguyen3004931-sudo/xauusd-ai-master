@@ -7,8 +7,10 @@ on:
     paths:
       - "apps/api/src/routes/phase7c.route.ts"
       - "apps/api/src/services/phase7c-strategy-entry-conditions.service.ts"
+      - "apps/api/src/services/phase7c-decision-monitor.service.ts"
       - "scripts/phase7c-strategy-entry-conditions.mjs"
       - "scripts/phase7c-strategy-entry-conditions.d.mts"
+      - "scripts/phase7c-decision-audit.mjs"
       - "scripts/test-phase7c-strategy-entry-conditions-*.mjs"
       - ".github/workflows/phase7c-strategy-entry-conditions-ci.yml"
   pull_request:
@@ -17,8 +19,10 @@ on:
     paths:
       - "apps/api/src/routes/phase7c.route.ts"
       - "apps/api/src/services/phase7c-strategy-entry-conditions.service.ts"
+      - "apps/api/src/services/phase7c-decision-monitor.service.ts"
       - "scripts/phase7c-strategy-entry-conditions.mjs"
       - "scripts/phase7c-strategy-entry-conditions.d.mts"
+      - "scripts/phase7c-decision-audit.mjs"
       - "scripts/test-phase7c-strategy-entry-conditions-*.mjs"
       - ".github/workflows/phase7c-strategy-entry-conditions-ci.yml"
 
@@ -46,3 +50,5 @@ jobs:
         run: pnpm --filter @xauusd/api... build
       - name: Strategy entry condition API persistence and route contract
         run: node scripts/test-phase7c-strategy-entry-conditions-api-contract.mjs
+      - name: Strategy entry condition audit/monitor contract
+        run: node scripts/test-phase7c-strategy-entry-conditions-audit-contract.mjs
