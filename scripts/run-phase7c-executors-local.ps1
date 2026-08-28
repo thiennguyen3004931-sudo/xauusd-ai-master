@@ -32,9 +32,9 @@ if ($AccountMode -eq "LIVE" -and -not $LiveExecutionEnabled) {
   throw "LIVE executor supervisor requires -LiveExecutionEnabled."
 }
 if ($DependencyWaitSeconds -lt 10) { throw "DependencyWaitSeconds must be >= 10." }
-if ($TrendFixedVolume -lt 0.03 -or $TrendFixedVolume -gt 0.30) { throw "TrendFixedVolume must be between 0.03 and 0.30." }
+if ($TrendFixedVolume -lt 0.03 -or $TrendFixedVolume -gt 0.06) { throw "TrendFixedVolume must be between 0.03 and 0.06." }
 if ($SidewayRiskPercent -lt 0.01 -or $SidewayRiskPercent -gt 1) { throw "SidewayRiskPercent must be between 0.01 and 1.00." }
-if ($SidewayMaxLot -lt 0.03 -or $SidewayMaxLot -gt 0.30) { throw "SidewayMaxLot must be between 0.03 and 0.30." }
+if ($SidewayMaxLot -lt 0.03 -or $SidewayMaxLot -gt 0.04) { throw "SidewayMaxLot must be between 0.03 and 0.04." }
 foreach ($managedLot in @($TrendFixedVolume, $SidewayMaxLot)) {
   $units = $managedLot / 0.03
   if ([math]::Abs($units - [math]::Round($units)) -gt 1e-8) { throw "Managed lot values must use 0.03 increments." }

@@ -33,8 +33,10 @@ export interface Phase7CLotSettingsInput {
 
 export const PHASE7C_LOT_LIMITS = {
   minManagedLot: 0.03,
-  maxDemoLot: 0.3,
-  maxManagedLot: 0.3,
+  maxDemoLot: 0.06,
+  maxManagedLot: 0.06,
+  maxTrendLot: 0.06,
+  maxSidewayLot: 0.04,
   lotStep: 0.01,
   managedLotIncrement: 0.03,
   minRiskPercent: 0.01,
@@ -57,10 +59,10 @@ function defaultState(): Phase7CLotSettingsState {
   };
 }
 
-function isManagedLot(value: number): boolean {
+function isManagedLot(value: number, maxLot: number): boolean {
   if (!Number.isFinite(value)) return false;
   if (value < PHASE7C_LOT_LIMITS.minManagedLot - 1e-9) return false;
-  if (value > PHASE7C_LOT_LIMITS.maxManagedLot + 1e-9) return false;
+  if (value > maxLot + 1e-9) return false;
   const units = value / PHASE7C_LOT_LIMITS.managedLotIncrement;
   return Math.abs(units - Math.round(units)) <= 1e-8;
 }
@@ -72,14 +74,14 @@ export function validatePhase7CLotSettings(
   const sidewayRiskPercent = Number(input.sidewayRiskPercent);
   const sidewayMaxLot = Number(input.sidewayMaxLot);
 
-  if (!isManagedLot(trendFixedLot)) {
+  if (!isManagedLot(trendFixedLot, PHASE7C_LOT_LIMITS.maxTrendLot)) {
     throw new Error(
-      "Trend fixed lot must be 0.03-0.30 and use 0.03 increments so +10 can close exactly one-third.",
+      "Trend fixed lot must be between 0.03 and 0.06 and use 0.03 increments so +10 can close exactly one-third.",
     );
   }
-  if (!isManagedLot(sidewayMaxLot)) {
+  if (!isManagedLot(sidewayMaxLot, PHASE7C_LOT_LIMITS.maxSidewayLot)) {
     throw new Error(
-      "Sideway max lot must be 0.03-0.30 and use 0.03 increments so +10 can close exactly one-third.",
+      "Sideway max lot must be between 0.03 and 0.04 and use 0.03 increments so +10 can close exactly one-third.",
     );
   }
   if (

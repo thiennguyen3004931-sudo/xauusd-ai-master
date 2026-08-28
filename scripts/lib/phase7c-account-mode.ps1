@@ -111,13 +111,16 @@ function Assert-Phase7CRiskProfile($Profile, [string]$Label = "Phase7C risk prof
   $trend = [double]$Profile.trendFixedLot
   $risk = [double]$Profile.sidewayRiskPercent
   $maxLot = [double]$Profile.sidewayMaxLot
+  if ($trend -lt 0.03 -or $trend -gt 0.06) {
+    throw "$Label trendFixedLot must be between 0.03 and 0.06."
+  }
+  if ($maxLot -lt 0.03 -or $maxLot -gt 0.04) {
+    throw "$Label sidewayMaxLot must be between 0.03 and 0.04."
+  }
   foreach ($item in @(
     [pscustomobject]@{ Value = $trend; Name = "trendFixedLot" },
     [pscustomobject]@{ Value = $maxLot; Name = "sidewayMaxLot" }
   )) {
-    if ($item.Value -lt 0.03 -or $item.Value -gt 0.30) {
-      throw "$Label $($item.Name) must be between 0.03 and 0.30."
-    }
     $units = $item.Value / 0.03
     if ([math]::Abs($units - [math]::Round($units)) -gt 1e-8) {
       throw "$Label $($item.Name) must use 0.03 increments."

@@ -24,7 +24,7 @@ if ($mode -eq "LIVE" -and -not $LiveExecutionEnabled) {
   throw "LIVE Sideway execution requires -LiveExecutionEnabled."
 }
 if ($RiskPercent -lt 0.01 -or $RiskPercent -gt 1) { throw "RiskPercent must be between 0.01 and 1.00." }
-if ($MaxLot -lt 0.03 -or $MaxLot -gt 0.30) { throw "MaxLot must be between 0.03 and 0.30." }
+if ($MaxLot -lt 0.03 -or $MaxLot -gt 0.04) { throw "MaxLot must be between 0.03 and 0.04." }
 $maxLotUnits = $MaxLot / 0.03
 if ([math]::Abs($maxLotUnits - [math]::Round($maxLotUnits)) -gt 1e-8) {
   throw "MaxLot must use 0.03 increments so +10 can close exactly one-third."

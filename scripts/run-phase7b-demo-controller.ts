@@ -197,6 +197,7 @@ type PersistedBotState = {
 };
 
 const symbol = process.env.ZIQ_DEMO_SYMBOL ?? "XAUUSD";
+const MAX_TREND_FIXED_VOLUME = 0.06;
 const fixedVolume = Number(process.env.ZIQ_FIXED_VOLUME ?? "0.03");
 const intervalSeconds = Math.max(1, Number(process.env.ZIQ_DEMO_INTERVAL_SECONDS ?? "5"));
 const armed = /^(1|true|yes|on)$/i.test(process.env.ZIQ_DEMO_ARMED ?? "false");
@@ -238,6 +239,9 @@ const allowReal = /^(1|true|yes|on)$/i.test(process.env.MT5_ALLOW_REAL_ACCOUNT ?
 
 if (![fixedVolume, intervalSeconds, magicNumber, sidewayMagicNumber, deviationPoints, pullbackWaitMinutes].every((value) => Number.isFinite(value) && value > 0)) {
   throw new Error("Phase 7B DEMO numeric configuration is invalid.");
+}
+if (fixedVolume < 0.03 - 1e-9 || fixedVolume > MAX_TREND_FIXED_VOLUME + 1e-9) {
+  throw new Error(`Phase 7B DEMO fixed volume must be between 0.03 and ${MAX_TREND_FIXED_VOLUME}.`);
 }
 
 fs.mkdirSync(workDir, { recursive: true });
