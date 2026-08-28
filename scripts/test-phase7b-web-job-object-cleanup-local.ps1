@@ -42,6 +42,25 @@ function Stop-TestProcessTree([int]$ProcessId) {
   }
 }
 
+function Test-HelperCallerStatePreserved {
+  $ErrorActionPreference = 'Continue'
+  Set-StrictMode -Off
+  . $helperPath
+
+  $errorActionPreserved = $ErrorActionPreference -eq 'Continue'
+  $strictModePreserved = $true
+  try {
+    $null = $phase7bJobObjectUndefinedProbe
+  } catch {
+    $strictModePreserved = $false
+  }
+
+  return [pscustomobject]@{
+    ErrorActionPreferencePreserved = $errorActionPreserved
+    StrictModeOffPreserved = $strictModePreserved
+  }
+}
+
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('phase7b-job-object-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 
@@ -113,6 +132,14 @@ while ($true) { Start-Sleep -Seconds 1 }
 '@ | Set-Content -LiteralPath $supervisorScript -Encoding UTF8
 
 $violations = New-Object System.Collections.Generic.List[string]
+$helperState = Test-HelperCallerStatePreserved
+if (-not $helperState.ErrorActionPreferencePreserved) {
+  $violations.Add('JOB_OBJECT_HELPER_MUTATES_ERROR_ACTION_PREFERENCE')
+}
+if (-not $helperState.StrictModeOffPreserved) {
+  $violations.Add('JOB_OBJECT_HELPER_MUTATES_STRICT_MODE')
+}
+
 try {
   $shellPath = (Get-Process -Id $PID).Path
   $supervisor = Start-Process -FilePath $shellPath -PassThru -ArgumentList @(
@@ -168,6 +195,7 @@ try {
   Write-Host 'PHASE7B_WEB_JOB_OBJECT_CLEANUP_TEST=PASS'
   Write-Host 'FORCED_SUPERVISOR_TERMINATION=DESCENDANTS_CLEANED'
   Write-Host 'AUTOSTART_JOB_OBJECT_ASSIGNMENT=BEFORE_CHILD_START'
+  Write-Host 'JOB_OBJECT_HELPER_CALLER_STATE=PRESERVED'
 }
 finally {
   if ($null -ne $supervisor -and (Test-ProcessAlive $supervisor.Id)) {
