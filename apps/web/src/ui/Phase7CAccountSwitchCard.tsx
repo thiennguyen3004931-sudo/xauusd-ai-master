@@ -12,9 +12,9 @@ import {
   Typography,
 } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { requestLocalControlJson } from "../local-control-request";
 
 const ACCOUNT_SWITCH_BASE = "/api/v1/phase7c-account-switch";
-const CONTROL_DIRECT = "http://127.0.0.1:3711";
 
 type AccountMode = "DEMO" | "LIVE";
 type SwitchChecks = Record<string, boolean>;
@@ -69,48 +69,12 @@ type SwitchStatus = {
   liveArmFilePresent: boolean;
 };
 
-async function safeJson<T>(response: Response): Promise<T> {
-  const text = await response.text();
-  let payload: any = {};
-  try { payload = text ? JSON.parse(text) : {}; } catch { payload = {}; }
-  if (!response.ok) {
-    throw new Error(typeof payload.error === "string" ? payload.error : `HTTP ${response.status}`);
-  }
-  return payload as T;
-}
-
-async function accountSwitchRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const urls = [`${ACCOUNT_SWITCH_BASE}${path}`, `${CONTROL_DIRECT}${ACCOUNT_SWITCH_BASE}${path}`];
-  const errors: string[] = [];
-  for (const url of urls) {
-    try {
-      const response = await fetch(url, { cache: "no-store", ...init });
-      return await safeJson<T>(response);
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : "Không kết nối được");
-    }
-  }
-  throw new Error(errors.join(" | "));
-}
-
 async function setPause() {
-  const urls = ["/api/v1/phase7c/bot-mode", `${CONTROL_DIRECT}/api/v1/phase7c/bot-mode`];
-  const body = JSON.stringify({ mode: "PAUSE", source: "web-account-switch-explicit-pause" });
-  const errors: string[] = [];
-  for (const url of urls) {
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        cache: "no-store",
-        headers: { "content-type": "application/json" },
-        body,
-      });
-      return await safeJson<any>(response);
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : "Không kết nối được");
-    }
-  }
-  throw new Error(errors.join(" | "));
+  return requestLocalControlJson<any>("/api/v1/phase7c/bot-mode", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ mode: "PAUSE", source: "web-account-switch-explicit-pause" }),
+  });
 }
 
 const CHECK_LABELS: Record<string, string> = {
@@ -138,7 +102,7 @@ export function Phase7CAccountSwitchCard() {
 
   const capabilityQuery = useQuery({
     queryKey: ["phase7c-account-switch-capability"],
-    queryFn: () => accountSwitchRequest<Capability>("/capability"),
+    queryFn: () => requestLocalControlJson<Capability>(`${ACCOUNT_SWITCH_BASE}/capability`),
     refetchInterval: requestId ? false : 3_000,
     retry: false,
   });
@@ -157,7 +121,7 @@ export function Phase7CAccountSwitchCard() {
   });
 
   const preflightMutation = useMutation({
-    mutationFn: () => accountSwitchRequest<Preflight>("/preflight", {
+    mutationFn: () => requestLocalControlJson<Preflight>(`${ACCOUNT_SWITCH_BASE}/preflight`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ targetMode }),
@@ -171,7 +135,7 @@ export function Phase7CAccountSwitchCard() {
   const executeMutation = useMutation({
     mutationFn: () => {
       if (!preflight?.preflightToken) throw new Error("Chưa có preflight token hợp lệ.");
-      return accountSwitchRequest<ExecuteResponse>("/execute", {
+      return requestLocalControlJson<ExecuteResponse>(`${ACCOUNT_SWITCH_BASE}/execute`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -186,7 +150,7 @@ export function Phase7CAccountSwitchCard() {
 
   const statusQuery = useQuery({
     queryKey: ["phase7c-account-switch-status", requestId],
-    queryFn: () => accountSwitchRequest<SwitchStatus>(`/status?requestId=${encodeURIComponent(requestId ?? "")}`),
+    queryFn: () => requestLocalControlJson<SwitchStatus>(`${ACCOUNT_SWITCH_BASE}/status?requestId=${encodeURIComponent(requestId ?? "")}`),
     enabled: Boolean(requestId),
     refetchInterval: (query) => {
       const status = (query.state.data as SwitchStatus | undefined)?.status;
