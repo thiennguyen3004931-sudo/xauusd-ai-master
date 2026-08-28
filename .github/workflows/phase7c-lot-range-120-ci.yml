@@ -1,11 +1,19 @@
 name: Phase7C Lot Range 1.20 CI
 
 on:
+  push:
+    branches:
+      - fix/phase7c-account-risk-lot-max-120
+    paths:
+      - "apps/web/src/pages/Phase7BOpsPage.tsx"
+      - "scripts/phase7c-lot-range-120.test.mjs"
+      - ".github/workflows/phase7c-lot-range-120-ci.yml"
   pull_request:
     paths:
       - "apps/api/src/routes/phase7c.route.ts"
       - "apps/api/src/services/phase7c-lot-settings.service.ts"
       - "apps/web/src/pages/Phase7CControlCenterPage.tsx"
+      - "apps/web/src/pages/Phase7BOpsPage.tsx"
       - "scripts/lib/phase7c-account-mode.ps1"
       - "scripts/activate-phase7c-local.ps1"
       - "scripts/run-phase7b-demo-controller.ts"
