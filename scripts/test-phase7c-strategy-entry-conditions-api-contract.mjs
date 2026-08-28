@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const routePath = path.resolve(here, "../apps/api/src/routes/phase7c.route.ts");
 
 const {
   Phase7CStrategyEntryConditionsService,
@@ -163,7 +167,39 @@ try {
     { allowed: true },
   );
 
+  const routeSource = fs.readFileSync(routePath, "utf8");
+  assert.match(routeSource, /phase7CStrategyEntryConditionsService/);
+  assert.match(routeSource, /evaluatePhase7CStrategyEntrySaveGuard/);
+  assert.match(routeSource, /Phase7CStrategyEntryConfigError/);
+  assert.match(routeSource, /router\.get\("\/strategy-entry-conditions"/);
+  assert.match(routeSource, /router\.post\("\/strategy-entry-conditions"/);
+  assert.match(routeSource, /canChangeBotMode\(req\)/);
+  assert.match(routeSource, /appliesTo:\s*"NEW_ENTRIES_ONLY"/);
+  assert.match(routeSource, /sharedAcrossAccounts:\s*true/);
+  assert.match(routeSource, /mandatory:\s*\{[\s\S]*trend:\s*\["patternM15"\][\s\S]*sideway:\s*\["rangeEdge"\]/);
+  assert.match(routeSource, /requiresPause:\s*true/);
+  assert.match(routeSource, /requiresZeroXauusdPositions:\s*true/);
+  assert.match(routeSource, /editable:\s*read\.valid\s*&&\s*guard\.allowed/);
+  assert.match(routeSource, /getMt5Telemetry\("XAUUSD"\)/);
+  assert.match(routeSource, /accountModeAllowsBroker/);
+  assert.match(routeSource, /openXauusdPositions/);
+  assert.match(routeSource, /status\(403\)/);
+  assert.match(routeSource, /CONFIG_VERSION_CONFLICT/);
+  assert.match(routeSource, /status\(409\)/);
+  assert.match(routeSource, /status\(400\)/);
+
+  const strategyRouteSection = routeSource.slice(
+    routeSource.indexOf('router.get("/strategy-entry-conditions"'),
+    routeSource.indexOf('router.get("/live-regime"'),
+  );
+  assert.ok(strategyRouteSection.length > 0, "strategy entry route section must exist before live-regime route");
+  assert.match(strategyRouteSection, /catch[\s\S]*bridgeReachable:\s*false/);
+  assert.doesNotMatch(strategyRouteSection, /catch[\s\S]{0,500}status\(503\)/);
+  assert.match(strategyRouteSection, /if\s*\(!read\.valid\)[\s\S]*status\(409\)/);
+  assert.match(strategyRouteSection, /phase7CStrategyEntryConditionsService\.set\(req\.body\)/);
+
   console.log("PHASE7C_STRATEGY_ENTRY_API_PERSISTENCE_CONTRACT=PASS");
+  console.log("PHASE7C_STRATEGY_ENTRY_API_ROUTE_CONTRACT=PASS");
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }
