@@ -42,7 +42,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Mutation transport behavior contract
-        run: pnpm exec tsx scripts/test-phase7c-web-mutation-single-transport.ts
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/test-phase7c-web-mutation-single-transport.ts
       - name: Build Web
         run: pnpm --filter @xauusd/web build
       - name: Build API dependency graph
