@@ -14,7 +14,6 @@ param(
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $AccountLibrary = Join-Path $PSScriptRoot "lib\phase7c-account-mode.ps1"
-$ExecutorStopper = Join-Path $PSScriptRoot "stop-phase7c-executors-local.ps1"
 $Verifier = Join-Path $PSScriptRoot "verify-phase7c-account-runtime-local.ps1"
 $Smoke = Join-Path $PSScriptRoot "smoke-phase7c-account-runtime-local.ps1"
 $AccountStatePath = Join-Path $ProjectRoot ".runtime\phase7c-account-mode.json"
@@ -22,7 +21,7 @@ $TaskConfigPath = Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.
 $BridgeRunnerLockPath = Join-Path $ProjectRoot ".runtime\phase7c-account-bridge\startup-runner.lock"
 $CanonicalRiskPath = $null
 
-foreach ($required in @($AccountLibrary, $ExecutorStopper, $Verifier, $Smoke)) {
+foreach ($required in @($AccountLibrary, $Verifier, $Smoke)) {
   if (-not (Test-Path -LiteralPath $required)) { throw "Phase7C account switch required file not found: $required" }
 }
 . $AccountLibrary
@@ -79,6 +78,9 @@ $executorActions = @($executorTask.Actions)
 $executorText = if ($executorActions.Count -eq 1) { "$($executorActions[0].Execute) $($executorActions[0].Arguments)" } else { "MULTIPLE_ACTIONS" }
 if ($executorActions.Count -ne 1 -or $executorText -notlike "*run-phase7c-executor-task-runner-local.ps1*") {
   throw "Executor Scheduled Task is not using the verified startup runner."
+}
+if ($executorTask.State -ne "Running") {
+  throw "Executor SYSTEM lifecycle broker task must already be Running before account switch. Current=$($executorTask.State)"
 }
 if (-not (Test-Path $TaskConfigPath)) { throw "Executor task config not found: $TaskConfigPath" }
 
@@ -222,12 +224,69 @@ function Stop-ExactVerifiedBridgeListener($CurrentEnv) {
   }
 }
 
-function Stop-ExecutorStack {
-  Stop-ScheduledTask -TaskName $ExecutorTaskName -ErrorAction SilentlyContinue
-  $runnerLock = Join-Path $WorkDir "phase7c-executors\startup-runner.lock"
-  Wait-ExclusiveLockReleased -Path $runnerLock -TimeoutSeconds 15
-  & $ExecutorStopper -WorkDir $WorkDir
-  if ($LASTEXITCODE -ne 0) { throw "Executor stopper failed." }
+function Get-ExecutorDesiredState($Lifecycle) {
+  $desired = ([string]$Lifecycle.broker.status.desiredExecutorState).Trim().ToUpperInvariant()
+  if ([string]::IsNullOrWhiteSpace($desired)) {
+    $desired = ([string]$Lifecycle.broker.heartbeat.desiredExecutorState).Trim().ToUpperInvariant()
+  }
+  return $desired
+}
+
+function Test-ExecutorRuntimeAlive($Lifecycle) {
+  if ([bool]$Lifecycle.running) { return $true }
+  foreach ($name in @("supervisor", "trend", "sideway", "telegram", "regimeNotifier")) {
+    $entry = $Lifecycle.processes.$name
+    if ($null -ne $entry -and [bool]$entry.alive) { return $true }
+  }
+  return $false
+}
+
+function Assert-ExecutorLifecycleBrokerReady([string]$ExpectedDesiredState = "") {
+  $task = Get-ScheduledTask -TaskName $ExecutorTaskName -ErrorAction Stop
+  if ($task.State -ne "Running") {
+    throw "Executor SYSTEM lifecycle broker Scheduled Task is not Running. Current=$($task.State). Refusing implicit task boot."
+  }
+  $api = $ControlApiUrl.TrimEnd('/')
+  $lifecycle = Invoke-RestMethod -Uri "$api/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 5
+  if (-not [bool]$lifecycle.broker.ready) {
+    throw "Lifecycle broker SYSTEM is not READY. Refusing account mutation."
+  }
+  $brokerPid = [int]$lifecycle.broker.heartbeat.brokerPid
+  if ($brokerPid -le 0) { throw "Lifecycle broker SYSTEM did not publish a valid broker PID." }
+  $desired = Get-ExecutorDesiredState $lifecycle
+  if ([string]::IsNullOrWhiteSpace($desired)) { throw "Lifecycle broker SYSTEM did not publish desiredExecutorState." }
+  if (-not [string]::IsNullOrWhiteSpace($ExpectedDesiredState) -and $desired -ne $ExpectedDesiredState.Trim().ToUpperInvariant()) {
+    throw "Lifecycle broker desiredExecutorState mismatch. Expected=$ExpectedDesiredState Actual=$desired"
+  }
+  return $lifecycle
+}
+
+function Stop-ExecutorsThroughLifecycle {
+  $api = $ControlApiUrl.TrimEnd('/')
+  $before = Assert-ExecutorLifecycleBrokerReady
+  $desiredBefore = Get-ExecutorDesiredState $before
+  if ($desiredBefore -eq "STOPPED" -and -not (Test-ExecutorRuntimeAlive $before)) {
+    Write-Host "PHASE7C_ACCOUNT_SWITCH_LIFECYCLE_STOP=PASS|ACTION=ALREADY_STOPPED|DESIRED=STOPPED"
+    return
+  }
+
+  $stopResult = Invoke-RestMethod -Uri "$api/api/v1/phase7c/lifecycle/stop" -Method Post -TimeoutSec 45
+  $action = ([string]$stopResult.action).Trim().ToUpperInvariant()
+  if ($action -ne "STOPPED") { throw "Canonical lifecycle STOP returned unexpected action: $action" }
+
+  for ($i = 1; $i -le 40; $i++) {
+    Start-Sleep -Milliseconds 500
+    try {
+      $status = Assert-ExecutorLifecycleBrokerReady
+      if ((Get-ExecutorDesiredState $status) -eq "STOPPED" -and -not (Test-ExecutorRuntimeAlive $status)) {
+        Write-Host "PHASE7C_ACCOUNT_SWITCH_LIFECYCLE_STOP=PASS|ACTION=$action|DESIRED=STOPPED"
+        return
+      }
+    } catch {
+      if ($_.Exception.Message -match 'Scheduled Task is not Running|not READY|valid broker PID') { throw }
+    }
+  }
+  throw "Executor runtime did not reach canonical STOPPED while SYSTEM broker remained Running."
 }
 
 function Stop-BridgeStack($CurrentEnv) {
@@ -326,22 +385,9 @@ function Start-TargetBridge($EnvInfo, [string]$Mode) {
   throw "Target $Mode bridge did not become healthy and verified within 60 seconds."
 }
 
-function Start-ExecutorsAndVerify([string]$Mode) {
-  Start-ScheduledTask -TaskName $ExecutorTaskName -ErrorAction Stop
+function Start-ExecutorsThroughLifecycle([string]$Mode) {
   $api = $ControlApiUrl.TrimEnd('/')
-  $brokerReady = $false
-  for ($i = 1; $i -le 40; $i++) {
-    Start-Sleep -Milliseconds 500
-    try {
-      $lifecycle = Invoke-RestMethod -Uri "$api/api/v1/phase7c/lifecycle" -Method Get -TimeoutSec 5
-      if ([bool]$lifecycle.broker.ready) {
-        $brokerReady = $true
-        break
-      }
-    } catch {}
-  }
-  if (-not $brokerReady) { throw "Lifecycle broker SYSTEM did not become READY after Scheduled Task boot." }
-
+  [void](Assert-ExecutorLifecycleBrokerReady "STOPPED")
   $startResult = Invoke-RestMethod -Uri "$api/api/v1/phase7c/lifecycle/start" -Method Post -TimeoutSec 70
   $action = ([string]$startResult.action).Trim().ToUpperInvariant()
   $accountMode = ([string]$startResult.accountMode).Trim().ToUpperInvariant()
@@ -357,7 +403,10 @@ function Start-ExecutorsAndVerify([string]$Mode) {
     Start-Sleep -Seconds 5
     try {
       & $Verifier -WorkDir $WorkDir -ExpectedAccountMode $Mode -ControlApiUrl $ControlApiUrl -RequireTelegram
-      if ($LASTEXITCODE -eq 0) { return }
+      if ($LASTEXITCODE -eq 0) {
+        [void](Assert-ExecutorLifecycleBrokerReady "RUNNING")
+        return
+      }
     } catch {}
   }
   throw "Executor runtime did not pass strict $Mode verification within startup grace."
@@ -385,7 +434,7 @@ try {
   }
 
   $mutationStarted = $true
-  Stop-ExecutorStack
+  Stop-ExecutorsThroughLifecycle
   Write-Host "PHASE7C_ACCOUNT_SWITCH_EXECUTORS_STOPPED=PASS"
   Stop-BridgeStack $previousCurrent.env
   Write-Host "PHASE7C_ACCOUNT_SWITCH_BRIDGE_STOPPED=PASS"
@@ -400,7 +449,7 @@ try {
       -AuthorizedBy "switch-phase7c-account-mode-local:-ConfirmLiveExecution")
     Write-Host "PHASE7C_ACCOUNT_SWITCH_LIVE_AUTHORIZATION=PASS"
   }
-  Start-ExecutorsAndVerify $TargetMode
+  Start-ExecutorsThroughLifecycle $TargetMode
   [void](Set-BotPause "account-mode-switch-complete")
 
   if (-not $SkipPostSwitchSmoke) {
@@ -420,13 +469,13 @@ try {
   try { [void](Set-BotPause "account-mode-switch-failure") } catch {}
   if ($mutationStarted -and $null -ne $previousCurrent -and $null -ne $previousRisk) {
     Write-Host "PHASE7C_ACCOUNT_SWITCH_ROLLBACK=START|MODE=$previousMode"
-    try { Stop-ScheduledTask -TaskName $ExecutorTaskName -ErrorAction SilentlyContinue } catch {}
-    try { Stop-ScheduledTask -TaskName $BridgeTaskName -ErrorAction SilentlyContinue } catch {}
     try {
+      Stop-ExecutorsThroughLifecycle
+      Stop-ScheduledTask -TaskName $BridgeTaskName -ErrorAction SilentlyContinue
       Wait-ExclusiveLockReleased -Path $BridgeRunnerLockPath -TimeoutSeconds 15
       Write-SelectedRuntimeFiles $previousMode $previousCurrent.env $previousRisk
       Start-TargetBridge $previousCurrent.env $previousMode
-      Start-ExecutorsAndVerify $previousMode
+      Start-ExecutorsThroughLifecycle $previousMode
       [void](Set-BotPause "account-mode-switch-rollback")
       Write-Host "PHASE7C_ACCOUNT_SWITCH_ROLLBACK=PASS|BOT_MODE=PAUSE"
     } catch {
