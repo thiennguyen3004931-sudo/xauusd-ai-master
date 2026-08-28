@@ -2239,7 +2239,7 @@ function numberOrNull(raw) {
 
 function value(raw) {
   if (raw === null || raw === undefined || raw === "") return "—";
-  if (typeof raw === "number") return Number.isInteger(raw) ? String(raw) : String(Math.round(raw * 100000) / 100000);
+  if (typeof raw === "number") return String(raw);
   if (typeof raw === "object") return JSON.stringify(raw);
   return String(raw);
 }

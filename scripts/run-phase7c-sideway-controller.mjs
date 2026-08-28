@@ -25,7 +25,16 @@ const symbol = (process.env.ZIQ_PHASE7C_SIDEWAY_SYMBOL || process.env.ZIQ_DEMO_S
 const controlApiBase = (process.env.ZIQ_PHASE7C_CONTROL_API_URL || "http://127.0.0.1:3711").trim().replace(/\/$/, "");
 const intervalSeconds = clampNumber(process.env.ZIQ_PHASE7C_SIDEWAY_INTERVAL_SECONDS, 5, 1, 60);
 const riskPercent = clampNumber(process.env.ZIQ_PHASE7C_SIDEWAY_RISK_PERCENT, 0.25, 0.01, 5);
-const maxLot = clampNumber(process.env.ZIQ_PHASE7C_SIDEWAY_MAX_LOT, 0.03, 0.01, 10);
+const MAX_SIDEWAY_LOT = 0.04;
+const rawMaxLot = Number(process.env.ZIQ_PHASE7C_SIDEWAY_MAX_LOT ?? "0.03");
+if (!Number.isFinite(rawMaxLot) || rawMaxLot < 0.03 - 1e-9 || rawMaxLot > MAX_SIDEWAY_LOT + 1e-9) {
+  throw new Error(`Phase 7C Sideway max lot must be between 0.03 and ${MAX_SIDEWAY_LOT}.`);
+}
+const maxLotUnits = rawMaxLot / 0.01;
+if (Math.abs(maxLotUnits - Math.round(maxLotUnits)) > 1e-8) {
+  throw new Error("Phase 7C Sideway max lot cap must use 0.01 broker-step increments; executed volume remains exact one-third compatible.");
+}
+const maxLot = rawMaxLot;
 const minRegimeConfidence = clampNumber(process.env.ZIQ_PHASE7C_SIDEWAY_MIN_REGIME_CONFIDENCE, 60, 0, 100);
 const regimeCandleCount = clampInteger(process.env.ZIQ_PHASE7C_REGIME_CANDLE_COUNT, 320, 220, 1000);
 const m5CandleCount = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_M5_COUNT, 120, 30, 500);
