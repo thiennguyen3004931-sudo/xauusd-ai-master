@@ -156,6 +156,7 @@ $script:lastHandledRequestId = $null
 $script:lastHandledAction = $null
 $script:lastResult = $null
 $script:lastReasonCode = $null
+$script:stateReasonCode = $null
 $script:lastError = $null
 $script:appliedLotProfile = $null
 $script:accountMode = [string]$bootConfig.accountMode
@@ -180,6 +181,7 @@ function Write-BrokerStatus {
   Write-Phase7CJsonAtomic -Path $statusPath -Value ([pscustomobject]@{
     version = 1
     state = $script:brokerState
+    stateReasonCode = $script:stateReasonCode
     brokerPid = $PID
     supervisorPid = $script:supervisorPid
     desiredExecutorState = $script:desiredExecutorState
@@ -198,7 +200,7 @@ function Write-BrokerStatus {
 
 function Set-BrokerState([string]$State, [string]$ReasonCode = $null, [string]$ErrorMessage = $null) {
   $script:brokerState = $State
-  if ($null -ne $ReasonCode) { $script:lastReasonCode = $ReasonCode }
+  $script:stateReasonCode = $ReasonCode
   $script:lastError = $ErrorMessage
   Write-BrokerStatus
   Write-BrokerHeartbeat
