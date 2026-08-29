@@ -66,5 +66,6 @@ jobs:
         run: node --import ./apps/api/node_modules/tsx/dist/loader.mjs --test scripts/phase7c-decision-monitor.test.mjs
       - name: Trend strategy entry condition contract
         run: node scripts/test-phase7c-trend-strategy-entry-conditions-contract.mjs
+      # Verification checkpoint for the tested Task 6 production commit.
       - name: Sideway strategy entry condition contract
         run: node scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs
