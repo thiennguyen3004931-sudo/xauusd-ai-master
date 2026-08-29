@@ -2,8 +2,8 @@ import {
   defaultMt5BrokerConfig,
   type Mt5BridgeDeal,
 } from "@xauusd/mt5-broker";
-import { getMt5DealHistory } from "./mt5-market.service";
 import { getMt5Telemetry } from "./mt5.service";
+import { getPhase7CCanonicalDeals } from "./phase7c-canonical-deal-ledger.service";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_RECOMMENDATION_SAMPLE = 30;
@@ -314,8 +314,12 @@ export async function getMt5PerformanceSnapshot(days = 90, symbol = "XAUUSD"): P
   const bridgeTradingEnabled = Boolean(telemetry.health.tradingEnabled);
   const brokerNow = telemetry.quote?.timestamp ?? Date.now();
   const fromMs = Math.max(0, brokerNow - days * DAY_MS);
-  const deals = (await getMt5DealHistory(fromMs, brokerNow, normalizedSymbol))
-    .filter((deal) => deal.isTradingDeal);
+  const deals = (await getPhase7CCanonicalDeals({
+    telemetry,
+    symbol: normalizedSymbol,
+    fromMs,
+    toMs: brokerNow,
+  })).filter((deal) => deal.isTradingDeal);
 
   const trendMagic = Number(process.env.MT5_MAGIC_NUMBER ?? defaultMt5BrokerConfig.magicNumber);
   const sidewayMagic = Number(process.env.ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER ?? 270714);
@@ -341,7 +345,7 @@ export async function getMt5PerformanceSnapshot(days = 90, symbol = "XAUUSD"): P
     account: {
       accountMode: account.accountMode,
       brokerMode: account.brokerMode,
-      login: null,
+      login: telemetry.accountLogin,
       server: telemetry.health.server ?? null,
     },
     safety: {
