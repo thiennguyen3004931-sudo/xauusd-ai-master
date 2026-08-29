@@ -11,8 +11,21 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
+import {
+  accountModeAllowsBroker,
+  getPhase7CAccountModeState,
+  type Phase7CAccountModeState,
+} from "./phase7c-account-mode.service";
 import { getMt5DealHistory } from "./mt5-market.service";
-import type { Mt5TelemetrySnapshot } from "./mt5.service";
+import {
+  getMt5Telemetry,
+  type Mt5TelemetrySnapshot,
+} from "./mt5.service";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const STARTUP_BACKFILL_DAYS = 365;
+
+type DealHistoryReader = typeof getMt5DealHistory;
 
 export interface Phase7CCanonicalDealWindow {
   telemetry: Pick<Mt5TelemetrySnapshot, "accountLogin" | "health">;
@@ -28,6 +41,26 @@ export interface Phase7CCanonicalDealSummaryInput extends Phase7CCanonicalDealWi
 export interface Phase7CCanonicalPositionRealizedInput extends Phase7CCanonicalDealWindow {
   positionId: string;
   ownedMagics: Iterable<number>;
+}
+
+export interface Phase7CCanonicalStartupBackfillDependencies {
+  telemetryReader?: (symbol?: string) => Promise<Mt5TelemetrySnapshot>;
+  accountModeReader?: () => Phase7CAccountModeState;
+  historyReader?: DealHistoryReader;
+}
+
+export interface Phase7CCanonicalStartupBackfillResult {
+  status: "BACKFILLED" | "SKIPPED";
+  reason:
+    | "OK"
+    | "MT5_UNAVAILABLE"
+    | "ACCOUNT_MODE_MISMATCH"
+    | "BROKER_TIME_UNAVAILABLE";
+  accountKey: string | null;
+  inserted: number;
+  total: number;
+  fromMs: number | null;
+  toMs: number | null;
 }
 
 function runtimeRoot(): string {
@@ -116,16 +149,92 @@ function validateWindow(input: Phase7CCanonicalDealWindow): {
 
 export async function backfillPhase7CCanonicalDealLedger(
   input: Phase7CCanonicalDealWindow,
+  dependencies: { historyReader?: DealHistoryReader } = {},
 ): Promise<{ accountKey: string; inserted: number; total: number }> {
   const { symbol, fromMs, toMs } = validateWindow(input);
   const accountKey = phase7CCanonicalAccountKey(input.telemetry);
-  const history = await getMt5DealHistory(fromMs, toMs, symbol);
+  const historyReader = dependencies.historyReader ?? getMt5DealHistory;
+  const history = await historyReader(fromMs, toMs, symbol);
   const merged = ledger().mergeBackfill(accountKey, history);
 
   return {
     accountKey,
     inserted: merged.inserted,
     total: merged.total,
+  };
+}
+
+export async function warmPhase7CCanonicalDealLedgerOnStartup(
+  dependencies: Phase7CCanonicalStartupBackfillDependencies = {},
+): Promise<Phase7CCanonicalStartupBackfillResult> {
+  const telemetryReader = dependencies.telemetryReader ?? getMt5Telemetry;
+  const accountModeReader = dependencies.accountModeReader ?? getPhase7CAccountModeState;
+  const telemetry = await telemetryReader("XAUUSD");
+  const accountState = accountModeReader();
+
+  if (
+    !telemetry.enabled ||
+    !telemetry.configured ||
+    !telemetry.reachable ||
+    telemetry.health?.connected !== true
+  ) {
+    return {
+      status: "SKIPPED",
+      reason: "MT5_UNAVAILABLE",
+      accountKey: null,
+      inserted: 0,
+      total: 0,
+      fromMs: null,
+      toMs: null,
+    };
+  }
+
+  if (!accountModeAllowsBroker(telemetry.health.accountMode, accountState)) {
+    return {
+      status: "SKIPPED",
+      reason: "ACCOUNT_MODE_MISMATCH",
+      accountKey: null,
+      inserted: 0,
+      total: 0,
+      fromMs: null,
+      toMs: null,
+    };
+  }
+
+  const toMs = Number(telemetry.quote?.timestamp);
+  if (!Number.isFinite(toMs) || toMs <= 0) {
+    return {
+      status: "SKIPPED",
+      reason: "BROKER_TIME_UNAVAILABLE",
+      accountKey: null,
+      inserted: 0,
+      total: 0,
+      fromMs: null,
+      toMs: null,
+    };
+  }
+
+  const fromMs = Math.max(0, toMs - STARTUP_BACKFILL_DAYS * DAY_MS);
+  const merged = await backfillPhase7CCanonicalDealLedger(
+    {
+      telemetry,
+      symbol: "XAUUSD",
+      fromMs,
+      toMs,
+    },
+    {
+      historyReader: dependencies.historyReader,
+    },
+  );
+
+  return {
+    status: "BACKFILLED",
+    reason: "OK",
+    accountKey: merged.accountKey,
+    inserted: merged.inserted,
+    total: merged.total,
+    fromMs,
+    toMs,
   };
 }
 
