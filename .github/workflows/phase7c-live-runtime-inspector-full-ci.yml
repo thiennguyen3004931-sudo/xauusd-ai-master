@@ -83,6 +83,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: MT5 broker build typecheck and tests
+        env:
+          PYTHONPATH: bridge
         run: |
           pnpm --filter @xauusd/mt5-broker... build
           pnpm --filter @xauusd/mt5-broker typecheck
