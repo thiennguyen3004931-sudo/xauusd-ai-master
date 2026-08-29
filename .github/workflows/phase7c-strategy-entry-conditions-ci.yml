@@ -19,6 +19,8 @@ on:
       - "scripts/test-phase7c-strategy-entry-conditions-*.mjs"
       - "scripts/test-phase7c-trend-strategy-entry-conditions-contract.mjs"
       - "scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs"
+      - "scripts/test-phase7c-trend-entry-recovery-contract.mjs"
+      - "scripts/test-phase7c-sideway-recovery-management-contract.mjs"
       - ".github/workflows/phase7c-strategy-entry-conditions-ci.yml"
   pull_request:
     branches:
@@ -37,6 +39,8 @@ on:
       - "scripts/test-phase7c-strategy-entry-conditions-*.mjs"
       - "scripts/test-phase7c-trend-strategy-entry-conditions-contract.mjs"
       - "scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs"
+      - "scripts/test-phase7c-trend-entry-recovery-contract.mjs"
+      - "scripts/test-phase7c-sideway-recovery-management-contract.mjs"
       - ".github/workflows/phase7c-strategy-entry-conditions-ci.yml"
 
 permissions:
