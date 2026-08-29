@@ -2,15 +2,51 @@ import { getMt5Telemetry } from "./mt5.service";
 import {
   accountModeAllowsBroker,
   getPhase7CAccountModeState,
+  type Phase7CAccountMode,
 } from "./phase7c-account-mode.service";
 
-const TREND_MAGIC_NUMBER = Number(
-  process.env.MT5_MAGIC_NUMBER ?? "270713",
-);
+type Phase7CDailyRecoveryMagicNumbers = {
+  trendMagicNumber: number;
+  sidewayMagicNumber: number;
+  configuredMagicNumbers: number[];
+};
 
-const SIDEWAY_MAGIC_NUMBER = Number(
-  process.env.ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER ?? "270714",
-);
+export function resolvePhase7CDailyRecoveryMagicNumbers(input: {
+  accountMode: Phase7CAccountMode;
+  env?: Record<string, string | undefined>;
+}): Phase7CDailyRecoveryMagicNumbers {
+  const env = input.env ?? process.env;
+  const trendDefault =
+    input.accountMode === "LIVE" ? "270715" : "270713";
+
+  const trendMagicNumber =
+    input.accountMode === "LIVE"
+      ? Number(trendDefault)
+      : Number(env.MT5_MAGIC_NUMBER ?? trendDefault);
+
+  const sidewayMagicNumber = Number(
+    env.ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER ?? "270714",
+  );
+
+  if (
+    ![trendMagicNumber, sidewayMagicNumber].every(
+      (value) => Number.isFinite(value) && value > 0,
+    )
+  ) {
+    throw new Error(
+      "Daily Recovery magic-number configuration is invalid.",
+    );
+  }
+
+  return {
+    trendMagicNumber,
+    sidewayMagicNumber,
+    configuredMagicNumbers: [
+      trendMagicNumber,
+      sidewayMagicNumber,
+    ],
+  };
+}
 
 const DAILY_RECOVERY_MIN_TP_DISTANCE = 6;
 const DAILY_RECOVERY_MAX_TP_DISTANCE = 10;
@@ -80,21 +116,10 @@ async function bridgeGet<T>(requestPath: string): Promise<T> {
   }
 }
 
-function validMagicNumbers(): Set<number> {
-  if (
-    ![TREND_MAGIC_NUMBER, SIDEWAY_MAGIC_NUMBER].every(
-      (value) => Number.isFinite(value) && value > 0,
-    )
-  ) {
-    throw new Error(
-      "Daily Recovery magic-number configuration is invalid.",
-    );
-  }
-
-  return new Set([
-    TREND_MAGIC_NUMBER,
-    SIDEWAY_MAGIC_NUMBER,
-  ]);
+function validMagicNumbers(
+  resolved: Phase7CDailyRecoveryMagicNumbers,
+): Set<number> {
+  return new Set(resolved.configuredMagicNumbers);
 }
 
 export async function getPhase7CDailyRecoveryView(
@@ -167,7 +192,14 @@ export async function getPhase7CDailyRecoveryView(
     );
   }
 
-  const magicNumbers = validMagicNumbers();
+  const resolvedMagicNumbers =
+    resolvePhase7CDailyRecoveryMagicNumbers({
+      accountMode: accountModeState.accountMode,
+    });
+
+  const magicNumbers = validMagicNumbers(
+    resolvedMagicNumbers,
+  );
 
   const botDeals = deals.filter(
     (deal) =>
@@ -280,9 +312,11 @@ export async function getPhase7CDailyRecoveryView(
 
     strategy: {
       trendMagicNumber:
-        TREND_MAGIC_NUMBER,
+        resolvedMagicNumbers.trendMagicNumber,
       sidewayMagicNumber:
-        SIDEWAY_MAGIC_NUMBER,
+        resolvedMagicNumbers.sidewayMagicNumber,
+      configuredMagicNumbers:
+        resolvedMagicNumbers.configuredMagicNumbers,
       targetNetUsd:
         DAILY_RECOVERY_TARGET_NET_USD,
       minTpDistance:
