@@ -1,9 +1,7 @@
-import {
-  defaultMt5BrokerConfig,
-  type Mt5BridgeDeal,
-} from "@xauusd/mt5-broker";
+import type { Mt5BridgeDeal } from "@xauusd/mt5-broker";
 import { getMt5Telemetry } from "./mt5.service";
 import { getPhase7CCanonicalDeals } from "./phase7c-canonical-deal-ledger.service";
+import { resolvePhase7CDailyRecoveryMagicNumbers } from "./phase7c-daily-recovery-view.service";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_RECOMMENDATION_SAMPLE = 30;
@@ -321,8 +319,11 @@ export async function getMt5PerformanceSnapshot(days = 90, symbol = "XAUUSD"): P
     toMs: brokerNow,
   })).filter((deal) => deal.isTradingDeal);
 
-  const trendMagic = Number(process.env.MT5_MAGIC_NUMBER ?? defaultMt5BrokerConfig.magicNumber);
-  const sidewayMagic = Number(process.env.ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER ?? 270714);
+  const resolvedMagicNumbers = resolvePhase7CDailyRecoveryMagicNumbers({
+    accountMode: account.accountMode,
+  });
+  const trendMagic = resolvedMagicNumbers.trendMagicNumber;
+  const sidewayMagic = resolvedMagicNumbers.sidewayMagicNumber;
   if (!Number.isInteger(trendMagic) || trendMagic <= 0) throw new Error("Configured Trend magic is invalid.");
   if (!Number.isInteger(sidewayMagic) || sidewayMagic <= 0) throw new Error("Configured Sideway magic is invalid.");
   if (trendMagic === sidewayMagic) throw new Error("Trend and Sideway magic numbers must be distinct.");
