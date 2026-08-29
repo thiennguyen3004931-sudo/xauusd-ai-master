@@ -19,6 +19,30 @@ const journalPath = trendJournalPath;
 const sidewayJournalPath =
   process.env.ZIQ_TELEGRAM_SIDEWAY_JOURNAL_PATH?.trim() || "";
 const statePath = requiredEnv("ZIQ_TELEGRAM_STATE_PATH");
+const singletonPath = `${statePath}.lock`;
+let singletonFd;
+try {
+  singletonFd = fs.openSync(singletonPath, "wx");
+  fs.writeFileSync(singletonFd, `${process.pid}\n`, "utf8");
+} catch (error) {
+  if (error?.code === "EEXIST") {
+    console.log(`PHASE7B_TELEGRAM_NOTIFIER_DUPLICATE=EXIT singleton=${singletonPath}`);
+    process.exit(0);
+  }
+  throw error;
+}
+
+const releaseSingleton = () => {
+  try {
+    if (singletonFd !== undefined) fs.closeSync(singletonFd);
+  } catch {}
+  try {
+    fs.unlinkSync(singletonPath);
+  } catch {}
+};
+process.once("exit", releaseSingleton);
+process.once("SIGINT", () => process.exit(0));
+process.once("SIGTERM", () => process.exit(0));
 const symbol = process.env.ZIQ_TELEGRAM_SYMBOL ?? "XAUUSD";
 const accountMode = normalizeAccountMode(
   process.env.ZIQ_PHASE7C_ACCOUNT_MODE ?? "DEMO",
