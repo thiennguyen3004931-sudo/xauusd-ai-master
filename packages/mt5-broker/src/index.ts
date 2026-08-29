@@ -9,3 +9,4 @@ export * from "./transport";
 export * from "./validators";
 export * from "./market";
 export * from "./accounting/broker-day-realized-pnl";
+export * from "./accounting/canonical-deal-ledger";
