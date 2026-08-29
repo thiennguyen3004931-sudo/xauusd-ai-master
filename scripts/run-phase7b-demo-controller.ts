@@ -11,6 +11,10 @@ import {
 import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
 import { canonicalHoldReason } from "./phase7c-hold-observability.mjs";
 import {
+  stopIsAtLeastAsTight,
+  stopStrictlyTightens,
+} from "./phase7c-stop-monotonicity.mjs";
+import {
   compareStrategyEntryConfigVersion,
   createVirtualStrategyEntryConditionState,
   evaluateStrategyEntryConditions,
@@ -1334,21 +1338,33 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
   const holdM15CloseTime = Number(latestM15?.closeTime ?? 0);
 
   if (!managed.breakEvenApplied && favorable >= 6) {
-    managed.beAttempt += 1;
-    saveState();
     const beStop = roundPrice(position.entry, spec.digits);
-    const commandId = `p7b-be-${managed.ticket}-${managed.beAttempt}`;
-    const response = await patch<CommandResponse>(`/v1/positions/${encodeURIComponent(managed.ticket)}`, {
-      stopLoss: beStop,
-      commandId,
-    });
-    if (response.success) {
+    if (stopIsAtLeastAsTight(managed.side, Number(position.stopLoss), beStop)) {
       managed.breakEvenApplied = true;
-      managed.lastStructuralStop = beStop;
+      managed.lastStructuralStop = Number(position.stopLoss);
       saveState();
-      journal("PLUS6_SL_TO_ENTRY", { ticket: managed.ticket, favorable, stopLoss: beStop, response });
+      journal("PLUS6_SL_ALREADY_AT_OR_TIGHTER", {
+        ticket: managed.ticket,
+        favorable,
+        entry: beStop,
+        stopLoss: Number(position.stopLoss),
+      });
     } else {
-      journal("PLUS6_SL_REJECTED", { ticket: managed.ticket, favorable, response });
+      managed.beAttempt += 1;
+      saveState();
+      const commandId = `p7b-be-${managed.ticket}-${managed.beAttempt}`;
+      const response = await patch<CommandResponse>(`/v1/positions/${encodeURIComponent(managed.ticket)}`, {
+        stopLoss: beStop,
+        commandId,
+      });
+      if (response.success) {
+        managed.breakEvenApplied = true;
+        managed.lastStructuralStop = beStop;
+        saveState();
+        journal("PLUS6_SL_TO_ENTRY", { ticket: managed.ticket, favorable, stopLoss: beStop, response });
+      } else {
+        journal("PLUS6_SL_REJECTED", { ticket: managed.ticket, favorable, response });
+      }
     }
   }
 
@@ -1449,26 +1465,28 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
 
   if (managed.partialApplied) {
     const structure = latestConfirmedStructureStop(managed.side, m15, managed.signalTimestamp, latest.closeTime);
-    if (structure !== null && improvesStop(managed.side, position.stopLoss, structure)) {
-      const minimumGap = Math.max(spec.stopsLevelTicks, spec.freezeLevelTicks) * spec.point;
-      const validAgainstMarket = managed.side === "BUY"
-        ? structure < quote.bid - minimumGap
-        : structure > quote.ask + minimumGap;
-      if (validAgainstMarket) {
-        managed.structureAttempt += 1;
-        saveState();
-        const candidate = roundPrice(structure, spec.digits);
-        const commandId = `p7b-struct-${managed.ticket}-${latest.closeTime}-${managed.structureAttempt}`;
-        const response = await patch<CommandResponse>(`/v1/positions/${encodeURIComponent(managed.ticket)}`, {
-          stopLoss: candidate,
-          commandId,
-        });
-        if (response.success) {
-          managed.lastStructuralStop = candidate;
+    if (structure !== null) {
+      const candidate = roundPrice(structure, spec.digits);
+      if (stopStrictlyTightens(managed.side, Number(position.stopLoss), candidate)) {
+        const minimumGap = Math.max(spec.stopsLevelTicks, spec.freezeLevelTicks) * spec.point;
+        const validAgainstMarket = managed.side === "BUY"
+          ? candidate < quote.bid - minimumGap
+          : candidate > quote.ask + minimumGap;
+        if (validAgainstMarket) {
+          managed.structureAttempt += 1;
           saveState();
-          journal("STRUCTURAL_SL_TIGHTEN", { ticket: managed.ticket, stopLoss: candidate, m15CloseTime: latest.closeTime, response });
-        } else {
-          journal("STRUCTURAL_SL_REJECTED", { ticket: managed.ticket, stopLoss: candidate, response });
+          const commandId = `p7b-struct-${managed.ticket}-${latest.closeTime}-${managed.structureAttempt}`;
+          const response = await patch<CommandResponse>(`/v1/positions/${encodeURIComponent(managed.ticket)}`, {
+            stopLoss: candidate,
+            commandId,
+          });
+          if (response.success) {
+            managed.lastStructuralStop = candidate;
+            saveState();
+            journal("STRUCTURAL_SL_TIGHTEN", { ticket: managed.ticket, stopLoss: candidate, m15CloseTime: latest.closeTime, response });
+          } else {
+            journal("STRUCTURAL_SL_REJECTED", { ticket: managed.ticket, stopLoss: candidate, response });
+          }
         }
       }
     }
@@ -1826,12 +1844,6 @@ function managedFromPending(
     recoveryDayStartTime:
       pending.recoveryDayStartTime,
   };
-}
-
-function improvesStop(side: "BUY" | "SELL", current: number, candidate: number): boolean {
-  if (!(candidate > 0)) return false;
-  if (!(current > 0)) return true;
-  return side === "BUY" ? candidate > current + 1e-9 : candidate < current - 1e-9;
 }
 
 function partialVolume(initial: number, remaining: number, spec: SymbolSpec): number {

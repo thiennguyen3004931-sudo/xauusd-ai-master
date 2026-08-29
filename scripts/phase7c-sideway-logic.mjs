@@ -193,8 +193,12 @@ export function normalizeVolume(value, step, digits = 8) {
 }
 
 export function oneThirdPartialVolume(initialVolume, currentVolume, minVolume, step) {
-  const desired = normalizeVolume(initialVolume / 3, step);
-  if (desired < minVolume - 1e-9) return 0;
+  if (!(initialVolume > 0) || !(currentVolume > 0) || !(minVolume > 0) || !(step > 0)) return 0;
+  const rawThird = initialVolume / 3;
+  const rawUnits = rawThird / step;
+  if (Math.abs(rawUnits - Math.round(rawUnits)) > 1e-8) return 0;
+  const desired = normalizeVolume(rawThird, step);
+  if (Math.abs(desired - rawThird) > 1e-8 || desired < minVolume - 1e-9) return 0;
   const remaining = normalizeVolume(currentVolume - desired, step);
   if (remaining < minVolume - 1e-9) return 0;
   return desired;

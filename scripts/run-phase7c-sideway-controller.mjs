@@ -21,6 +21,7 @@ import {
 } from "./phase7c-sideway-logic.mjs";
 import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
 import { canonicalHoldReason } from "./phase7c-hold-observability.mjs";
+import { stopIsAtLeastAsTight } from "./phase7c-stop-monotonicity.mjs";
 import {
   compareStrategyEntryConfigVersion,
   createVirtualStrategyEntryConditionState,
@@ -941,23 +942,35 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
     : managed.entry - marketPrice;
 
   if (!managed.breakEvenApplied && favorable >= 6) {
-    const minimumGap = Math.max(Number(spec.stopsLevelTicks ?? 0), Number(spec.freezeLevelTicks ?? 0)) * Number(spec.point);
-    const valid = managed.side === "BUY"
-      ? managed.entry < Number(quote.bid) - minimumGap
-      : managed.entry > Number(quote.ask) + minimumGap;
-    if (valid) {
-      managed.breakEvenAttempt += 1;
+    const beStop = roundPrice(managed.entry, Number(spec.digits ?? 2));
+    if (stopIsAtLeastAsTight(managed.side, Number(position.stopLoss), beStop)) {
+      managed.breakEvenApplied = true;
       saveState();
-      const response = await bridgeRequest("PATCH", `/v1/positions/${encodeURIComponent(managed.ticket)}`, {
-        stopLoss: roundPrice(managed.entry, Number(spec.digits ?? 2)),
-        commandId: `p7c-sideway-plus6-be-${managed.ticket}-${managed.breakEvenAttempt}`,
+      journal("PLUS6_SL_ALREADY_AT_OR_TIGHTER", {
+        ticket: managed.ticket,
+        favorable,
+        entry: beStop,
+        stopLoss: Number(position.stopLoss),
       });
-      if (response.success) {
-        managed.breakEvenApplied = true;
+    } else {
+      const minimumGap = Math.max(Number(spec.stopsLevelTicks ?? 0), Number(spec.freezeLevelTicks ?? 0)) * Number(spec.point);
+      const valid = managed.side === "BUY"
+        ? beStop < Number(quote.bid) - minimumGap
+        : beStop > Number(quote.ask) + minimumGap;
+      if (valid) {
+        managed.breakEvenAttempt += 1;
         saveState();
-        journal("PLUS6_SL_TO_ENTRY", { ticket: managed.ticket, favorable, stopLoss: managed.entry });
-      } else {
-        journal("PLUS6_SL_REJECTED", { ticket: managed.ticket, favorable, response });
+        const response = await bridgeRequest("PATCH", `/v1/positions/${encodeURIComponent(managed.ticket)}`, {
+          stopLoss: beStop,
+          commandId: `p7c-sideway-plus6-be-${managed.ticket}-${managed.breakEvenAttempt}`,
+        });
+        if (response.success) {
+          managed.breakEvenApplied = true;
+          saveState();
+          journal("PLUS6_SL_TO_ENTRY", { ticket: managed.ticket, favorable, stopLoss: beStop });
+        } else {
+          journal("PLUS6_SL_REJECTED", { ticket: managed.ticket, favorable, response });
+        }
       }
     }
   }
