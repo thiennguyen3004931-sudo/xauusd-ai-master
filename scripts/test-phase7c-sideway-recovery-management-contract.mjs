@@ -43,7 +43,7 @@ const recoveryGuardIndex = source.indexOf(
 );
 
 const partialIndex = source.indexOf(
-  'if (!managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1))',
+  'if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1))',
 );
 
 assert.ok(
