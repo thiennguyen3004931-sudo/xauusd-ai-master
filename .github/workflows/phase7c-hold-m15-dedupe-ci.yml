@@ -15,6 +15,7 @@ on:
       - scripts/apply-phase7c-hold-m15-dedupe-patch-v2.mjs
       - scripts/apply-phase7c-hold-m15-dedupe-patch-v3.mjs
       - scripts/apply-phase7c-hold-m15-dedupe-patch-v4.mjs
+      - scripts/apply-phase7c-hold-m15-dedupe-patch-v5.mjs
       - .github/workflows/phase7c-hold-m15-dedupe-ci.yml
   pull_request:
     paths:
@@ -52,7 +53,7 @@ jobs:
           if grep -q 'holdM15ByTicketReason' ./scripts/run-phase7b-telegram-notifier.mjs; then
             echo 'PHASE7C_HOLD_M15_PATCH=ALREADY_APPLIED'
           else
-            node ./scripts/apply-phase7c-hold-m15-dedupe-patch-v4.mjs
+            node ./scripts/apply-phase7c-hold-m15-dedupe-patch-v5.mjs
           fi
 
       - name: Verify focused contracts
