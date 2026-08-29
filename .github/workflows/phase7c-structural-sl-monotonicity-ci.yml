@@ -5,19 +5,23 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - feat/phase7c-structural-sl-monotonicity
+      - codex/phase7c-structural-sl-monotonicity-audit
     paths:
       - scripts/test-phase7c-structural-sl-monotonicity.mjs
       - scripts/phase7c-stop-monotonicity.mjs
       - scripts/phase7c-sideway-logic.mjs
+      - scripts/phase7c-sideway-logic.test.mjs
       - scripts/run-phase7b-demo-controller.ts
       - scripts/run-phase7c-sideway-controller.mjs
       - .github/workflows/phase7c-structural-sl-monotonicity-ci.yml
   pull_request:
+    branches:
+      - main
     paths:
       - scripts/test-phase7c-structural-sl-monotonicity.mjs
       - scripts/phase7c-stop-monotonicity.mjs
       - scripts/phase7c-sideway-logic.mjs
+      - scripts/phase7c-sideway-logic.test.mjs
       - scripts/run-phase7b-demo-controller.ts
       - scripts/run-phase7c-sideway-controller.mjs
       - .github/workflows/phase7c-structural-sl-monotonicity-ci.yml
@@ -37,10 +41,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Structural SL monotonicity contract
         run: node --test ./scripts/test-phase7c-structural-sl-monotonicity.mjs
+
+      - name: Sideway exact one-third and restart recovery regression
+        run: node --test ./scripts/phase7c-sideway-logic.test.mjs
 
       - name: Source syntax checks
         run: |
