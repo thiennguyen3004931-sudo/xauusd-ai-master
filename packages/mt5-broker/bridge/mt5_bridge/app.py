@@ -54,9 +54,9 @@ async def bridge_error_handler(_, exc: BridgeError):
 
 
 @app.get("/health", dependencies=[Depends(verify_api_key)])
-def health():
+def health(reconnect: bool = True):
     return {
-        **gateway.health(),
+        **gateway.health(reconnect=reconnect),
         "brokerTimeOffsetSeconds": broker_time_offset_seconds(),
     }
 
@@ -109,13 +109,13 @@ def deal_history(fromMs: int, toMs: int, symbol: str | None = None):
 
 
 @app.get("/v1/positions", dependencies=[Depends(verify_api_key)])
-def positions(symbol: str | None = Query(default=None)):
-    return normalize_positions(gateway.positions(symbol))
+def positions(symbol: str | None = Query(default=None), reconnect: bool = True):
+    return normalize_positions(gateway.positions(symbol, reconnect=reconnect))
 
 
 @app.get("/v1/orders", dependencies=[Depends(verify_api_key)])
-def pending_orders(symbol: str | None = Query(default=None)):
-    return gateway.pending_orders(symbol)
+def pending_orders(symbol: str | None = Query(default=None), reconnect: bool = True):
+    return gateway.pending_orders(symbol, reconnect=reconnect)
 
 
 @app.post("/v1/orders", dependencies=[Depends(verify_api_key)])

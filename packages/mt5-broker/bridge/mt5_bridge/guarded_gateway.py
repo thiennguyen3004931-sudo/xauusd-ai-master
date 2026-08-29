@@ -43,15 +43,15 @@ class GuardedMt5Gateway(Mt5Gateway):
             compatibility_enabled=self.settings.live_compatibility_enabled,
         )
 
-    def health(self) -> dict[str, Any]:
-        base = super().health()
+    def health(self, reconnect: bool = True) -> dict[str, Any]:
+        base = super().health(reconnect=reconnect)
         connected = bool(base.get("connected"))
         actual_mode = str(base.get("accountMode") or "")
 
         decision = LiveArmDecision(False, "NOT_REQUIRED")
         if connected and actual_mode == "real":
             with self._lock:
-                _, account = self._connection_snapshot_locked(reconnect=True)
+                _, account = self._connection_snapshot_locked(reconnect=reconnect)
             decision = self._live_arm_decision(account)
         elif connected and self.settings.account_mode == "LIVE":
             decision = LiveArmDecision(False, "ACCOUNT_MODE_MISMATCH")
@@ -75,14 +75,22 @@ class GuardedMt5Gateway(Mt5Gateway):
             "liveRiskReductionAllowedWhenDisarmed": True,
         }
 
-    def pending_orders(self, canonical_symbol: str | None = None) -> list[dict[str, Any]]:
+    def pending_orders(
+        self,
+        canonical_symbol: str | None = None,
+        reconnect: bool = True,
+    ) -> list[dict[str, Any]]:
         """Read-only broker pending-order snapshot used by LIVE arm preflight."""
         broker_symbol = self.settings.broker_symbol(canonical_symbol) if canonical_symbol else None
         with self._lock:
             rows = (
-                self._read_with_reconnect_locked("orders_get", symbol=broker_symbol)
+                self._read_with_reconnect_locked(
+                    "orders_get",
+                    symbol=broker_symbol,
+                    reconnect=reconnect,
+                )
                 if broker_symbol
-                else self._read_with_reconnect_locked("orders_get")
+                else self._read_with_reconnect_locked("orders_get", reconnect=reconnect)
             )
         if rows is None:
             raise BridgeError(

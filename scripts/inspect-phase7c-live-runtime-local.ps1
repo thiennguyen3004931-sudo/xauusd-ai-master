@@ -98,15 +98,15 @@ try {
   $mode = Read-ModeValue $modeResponse
   if ($mode -ne $ExpectedMode) { throw "Expected bot mode $ExpectedMode but observed $mode." }
 
-  $health = Invoke-ObservationGet "$bridgeBaseUrl/health" $bridgeHeaders
+  $health = Invoke-ObservationGet "$bridgeBaseUrl/health?reconnect=false" $bridgeHeaders
   if (-not [bool]$health.connected -or ([string]$health.status).Trim().ToLowerInvariant() -ne 'ok') { throw "Bridge health is not connected/ok." }
   $expectedBrokerMode = if ($runtime -eq 'LIVE') { 'real' } else { 'demo' }
   if (([string]$health.accountMode).Trim().ToLowerInvariant() -ne $expectedBrokerMode) { throw "Bridge accountMode does not match selected runtime." }
   if ($null -ne $health.PSObject.Properties['configuredAccountMode'] -and ([string]$health.configuredAccountMode).Trim().ToUpperInvariant() -ne $runtime) { throw "Bridge configuredAccountMode does not match selected runtime." }
 
   $escapedSymbol = [uri]::EscapeDataString($Symbol)
-  $positions = Invoke-ObservationGet "$bridgeBaseUrl/v1/positions?symbol=$escapedSymbol" $bridgeHeaders
-  $orders = Invoke-ObservationGet "$bridgeBaseUrl/v1/orders?symbol=$escapedSymbol" $bridgeHeaders
+  $positions = Invoke-ObservationGet "$bridgeBaseUrl/v1/positions?symbol=$escapedSymbol&reconnect=false" $bridgeHeaders
+  $orders = Invoke-ObservationGet "$bridgeBaseUrl/v1/orders?symbol=$escapedSymbol&reconnect=false" $bridgeHeaders
   $positionCount = Count-Items $positions
   $orderCount = Count-Items $orders
 

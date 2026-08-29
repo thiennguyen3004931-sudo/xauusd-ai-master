@@ -52,9 +52,9 @@ try {
   $requests = @(Get-Content -LiteralPath $logPath | Where-Object { $_.Trim() })
   $expected = @(
     'GET /api/v1/phase7c/bot-mode',
-    'GET /health',
-    'GET /v1/positions?symbol=XAUUSD',
-    'GET /v1/orders?symbol=XAUUSD'
+    'GET /health?reconnect=false',
+    'GET /v1/positions?symbol=XAUUSD&reconnect=false',
+    'GET /v1/orders?symbol=XAUUSD&reconnect=false'
   )
   foreach ($item in $expected) { if ($requests -notcontains $item) { throw "Missing expected observation request: $item. Actual=$($requests -join ', ')" } }
   foreach ($request in $requests) { if ($request -notmatch '^GET ') { throw "Non-GET request observed: $request" } }
