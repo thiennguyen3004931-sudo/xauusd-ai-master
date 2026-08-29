@@ -174,7 +174,7 @@ if (apply) {
 }
 
 function ensureGuardImportNames(source, requiredNames) {
-  const pattern = /import\s*\{([\s\S]*?)\}\s*from\s*(["'])\.\/phase7c-sideway-execution-guards\.mjs\2\s*;/g;
+  const pattern = /import\s*\{([^}]*)\}\s*from\s*(["'])\.\/phase7c-sideway-execution-guards\.mjs\2\s*;/g;
   const matches = [...source.matchAll(pattern)];
   if (matches.length !== 1) {
     throw new Error(`SIDEWAY_IMPORT_CLOCK_HELPERS: expected exactly one guard import block, found ${matches.length}. Refusing to modify ${sidewayPath}.`);
