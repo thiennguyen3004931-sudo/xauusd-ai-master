@@ -25,3 +25,17 @@ export function stopIsAtLeastAsTight(side, currentStop, requiredStop) {
     ? current >= required - EPSILON
     : current <= required + EPSILON;
 }
+
+export function tightestKnownStop(side, ...stops) {
+  const normalizedSide = normalizeSide(side);
+  if (!normalizedSide) return 0;
+
+  const validStops = stops
+    .map((stop) => Number(stop))
+    .filter((stop) => Number.isFinite(stop) && stop > 0);
+
+  if (validStops.length === 0) return 0;
+  return normalizedSide === "BUY"
+    ? Math.max(...validStops)
+    : Math.min(...validStops);
+}
