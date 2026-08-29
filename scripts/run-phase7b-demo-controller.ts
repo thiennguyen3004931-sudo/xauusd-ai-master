@@ -13,6 +13,7 @@ import { canonicalHoldReason } from "./phase7c-hold-observability.mjs";
 import {
   stopIsAtLeastAsTight,
   stopStrictlyTightens,
+  tightestKnownStop,
 } from "./phase7c-stop-monotonicity.mjs";
 import {
   compareStrategyEntryConfigVersion,
@@ -1467,7 +1468,12 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
     const structure = latestConfirmedStructureStop(managed.side, m15, managed.signalTimestamp, latest.closeTime);
     if (structure !== null) {
       const candidate = roundPrice(structure, spec.digits);
-      if (stopStrictlyTightens(managed.side, Number(position.stopLoss), candidate)) {
+      const structuralBaseline = tightestKnownStop(
+        managed.side,
+        Number(position.stopLoss),
+        Number(managed.lastStructuralStop),
+      );
+      if (stopStrictlyTightens(managed.side, structuralBaseline, candidate)) {
         const minimumGap = Math.max(spec.stopsLevelTicks, spec.freezeLevelTicks) * spec.point;
         const validAgainstMarket = managed.side === "BUY"
           ? candidate < quote.bid - minimumGap
