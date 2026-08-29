@@ -21,10 +21,15 @@ assert.notEqual(entryStart, -1, "ENTRY_FILLED formatter block must exist");
 assert.notEqual(entryEnd, -1, "PLUS6 formatter block must follow ENTRY_FILLED");
 let entryBlock = source.slice(entryStart, entryEnd);
 
-const entryLine = `          line(\n            "💵",\n            "Entry",`;
-assert.equal(count(entryBlock, entryLine), 3, "all three filled-entry variants must expose Entry");
-const ticketLine = `          line(\n            "🎫",\n            "Ticket",\n            position.ticket ?? event.ticket,\n          ),\n`;
-entryBlock = entryBlock.replaceAll(entryLine, `${ticketLine}${entryLine}`);
+const nestedEntryLine = `          line(\n            "💵",\n            "Entry",`;
+assert.equal(count(entryBlock, nestedEntryLine), 2, "Recovery and Sideway filled cards must expose Entry");
+const nestedTicketLine = `          line(\n            "🎫",\n            "Ticket",\n            position.ticket ?? event.ticket,\n          ),\n`;
+entryBlock = entryBlock.replaceAll(nestedEntryLine, `${nestedTicketLine}${nestedEntryLine}`);
+
+const trendEntryLine = `        line(\n          "💵",\n          "Entry",`;
+assert.equal(count(entryBlock, trendEntryLine), 1, "Trend filled card must expose Entry");
+const trendTicketLine = `        line(\n          "🎫",\n          "Ticket",\n          position.ticket ?? event.ticket,\n        ),\n`;
+entryBlock = entryBlock.replace(trendEntryLine, `${trendTicketLine}${trendEntryLine}`);
 
 const sidewayHeader = `        \`\${side} SIDEWAY FILLED · \${symbol}\`,\n        [\n`;
 assert.equal(count(entryBlock, sidewayHeader), 1, "Sideway filled card header must exist");
@@ -40,9 +45,12 @@ entryBlock = entryBlock.replace(
   `${trendHeader}        line("🤖", "Regime", "TREND"),\n`,
 );
 
-const volumeLabel = `            "Volume",`;
-assert.equal(count(entryBlock, volumeLabel), 3, "all filled-entry cards must use the legacy Volume label before migration");
-entryBlock = entryBlock.replaceAll(volumeLabel, `            "Lot",`);
+const nestedVolumeLabel = `            "Volume",`;
+assert.equal(count(entryBlock, nestedVolumeLabel), 2, "Recovery and Sideway cards must use legacy Volume label before migration");
+entryBlock = entryBlock.replaceAll(nestedVolumeLabel, `            "Lot",`);
+const trendVolumeLabel = `          "Volume",`;
+assert.equal(count(entryBlock, trendVolumeLabel), 1, "Trend card must use legacy Volume label before migration");
+entryBlock = entryBlock.replace(trendVolumeLabel, `          "Lot",`);
 
 const sidewayTp2 = `            event.management?.tp2,`;
 assert.equal(count(entryBlock, sidewayTp2), 1, "Sideway TP2 formatter must exist");
