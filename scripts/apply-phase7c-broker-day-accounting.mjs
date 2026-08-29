@@ -84,7 +84,7 @@ write("scripts/run-phase7c-sideway-controller.mjs", sideway);
 let api = read("apps/api/src/services/phase7c-daily-recovery-view.service.ts");
 api = addImport(
   api,
-  '',
+  'import { getMt5Telemetry } from "./mt5.service";\n',
   'import { summarizeBrokerDayRealizedPnl } from "@xauusd/mt5-broker";\n',
   "Daily Recovery API",
 );
