@@ -34,7 +34,7 @@ try {
   }
   if (-not $ready) { throw "Mock server did not become ready." }
 
-  $output = @(& $InspectorPath -WorkDir $tempRoot -ControlApiUrl $baseUrl -ExpectedRuntime LIVE -ExpectedMode AUTO -RequireArmed -Symbol XAUUSD -TimeoutSec 3 2>&1 | ForEach-Object { [string]$_ })
+  $output = @(& $InspectorPath -WorkDir $tempRoot -ControlApiUrl $baseUrl -ExpectedRuntime LIVE -ExpectedMode AUTO -RequireArmed -Symbol XAUUSD -TimeoutSec 3 *>&1 | ForEach-Object { [string]$_ })
   $joined = $output -join "`n"
   if ($joined -notmatch 'PHASE7C_LIVE_RUNTIME_INSPECTOR_RESULT=PASS') { throw "Inspector did not PASS. Output:`n$joined" }
   if ($joined -notmatch 'PHASE7C_LIVE_RUNTIME_INSPECTOR_OBSERVATION_ONLY=TRUE') { throw "Inspector did not declare observation-only. Output:`n$joined" }
