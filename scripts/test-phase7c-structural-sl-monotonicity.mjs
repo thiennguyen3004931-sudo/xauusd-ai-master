@@ -74,7 +74,7 @@ assert.match(
 // Trend structural trailing must compare against the tightest broker/durable stop, not broker SL alone.
 assert.match(
   trendSource,
-  /tightestKnownStop\(\s*managed\.side,\s*Number\(position\.stopLoss\),\s*Number\(managed\.lastStructuralStop\)\s*\)/,
+  /tightestKnownStop\(\s*managed\.side,\s*Number\(position\.stopLoss\),\s*Number\(managed\.lastStructuralStop\),?\s*\)/,
   "RED_TARGET: Trend trailing must preserve durable lastStructuralStop when broker SL is missing or looser.",
 );
 assert.match(
