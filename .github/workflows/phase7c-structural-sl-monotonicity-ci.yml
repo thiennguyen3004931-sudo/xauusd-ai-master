@@ -1,0 +1,48 @@
+name: Phase7C Structural SL Monotonicity CI
+# Synthetic/source-only regression: no runtime, ARM, mode, bridge, or order mutation.
+
+on:
+  push:
+    branches:
+      - feat/phase7c-structural-sl-monotonicity
+    paths:
+      - scripts/test-phase7c-structural-sl-monotonicity.mjs
+      - scripts/phase7c-stop-monotonicity.mjs
+      - scripts/phase7c-sideway-logic.mjs
+      - scripts/run-phase7b-demo-controller.ts
+      - scripts/run-phase7c-sideway-controller.mjs
+      - .github/workflows/phase7c-structural-sl-monotonicity-ci.yml
+  pull_request:
+    paths:
+      - scripts/test-phase7c-structural-sl-monotonicity.mjs
+      - scripts/phase7c-stop-monotonicity.mjs
+      - scripts/phase7c-sideway-logic.mjs
+      - scripts/run-phase7b-demo-controller.ts
+      - scripts/run-phase7c-sideway-controller.mjs
+      - .github/workflows/phase7c-structural-sl-monotonicity-ci.yml
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: structural-sl-monotonicity-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Structural SL monotonicity contract
+        run: node --test ./scripts/test-phase7c-structural-sl-monotonicity.mjs
+
+      - name: Sideway syntax check
+        run: node --check ./scripts/run-phase7c-sideway-controller.mjs
+
+      - name: Diff hygiene
+        run: git diff --check
