@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { summarizeBrokerDayRealizedPnl } from "@xauusd/mt5-broker";
 import {
   evaluateTimestampFreshness,
   inferBrokerClockOffset,
@@ -761,17 +762,11 @@ async function resolveDailyRecoveryPlan(
     );
   }
 
-  const botDeals = deals.filter(
-    (deal) =>
-      deal?.isTradingDeal === true &&
-      dailyBotMagicNumbers.has(Number(deal?.magic)),
-  );
-
-  const dailyNetPnl = botDeals.reduce(
-    (sum, deal) =>
-      sum + Number(deal?.netPnl || 0),
-    0,
-  );
+  const { dealCount, dailyNetPnl } =
+    summarizeBrokerDayRealizedPnl(
+      deals,
+      dailyBotMagicNumbers,
+    );
 
   if (dailyNetPnl >= 0) {
     return {
@@ -783,7 +778,7 @@ async function resolveDailyRecoveryPlan(
       rawTpDistance: 0,
       tpDistance: 0,
       canRecoverInOneTrade: true,
-      dealCount: botDeals.length,
+      dealCount: dealCount,
     };
   }
 
@@ -837,7 +832,7 @@ async function resolveDailyRecoveryPlan(
     tpDistance,
     canRecoverInOneTrade:
       rawTpDistance <= DAILY_RECOVERY_MAX_TP_DISTANCE + 1e-9,
-    dealCount: botDeals.length,
+    dealCount: dealCount,
   };
 }
 
