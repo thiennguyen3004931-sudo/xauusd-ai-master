@@ -22,6 +22,7 @@ assert.equal(stopStrictlyTightens("SELL", 2300, 2301), false);
 assert.equal(stopStrictlyTightens("SELL", 2300, 2300), false);
 assert.equal(stopStrictlyTightens("BUY", 2300, 2300 + 1e-10), false);
 assert.equal(stopStrictlyTightens("SELL", 2300, 2300 - 1e-10), false);
+assert.equal(stopStrictlyTightens("HOLD", 2300, 2301), false);
 
 // A missing/zero broker SL may be tightened to a valid positive candidate.
 assert.equal(stopStrictlyTightens("BUY", 0, 2299), true);
@@ -34,6 +35,7 @@ assert.equal(stopIsAtLeastAsTight("BUY", 2299, 2300), false);
 assert.equal(stopIsAtLeastAsTight("SELL", 2299, 2300), true);
 assert.equal(stopIsAtLeastAsTight("SELL", 2300, 2300), true);
 assert.equal(stopIsAtLeastAsTight("SELL", 2301, 2300), false);
+assert.equal(stopIsAtLeastAsTight("HOLD", 2301, 2300), false);
 
 // Sideway +10 must close exactly one third of INITIAL volume, never a rounded approximation.
 assert.equal(oneThirdPartialVolume(0.09, 0.09, 0.01, 0.01), 0.03);
