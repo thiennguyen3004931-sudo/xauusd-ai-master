@@ -1,4 +1,5 @@
 import { getMt5Telemetry } from "./mt5.service";
+import { summarizeBrokerDayRealizedPnl } from "@xauusd/mt5-broker";
 import {
   accountModeAllowsBroker,
   getPhase7CAccountModeState,
@@ -201,17 +202,11 @@ export async function getPhase7CDailyRecoveryView(
     resolvedMagicNumbers,
   );
 
-  const botDeals = deals.filter(
-    (deal) =>
-      deal?.isTradingDeal === true &&
-      magicNumbers.has(Number(deal?.magic)),
-  );
-
-  const dailyNetPnl = botDeals.reduce(
-    (sum, deal) =>
-      sum + Number(deal?.netPnl || 0),
-    0,
-  );
+  const { dealCount, dailyNetPnl } =
+    summarizeBrokerDayRealizedPnl(
+      deals,
+      magicNumbers,
+    );
 
   const cashPerPriceUnitPerLot =
     Number(
@@ -286,7 +281,7 @@ export async function getPhase7CDailyRecoveryView(
 
     dayStartTime,
     historyEndTime,
-    dealCount: botDeals.length,
+    dealCount: dealCount,
 
     dailyNetPnl,
 

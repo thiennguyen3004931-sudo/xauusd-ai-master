@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@xauusd/mt5-broker':
+        specifier: workspace:*
+        version: link:packages/mt5-broker
       '@xauusd/risk-engine':
         specifier: workspace:*
         version: link:packages/risk-engine
