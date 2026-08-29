@@ -4,6 +4,7 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
+// Current wait reasons share the decision monitor's 30-minute freshness boundary.
 const THIRTY_MINUTES_MS = 30 * 60_000;
 const NOW = 2_000_000_000_000;
 
