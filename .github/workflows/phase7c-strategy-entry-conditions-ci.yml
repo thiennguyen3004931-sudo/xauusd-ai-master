@@ -60,5 +60,6 @@ jobs:
         run: node --test scripts/phase7c-decision-audit.test.mjs
       - name: Decision monitor regression
         run: node --import ./apps/api/node_modules/tsx/dist/loader.mjs --test scripts/phase7c-decision-monitor.test.mjs
+      # Verification checkpoint for the tested Task 5 production commit.
       - name: Trend strategy entry condition contract
         run: node scripts/test-phase7c-trend-strategy-entry-conditions-contract.mjs
