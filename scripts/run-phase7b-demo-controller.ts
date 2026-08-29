@@ -273,7 +273,6 @@ const decisionAudit = createPhase7CDecisionAudit({
   configuration: { fixedLot: fixedVolume },
 });
 let state = loadState(statePath);
-let lastHoldObservationKey = "";
 
 console.log("PHASE7B_DEMO_STRATEGY=M15_TRIPLE_PATTERN_SUPERTREND_STRUCTURE_RIDER_MA_CONFIDENCE_FVG_CONTEXT");
 console.log(`PHASE7B_DEMO_SYMBOL=${symbol}`);

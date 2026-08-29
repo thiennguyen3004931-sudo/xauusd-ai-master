@@ -218,7 +218,6 @@ if (!state.initialized) {
     lastEventAt: null,
     trade: null,
     hold: null,
-    holdSentKeys: {},
     holdM15ByTicketReason: {},
     systemAlerts: {},
   };
@@ -237,7 +236,6 @@ if (!state.initialized) {
 
 state.offsets ??= {};
 state.hold ??= null;
-state.holdSentKeys ??= {};
 state.holdM15ByTicketReason ??= {};
 
 if (!Number.isFinite(Number(state.offsets.trend))) {
@@ -2151,7 +2149,6 @@ function loadState() {
     lastEventAt: null,
     trade: null,
     hold: null,
-    holdSentKeys: {},
     holdM15ByTicketReason: {},
     systemAlerts: {},
   };

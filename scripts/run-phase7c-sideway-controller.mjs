@@ -89,7 +89,6 @@ const decisionAudit = createPhase7CDecisionAudit({
   configuration: { riskPercent, maxLot },
 });
 let state = loadState();
-let lastHoldObservationKey = "";
 
 console.log("PHASE7C_SIDEWAY_CONTROLLER=STARTING");
 console.log(`PHASE7C_SIDEWAY_SYMBOL=${symbol}`);
