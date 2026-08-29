@@ -1,5 +1,6 @@
 name: Phase7C Broker-Day Accounting CI
 # Scope B accounting regression is read-only: no runtime, ARM, mode, bridge, or order mutation.
+# Final tree verification runs against the production migration commit history.
 
 on:
   push:
