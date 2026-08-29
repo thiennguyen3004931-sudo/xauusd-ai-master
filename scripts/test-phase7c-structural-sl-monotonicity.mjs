@@ -7,6 +7,7 @@ import { oneThirdPartialVolume } from "./phase7c-sideway-logic.mjs";
 import {
   stopIsAtLeastAsTight,
   stopStrictlyTightens,
+  tightestKnownStop,
 } from "./phase7c-stop-monotonicity.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -27,6 +28,18 @@ assert.equal(stopStrictlyTightens("HOLD", 2300, 2301), false);
 // A missing/zero broker SL may be tightened to a valid positive candidate.
 assert.equal(stopStrictlyTightens("BUY", 0, 2299), true);
 assert.equal(stopStrictlyTightens("SELL", 0, 2301), true);
+
+// Durable monotonic floor: a transient broker SL=0 must not erase the last tighter stop we persisted.
+assert.equal(tightestKnownStop("BUY", 0, 2305), 2305);
+assert.equal(tightestKnownStop("BUY", 2307, 2305), 2307);
+assert.equal(tightestKnownStop("BUY", 2303, 2305), 2305);
+assert.equal(tightestKnownStop("SELL", 0, 2295), 2295);
+assert.equal(tightestKnownStop("SELL", 2293, 2295), 2293);
+assert.equal(tightestKnownStop("SELL", 2297, 2295), 2295);
+assert.equal(stopStrictlyTightens("BUY", tightestKnownStop("BUY", 0, 2305), 2303), false);
+assert.equal(stopStrictlyTightens("BUY", tightestKnownStop("BUY", 0, 2305), 2306), true);
+assert.equal(stopStrictlyTightens("SELL", tightestKnownStop("SELL", 0, 2295), 2297), false);
+assert.equal(stopStrictlyTightens("SELL", tightestKnownStop("SELL", 0, 2295), 2294), true);
 
 // +6 BE is already satisfied when the broker SL is equal to or tighter than entry.
 assert.equal(stopIsAtLeastAsTight("BUY", 2301, 2300), true);
@@ -58,16 +71,22 @@ assert.match(
   "RED_TARGET: Sideway +6 BE must not loosen an already-tighter broker SL.",
 );
 
-// Trend structural trailing must compare the rounded broker-facing candidate against current broker SL.
+// Trend structural trailing must compare against the tightest broker/durable stop, not broker SL alone.
 assert.match(
   trendSource,
-  /stopStrictlyTightens\(managed\.side,\s*Number\(position\.stopLoss\),\s*candidate\)/,
-  "RED_TARGET: Trend structural trailing must only PATCH a rounded candidate that strictly tightens broker SL.",
+  /tightestKnownStop\(managed\.side,\s*Number\(position\.stopLoss\),\s*Number\(managed\.lastStructuralStop\)\)/,
+  "RED_TARGET: Trend trailing must preserve durable lastStructuralStop when broker SL is missing or looser.",
+);
+assert.match(
+  trendSource,
+  /stopStrictlyTightens\(managed\.side,\s*structuralBaseline,\s*candidate\)/,
+  "RED_TARGET: Trend trailing candidate must strictly tighten the durable structural baseline.",
 );
 
 console.log("STRUCTURAL_SL_MONOTONICITY_CONTRACT=PASS");
 console.log("BUY_SL_ONLY_INCREASES=PASS");
 console.log("SELL_SL_ONLY_DECREASES=PASS");
+console.log("DURABLE_STRUCTURAL_SL_FLOOR=PASS");
 console.log("SIDEWAY_PLUS6_BE_MONOTONIC=PASS");
 console.log("SIDEWAY_PLUS10_EXACT_ONE_THIRD=PASS");
 console.log("TREND_STRUCTURAL_TRAILING_ONLY_TIGHTENS=PASS");
