@@ -143,6 +143,10 @@ function normalizeRecord(strategy, symbol, configuration, event, payload) {
       canonicalHoldEvent && canonicalHold
         ? canonicalHold.reason
         : deriveReason(event, payload),
+    entryConditions:
+      payload?.entryConditions && typeof payload.entryConditions === "object"
+        ? payload.entryConditions
+        : null,
     setup: {
       side,
       pattern: cleanText(payload?.pattern ?? payload?.confirmation),

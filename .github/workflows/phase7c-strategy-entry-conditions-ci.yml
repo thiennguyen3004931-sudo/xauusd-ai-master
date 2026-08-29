@@ -1,0 +1,79 @@
+name: Phase7C Strategy Entry Conditions CI
+
+on:
+  push:
+    branches:
+      - feat/phase7c-strategy-entry-conditions
+    paths:
+      - "apps/api/src/routes/phase7c.route.ts"
+      - "apps/api/src/services/phase7c-strategy-entry-conditions.service.ts"
+      - "apps/api/src/services/phase7c-decision-monitor.service.ts"
+      - "apps/web/src/pages/Phase7CAccountRiskPage.tsx"
+      - "apps/web/src/ui/Phase7CStrategyEntryConditionsCard.tsx"
+      - "scripts/phase7c-strategy-entry-conditions.mjs"
+      - "scripts/phase7c-strategy-entry-conditions.d.mts"
+      - "scripts/phase7c-decision-audit.mjs"
+      - "scripts/run-phase7b-demo-controller.ts"
+      - "scripts/run-phase7c-sideway-controller.mjs"
+      - "scripts/test-phase7c-strategy-entry-conditions-*.mjs"
+      - "scripts/test-phase7c-trend-strategy-entry-conditions-contract.mjs"
+      - "scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs"
+      - ".github/workflows/phase7c-strategy-entry-conditions-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "apps/api/src/routes/phase7c.route.ts"
+      - "apps/api/src/services/phase7c-strategy-entry-conditions.service.ts"
+      - "apps/api/src/services/phase7c-decision-monitor.service.ts"
+      - "apps/web/src/pages/Phase7CAccountRiskPage.tsx"
+      - "apps/web/src/ui/Phase7CStrategyEntryConditionsCard.tsx"
+      - "scripts/phase7c-strategy-entry-conditions.mjs"
+      - "scripts/phase7c-strategy-entry-conditions.d.mts"
+      - "scripts/phase7c-decision-audit.mjs"
+      - "scripts/run-phase7b-demo-controller.ts"
+      - "scripts/run-phase7c-sideway-controller.mjs"
+      - "scripts/test-phase7c-strategy-entry-conditions-*.mjs"
+      - "scripts/test-phase7c-trend-strategy-entry-conditions-contract.mjs"
+      - "scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs"
+      - ".github/workflows/phase7c-strategy-entry-conditions-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  feature-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Core strategy entry condition contract
+        run: node scripts/test-phase7c-strategy-entry-conditions-core-contract.mjs
+      - name: Build API dependency graph
+        run: pnpm --filter @xauusd/api... build
+      - name: Strategy entry condition API persistence and route contract
+        run: node scripts/test-phase7c-strategy-entry-conditions-api-contract.mjs
+      - name: Strategy entry condition audit/monitor contract
+        run: node scripts/test-phase7c-strategy-entry-conditions-audit-contract.mjs
+      - name: Decision audit regression
+        run: node --test scripts/phase7c-decision-audit.test.mjs
+      - name: Decision monitor regression
+        run: node --import ./apps/api/node_modules/tsx/dist/loader.mjs --test scripts/phase7c-decision-monitor.test.mjs
+      - name: Trend strategy entry condition contract
+        run: node scripts/test-phase7c-trend-strategy-entry-conditions-contract.mjs
+      - name: Sideway strategy entry condition contract
+        run: node scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs
+      - name: Web strategy entry condition contract
+        run: node scripts/test-phase7c-strategy-entry-conditions-web-contract.mjs
+      # Fresh verification checkpoint after merging the latest main into this branch.
+      - name: Build Web Control Center
+        run: pnpm --filter @xauusd/web... build

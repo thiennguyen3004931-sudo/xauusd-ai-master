@@ -80,6 +80,45 @@ test("decision monitor calculates the active Trend lot and exact risk before ent
   assert.deepEqual(snapshot.engine.reasons, ["ADX and structure support trend."]);
 });
 
+test("decision monitor preserves canonical Sideway entry conditions from the audit journal", () => {
+  const input = fixture();
+  input.regime = {
+    ...input.regime,
+    regime: "RANGING",
+    recommendedMode: "SIDEWAY",
+    reasons: ["Canonical Sideway regime is active."],
+  };
+  const entryConditions = {
+    configVersion: 3,
+    side: "BUY",
+    anchorCondition: "rangeEdge",
+    enabledCount: 6,
+    allEnabledPassed: true,
+    failedConditions: [],
+    conditions: [
+      { id: "rangingRegime", enabled: true, mandatory: false, status: "PASS", observed: "RANGING" },
+      { id: "recommendedModeSideway", enabled: true, mandatory: false, status: "PASS", observed: "SIDEWAY" },
+      { id: "minimumRegimeConfidence", enabled: true, mandatory: false, status: "PASS", observed: 82 },
+      { id: "supplyDemandRange", enabled: true, mandatory: false, status: "PASS", observed: "DEMAND" },
+      { id: "rangeEdge", enabled: true, mandatory: true, status: "PASS", observed: "LOWER_EDGE" },
+      { id: "m5Confirmation", enabled: true, mandatory: false, status: "PASS", observed: "BULLISH" },
+    ],
+  };
+  input.audit = [{
+    timestamp: input.now - 1_000,
+    strategy: "SIDEWAY",
+    event: "ENTRY_READY",
+    stage: "READY",
+    reason: "Canonical Sideway entry conditions passed.",
+    setup: { side: "BUY", pattern: "DEMAND_REJECTION" },
+    entryConditions,
+  }];
+
+  const snapshot = buildPhase7CDecisionMonitor(input);
+  assert.equal(snapshot.preTrade.strategy, "SIDEWAY");
+  assert.deepEqual(snapshot.strategyEntryConditions.sideway, entryConditions);
+});
+
 test("AUTO permits a canonical Trend entry during confirmed REVERSAL instead of collapsing to PAUSE", () => {
   const input = fixture();
   input.regime = {
