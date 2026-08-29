@@ -20,6 +20,8 @@ assert.equal(stopStrictlyTightens("BUY", 2300, 2300), false);
 assert.equal(stopStrictlyTightens("SELL", 2300, 2299), true);
 assert.equal(stopStrictlyTightens("SELL", 2300, 2301), false);
 assert.equal(stopStrictlyTightens("SELL", 2300, 2300), false);
+assert.equal(stopStrictlyTightens("BUY", 2300, 2300 + 1e-10), false);
+assert.equal(stopStrictlyTightens("SELL", 2300, 2300 - 1e-10), false);
 
 // A missing/zero broker SL may be tightened to a valid positive candidate.
 assert.equal(stopStrictlyTightens("BUY", 0, 2299), true);
