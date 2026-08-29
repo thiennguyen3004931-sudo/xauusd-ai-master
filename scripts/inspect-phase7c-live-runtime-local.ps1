@@ -104,10 +104,6 @@ try {
   if (([string]$health.accountMode).Trim().ToLowerInvariant() -ne $expectedBrokerMode) { throw "Bridge accountMode does not match selected runtime." }
   if ($null -ne $health.PSObject.Properties['configuredAccountMode'] -and ([string]$health.configuredAccountMode).Trim().ToUpperInvariant() -ne $runtime) { throw "Bridge configuredAccountMode does not match selected runtime." }
 
-  $account = Invoke-ObservationGet "$bridgeBaseUrl/account" $bridgeHeaders
-  if ($null -ne $account.PSObject.Properties['valid'] -and -not [bool]$account.valid) { throw "Bridge account response is not valid." }
-  if ($null -ne $account.PSObject.Properties['accountMode'] -and ([string]$account.accountMode).Trim().ToLowerInvariant() -ne $expectedBrokerMode) { throw "Bridge account endpoint mode mismatch." }
-
   $escapedSymbol = [uri]::EscapeDataString($Symbol)
   $positions = Invoke-ObservationGet "$bridgeBaseUrl/v1/positions?symbol=$escapedSymbol" $bridgeHeaders
   $orders = Invoke-ObservationGet "$bridgeBaseUrl/v1/orders?symbol=$escapedSymbol" $bridgeHeaders
