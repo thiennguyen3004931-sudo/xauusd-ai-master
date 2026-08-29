@@ -42,6 +42,13 @@ test("Web performance reads the same canonical ledger source instead of a separa
   assert.doesNotMatch(source, /getMt5DealHistory/);
 });
 
+test("Web performance uses the same account-mode-aware Phase7C owned magic contract as Daily Recovery", () => {
+  const source = read(performancePath);
+  assert.match(source, /resolvePhase7CDailyRecoveryMagicNumbers/);
+  assert.doesNotMatch(source, /defaultMt5BrokerConfig/);
+  assert.doesNotMatch(source, /process\.env\.MT5_MAGIC_NUMBER/);
+});
+
 test("Telegram partial and exit accounting never estimate realized P&L from market movement", () => {
   const source = read(notifierPath);
   assert.doesNotMatch(source, /partialPnlEstimate/);
