@@ -7,21 +7,21 @@ on:
     paths:
       - scripts/test-phase7c-hold-m15-dedupe-contract.mjs
       - scripts/test-phase7c-hold-telegram-dedupe-contract.mjs
+      - scripts/test-phase7c-hold-journal-canonical-contract.mjs
+      - scripts/phase7c-trade-notifier-synthetic.test.mjs
+      - scripts/phase7c-sideway-production-telegram-sample.test.mjs
       - scripts/run-phase7b-telegram-notifier.mjs
       - scripts/run-phase7b-demo-controller.ts
       - scripts/run-phase7c-sideway-controller.mjs
       - scripts/phase7c-hold-observability.mjs
-      - scripts/apply-phase7c-hold-m15-dedupe-patch.mjs
-      - scripts/apply-phase7c-hold-m15-dedupe-patch-v2.mjs
-      - scripts/apply-phase7c-hold-m15-dedupe-patch-v3.mjs
-      - scripts/apply-phase7c-hold-m15-dedupe-patch-v4.mjs
-      - scripts/apply-phase7c-hold-m15-dedupe-patch-v5.mjs
-      - scripts/apply-phase7c-hold-m15-legacy-cleanup.mjs
       - .github/workflows/phase7c-hold-m15-dedupe-ci.yml
   pull_request:
     paths:
       - scripts/test-phase7c-hold-m15-dedupe-contract.mjs
       - scripts/test-phase7c-hold-telegram-dedupe-contract.mjs
+      - scripts/test-phase7c-hold-journal-canonical-contract.mjs
+      - scripts/phase7c-trade-notifier-synthetic.test.mjs
+      - scripts/phase7c-sideway-production-telegram-sample.test.mjs
       - scripts/run-phase7b-telegram-notifier.mjs
       - scripts/run-phase7b-demo-controller.ts
       - scripts/run-phase7c-sideway-controller.mjs
@@ -29,7 +29,7 @@ on:
       - .github/workflows/phase7c-hold-m15-dedupe-ci.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   contract:
@@ -39,52 +39,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: feat/phase7c-hold-m15-dedupe
-          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Apply replacement when branch is still RED
-        shell: bash
-        run: |
-          if grep -q 'holdM15ByTicketReason' ./scripts/run-phase7b-telegram-notifier.mjs; then
-            echo 'PHASE7C_HOLD_M15_PATCH=ALREADY_APPLIED'
-          else
-            node ./scripts/apply-phase7c-hold-m15-dedupe-patch-v5.mjs
-          fi
-
-      - name: Remove superseded HOLD dedupe legacy
-        shell: bash
-        run: |
-          if grep -q 'holdSentKeys' ./scripts/run-phase7b-telegram-notifier.mjs || \
-             grep -q 'lastHoldObservationKey' ./scripts/run-phase7b-demo-controller.ts || \
-             grep -q 'lastHoldObservationKey' ./scripts/run-phase7c-sideway-controller.mjs; then
-            node ./scripts/apply-phase7c-hold-m15-legacy-cleanup.mjs
-          else
-            echo 'PHASE7C_HOLD_M15_LEGACY_CLEANUP=ALREADY_CLEAN'
-          fi
-
-      - name: Verify focused contracts
+      - name: Syntax checks
         run: |
           node --check ./scripts/run-phase7b-telegram-notifier.mjs
           node --check ./scripts/run-phase7c-sideway-controller.mjs
+
+      - name: HOLD M15 and canonical contracts
+        run: |
           node --test ./scripts/test-phase7c-hold-m15-dedupe-contract.mjs
           node --test ./scripts/test-phase7c-hold-telegram-dedupe-contract.mjs
-          git diff --check
+          node --test ./scripts/test-phase7c-hold-journal-canonical-contract.mjs
 
-      - name: Commit replacement if produced
-        shell: bash
+      - name: Notifier lifecycle regressions
         run: |
-          if git diff --quiet -- scripts/run-phase7b-telegram-notifier.mjs scripts/run-phase7b-demo-controller.ts scripts/run-phase7c-sideway-controller.mjs; then
-            echo 'PHASE7C_HOLD_M15_COMMIT=NO_CHANGES'
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add scripts/run-phase7b-telegram-notifier.mjs scripts/run-phase7b-demo-controller.ts scripts/run-phase7c-sideway-controller.mjs
-          git commit -m "refactor(phase7c): remove superseded HOLD dedupe legacy"
-          git push origin HEAD:feat/phase7c-hold-m15-dedupe
+          node --test ./scripts/phase7c-trade-notifier-synthetic.test.mjs
+          node --test ./scripts/phase7c-sideway-production-telegram-sample.test.mjs
+
+      - name: Diff hygiene
+        run: git diff --check
