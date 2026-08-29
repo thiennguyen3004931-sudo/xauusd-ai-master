@@ -1,5 +1,5 @@
 $ErrorActionPreference = "Stop"
-# Observation-only means health, positions, and pending-order reads must never initiate reconnect.
+# Observation-only contract: health, positions, and pending-order reads must never initiate MT5 reconnect.
 $InspectorPath = Join-Path $PSScriptRoot "inspect-phase7c-live-runtime-local.ps1"
 
 if (-not (Test-Path -LiteralPath $InspectorPath)) {
