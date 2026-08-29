@@ -207,6 +207,10 @@ function strategyWaitReasons(snapshot: Snapshot, strategy: "TREND" | "SIDEWAY"):
     if (row.strategy !== strategy) continue;
     const event = String(row.event ?? "");
     if (!event) continue;
+    if (
+      event.toUpperCase() === "ENTRY_MODE_BLOCK" &&
+      snapshot.generatedAt - Number(row.timestamp) > 30 * 60_000
+    ) continue;
 
     // Submission lifecycle events are not reasons why a strategy is waiting.
     // They belong to execution history, not the "why no entry" checklist.
