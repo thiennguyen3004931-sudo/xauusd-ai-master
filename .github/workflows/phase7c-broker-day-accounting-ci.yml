@@ -54,9 +54,9 @@ jobs:
           if [ -f scripts/test-phase7c-broker-day-accounting-consumers-contract.mjs ]; then
             node --test scripts/test-phase7c-broker-day-accounting-consumers-contract.mjs
           fi
+      - name: Build MT5 broker dependency graph
+        run: pnpm --filter @xauusd/mt5-broker... build
       - name: MT5 broker typecheck
         run: pnpm --filter @xauusd/mt5-broker typecheck
-      - name: MT5 broker build
-        run: pnpm --filter @xauusd/mt5-broker build
       - name: Diff hygiene
         run: git diff --check
