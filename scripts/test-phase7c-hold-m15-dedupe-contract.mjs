@@ -202,3 +202,29 @@ for (const [name, controllerPath] of [
     }
   });
 }
+
+test("HOLD M15 replacement fully removes superseded legacy dedupe state and process-memory keys", () => {
+  const notifier = fs.readFileSync(notifierPath, "utf8");
+  const trend = fs.readFileSync(trendControllerPath, "utf8");
+  const sideway = fs.readFileSync(sidewayControllerPath, "utf8");
+
+  assert.match(notifier, /holdM15ByTicketReason/, "notifier must retain restart-safe M15 dedupe state");
+  assert.match(trend, /lastHoldM15Key/, "Trend must retain persisted M15 HOLD key");
+  assert.match(sideway, /lastHoldM15Key/, "Sideway must retain persisted M15 HOLD key");
+
+  assert.doesNotMatch(
+    notifier,
+    /\bholdSentKeys\b/,
+    "legacy notifier holdSentKeys state must be removed after M15 replacement is GREEN",
+  );
+  assert.doesNotMatch(
+    trend,
+    /\blastHoldObservationKey\b/,
+    "legacy Trend process-memory HOLD dedupe must be removed after persisted M15 replacement is GREEN",
+  );
+  assert.doesNotMatch(
+    sideway,
+    /\blastHoldObservationKey\b/,
+    "legacy Sideway process-memory HOLD dedupe must be removed after persisted M15 replacement is GREEN",
+  );
+});
