@@ -71,6 +71,18 @@ async function withMonitor(run, overrides = {}) {
       return;
     }
 
+    if (url.pathname === "/api/v1/phase7c-canonical-ledger/position-realized") {
+      const positionId = String(url.searchParams.get("positionId") ?? "");
+      const snapshot = overrides.canonicalRealized?.[positionId] ?? null;
+      if (snapshot) {
+        json(response, snapshot);
+        return;
+      }
+      response.statusCode = 404;
+      response.end("canonical realized position not found");
+      return;
+    }
+
     response.statusCode = 404;
     response.end("not found");
   });
@@ -175,6 +187,7 @@ function assertCanonicalContext(text, {
 }
 
 test("Trend lifecycle cards share canonical trade context and actual MT5 fill wins over signal entry", async () => {
+  const partialTimestamp = "2026-08-29T06:17:00.000Z";
   const events = [
     {
       type: "ENTRY_FILLED",
@@ -206,7 +219,7 @@ test("Trend lifecycle cards share canonical trade context and actual MT5 fill wi
     },
     {
       type: "PLUS10_PARTIAL_ONE_THIRD",
-      timestamp: "2026-08-29T06:17:00.000Z",
+      timestamp: partialTimestamp,
       ticket: "TREND-LIFE-1",
       side: "BUY",
       favorable: 10,
@@ -224,8 +237,24 @@ test("Trend lifecycle cards share canonical trade context and actual MT5 fill wi
     },
   ];
 
-  const { notifications } = await withMonitor((monitorApiBase) =>
-    runNotifier({ events, monitorApiBase, label: "trend-context" }),
+  const canonicalRealized = {
+    "TREND-LIFE-1": {
+      positionId: "TREND-LIFE-1",
+      realizedNetPnl: 4.21,
+      dealCount: 1,
+      deals: [{
+        ticket: "TREND-PARTIAL-DEAL-1",
+        positionId: "TREND-LIFE-1",
+        timestamp: Date.parse(partialTimestamp),
+        volume: 0.03,
+        netPnl: 4.21,
+      }],
+    },
+  };
+
+  const { notifications } = await withMonitor(
+    (monitorApiBase) => runNotifier({ events, monitorApiBase, label: "trend-context" }),
+    { canonicalRealized },
   );
 
   assert.equal(notifications.length, 5);
@@ -242,8 +271,9 @@ test("Trend lifecycle cards share canonical trade context and actual MT5 fill wi
 
   assert.doesNotMatch(notifications[0].text, /2300(?:\.00)?/);
   assert.match(notifications[1].text, new RegExp(HOLD_TREND.reason));
-  assert.match(notifications[3].text, /≈\s*\+?\$/);
-  assert.doesNotMatch(notifications[3].text, /realized/i);
+  assert.match(notifications[3].text, /Realized P&L[^\n]*\+\$4\.21/i);
+  assert.doesNotMatch(notifications[3].text, /≈/);
+  assert.doesNotMatch(notifications[3].text, /đang chờ MT5 deal/i);
 });
 
 test("Sideway ENTRY and BE cards persist TP2 and remaining lifecycle context", async () => {
@@ -371,7 +401,7 @@ test("Recovery ENTRY exposes adaptive TP through the same lifecycle context", as
   assert.match(notifications[0].text, /RECOVERY/i);
 });
 
-test("EXIT uses MT5 lifecycle performance netPnl and actual average exit without falling back to estimates", async () => {
+test("EXIT uses canonical realized netPnl and MT5 performance only for actual average exit", async () => {
   const exitTimestamp = "2026-08-29T09:04:00.000Z";
   const events = [
     {
@@ -401,9 +431,23 @@ test("EXIT uses MT5 lifecycle performance netPnl and actual average exit without
       side: "BUY",
       entry: 4800.25,
       exit: 4812.75,
-      netPnl: 17.43,
+      netPnl: 999.99,
       closedAt: Date.parse(exitTimestamp),
     }],
+  };
+  const canonicalRealized = {
+    "EXIT-LIFE-1": {
+      positionId: "EXIT-LIFE-1",
+      realizedNetPnl: 17.43,
+      dealCount: 1,
+      deals: [{
+        ticket: "EXIT-DEAL-1",
+        positionId: "EXIT-LIFE-1",
+        timestamp: Date.parse(exitTimestamp),
+        volume: 0.09,
+        netPnl: 17.43,
+      }],
+    },
   };
 
   const { notifications } = await withMonitor(
@@ -412,12 +456,13 @@ test("EXIT uses MT5 lifecycle performance netPnl and actual average exit without
       monitorApiBase,
       label: "exit-performance",
     }),
-    { performance },
+    { performance, canonicalRealized },
   );
 
   assert.equal(notifications.length, 2);
   const exit = notifications[1].text;
   assert.match(exit, /P&L[^\n]*\+\$17\.43/i);
+  assert.doesNotMatch(exit, /999\.99/);
   assert.match(exit, /Exit[^\n]*4812\.75/i);
   assertCanonicalContext(exit, {
     regime: "TREND",

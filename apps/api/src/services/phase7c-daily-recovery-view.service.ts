@@ -1,10 +1,10 @@
 import { getMt5Telemetry } from "./mt5.service";
-import { summarizeBrokerDayRealizedPnl } from "@xauusd/mt5-broker";
 import {
   accountModeAllowsBroker,
   getPhase7CAccountModeState,
   type Phase7CAccountMode,
 } from "./phase7c-account-mode.service";
+import { summarizePhase7CCanonicalDeals } from "./phase7c-canonical-deal-ledger.service";
 
 type Phase7CDailyRecoveryMagicNumbers = {
   trendMagicNumber: number;
@@ -55,12 +55,6 @@ const DAILY_RECOVERY_TARGET_NET_USD = 1;
 
 interface BridgeDayBoundary {
   currentStartTime?: number;
-}
-
-interface BridgeDeal {
-  isTradingDeal?: boolean;
-  magic?: number | string;
-  netPnl?: number | string;
 }
 
 function bridgeBaseUrl(): string {
@@ -115,12 +109,6 @@ async function bridgeGet<T>(requestPath: string): Promise<T> {
   } finally {
     clearTimeout(timeout);
   }
-}
-
-function validMagicNumbers(
-  resolved: Phase7CDailyRecoveryMagicNumbers,
-): Set<number> {
-  return new Set(resolved.configuredMagicNumbers);
 }
 
 export async function getPhase7CDailyRecoveryView(
@@ -183,30 +171,19 @@ export async function getPhase7CDailyRecoveryView(
     );
   }
 
-  const deals = await bridgeGet<BridgeDeal[]>(
-    `/v1/history/deals?fromMs=${dayStartTime}&toMs=${historyEndTime}&symbol=${encodeURIComponent(normalizedSymbol)}`,
-  );
-
-  if (!Array.isArray(deals)) {
-    throw new Error(
-      "Daily Recovery deal history is invalid.",
-    );
-  }
-
   const resolvedMagicNumbers =
     resolvePhase7CDailyRecoveryMagicNumbers({
       accountMode: accountModeState.accountMode,
     });
 
-  const magicNumbers = validMagicNumbers(
-    resolvedMagicNumbers,
-  );
-
   const { dealCount, dailyNetPnl } =
-    summarizeBrokerDayRealizedPnl(
-      deals,
-      magicNumbers,
-    );
+    await summarizePhase7CCanonicalDeals({
+      telemetry,
+      symbol: normalizedSymbol,
+      ownedMagics: resolvedMagicNumbers.configuredMagicNumbers,
+      fromMs: dayStartTime,
+      toMs: historyEndTime,
+    });
 
   const cashPerPriceUnitPerLot =
     Number(
@@ -281,7 +258,7 @@ export async function getPhase7CDailyRecoveryView(
 
     dayStartTime,
     historyEndTime,
-    dealCount: dealCount,
+    dealCount,
 
     dailyNetPnl,
 

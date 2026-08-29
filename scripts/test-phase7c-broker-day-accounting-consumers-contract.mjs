@@ -16,13 +16,12 @@ const apiPath = path.join(
   "apps/api/src/services/phase7c-daily-recovery-view.service.ts",
 );
 
-const consumers = [
+const controllerConsumers = [
   ["Trend", trendPath],
   ["Sideway", sidewayPath],
-  ["Daily Recovery API", apiPath],
 ];
 
-for (const [name, sourcePath] of consumers) {
+for (const [name, sourcePath] of controllerConsumers) {
   test(`${name} uses canonical broker-day accounting summary`, () => {
     const source = fs.readFileSync(sourcePath, "utf8");
 
@@ -49,6 +48,15 @@ for (const [name, sourcePath] of consumers) {
     );
   });
 }
+
+test("Daily Recovery consumes the durable canonical deal ledger instead of the legacy broker-day history path", () => {
+  const source = fs.readFileSync(apiPath, "utf8");
+
+  assert.match(source, /phase7c-canonical-deal-ledger\.service/);
+  assert.match(source, /summarizePhase7CCanonicalDeals/);
+  assert.doesNotMatch(source, /summarizeBrokerDayRealizedPnl/);
+  assert.doesNotMatch(source, /\/v1\/history\/deals/);
+});
 
 test("canonical accounting helper owns both deal count and daily net P&L", () => {
   const source = fs.readFileSync(helperPath, "utf8");
