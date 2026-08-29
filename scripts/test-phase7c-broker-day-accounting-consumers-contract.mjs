@@ -53,7 +53,7 @@ test("Daily Recovery consumes the durable canonical deal ledger instead of the l
   const source = fs.readFileSync(apiPath, "utf8");
 
   assert.match(source, /phase7c-canonical-deal-ledger\.service/);
-  assert.match(source, /getPhase7CCanonicalDeals/);
+  assert.match(source, /summarizePhase7CCanonicalDeals/);
   assert.doesNotMatch(source, /summarizeBrokerDayRealizedPnl/);
   assert.doesNotMatch(source, /\/v1\/history\/deals/);
 });
