@@ -774,13 +774,18 @@ async function formatEvent(event, enrichment) {
               : "TREND",
           ),
           line(
+            "🎫",
+            "Ticket",
+            position.ticket ?? event.ticket,
+          ),
+          line(
             "💵",
             "Entry",
             fmtPrice(entry),
           ),
           line(
             "📦",
-            "Volume",
+            "Lot",
             `${value(
               position.volume,
             )} lot`,
@@ -825,6 +830,12 @@ async function formatEvent(event, enrichment) {
           : "✅🔴",
         `${side} SIDEWAY FILLED · ${symbol}`,
         [
+          line("🤖", "Regime", "SIDEWAY"),
+          line(
+            "🎫",
+            "Ticket",
+            position.ticket ?? event.ticket,
+          ),
           line(
             "💵",
             "Entry",
@@ -832,7 +843,7 @@ async function formatEvent(event, enrichment) {
           ),
           line(
             "📦",
-            "Volume",
+            "Lot",
             `${value(
               position.volume,
             )} lot`,
@@ -850,7 +861,7 @@ async function formatEvent(event, enrichment) {
           line(
             "2️⃣",
             "TP2",
-            event.management?.tp2,
+            fmtPrice(event.management?.tp2),
           ),
           "",
           "<b>Rule:</b> +6 → BE · +10 → chốt 1/3 · giữ 2/3 với SL không dưới BE · TP2 biên đối diện.",
@@ -864,6 +875,12 @@ async function formatEvent(event, enrichment) {
         : "✅🔴",
       `${side} FILLED · ${symbol}`,
       [
+        line("🤖", "Regime", "TREND"),
+        line(
+          "🎫",
+          "Ticket",
+          position.ticket ?? event.ticket,
+        ),
         line(
           "💵",
           "Entry",
@@ -871,7 +888,7 @@ async function formatEvent(event, enrichment) {
         ),
         line(
           "📦",
-          "Volume",
+          "Lot",
           `${value(
             position.volume,
           )} lot`,
@@ -883,6 +900,7 @@ async function formatEvent(event, enrichment) {
             slDistance,
           )} giá`,
         ),
+        line("🎯", "TP", "RUNNER M15"),
         line(
           "🧩",
           "FVG",
@@ -910,6 +928,7 @@ async function formatEvent(event, enrichment) {
       side,
       "+6 → BE",
       [
+        ...lifecycleContextLines(event, enrichment),
         compactStats(m),
         `🔒 <b>SL:</b> <code>${fmtPrice(
           m.stopLoss,
@@ -939,6 +958,7 @@ async function formatEvent(event, enrichment) {
       side,
       "CHỐT 1/3",
       [
+        ...lifecycleContextLines(event, enrichment),
         `📈 <b>Chốt tại:</b> <code>${fmtSignedPrice(
           numberOrNull(event.favorable),
         )} giá</code> · <b>Lãi:</b> <code>${fmtMoney(
@@ -981,6 +1001,7 @@ async function formatEvent(event, enrichment) {
       side,
       "SIDEWAY TP1 · CHỐT 1/3",
       [
+        ...lifecycleContextLines(event, enrichment),
         `🎯 <b>TP1:</b> <code>${fmtPrice(
           event.tp1,
         )}</code> · ${esc(
@@ -1012,6 +1033,7 @@ async function formatEvent(event, enrichment) {
       side,
       "SIDEWAY · BREAK EVEN",
       [
+        ...lifecycleContextLines(event, enrichment),
         `🔒 <b>SL:</b> <code>${fmtPrice(
           event.stopLoss,
         )}</code> · đã đưa về Entry.`,
@@ -1051,6 +1073,7 @@ async function formatEvent(event, enrichment) {
       side,
       "HOLD CONFIRMED",
       [
+        ...lifecycleContextLines(event, enrichment),
         `🧾 <b>${esc(reason)}</b>`,
       ],
     );
@@ -1070,6 +1093,7 @@ async function formatEvent(event, enrichment) {
       side,
       "TRAIL SL",
       [
+        ...lifecycleContextLines(event, enrichment),
         `🛡 <b>SL mới:</b> <code>${fmtPrice(
           m.stopLoss,
         )}</code> · khóa <code>${fmtSignedPrice(
@@ -1166,6 +1190,7 @@ async function formatEvent(event, enrichment) {
           ? "DAILY RECOVERY COMPLETED"
           : "RECOVERY TRADE CLOSED",
         [
+          ...lifecycleContextLines(event, enrichment),
           closed
             ? `💵 <b>P&L lệnh:</b> <code>${fmtMoney(
                 pnl,
@@ -1208,6 +1233,7 @@ async function formatEvent(event, enrichment) {
         ? "CLOSED / STOP"
         : "CHỐT LỆNH",
       [
+        ...lifecycleContextLines(event, enrichment),
         closed
           ? `💵 <b>P&L tổng:</b> <code>${fmtMoney(
               pnl,
@@ -1742,6 +1768,16 @@ function applyEventState(event, enrichment) {
           position.stopLoss,
         ),
 
+      takeProfit:
+        recovery.active
+          ? recovery.takeProfit
+          : event.journalSource === "SIDEWAY"
+            ? numberOrNull(
+                event.management?.tp2 ??
+                position.takeProfit,
+              )
+            : null,
+
       openedAt:
         Date.parse(
           String(
@@ -1997,6 +2033,73 @@ async function fetchJson(url, timeoutMs) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function lifecycleRegime(event) {
+  return String(
+    state.trade?.source ??
+    event?.journalSource ??
+    "TREND",
+  ).toUpperCase() === "SIDEWAY"
+    ? "SIDEWAY"
+    : "TREND";
+}
+
+function lifecycleTakeProfit(event) {
+  const recovery = recoveryMetadata(event);
+  if (recovery.active) {
+    return fmtPrice(recovery.takeProfit);
+  }
+
+  if (lifecycleRegime(event) === "SIDEWAY") {
+    return fmtPrice(
+      event?.management?.tp2 ??
+      event?.lastKnownState?.tp2 ??
+      state.trade?.takeProfit ??
+      event?.position?.takeProfit,
+    );
+  }
+
+  return "RUNNER M15";
+}
+
+function lifecycleContextLines(event, enrichment) {
+  const position = event?.position ?? {};
+  const metrics = enrichment?.metrics ?? {};
+  const ticket = String(
+    event?.ticket ??
+    position?.ticket ??
+    state.trade?.ticket ??
+    "—",
+  );
+  const entry = numberOrNull(
+    position?.entry ??
+    event?.fillPrice ??
+    metrics?.entry ??
+    state.trade?.entry,
+  );
+  const stopLoss = numberOrNull(
+    event?.stopLoss ??
+    position?.stopLoss ??
+    metrics?.stopLoss ??
+    state.trade?.stopLoss,
+  );
+  const lot = numberOrNull(
+    event?.remainingVolume ??
+    position?.volume ??
+    metrics?.volume ??
+    state.trade?.remainingVolume ??
+    state.trade?.initialVolume,
+  );
+
+  return [
+    line("🤖", "Regime", lifecycleRegime(event)),
+    line("🎫", "Ticket", ticket),
+    line("💵", "Entry", fmtPrice(entry)),
+    line("🛡", "SL", fmtPrice(stopLoss)),
+    line("🎯", "TP", lifecycleTakeProfit(event)),
+    line("📦", "Lot", `${value(lot)} lot`),
+  ];
 }
 
 function compactStats(metrics) {
