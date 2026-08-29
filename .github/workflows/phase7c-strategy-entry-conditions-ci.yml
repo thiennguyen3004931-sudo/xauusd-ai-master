@@ -72,5 +72,7 @@ jobs:
         run: node scripts/test-phase7c-trend-strategy-entry-conditions-contract.mjs
       - name: Sideway strategy entry condition contract
         run: node scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs
-      - name: Web strategy entry condition RED contract
+      - name: Web strategy entry condition contract
         run: node scripts/test-phase7c-strategy-entry-conditions-web-contract.mjs
+      - name: Build Web Control Center
+        run: pnpm --filter @xauusd/web... build
