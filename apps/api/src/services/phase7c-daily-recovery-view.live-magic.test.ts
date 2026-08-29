@@ -30,18 +30,22 @@ test("Daily Recovery keeps DEMO trend magic when Phase 7C account mode is DEMO a
   });
 });
 
-test("Daily Recovery respects explicit MT5_MAGIC_NUMBER override", () => {
+test("Daily Recovery ignores generic bridge MT5_MAGIC_NUMBER when canonical account mode is LIVE", () => {
   const resolved = resolvePhase7CDailyRecoveryMagicNumbers({
     accountMode: "LIVE",
     env: {
-      MT5_MAGIC_NUMBER: "990001",
+      // The persistent API/Web Scheduled Task can still be launched with
+      // the DEMO BridgeEnv after the canonical Phase 7C account mode
+      // has switched to LIVE. This generic bridge magic must not override
+      // the canonical LIVE Trend strategy magic.
+      MT5_MAGIC_NUMBER: "270713",
       ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER: "990002",
     },
   });
 
   assert.deepEqual(resolved, {
-    trendMagicNumber: 990001,
+    trendMagicNumber: 270715,
     sidewayMagicNumber: 990002,
-    configuredMagicNumbers: [990001, 990002],
+    configuredMagicNumbers: [270715, 990002],
   });
 });
