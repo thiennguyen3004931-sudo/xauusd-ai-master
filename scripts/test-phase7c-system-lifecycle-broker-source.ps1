@@ -10,6 +10,10 @@ function Assert-True([bool]$Value, [string]$Message) {
   if (-not $Value) { throw $Message }
 }
 
+function Assert-Equal($Actual, $Expected, [string]$Message) {
+  if ($Actual -ne $Expected) { throw "$Message actual=$Actual expected=$Expected" }
+}
+
 function Assert-PowerShellSyntax([string]$Path) {
   $tokens = $null
   $errors = $null
@@ -93,5 +97,37 @@ Assert-True ($runner -match '(?s)# Critical: re-read task/account/lot configurat
 
 # Lifecycle START/RESTART must not invent or require session ARM. AUTO ARM stays elsewhere.
 Assert-True (-not ($runner -match 'REJECT_LIVE_ARM_INVALID')) "Lifecycle broker must not require session LIVE ARM for START/RESTART"
+
+# Synthetic bookkeeping regression: execute the production Set-BrokerState function in isolation.
+# A successful PAUSE-only recovery may change current state semantics, but it must not overwrite
+# the audit semantics of the most recently handled STOP request.
+$astTokens = $null
+$astErrors = $null
+$runnerAst = [System.Management.Automation.Language.Parser]::ParseFile($BrokerRunner, [ref]$astTokens, [ref]$astErrors)
+Assert-Equal $astErrors.Count 0 "runner AST must parse for lifecycle status consistency harness"
+$setBrokerStateAst = $runnerAst.Find({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Set-BrokerState"
+}, $true)
+Assert-True ($null -ne $setBrokerStateAst) "production Set-BrokerState function must exist"
+
+function Write-BrokerStatus {}
+function Write-BrokerHeartbeat {}
+Invoke-Expression $setBrokerStateAst.Extent.Text
+
+$script:brokerState = "BLOCKED"
+$script:lastHandledAction = "STOP"
+$script:lastResult = "FAILED"
+$script:lastReasonCode = "FAIL_STOP_TIMEOUT"
+$script:stateReasonCode = $null
+$script:lastError = "Executor stop exceeded 25 seconds."
+
+Set-BrokerState "RUNNING" "OK_STARTED"
+
+Assert-Equal $script:brokerState "RUNNING" "recovery must update current broker state"
+Assert-Equal $script:lastHandledAction "STOP" "recovery must preserve last handled action audit"
+Assert-Equal $script:lastResult "FAILED" "recovery must preserve last request result audit"
+Assert-Equal $script:lastReasonCode "FAIL_STOP_TIMEOUT" "recovery state reason must not overwrite last request reason audit"
+Assert-Equal $script:stateReasonCode "OK_STARTED" "recovery must expose its current-state reason separately"
 
 Write-Host "PHASE7C_SYSTEM_LIFECYCLE_BROKER_SOURCE_TEST=PASS"
