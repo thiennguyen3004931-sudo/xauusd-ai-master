@@ -114,7 +114,9 @@ try {
   if (Test-Path -LiteralPath $LiveArmPath) { $armState = Read-JsonRequired $LiveArmPath "Phase7C LIVE arm state" }
   $healthArmed = $null -ne $health.PSObject.Properties['liveExecutionArmed'] -and [bool]$health.liveExecutionArmed
   $healthArmStatus = if ($null -ne $health.PSObject.Properties['liveArmStatus']) { ([string]$health.liveArmStatus).Trim().ToUpperInvariant() } else { '' }
-  $localArmValid = $null -ne $armState -and [int]$armState.version -eq 1 -and ([string]$armState.accountMode).Trim().ToUpperInvariant() -eq 'LIVE'
+  $localArmVersion = if ($null -ne $armState) { [int]$armState.version } else { 0 }
+  $localArmScopeValid = $localArmVersion -ne 2 -or ([string]$armState.scope).Trim().ToUpperInvariant() -eq 'BRIDGE_SESSION'
+  $localArmValid = $null -ne $armState -and $localArmVersion -in @(1, 2) -and [bool]$armState.armed -and $localArmScopeValid -and ([string]$armState.accountMode).Trim().ToUpperInvariant() -eq 'LIVE'
   $armed = $runtime -eq 'LIVE' -and $localArmValid -and $healthArmed -and $healthArmStatus -eq 'ARMED'
 
   if ($RequireArmed) {
