@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Mt5BridgeDeal } from "../models/Mt5BridgeDeal";
-import { computeBrokerDayRealizedPnl } from "./broker-day-realized-pnl";
+import {
+  computeBrokerDayRealizedPnl,
+  summarizeBrokerDayRealizedPnl,
+} from "./broker-day-realized-pnl";
 
 function deal(overrides: Partial<Mt5BridgeDeal> = {}): Mt5BridgeDeal {
   return {
@@ -60,5 +63,21 @@ describe("computeBrokerDayRealizedPnl", () => {
     ];
 
     expect(computeBrokerDayRealizedPnl(deals, [270715, 270714])).toBe(0);
+  });
+});
+
+describe("summarizeBrokerDayRealizedPnl", () => {
+  it("returns one canonical owned-deal count together with the same daily net P&L", () => {
+    const deals = [
+      deal({ ticket: "1", magic: 270715, netPnl: 10.25 }),
+      deal({ ticket: "2", magic: 270714, netPnl: -2.5 }),
+      deal({ ticket: "3", magic: 999999, netPnl: 100 }),
+      deal({ ticket: "4", magic: 270715, isTradingDeal: false, netPnl: 50 }),
+    ];
+
+    expect(summarizeBrokerDayRealizedPnl(deals, [270715, 270714])).toEqual({
+      dealCount: 2,
+      dailyNetPnl: 7.75,
+    });
   });
 });
