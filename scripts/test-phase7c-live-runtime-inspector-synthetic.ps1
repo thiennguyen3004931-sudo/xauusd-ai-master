@@ -22,7 +22,7 @@ try {
     "MT5_BRIDGE_PORT=$port"
   ) | Set-Content -LiteralPath $envPath -Encoding utf8
   @{ version = 1; accountMode = "LIVE"; liveExecutionEnabled = $true; envFile = $envPath } | ConvertTo-Json | Set-Content -LiteralPath $accountPath -Encoding utf8
-  @{ version = 1; accountMode = "LIVE"; bridgeSessionId = "ci-session"; accountLogin = 123456; server = "DBGMarkets-Live"; profileFingerprint = "ci"; armedAt = 1787970000000; armedBy = "ci" } | ConvertTo-Json | Set-Content -LiteralPath $armPath -Encoding utf8
+  @{ version = 2; armed = $true; scope = "BRIDGE_SESSION"; accountMode = "LIVE"; bridgeSessionId = "ci-session"; accountLogin = 123456; server = "DBGMarkets-Live"; profileFingerprint = "ci"; armedAt = 1787970000000; armedBy = "ci" } | ConvertTo-Json | Set-Content -LiteralPath $armPath -Encoding utf8
 
   $before = @{}
   foreach ($path in @($envPath, $accountPath, $armPath)) { $before[$path] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash }
