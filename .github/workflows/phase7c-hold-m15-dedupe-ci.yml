@@ -16,6 +16,7 @@ on:
       - scripts/apply-phase7c-hold-m15-dedupe-patch-v3.mjs
       - scripts/apply-phase7c-hold-m15-dedupe-patch-v4.mjs
       - scripts/apply-phase7c-hold-m15-dedupe-patch-v5.mjs
+      - scripts/apply-phase7c-hold-m15-legacy-cleanup.mjs
       - .github/workflows/phase7c-hold-m15-dedupe-ci.yml
   pull_request:
     paths:
@@ -56,6 +57,17 @@ jobs:
             node ./scripts/apply-phase7c-hold-m15-dedupe-patch-v5.mjs
           fi
 
+      - name: Remove superseded HOLD dedupe legacy
+        shell: bash
+        run: |
+          if grep -q 'holdSentKeys' ./scripts/run-phase7b-telegram-notifier.mjs || \
+             grep -q 'lastHoldObservationKey' ./scripts/run-phase7b-demo-controller.ts || \
+             grep -q 'lastHoldObservationKey' ./scripts/run-phase7c-sideway-controller.mjs; then
+            node ./scripts/apply-phase7c-hold-m15-legacy-cleanup.mjs
+          else
+            echo 'PHASE7C_HOLD_M15_LEGACY_CLEANUP=ALREADY_CLEAN'
+          fi
+
       - name: Verify focused contracts
         run: |
           node --check ./scripts/run-phase7b-telegram-notifier.mjs
@@ -74,5 +86,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add scripts/run-phase7b-telegram-notifier.mjs scripts/run-phase7b-demo-controller.ts scripts/run-phase7c-sideway-controller.mjs
-          git commit -m "fix(phase7c): dedupe HOLD once per M15 candle"
+          git commit -m "refactor(phase7c): remove superseded HOLD dedupe legacy"
           git push origin HEAD:feat/phase7c-hold-m15-dedupe
