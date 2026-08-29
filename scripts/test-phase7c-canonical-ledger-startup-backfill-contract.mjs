@@ -23,7 +23,8 @@ test("API startup must invoke best-effort canonical ledger historical backfill",
   );
   assert.match(service, /backfillPhase7CCanonicalDealLedger\s*\(/);
   assert.match(service, /accountModeAllowsBroker\s*\(/);
-  assert.match(service, /365\s*\*\s*(?:24\s*\*\s*)?60\s*\*\s*60\s*\*\s*1000|365\s*\*\s*DAY_MS/);
+  assert.match(service, /const\s+STARTUP_BACKFILL_DAYS\s*=\s*365\s*;/);
+  assert.match(service, /toMs\s*-\s*STARTUP_BACKFILL_DAYS\s*\*\s*DAY_MS/);
   assert.doesNotMatch(service, /timestampCursor|cursorTimestamp|lastTimestamp/i);
 
   assert.match(index, /warmPhase7CCanonicalDealLedgerOnStartup/);
