@@ -1,5 +1,6 @@
 name: Phase7C Telegram Lifecycle Observability CI
 
+# Final scoped verification runs on the exact feature head after source generation.
 on:
   push:
     branches:
