@@ -168,7 +168,7 @@ export async function summarizePhase7CCanonicalDeals(
 export async function getPhase7CCanonicalPositionRealizedDeals(
   input: Phase7CCanonicalPositionRealizedInput,
 ): Promise<{ accountKey: string; deals: CanonicalDealRecord[]; realizedNetPnl: number }> {
-  const { symbol } = validateWindow(input);
+  const { symbol, fromMs, toMs } = validateWindow(input);
   const positionId = String(input.positionId ?? "").trim();
   if (!positionId) {
     throw new Error("Canonical realized P&L requires positionId.");
@@ -180,7 +180,11 @@ export async function getPhase7CCanonicalPositionRealizedDeals(
     positionId,
     symbol,
     ownedMagics: input.ownedMagics,
-  });
+  }).filter(
+    (deal) =>
+      deal.timestamp >= fromMs &&
+      deal.timestamp < toMs,
+  );
   const realizedNetPnl = Math.round(
     (deals.reduce((sum, deal) => sum + deal.netPnl, 0) + Number.EPSILON) * 1e10,
   ) / 1e10;
