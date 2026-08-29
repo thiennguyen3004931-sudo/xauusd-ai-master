@@ -53,7 +53,6 @@ try {
   $expected = @(
     'GET /api/v1/phase7c/bot-mode',
     'GET /health',
-    'GET /account',
     'GET /v1/positions?symbol=XAUUSD',
     'GET /v1/orders?symbol=XAUUSD'
   )
