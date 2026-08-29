@@ -1,4 +1,5 @@
 name: Phase7C HOLD M15 Dedupe CI
+# Scope A regression is read-only: no runtime, ARM, mode, bridge, or order mutation.
 
 on:
   push:
