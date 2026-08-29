@@ -35,5 +35,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: UI current wait reason freshness contract
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/test-phase7c-ui-current-wait-reason-freshness.ts
-      - name: Build API
-        run: pnpm --filter @xauusd/api build
+      - name: Build API dependency graph
+        run: pnpm --filter @xauusd/api... build
