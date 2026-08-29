@@ -528,24 +528,22 @@ async function buildEnrichment(event) {
     }
   }
 
-  let partialPnlEstimate = null;
+  let canonicalRealized = null;
 
   if (
-    type === "PLUS10_PARTIAL_ONE_THIRD"
+    type === "PLUS10_PARTIAL_ONE_THIRD" ||
+    type === "TP1_PARTIAL_FILLED" ||
+    isCloseEvent
   ) {
-    partialPnlEstimate =
-      estimatePnlFromPriceMove(
-        numberOrNull(event.favorable),
-        numberOrNull(event.closedVolume),
-        live?.mt5?.spec,
-      );
+    canonicalRealized =
+      await getCanonicalRealizedPositionWithRetry(event);
   }
 
   return {
     live,
     metrics,
     closedTrade,
-    partialPnlEstimate,
+    canonicalRealized,
     dailyRecoveryAfterClose,
   };
 }
@@ -950,8 +948,11 @@ async function formatEvent(event, enrichment) {
       );
 
     const m = enrichment.metrics;
-    const partial =
-      enrichment.partialPnlEstimate;
+    const realizedDeal =
+      matchCanonicalRealizedDeal(
+        enrichment.canonicalRealized,
+        event,
+      );
 
     return compactTradeCard(
       "💰",
@@ -961,11 +962,14 @@ async function formatEvent(event, enrichment) {
         ...lifecycleContextLines(event, enrichment),
         `📈 <b>Chốt tại:</b> <code>${fmtSignedPrice(
           numberOrNull(event.favorable),
-        )} giá</code> · <b>Lãi:</b> <code>${fmtMoney(
-          partial,
-          true,
-          true,
-        )}</code>`,
+        )} giá</code> · <b>Realized P&L:</b> <code>${
+          realizedDeal
+            ? fmtMoney(
+                realizedDeal.netPnl,
+                true,
+              )
+            : "đang chờ MT5 deal"
+        }</code>`,
         `📤 <b>Đóng:</b> <code>${value(
           event.closedVolume,
         )} lot</code> · còn <code>${value(
@@ -1146,7 +1150,7 @@ async function formatEvent(event, enrichment) {
 
     const pnl =
       numberOrNull(
-        closed?.netPnl,
+        enrichment.canonicalRealized?.realizedNetPnl,
       );
 
     const averageMove =
@@ -1191,12 +1195,12 @@ async function formatEvent(event, enrichment) {
           : "RECOVERY TRADE CLOSED",
         [
           ...lifecycleContextLines(event, enrichment),
-          closed
+          pnl !== null
             ? `💵 <b>P&L lệnh:</b> <code>${fmtMoney(
                 pnl,
                 true,
               )}</code>`
-            : "💵 <b>P&L lệnh:</b> <code>đang đồng bộ MT5</code>",
+            : "💵 <b>P&L lệnh:</b> <code>đang đồng bộ MT5 deal canonical</code>",
           dailyPnl === null
             ? "📅 <b>Daily P/L sau đóng:</b> <code>chưa đọc được</code>"
             : `📅 <b>Daily P/L sau đóng:</b> <code>${fmtMoney(
@@ -1234,12 +1238,12 @@ async function formatEvent(event, enrichment) {
         : "CHỐT LỆNH",
       [
         ...lifecycleContextLines(event, enrichment),
-        closed
+        pnl !== null
           ? `💵 <b>P&L tổng:</b> <code>${fmtMoney(
               pnl,
               true,
             )}</code>`
-          : "💵 <b>P&L:</b> <code>đang đồng bộ MT5</code>",
+          : "💵 <b>P&L:</b> <code>đang đồng bộ MT5 deal canonical</code>",
         closed
           ? `📈 <b>Biến động TB:</b> <code>${fmtSignedPrice(
               averageMove,
@@ -1786,8 +1790,6 @@ function applyEventState(event, enrichment) {
           ),
         ),
 
-      realizedPnlEstimate: 0,
-
       dailyMode:
         recovery.dailyMode ||
         null,
@@ -1854,18 +1856,6 @@ function applyEventState(event, enrichment) {
       ) ??
       state.trade.remainingVolume;
 
-    if (
-      enrichment.partialPnlEstimate !==
-      null
-    ) {
-      state.trade.realizedPnlEstimate =
-        Number(
-          state.trade
-            .realizedPnlEstimate ??
-          0,
-        ) +
-        enrichment.partialPnlEstimate;
-    }
   }
 
   if (type === "TP1_PARTIAL_FILLED") {
@@ -1906,7 +1896,7 @@ function liveMetrics(snapshot, event) {
   const volume = numberOrNull(managed?.volume ?? managedState?.expectedRemainingVolume ?? state.trade?.remainingVolume);
   const priceMove = entry !== null && market !== null ? sidePriceMove(side, entry, market) : numberOrNull(event.favorable);
   const slPriceMove = entry !== null && stopLoss !== null ? sidePriceMove(side, entry, stopLoss) : null;
-  const lockedPnlUsd = estimatePnlFromPriceMove(slPriceMove, volume, snapshot?.mt5?.spec);
+  const lockedPnlUsd = estimateLockedPnlUsd(slPriceMove, volume, snapshot?.mt5?.spec);
   return {
     side,
     entry,
@@ -1995,6 +1985,109 @@ async function getDailyRecoverySnapshotWithRetry(volume) {
 
   return lastSnapshot;
 }
+async function getCanonicalRealizedPosition(event) {
+  const positionId = String(
+    event?.ticket ??
+    event?.position?.ticket ??
+    state.trade?.ticket ??
+    "",
+  ).trim();
+
+  if (!positionId) return null;
+
+  const eventAt = Date.parse(
+    String(
+      event?.timestamp ??
+      new Date().toISOString(),
+    ),
+  );
+  const safeEventAt = Number.isFinite(eventAt)
+    ? eventAt
+    : Date.now();
+  const openedAt = Number(state.trade?.openedAt);
+  const fromMs =
+    Number.isFinite(openedAt) && openedAt > 0
+      ? Math.max(0, openedAt - 5 * 60_000)
+      : Math.max(0, safeEventAt - 7 * 24 * 60 * 60_000);
+  const toMs = safeEventAt + 2 * 60_000;
+  const query = new URLSearchParams({
+    positionId,
+    symbol,
+    fromMs: String(fromMs),
+    toMs: String(toMs),
+  });
+
+  return fetchJson(
+    `${monitorApiBase}/api/v1/phase7c-canonical-ledger/position-realized?${query.toString()}`,
+    3000,
+  ).catch(() => null);
+}
+
+async function getCanonicalRealizedPositionWithRetry(event) {
+  let lastSnapshot = null;
+  const partialEvent = [
+    "PLUS10_PARTIAL_ONE_THIRD",
+    "TP1_PARTIAL_FILLED",
+  ].includes(String(event?.type ?? ""));
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const snapshot =
+      await getCanonicalRealizedPosition(event);
+
+    if (snapshot) {
+      lastSnapshot = snapshot;
+      if (
+        partialEvent
+          ? matchCanonicalRealizedDeal(snapshot, event)
+          : Number(snapshot.dealCount) > 0
+      ) {
+        return snapshot;
+      }
+    }
+
+    if (attempt < 3) await sleep(650);
+  }
+
+  return lastSnapshot;
+}
+
+function matchCanonicalRealizedDeal(snapshot, event) {
+  const deals = Array.isArray(snapshot?.deals)
+    ? snapshot.deals
+    : [];
+  if (deals.length === 0) return null;
+
+  const targetVolume = numberOrNull(event?.closedVolume);
+  const eventAt = Date.parse(String(event?.timestamp ?? ""));
+  const safeEventAt = Number.isFinite(eventAt)
+    ? eventAt
+    : Date.now();
+
+  return [...deals]
+    .filter((deal) => {
+      const dealAt = Number(deal?.timestamp);
+      return Number.isFinite(dealAt) &&
+        Math.abs(dealAt - safeEventAt) <= 2 * 60_000;
+    })
+    .sort((left, right) => {
+      const leftVolume = numberOrNull(left?.volume);
+      const rightVolume = numberOrNull(right?.volume);
+      const leftVolumeDelta =
+        targetVolume === null || leftVolume === null
+          ? 0
+          : Math.abs(leftVolume - targetVolume);
+      const rightVolumeDelta =
+        targetVolume === null || rightVolume === null
+          ? 0
+          : Math.abs(rightVolume - targetVolume);
+      if (Math.abs(leftVolumeDelta - rightVolumeDelta) > 1e-9) {
+        return leftVolumeDelta - rightVolumeDelta;
+      }
+      return Math.abs(Number(left.timestamp) - safeEventAt) -
+        Math.abs(Number(right.timestamp) - safeEventAt);
+    })[0] ?? null;
+}
+
 async function findClosedTradeWithRetry(event) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const performance = await fetchJson(`${monitorApiBase}/api/v1/mt5/performance?symbol=${encodeURIComponent(symbol)}&days=7`, 3000).catch(() => null);
@@ -2347,7 +2440,7 @@ function saveState() {
   fs.renameSync(temp, statePath);
 }
 
-function estimatePnlFromPriceMove(priceMove, volume, spec) {
+function estimateLockedPnlUsd(priceMove, volume, spec) {
   const move = numberOrNull(priceMove);
   const lots = numberOrNull(volume);
   const tickSize = numberOrNull(spec?.tickSize);
