@@ -171,7 +171,7 @@ function assertCanonicalContext(text, {
   assert.match(text, new RegExp(`Entry[^\\n]*${entry}`, "i"));
   assert.match(text, /SL:/i);
   assert.match(text, new RegExp(`TP[^\\n]*${tp}`, "i"));
-  assert.match(text, new RegExp(`Lot[^\\n]*${lot}`, "i"));
+  assert.match(text, new RegExp(`Lot[^\\n]*(?:${lot})`, "i"));
 }
 
 test("Trend lifecycle cards share canonical trade context and actual MT5 fill wins over signal entry", async () => {
@@ -304,14 +304,15 @@ test("Sideway ENTRY and BE cards persist TP2 and remaining lifecycle context", a
     },
   };
 
-  const { notifications } = await withMonitor((monitorApiBase) =>
-    runNotifier({
+  const { notifications } = await withMonitor(
+    (monitorApiBase) => runNotifier({
       events,
       source: "SIDEWAY",
       monitorApiBase,
       label: "sideway-context",
     }),
-  , { demo });
+    { demo },
+  );
 
   assert.equal(notifications.length, 2);
   for (const notification of notifications) {
@@ -405,9 +406,14 @@ test("EXIT uses MT5 lifecycle performance netPnl and actual average exit without
     }],
   };
 
-  const { notifications } = await withMonitor((monitorApiBase) =>
-    runNotifier({ events, monitorApiBase, label: "exit-performance" }),
-  , { performance });
+  const { notifications } = await withMonitor(
+    (monitorApiBase) => runNotifier({
+      events,
+      monitorApiBase,
+      label: "exit-performance",
+    }),
+    { performance },
+  );
 
   assert.equal(notifications.length, 2);
   const exit = notifications[1].text;
