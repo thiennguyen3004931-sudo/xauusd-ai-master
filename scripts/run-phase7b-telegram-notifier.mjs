@@ -19,17 +19,52 @@ const journalPath = trendJournalPath;
 const sidewayJournalPath =
   process.env.ZIQ_TELEGRAM_SIDEWAY_JOURNAL_PATH?.trim() || "";
 const statePath = requiredEnv("ZIQ_TELEGRAM_STATE_PATH");
+fs.mkdirSync(path.dirname(statePath), { recursive: true });
 const singletonPath = `${statePath}.lock`;
 let singletonFd;
-try {
-  singletonFd = fs.openSync(singletonPath, "wx");
-  fs.writeFileSync(singletonFd, `${process.pid}\n`, "utf8");
-} catch (error) {
-  if (error?.code === "EEXIST") {
-    console.log(`PHASE7B_TELEGRAM_NOTIFIER_DUPLICATE=EXIT singleton=${singletonPath}`);
-    process.exit(0);
+for (let attempt = 0; attempt < 3; attempt += 1) {
+  try {
+    singletonFd = fs.openSync(singletonPath, "wx");
+    fs.writeFileSync(singletonFd, `${process.pid}\n`, "utf8");
+    break;
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+
+    let ownerPid = null;
+    try {
+      const rawOwnerPid = fs.readFileSync(singletonPath, "utf8").trim();
+      const parsedOwnerPid = Number(rawOwnerPid);
+      if (Number.isInteger(parsedOwnerPid) && parsedOwnerPid > 0) {
+        ownerPid = parsedOwnerPid;
+      }
+    } catch {}
+
+    let ownerAlive = false;
+    if (ownerPid !== null) {
+      try {
+        process.kill(ownerPid, 0);
+        ownerAlive = true;
+      } catch (ownerError) {
+        ownerAlive = ownerError?.code === "EPERM";
+      }
+    }
+
+    if (ownerAlive) {
+      console.log(`PHASE7B_TELEGRAM_NOTIFIER_DUPLICATE=EXIT singleton=${singletonPath}`);
+      process.exit(0);
+    }
+
+    try {
+      fs.unlinkSync(singletonPath);
+      console.log(`PHASE7B_TELEGRAM_NOTIFIER_STALE_LOCK=RECLAIMED singleton=${singletonPath}`);
+    } catch (unlinkError) {
+      if (unlinkError?.code !== "ENOENT") throw unlinkError;
+    }
   }
-  throw error;
+}
+
+if (singletonFd === undefined) {
+  throw new Error(`Unable to acquire Telegram notifier singleton lock: ${singletonPath}`);
 }
 
 const releaseSingleton = () => {
@@ -134,7 +169,6 @@ const systemRecoveryQuietMs = Math.max(
 
 let nextSystemHealthCheckAt = 0;
 
-fs.mkdirSync(path.dirname(statePath), { recursive: true });
 if (!fs.existsSync(trendJournalPath)) {
   fs.writeFileSync(trendJournalPath, "", "utf8");
 }
