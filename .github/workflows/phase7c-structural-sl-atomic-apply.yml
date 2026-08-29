@@ -1,0 +1,47 @@
+name: Phase7C Structural SL Atomic Apply
+
+on:
+  push:
+    branches:
+      - feat/phase7c-structural-sl-monotonicity
+    paths:
+      - .github/workflows/phase7c-structural-sl-atomic-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply asserted source-only patch
+        run: node ./scripts/.tmp-apply-phase7c-structural-sl-monotonicity-v2.mjs
+
+      - name: Syntax and contract preflight
+        run: |
+          node --check ./scripts/phase7c-stop-monotonicity.mjs
+          node --check ./scripts/phase7c-sideway-logic.mjs
+          node --check ./scripts/run-phase7c-sideway-controller.mjs
+          node --test ./scripts/test-phase7c-structural-sl-monotonicity.mjs
+          git diff --check
+
+      - name: Commit minimal production fix and remove temporary applier
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/phase7c-structural-sl-atomic-apply.yml
+          git rm scripts/.tmp-apply-phase7c-structural-sl-monotonicity.mjs
+          git rm scripts/.tmp-apply-phase7c-structural-sl-monotonicity-v2.mjs
+          git add scripts/phase7c-stop-monotonicity.mjs
+          git add scripts/phase7c-sideway-logic.mjs
+          git add scripts/run-phase7b-demo-controller.ts
+          git add scripts/run-phase7c-sideway-controller.mjs
+          git diff --cached --check
+          git commit -m "fix(phase7c): enforce monotonic structural stop management"
+          git push origin HEAD:feat/phase7c-structural-sl-monotonicity
