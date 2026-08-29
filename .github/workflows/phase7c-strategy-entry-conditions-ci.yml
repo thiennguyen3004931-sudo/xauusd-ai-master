@@ -74,5 +74,6 @@ jobs:
         run: node scripts/test-phase7c-sideway-strategy-entry-conditions-contract.mjs
       - name: Web strategy entry condition contract
         run: node scripts/test-phase7c-strategy-entry-conditions-web-contract.mjs
+      # Fresh verification checkpoint after merging the latest main into this branch.
       - name: Build Web Control Center
         run: pnpm --filter @xauusd/web... build
