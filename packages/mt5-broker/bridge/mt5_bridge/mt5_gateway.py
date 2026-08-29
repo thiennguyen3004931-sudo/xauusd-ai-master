@@ -42,10 +42,10 @@ class Mt5Gateway:
                 self.mt5.shutdown()
             self.ledger.close()
 
-    def health(self) -> dict[str, Any]:
+    def health(self, reconnect: bool = True) -> dict[str, Any]:
         now = int(time.time() * 1000)
         with self._lock:
-            terminal, account = self._connection_snapshot_locked(reconnect=True)
+            terminal, account = self._connection_snapshot_locked(reconnect=reconnect)
         connected = terminal is not None and account is not None
         mode = self._account_mode(getattr(account, "trade_mode", None)) if account else None
         return {
@@ -390,13 +390,21 @@ class Mt5Gateway:
         output.sort(key=lambda deal: int(deal["timestamp"]))
         return output
 
-    def positions(self, canonical_symbol: str | None = None) -> list[dict[str, Any]]:
+    def positions(
+        self,
+        canonical_symbol: str | None = None,
+        reconnect: bool = True,
+    ) -> list[dict[str, Any]]:
         broker_symbol = self.settings.broker_symbol(canonical_symbol) if canonical_symbol else None
         with self._lock:
             rows = (
-                self._read_with_reconnect_locked("positions_get", symbol=broker_symbol)
+                self._read_with_reconnect_locked(
+                    "positions_get",
+                    symbol=broker_symbol,
+                    reconnect=reconnect,
+                )
                 if broker_symbol
-                else self._read_with_reconnect_locked("positions_get")
+                else self._read_with_reconnect_locked("positions_get", reconnect=reconnect)
             )
         if rows is None:
             raise BridgeError(f"positions_get failed: {self.mt5.last_error()}", 503, "POSITIONS_UNAVAILABLE")
@@ -675,17 +683,27 @@ class Mt5Gateway:
                 "TERMINAL_DISCONNECTED",
             )
 
-    def _read_with_reconnect_locked(self, method_name: str, *args: Any, **kwargs: Any) -> Any:
-        """Run an idempotent MT5 read and retry once after an IPC reconnect.
+    def _read_with_reconnect_locked(
+        self,
+        method_name: str,
+        *args: Any,
+        reconnect: bool = True,
+        **kwargs: Any,
+    ) -> Any:
+        """Run an idempotent MT5 read and optionally retry after an IPC reconnect.
 
         This helper is deliberately not used for order_send. A lost response to
         a mutating request must never be retried blindly because the broker may
-        already have accepted the original command.
+        already have accepted the original command. Setting reconnect=False is
+        reserved for strict observation-only callers.
         """
-        self._ensure_connected_locked()
+        if reconnect:
+            self._ensure_connected_locked()
+        elif self.mt5 is None:
+            return None
         method = getattr(self.mt5, method_name)
         result = method(*args, **kwargs)
-        if result is not None:
+        if result is not None or not reconnect:
             return result
         error = self._last_mt5_error_locked()
         if not self._is_recoverable_connection_error(error):
