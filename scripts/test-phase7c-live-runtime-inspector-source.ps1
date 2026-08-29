@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+# Observation-only means health, positions, and pending-order reads must never initiate reconnect.
 $InspectorPath = Join-Path $PSScriptRoot "inspect-phase7c-live-runtime-local.ps1"
 
 if (-not (Test-Path -LiteralPath $InspectorPath)) {
@@ -19,10 +20,11 @@ Assert-Contains 'phase7c-account-mode\.json' 'canonical selected account state i
 Assert-Contains 'phase7c-live-arm\.json' 'canonical LIVE arm record is observed'
 Assert-Contains '/api/v1/phase7c/bot-mode' 'bot mode is observed through control API'
 Assert-Contains 'Invoke-RestMethod[^\r\n]*-Method\s+Get' 'REST observations are explicit GET'
-Assert-Contains '/health' 'bridge health is observed'
+Assert-Contains '/health\?reconnect=false' 'bridge health observation explicitly disables reconnect'
+Assert-Contains '/v1/positions\?symbol=\$escapedSymbol&reconnect=false' 'positions observation explicitly disables reconnect'
+Assert-Contains '/v1/orders\?symbol=\$escapedSymbol&reconnect=false' 'pending orders observation explicitly disables reconnect'
+Assert-NotContains '"\$bridgeBaseUrl/health"' 'bridge health observation must not use reconnecting default'
 Assert-NotContains '"\$bridgeBaseUrl/account"' 'unsupported Bridge /account route'
-Assert-Contains '/v1/positions\?symbol=' 'positions are observed read-only'
-Assert-Contains '/v1/orders\?symbol=' 'pending orders are observed read-only'
 Assert-Contains 'PHASE7C_LIVE_RUNTIME_INSPECTOR_OBSERVATION_ONLY=TRUE' 'observation-only marker'
 Assert-Contains 'PHASE7C_LIVE_RUNTIME_INSPECTOR_RESULT=PASS' 'explicit PASS marker'
 Assert-Contains 'PHASE7C_LIVE_RUNTIME_INSPECTOR_RESULT=FAIL' 'explicit FAIL marker'
