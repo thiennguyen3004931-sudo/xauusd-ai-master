@@ -89,7 +89,6 @@ const decisionAudit = createPhase7CDecisionAudit({
   configuration: { riskPercent, maxLot },
 });
 let state = loadState();
-let lastHoldObservationKey = "";
 
 console.log("PHASE7C_SIDEWAY_CONTROLLER=STARTING");
 console.log(`PHASE7C_SIDEWAY_SYMBOL=${symbol}`);
@@ -879,6 +878,7 @@ function buildManagedState(opened, pending, brokerClockOffsetMs = 0) {
     partialApplied: false,
     breakEvenApplied: false,
     lastRegimeCloseChecked: Number(pending.lastRegimeCloseChecked ?? 0),
+    lastHoldM15Key: "",
     openedAt,
     timeStopAt: openedAt + maxHoldingMinutes * 60_000,
     partialAttempt: 0,
@@ -925,6 +925,8 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
     // trigger a blind close or abandon management state.
     journal("MANAGEMENT_REGIME_CHECK_ERROR", { ticket: managed.ticket, message: errorMessage(error) });
   }
+
+  const holdM15CloseTime = Number(managed.lastRegimeCloseChecked ?? 0);
 
   const quoteFreshness = evaluateTimestampFreshness(quote?.timestamp, { maxAgeMs: maxQuoteAgeMs, clockOffsetMs: brokerClockOffsetMs });
   if (!quoteFreshness.fresh) {
@@ -974,19 +976,21 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
 
     const holdKey =
       hold
-        ? `${managed.ticket}|${hold.reasonCode}`
+        ? `${managed.ticket}|${hold.reasonCode}|${holdM15CloseTime}`
         : "";
 
     if (
       hold &&
-      holdKey !== lastHoldObservationKey
+      holdM15CloseTime > 0 &&
+      holdKey !== managed.lastHoldM15Key
     ) {
-      lastHoldObservationKey =
-        holdKey;
+      managed.lastHoldM15Key = holdKey;
+      saveState();
 
       journal("HOLD_POSITION", {
         ticket: managed.ticket,
         side: managed.side,
+        m15CloseTime: holdM15CloseTime,
         dailyMode:
           managed.dailyMode,
         ...hold,
@@ -1048,19 +1052,21 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
 
     const holdKey =
       hold
-        ? `${managed.ticket}|${hold.reasonCode}`
+        ? `${managed.ticket}|${hold.reasonCode}|${holdM15CloseTime}`
         : "";
 
     if (
       hold &&
-      holdKey !== lastHoldObservationKey
+      holdM15CloseTime > 0 &&
+      holdKey !== managed.lastHoldM15Key
     ) {
-      lastHoldObservationKey =
-        holdKey;
+      managed.lastHoldM15Key = holdKey;
+      saveState();
 
       journal("HOLD_POSITION", {
         ticket: managed.ticket,
         side: managed.side,
+        m15CloseTime: holdM15CloseTime,
         dailyMode:
           managed.dailyMode ?? null,
         ...hold,

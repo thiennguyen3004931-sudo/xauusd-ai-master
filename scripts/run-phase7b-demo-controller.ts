@@ -142,6 +142,7 @@ type ManagedState = {
   lastStructuralStop: number | null;
   lastReversalM15CloseChecked: number;
   lastTrendM15CloseChecked: number;
+  lastHoldM15Key?: string;
   beAttempt: number;
   partialAttempt: number;
   exitAttempt: number;
@@ -272,7 +273,6 @@ const decisionAudit = createPhase7CDecisionAudit({
   configuration: { fixedLot: fixedVolume },
 });
 let state = loadState(statePath);
-let lastHoldObservationKey = "";
 
 console.log("PHASE7B_DEMO_STRATEGY=M15_TRIPLE_PATTERN_SUPERTREND_STRUCTURE_RIDER_MA_CONFIDENCE_FVG_CONTEXT");
 console.log(`PHASE7B_DEMO_SYMBOL=${symbol}`);
@@ -1334,6 +1334,8 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
   const managed = state.managed!;
   const exitPrice = managed.side === "BUY" ? quote.bid : quote.ask;
   const favorable = managed.side === "BUY" ? exitPrice - position.entry : position.entry - exitPrice;
+  const latestM15 = m15.at(-1);
+  const holdM15CloseTime = Number(latestM15?.closeTime ?? 0);
 
   if (!managed.breakEvenApplied && favorable >= 6) {
     managed.beAttempt += 1;
@@ -1363,19 +1365,21 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
 
     const holdKey =
       hold
-        ? `${managed.ticket}|${hold.reasonCode}`
+        ? `${managed.ticket}|${hold.reasonCode}|${holdM15CloseTime}`
         : "";
 
     if (
       hold &&
-      holdKey !== lastHoldObservationKey
+      holdM15CloseTime > 0 &&
+      holdKey !== managed.lastHoldM15Key
     ) {
-      lastHoldObservationKey =
-        holdKey;
+      managed.lastHoldM15Key = holdKey;
+      saveState();
 
       journal("HOLD_POSITION", {
         ticket: managed.ticket,
         side: managed.side,
+        m15CloseTime: holdM15CloseTime,
         dailyMode:
           managed.dailyMode,
         ...hold,
@@ -1393,20 +1397,22 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
 
   const holdKey =
     hold
-      ? `${managed.ticket}|${hold.reasonCode}`
+      ? `${managed.ticket}|${hold.reasonCode}|${holdM15CloseTime}`
       : "";
 
   if (
     hold &&
-    holdKey !== lastHoldObservationKey
-  ) {
-    lastHoldObservationKey =
-      holdKey;
+      holdM15CloseTime > 0 &&
+      holdKey !== managed.lastHoldM15Key
+    ) {
+      managed.lastHoldM15Key = holdKey;
+      saveState();
 
     journal("HOLD_POSITION", {
       ticket: managed.ticket,
       side: managed.side,
-      dailyMode:
+        m15CloseTime: holdM15CloseTime,
+        dailyMode:
         managed.dailyMode ?? null,
       ...hold,
     });
@@ -1442,7 +1448,7 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
     }
   }
 
-  const latest = m15.at(-1);
+  const latest = latestM15;
   if (!latest) return;
 
   if (managed.partialApplied) {

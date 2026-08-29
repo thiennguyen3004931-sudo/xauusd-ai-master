@@ -218,7 +218,7 @@ if (!state.initialized) {
     lastEventAt: null,
     trade: null,
     hold: null,
-    holdSentKeys: {},
+    holdM15ByTicketReason: {},
     systemAlerts: {},
   };
   saveState();
@@ -236,7 +236,7 @@ if (!state.initialized) {
 
 state.offsets ??= {};
 state.hold ??= null;
-state.holdSentKeys ??= {};
+state.holdM15ByTicketReason ??= {};
 
 if (!Number.isFinite(Number(state.offsets.trend))) {
   state.offsets.trend = Number.isFinite(Number(state.offset))
@@ -1371,6 +1371,20 @@ function holdReasonCode(event) {
   );
 }
 
+function holdM15CloseTime(event) {
+  const explicit = Number(event?.m15CloseTime);
+  if (Number.isFinite(explicit) && explicit > 0) {
+    return explicit;
+  }
+
+  const timestampMs = Date.parse(String(event?.timestamp ?? ""));
+  if (Number.isFinite(timestampMs)) {
+    return Math.floor(timestampMs / (15 * 60_000)) * (15 * 60_000);
+  }
+
+  return 0;
+}
+
 function holdKey(event) {
   const ticket =
     String(
@@ -1382,31 +1396,28 @@ function holdKey(event) {
   return `${ticket}|${holdReasonCode(event)}`;
 }
 
-function shouldSuppressHold(event) {
-  const key =
-    holdKey(event);
+function holdM15Key(event) {
+  return `${holdKey(event)}|${holdM15CloseTime(event)}`;
+}
 
-  state.holdSentKeys ??= {};
+function shouldSuppressHold(event) {
+  const key = holdKey(event);
+  const m15CloseTime = holdM15CloseTime(event);
+
+  state.holdM15ByTicketReason ??= {};
 
   if (
-    Object.prototype.hasOwnProperty.call(
-      state.holdSentKeys,
-      key,
-    )
+    m15CloseTime > 0 &&
+    Number(state.holdM15ByTicketReason[key]) === m15CloseTime
   ) {
-    if (
-      state.hold?.key === key
-    ) {
+    if (state.hold?.key === key) {
       state.hold.lastSeenAt =
         String(
           event?.timestamp ??
           new Date().toISOString(),
         );
-
-      state.hold.lastM15CloseTime =
-        event?.m15CloseTime ??
-        state.hold.lastM15CloseTime ??
-        null;
+      state.hold.lastM15CloseTime = m15CloseTime;
+      state.hold.m15Key = holdM15Key(event);
     }
 
     saveState();
@@ -1440,48 +1451,42 @@ function shouldSuppressHoldAddon(event) {
 }
 
 function markHold(event) {
-  const key =
-    holdKey(event);
-
-  const reasonCode =
-    holdReasonCode(event);
-
+  const key = holdKey(event);
+  const m15CloseTime = holdM15CloseTime(event);
+  const reasonCode = holdReasonCode(event);
   const confirmedAt =
     String(
       event?.timestamp ??
       new Date().toISOString(),
     );
 
-  state.holdSentKeys ??= {};
-
-  state.holdSentKeys[key] =
-    confirmedAt;
+  state.holdM15ByTicketReason ??= {};
+  if (m15CloseTime > 0) {
+    state.holdM15ByTicketReason[key] = m15CloseTime;
+  }
 
   state.hold = {
     active: true,
     key,
+    m15Key: holdM15Key(event),
     reasonCode,
-
     ticket:
       String(
         event?.ticket ??
         state.trade?.ticket ??
         "",
       ),
-
     side:
       normalizeSide(
         event?.side ??
         state.trade?.side,
       ),
-
     confirmedAt,
-    lastSeenAt:
-      confirmedAt,
-
+    lastSeenAt: confirmedAt,
     lastM15CloseTime:
-      event?.m15CloseTime ??
-      null,
+      m15CloseTime > 0
+        ? m15CloseTime
+        : null,
   };
 }
 
@@ -2144,7 +2149,7 @@ function loadState() {
     lastEventAt: null,
     trade: null,
     hold: null,
-    holdSentKeys: {},
+    holdM15ByTicketReason: {},
     systemAlerts: {},
   };
 
@@ -2216,6 +2221,12 @@ function loadState() {
         typeof parsed.hold === "object"
           ? parsed.hold
           : null,
+
+      holdM15ByTicketReason:
+        parsed.holdM15ByTicketReason &&
+        typeof parsed.holdM15ByTicketReason === "object"
+          ? { ...parsed.holdM15ByTicketReason }
+          : {},
 
       systemAlerts:
         parsed.systemAlerts &&
