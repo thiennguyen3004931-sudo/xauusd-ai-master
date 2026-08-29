@@ -9,6 +9,12 @@ import {
 } from "@xauusd/risk-engine";
 import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
 import { canonicalHoldReason } from "./phase7c-hold-observability.mjs";
+import {
+  compareStrategyEntryConfigVersion,
+  createVirtualStrategyEntryConditionState,
+  evaluateStrategyEntryConditions,
+  validateStrategyEntryConditionState,
+} from "./phase7c-strategy-entry-conditions.mjs";
 
 type Health = {
   status: "ok" | "degraded";
@@ -148,10 +154,20 @@ type ManagedState = {
   recoveryDayStartTime?: number;
 };
 
+type StrategyEntryConfigSnapshot = {
+  version: number;
+  valid: boolean;
+  state: ReturnType<typeof createVirtualStrategyEntryConditionState> | null;
+  error: string | null;
+};
+
 type RuntimeEntrySignal = Pick<
   Phase7BSignal,
   "id" | "side" | "pattern" | "signalTimestamp" | "entry" | "patternExtreme"
->;
+> & {
+  strategyConfigSnapshot: { version: number; valid: boolean };
+  entryConditions: ReturnType<typeof evaluateStrategyEntryConditions>;
+};
 
 type PendingTrendEntry = {
   orderId: string;
@@ -203,6 +219,9 @@ const intervalSeconds = Math.max(1, Number(process.env.ZIQ_DEMO_INTERVAL_SECONDS
 const armed = /^(1|true|yes|on)$/i.test(process.env.ZIQ_DEMO_ARMED ?? "false");
 const once = /^(1|true|yes|on)$/i.test(process.env.ZIQ_DEMO_ONCE ?? "false");
 const workDir = requiredEnv("ZIQ_DEMO_WORK_DIR");
+const strategyEntryConditionsFile = process.env.PHASE7C_STRATEGY_ENTRY_CONDITIONS_FILE?.trim()
+  ? path.resolve(process.env.PHASE7C_STRATEGY_ENTRY_CONDITIONS_FILE.trim())
+  : path.resolve(process.cwd(), ".runtime", "phase7c-strategy-entry-conditions.json");
 const bridgeEnvPath = process.env.ZIQ_BRIDGE_ENV ?? path.resolve("packages/mt5-broker/bridge/.env.phase7b-demo");
 const ENGULF_BODY_TOLERANCE_PRICE = 0.1;
 const MIN_INITIAL_SL_PRICE = 6;
@@ -350,7 +369,8 @@ async function previewLatestSignal(): Promise<void> {
     get<SymbolSpec>(`/v1/symbols/${encodeURIComponent(symbol)}/spec`),
     get<Quote>(`/v1/quotes/${encodeURIComponent(symbol)}`),
   ]);
-  const signal = latestSignal(m15, m5, spec);
+  const strategyEntryConfig = readStrategyEntryConfigSnapshot();
+  const signal = latestSignal(m15, m5, spec, strategyEntryConfig);
   const latest = m15.at(-1);
   console.log(`PHASE7B_DEMO_LATEST_M15_CLOSE=${latest?.closeTime ?? "NONE"}`);
   if (!signal || !latest || signal.signalTimestamp !== latest.closeTime) {
@@ -540,15 +560,69 @@ async function cycle(): Promise<void> {
       : null;
     const m5Direction = phase7BSupertrend(m5, 10, 3).direction[m5.length - 1] ?? null;
     const marketEntry = pending.side === "BUY" ? quote.ask : quote.bid;
+    const strategyEntryConfig = readStrategyEntryConfigSnapshot();
+    const structuralStopDistance = structuralDistance(
+      pending.side,
+      marketEntry,
+      pending.structuralStopPrice,
+    );
+    const closes = m15.slice(0, Math.max(0, m15Index) + 1).map((bar) => bar.close);
+    const ma20 = smaPeriod(closes, 20);
+    const ma50 = smaPeriod(closes, 50);
+    const fvgConfirmed = m15Index >= 0
+      ? hasRelevantFvg(m15, m15Index, pending.side, 12)
+      : false;
+    const entryConditions = strategyEntryConfig.valid && strategyEntryConfig.state
+      ? evaluateStrategyEntryConditions({
+          strategy: "TREND",
+          config: strategyEntryConfig.state,
+          side: pending.side,
+          observations: {
+            patternM15: { passed: true, observed: `${pending.side}:${pending.pattern}` },
+            supertrendM15: { passed: m15Direction === pending.side, observed: m15Direction },
+            supertrendM5: { passed: m5Direction === pending.side, observed: m5Direction },
+            validTrendStructure: { passed: structuralStopDistance > 0, observed: structuralStopDistance },
+            ma20Ma50: {
+              passed: pending.side === "BUY" ? ma20 > ma50 : ma20 < ma50,
+              observed: { ma20, ma50 },
+            },
+            fvg: { passed: fvgConfirmed, observed: fvgConfirmed ? "CONFIRMED" : "NONE" },
+          },
+        })
+      : null;
+
+    if (!entryConditions || !entryConditions.allEnabledPassed) {
+      journal("ENTRY_STRATEGY_CONDITION_BLOCK", {
+        signalId: pending.signalId,
+        side: pending.side,
+        pattern: pending.pattern,
+        reason: entryConditions
+          ? entryConditions.failedConditions.join(",")
+          : "ENTRY_STRATEGY_CONFIG_INVALID",
+        configError: strategyEntryConfig.error,
+        entryConditions,
+      });
+      return;
+    }
+
+    journal("ENTRY_STRATEGY_CONDITIONS_PASS", {
+      signalId: pending.signalId,
+      side: pending.side,
+      pattern: pending.pattern,
+      entryConditions,
+    });
+
+    const conditionAllows = (id: string) =>
+      entryConditions.conditions.find((row) => row.id === id)?.status !== "FAIL";
     const evaluation = pullbackEntryService.evaluatePullback({
       pending,
       timestamp: latestM5.closeTime,
       candidateEntryPrice: marketEntry,
       barLow: latestM5.low,
       barHigh: latestM5.high,
-      setupStillValid: true,
-      m15SupertrendAligned: m15Direction === pending.side,
-      m5SupertrendAligned: m5Direction === pending.side,
+      setupStillValid: conditionAllows("validTrendStructure"),
+      m15SupertrendAligned: conditionAllows("supertrendM15"),
+      m5SupertrendAligned: conditionAllows("supertrendM5"),
     });
 
     journal(evaluation.state, {
@@ -581,6 +655,11 @@ async function cycle(): Promise<void> {
         ? pending.structuralStopPrice + pending.structuralStopDistanceAtSignal
         : pending.structuralStopPrice - pending.structuralStopDistanceAtSignal,
       patternExtreme: pending.structuralStopPrice,
+      strategyConfigSnapshot: {
+        version: entryConditions.configVersion,
+        valid: true,
+      },
+      entryConditions,
     };
     const submitted = await submitTrendEntry(signal, marketEntry, quote, spec, m15, "PULLBACK_ENTRY", health.accountBalance);
     if (submitted !== "BROKER_GAP_WAIT" && submitted !== "TOO_WIDE_WAIT") {
@@ -594,7 +673,8 @@ async function cycle(): Promise<void> {
   state.lastEvaluatedM15Close = latestM15.closeTime;
   saveState();
 
-  const signal = latestSignal(m15, m5, spec);
+  const strategyEntryConfig = readStrategyEntryConfigSnapshot();
+  const signal = latestSignal(m15, m5, spec, strategyEntryConfig);
   if (!signal || signal.signalTimestamp !== latestM15.closeTime) {
     journal("M15_NO_ENTRY_SIGNAL", {
       closeTime: latestM15.closeTime,
@@ -768,6 +848,27 @@ async function submitTrendEntry(
       signalId: signal.id,
       entryState,
       quoteTimestamp: quote.timestamp,
+    });
+    return "REJECTED";
+  }
+
+  const currentStrategyConfig = readStrategyEntryConfigSnapshot();
+  const versionGuard = compareStrategyEntryConfigVersion(
+    signal.strategyConfigSnapshot,
+    { version: currentStrategyConfig.version, valid: currentStrategyConfig.valid },
+  );
+  if (!versionGuard.ok) {
+    const reasonCode = versionGuard.reasonCode === "ENTRY_CONFIG_VERSION_CHANGED"
+      ? "ENTRY_CONFIG_VERSION_CHANGED"
+      : "ENTRY_STRATEGY_CONFIG_INVALID";
+    journal(reasonCode, {
+      signalId: signal.id,
+      entryState,
+      reasonCode,
+      cycleConfigVersion: signal.strategyConfigSnapshot.version,
+      currentConfigVersion: currentStrategyConfig.version,
+      configError: currentStrategyConfig.error,
+      entryConditions: signal.entryConditions,
     });
     return "REJECTED";
   }
@@ -1026,7 +1127,12 @@ async function resolveDailyRecoveryPlan(
   };
 }
 
-function latestSignal(m15: Phase7Bar[], m5: Phase7Bar[], spec: SymbolSpec): Phase7BSignal | null {
+function latestSignal(
+  m15: Phase7Bar[],
+  m5: Phase7Bar[],
+  spec: SymbolSpec,
+  strategy: StrategyEntryConfigSnapshot,
+): RuntimeEntrySignal | null {
   const index = m15.length - 1;
   if (index < 200) return null;
   const current = m15[index]!;
@@ -1045,12 +1151,53 @@ function latestSignal(m15: Phase7Bar[], m5: Phase7Bar[], spec: SymbolSpec): Phas
   const m5AtSignal = m5.slice(0, m5SignalIndex + 1);
   const m5Supertrend = phase7BSupertrend(m5AtSignal, 10, 3);
   const m5Direction = m5Supertrend.direction[m5SignalIndex] ?? null;
-  if (m15Direction !== trigger.side || m5Direction !== trigger.side) return null;
 
   const entry = current.close;
   const structuralStopDistance = trigger.side === "BUY"
     ? entry - trigger.patternExtreme
     : trigger.patternExtreme - entry;
+  const fvgConfirmed = hasRelevantFvg(m15, index, trigger.side, 12);
+
+  const entryConditions = strategy.valid && strategy.state
+    ? evaluateStrategyEntryConditions({
+        strategy: "TREND",
+        config: strategy.state,
+        side: trigger.side,
+        observations: {
+          patternM15: { passed: true, observed: `${trigger.side}:${trigger.pattern}` },
+          supertrendM15: { passed: m15Direction === trigger.side, observed: m15Direction },
+          supertrendM5: { passed: m5Direction === trigger.side, observed: m5Direction },
+          validTrendStructure: { passed: structuralStopDistance > 0, observed: structuralStopDistance },
+          ma20Ma50: {
+            passed: trigger.side === "BUY" ? ma20 > ma50 : ma20 < ma50,
+            observed: { ma20, ma50 },
+          },
+          fvg: { passed: fvgConfirmed, observed: fvgConfirmed ? "CONFIRMED" : "NONE" },
+        },
+      })
+    : null;
+
+  if (!entryConditions || !entryConditions.allEnabledPassed) {
+    journal("ENTRY_STRATEGY_CONDITION_BLOCK", {
+      signalId: `phase7b-demo-${current.closeTime}-${trigger.side}-${trigger.pattern}`,
+      side: trigger.side,
+      pattern: trigger.pattern,
+      reason: entryConditions
+        ? entryConditions.failedConditions.join(",")
+        : "ENTRY_STRATEGY_CONFIG_INVALID",
+      configError: strategy.error,
+      entryConditions,
+    });
+    return null;
+  }
+
+  journal("ENTRY_STRATEGY_CONDITIONS_PASS", {
+    signalId: `phase7b-demo-${current.closeTime}-${trigger.side}-${trigger.pattern}`,
+    side: trigger.side,
+    pattern: trigger.pattern,
+    entryConditions,
+  });
+
   if (!(structuralStopDistance > 0)) return null;
 
   const stopDistance = structuralStopDistance > MAX_INITIAL_SL_PRICE
@@ -1068,15 +1215,47 @@ function latestSignal(m15: Phase7Bar[], m5: Phase7Bar[], spec: SymbolSpec): Phas
     signalTimestamp: current.closeTime,
     entry: roundValue(entry, 5),
     patternExtreme: roundValue(trigger.patternExtreme, 5),
-    structuralStopDistance: roundValue(structuralStopDistance, 5),
-    stopDistance: roundValue(stopDistance, 5),
-    stopLoss: roundValue(stopLoss, 5),
-    volume: roundValue(fixedVolume, 4),
-    initialRiskUsd: roundValue(initialRiskUsd, 4),
-    ma20: roundValue(ma20, 5),
-    ma50: roundValue(ma50, 5),
-    ma200: roundValue(ma200, 5),
+    strategyConfigSnapshot: {
+      version: entryConditions.configVersion,
+      valid: true,
+    },
+    entryConditions,
   };
+}
+
+function readStrategyEntryConfigSnapshot(): StrategyEntryConfigSnapshot {
+  if (!fs.existsSync(strategyEntryConditionsFile)) {
+    const state = createVirtualStrategyEntryConditionState();
+    return { version: state.version, valid: true, state, error: null };
+  }
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(strategyEntryConditionsFile, "utf8"));
+    const validation = validateStrategyEntryConditionState(raw, {
+      allowVirtualVersionZero: false,
+    });
+    if (!validation.valid) {
+      return {
+        version: Number.isInteger(raw?.version) ? Number(raw.version) : 0,
+        valid: false,
+        state: null,
+        error: validation.error,
+      };
+    }
+    return {
+      version: validation.state.version,
+      valid: true,
+      state: validation.state,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      version: 0,
+      valid: false,
+      state: null,
+      error: errorMessage(error),
+    };
+  }
 }
 
 function detectEntryPattern(
