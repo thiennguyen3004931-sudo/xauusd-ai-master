@@ -58,7 +58,24 @@ const sinkPath = path.resolve(options.sink ?? path.join(tempDir, "notifications.
 const ticket = "SIDEWAY-PRODUCTION-SAMPLE-1";
 const openedAt = "2026-08-27T04:00:00.000Z";
 const closedAt = "2026-08-27T04:05:00.000Z";
+const partialAt = "2026-08-27T04:02:00.000Z";
 const events = buildSidewayLifecycle({ ticket, openedAt, closedAt });
+const canonicalDeals = [
+  {
+    ticket: "SIDEWAY-PRODUCTION-PARTIAL-DEAL-1",
+    positionId: ticket,
+    timestamp: Date.parse(partialAt),
+    volume: 0.04,
+    netPnl: 40,
+  },
+  {
+    ticket: "SIDEWAY-PRODUCTION-EXIT-DEAL-1",
+    positionId: ticket,
+    timestamp: Date.parse(closedAt),
+    volume: 0.08,
+    netPnl: 120,
+  },
+];
 fs.writeFileSync(trendJournalPath, "", "utf8");
 fs.writeFileSync(
   sidewayJournalPath,
@@ -114,10 +131,33 @@ const monitorServer = http.createServer((request, response) => {
           side: "BUY",
           entry: 4700,
           exit: 4720,
-          netPnl: 160,
+          netPnl: 999.99,
           closedAt: Date.parse(closedAt),
         },
       ],
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/v1/phase7c-canonical-ledger/position-realized") {
+    const requestedPositionId = String(url.searchParams.get("positionId") ?? "");
+    if (requestedPositionId !== ticket) {
+      sendJson(response, 404, { error: "POSITION_NOT_FOUND" });
+      return;
+    }
+
+    const fromMs = Number(url.searchParams.get("fromMs"));
+    const toMs = Number(url.searchParams.get("toMs"));
+    const deals = canonicalDeals.filter((deal) =>
+      (!Number.isFinite(fromMs) || deal.timestamp >= fromMs) &&
+      (!Number.isFinite(toMs) || deal.timestamp <= toMs),
+    );
+
+    sendJson(response, 200, {
+      positionId: ticket,
+      realizedNetPnl: deals.reduce((sum, deal) => sum + deal.netPnl, 0),
+      dealCount: deals.length,
+      deals,
     });
     return;
   }
@@ -263,7 +303,7 @@ function buildSidewayLifecycle({ ticket, openedAt, closedAt }) {
     },
     {
       type: "PLUS10_PARTIAL_ONE_THIRD",
-      timestamp: "2026-08-27T04:02:00.000Z",
+      timestamp: partialAt,
       ticket,
       side: "BUY",
       favorable: 10,
