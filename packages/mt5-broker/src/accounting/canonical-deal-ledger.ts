@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
 import type { Mt5BridgeDeal } from "../models/Mt5BridgeDeal";
 
 export interface CanonicalDealRecord extends Mt5BridgeDeal {
@@ -7,8 +5,13 @@ export interface CanonicalDealRecord extends Mt5BridgeDeal {
   netPnl: number;
 }
 
+export interface CanonicalDealLedgerStore {
+  load(): string | null;
+  save(serializedState: string): void;
+}
+
 export interface CanonicalDealLedgerOptions {
-  storagePath: string;
+  store: CanonicalDealLedgerStore;
 }
 
 export interface CanonicalDealSummaryQuery {
@@ -43,16 +46,15 @@ const CLOSING_ENTRIES = new Set<Mt5BridgeDeal["entry"]>([
 ]);
 
 export class CanonicalDealLedger {
-  readonly #storagePath: string;
+  readonly #store: CanonicalDealLedgerStore;
   readonly #dealsByIdentity = new Map<string, CanonicalDealRecord>();
 
   constructor(options: CanonicalDealLedgerOptions) {
-    const storagePath = String(options?.storagePath ?? "").trim();
-    if (!storagePath) {
-      throw new Error("CanonicalDealLedger storagePath is required");
+    if (!options?.store) {
+      throw new Error("CanonicalDealLedger store is required");
     }
 
-    this.#storagePath = storagePath;
+    this.#store = options.store;
     this.#restore();
   }
 
@@ -142,11 +144,7 @@ export class CanonicalDealLedger {
   }
 
   #restore(): void {
-    if (!fs.existsSync(this.#storagePath)) {
-      return;
-    }
-
-    const raw = fs.readFileSync(this.#storagePath, "utf8").trim();
+    const raw = this.#store.load()?.trim() ?? "";
     if (!raw) {
       return;
     }
@@ -167,15 +165,12 @@ export class CanonicalDealLedger {
   }
 
   #persist(): void {
-    fs.mkdirSync(path.dirname(this.#storagePath), { recursive: true });
-    const tempPath = `${this.#storagePath}.${process.pid}.tmp`;
     const payload: PersistedCanonicalDealLedger = {
       version: 1,
       deals: this.deals(),
     };
 
-    fs.writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-    fs.renameSync(tempPath, this.#storagePath);
+    this.#store.save(`${JSON.stringify(payload, null, 2)}\n`);
   }
 }
 

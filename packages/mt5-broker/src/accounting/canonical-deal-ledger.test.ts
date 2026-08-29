@@ -3,7 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Mt5BridgeDeal } from "../models/Mt5BridgeDeal";
-import { CanonicalDealLedger } from "./canonical-deal-ledger";
+import {
+  CanonicalDealLedger,
+  type CanonicalDealLedgerStore,
+} from "./canonical-deal-ledger";
 
 const tempDirs: string[] = [];
 
@@ -13,10 +16,21 @@ afterEach(() => {
   }
 });
 
-function storagePath(label: string): string {
+function fileStore(label: string): CanonicalDealLedgerStore {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `phase7c-ledger-${label}-`));
+  const filePath = path.join(dir, "canonical-deal-ledger.json");
   tempDirs.push(dir);
-  return path.join(dir, "canonical-deal-ledger.json");
+
+  return {
+    load() {
+      return fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf8") : null;
+    },
+    save(serializedState) {
+      const tempPath = `${filePath}.tmp`;
+      fs.writeFileSync(tempPath, serializedState, "utf8");
+      fs.renameSync(tempPath, filePath);
+    },
+  };
 }
 
 function deal(overrides: Partial<Mt5BridgeDeal> = {}): Mt5BridgeDeal {
@@ -44,7 +58,7 @@ function deal(overrides: Partial<Mt5BridgeDeal> = {}): Mt5BridgeDeal {
 
 describe("CanonicalDealLedger identity and durability", () => {
   it("deduplicates by account + MT5 deal ticket while allowing the same ticket on another account", () => {
-    const ledger = new CanonicalDealLedger({ storagePath: storagePath("identity") });
+    const ledger = new CanonicalDealLedger({ store: fileStore("identity") });
     const original = deal();
 
     expect(ledger.mergeBackfill("LIVE:10001", [original, original])).toEqual({ inserted: 1, total: 1 });
@@ -53,11 +67,11 @@ describe("CanonicalDealLedger identity and durability", () => {
   });
 
   it("restores persisted deals after restart without duplicating a replayed backfill", () => {
-    const filePath = storagePath("restart");
-    const first = new CanonicalDealLedger({ storagePath: filePath });
+    const store = fileStore("restart");
+    const first = new CanonicalDealLedger({ store });
     first.mergeBackfill("LIVE:10001", [deal({ ticket: "1101" }), deal({ ticket: "1102" })]);
 
-    const restarted = new CanonicalDealLedger({ storagePath: filePath });
+    const restarted = new CanonicalDealLedger({ store });
     expect(restarted.size).toBe(2);
     expect(
       restarted.mergeBackfill("LIVE:10001", [deal({ ticket: "1101" }), deal({ ticket: "1102" })]),
@@ -65,7 +79,7 @@ describe("CanonicalDealLedger identity and durability", () => {
   });
 
   it("merges historical deals that arrive older than already persisted deals without a timestamp cursor", () => {
-    const ledger = new CanonicalDealLedger({ storagePath: storagePath("historical") });
+    const ledger = new CanonicalDealLedger({ store: fileStore("historical") });
     const newer = deal({ ticket: "1202", timestamp: Date.UTC(2026, 7, 29, 9) });
     const older = deal({ ticket: "1201", timestamp: Date.UTC(2026, 7, 28, 9) });
 
@@ -77,7 +91,7 @@ describe("CanonicalDealLedger identity and durability", () => {
 
 describe("CanonicalDealLedger accounting", () => {
   it("computes canonical netPnl from profit + commission + swap + fee and never trusts bridge netPnl", () => {
-    const ledger = new CanonicalDealLedger({ storagePath: storagePath("components") });
+    const ledger = new CanonicalDealLedger({ store: fileStore("components") });
     ledger.mergeBackfill("LIVE:10001", [
       deal({ profit: 10, commission: -1.25, swap: -0.5, fee: -0.25, netPnl: 777 }),
     ]);
@@ -96,7 +110,7 @@ describe("CanonicalDealLedger accounting", () => {
   });
 
   it("isolates daily P&L by account + symbol + owned magic + broker-day", () => {
-    const ledger = new CanonicalDealLedger({ storagePath: storagePath("isolation") });
+    const ledger = new CanonicalDealLedger({ store: fileStore("isolation") });
     const dayStart = Date.UTC(2026, 7, 29, 0);
     const dayEnd = Date.UTC(2026, 7, 30, 0);
 
@@ -123,7 +137,7 @@ describe("CanonicalDealLedger accounting", () => {
   });
 
   it("returns all actual MT5 closing deals for multiple partials and the final exit of one position", () => {
-    const ledger = new CanonicalDealLedger({ storagePath: storagePath("position") });
+    const ledger = new CanonicalDealLedger({ store: fileStore("position") });
     ledger.mergeBackfill("LIVE:10001", [
       deal({ ticket: "1400", positionId: "P-1", entry: "IN", volume: 0.12, timestamp: 100 }),
       deal({ ticket: "1401", positionId: "P-1", entry: "OUT", volume: 0.04, profit: 4, commission: -0.1, swap: 0, fee: 0, timestamp: 200 }),
