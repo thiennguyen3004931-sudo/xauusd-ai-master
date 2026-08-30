@@ -1,0 +1,49 @@
+name: Phase7C MT5 Unmanaged Diagnostic Details CI
+
+on:
+  push:
+    branches:
+      - fix/phase7c-mt5-unmanaged-diagnostic-details
+    paths:
+      - "apps/api/src/services/phase7c-decision-monitor.service.ts"
+      - "mt5/XAUUSD_AI_Master_Decision_Panel.mq5"
+      - "scripts/phase7c-mt5-unmanaged-diagnostic-details.test.mjs"
+      - "scripts/phase7c-mt5-unmanaged-multi-position-status.test.mjs"
+      - ".github/workflows/phase7c-mt5-unmanaged-diagnostic-details-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "apps/api/src/services/phase7c-decision-monitor.service.ts"
+      - "mt5/XAUUSD_AI_Master_Decision_Panel.mq5"
+      - "scripts/phase7c-mt5-unmanaged-diagnostic-details.test.mjs"
+      - ".github/workflows/phase7c-mt5-unmanaged-diagnostic-details-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  mt5-unmanaged-diagnostic-details:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build API dependency graph
+        run: pnpm --filter @xauusd/api... build
+      - name: Existing MT5 unmanaged status contract
+        run: node --test scripts/phase7c-mt5-unmanaged-multi-position-status.test.mjs
+      - name: MT5 unmanaged diagnostic detail contract
+        run: node --test scripts/phase7c-mt5-unmanaged-diagnostic-details.test.mjs
