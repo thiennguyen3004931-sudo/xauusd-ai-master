@@ -18,6 +18,9 @@ class FakeDealHistoryMt5:
     DEAL_ENTRY_INOUT = 2
     DEAL_ENTRY_OUT_BY = 3
 
+    def __init__(self, broker_symbol: str):
+        self.broker_symbol = broker_symbol
+
     def terminal_info(self):
         return SimpleNamespace(trade_allowed=True)
 
@@ -42,7 +45,7 @@ class FakeDealHistoryMt5:
                 ticket=3001,
                 order=2001,
                 position_id=1001,
-                symbol="XAUUSDm",
+                symbol=self.broker_symbol,
                 type=self.DEAL_TYPE_BUY,
                 entry=self.DEAL_ENTRY_IN,
                 volume=0.03,
@@ -59,7 +62,7 @@ class FakeDealHistoryMt5:
         )
 
 
-def settings(path: Path) -> Settings:
+def settings(path: Path, broker_symbol: str) -> Settings:
     return Settings(
         host="127.0.0.1",
         port=8765,
@@ -74,7 +77,7 @@ def settings(path: Path) -> Settings:
         portable=False,
         initialize_timeout_ms=60000,
         fail_startup_if_disconnected=True,
-        symbol_map={"XAUUSD": "XAUUSDm"},
+        symbol_map={"XAUUSD": broker_symbol},
         max_spread_points={"XAUUSD": 50},
         magic_number=270715,
         deviation_points=50,
@@ -84,11 +87,15 @@ def settings(path: Path) -> Settings:
 
 
 class DealHistoryCanonicalSymbolTests(unittest.TestCase):
-    def test_deal_history_returns_canonical_symbol_after_broker_symbol_filter(self):
+    def assert_canonical_deal_symbol(self, broker_symbol: str):
         with tempfile.TemporaryDirectory() as directory:
             ledger_path = Path(directory) / "ledger.sqlite3"
             ledger = IdempotencyLedger(ledger_path)
-            gateway = Mt5Gateway(settings(ledger_path), ledger, FakeDealHistoryMt5())
+            gateway = Mt5Gateway(
+                settings(ledger_path, broker_symbol),
+                ledger,
+                FakeDealHistoryMt5(broker_symbol),
+            )
 
             deals = gateway.deals(
                 1787990000000,
@@ -99,6 +106,12 @@ class DealHistoryCanonicalSymbolTests(unittest.TestCase):
             self.assertEqual(len(deals), 1)
             self.assertEqual(deals[0]["symbol"], "XAUUSD")
             ledger.close()
+
+    def test_live_xauusd_dot_g_deal_history_returns_canonical_xauusd(self):
+        self.assert_canonical_deal_symbol("XAUUSD.G")
+
+    def test_demo_xauusd_deal_history_keeps_canonical_xauusd(self):
+        self.assert_canonical_deal_symbol("XAUUSD")
 
 
 if __name__ == "__main__":
