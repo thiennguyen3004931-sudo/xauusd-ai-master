@@ -59,7 +59,8 @@ try {
     "MT5_BRIDGE_PORT=8765",
     "MT5_ALLOW_REAL_ACCOUNT=true",
     "MT5_TRADING_ENABLED=true",
-    "MT5_ALLOWED_LOGINS=123456"
+    "MT5_ALLOWED_LOGINS=123456",
+    "MT5_MAGIC_NUMBER=270715"
   ) | Set-Content -LiteralPath $liveEnvFile -Encoding ASCII
 
   "synthetic" | Set-Content -LiteralPath $telegramEnvFile -Encoding ASCII
