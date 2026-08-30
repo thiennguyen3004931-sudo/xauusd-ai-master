@@ -10,7 +10,7 @@ function requireText(source, needle, label) {
 }
 
 const startMarker = "export async function startPhase7CFromWeb";
-const stopMarker = "export async function stopPhase7CFromWeb";
+const stopMarker = "export async function stopPhase7C";
 const startIndex = lifecycle.indexOf(startMarker);
 const stopIndex = lifecycle.indexOf(stopMarker);
 if (startIndex < 0 || stopIndex <= startIndex) {
