@@ -42,5 +42,8 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build API dependency graph
+        run: pnpm --filter @xauusd/api... build
+
       - name: AUTO REVERSAL UI gate contract
         run: node --import ./apps/api/node_modules/tsx/dist/loader.mjs --test scripts/phase7c-auto-reversal-ui-gate.test.mjs
