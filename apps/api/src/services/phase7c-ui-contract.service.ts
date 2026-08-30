@@ -144,7 +144,7 @@ function gateFor(snapshot: Snapshot, strategy: "TREND" | "SIDEWAY"): Phase7CUiGa
   if (snapshot.mode.active === "PAUSE") return "BLOCKED_BY_MODE";
   if (snapshot.mode.active === strategy) return "ALLOWED";
   if (snapshot.mode.active === "AUTO") {
-    return snapshot.engine.recommendedMode === strategy ? "ALLOWED" : "BLOCKED_BY_REGIME";
+    return snapshot.mode.effectiveStrategy === strategy ? "ALLOWED" : "BLOCKED_BY_REGIME";
   }
   return "BLOCKED_BY_MODE";
 }
