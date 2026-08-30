@@ -1,5 +1,6 @@
 name: Phase7C Current PreTrade Freshness CI
 
+# Re-run after the minimal production fix to capture the GREEN checkpoint.
 on:
   push:
     branches:
