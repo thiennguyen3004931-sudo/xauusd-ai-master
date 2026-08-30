@@ -34,6 +34,11 @@ assert.match(
   /startPhase7C[\s\S]*?phase7CBotModeService\.set\(\s*["']PAUSE["']\s*,\s*provenance\s*\)/,
   "lifecycle START must persist the caller provenance supplied by the trusted server route",
 );
+assert.doesNotMatch(
+  lifecycle,
+  /provenance\s*:\s*Phase7CLifecycleStartProvenance\s*=\s*["']web-control-center-start["']/,
+  "lifecycle START provenance must be explicit; omitting provenance must never silently inherit Web authority",
+);
 
 // Broker request provenance must remain a trusted closed enum all the way to the SYSTEM broker.
 assert.match(
