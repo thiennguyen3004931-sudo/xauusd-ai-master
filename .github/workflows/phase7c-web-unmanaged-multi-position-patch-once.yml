@@ -18,71 +18,78 @@ jobs:
         with:
           ref: fix/phase7c-web-unmanaged-multi-position-status
       - name: Apply exact minimal Web fail-closed patch
-        shell: python
+        shell: bash
         run: |
+          python - <<'PY'
           from pathlib import Path
 
           path = Path("apps/web/src/pages/Phase7CControlCenterPage.tsx")
           source = path.read_text(encoding="utf-8")
 
-          old_state = '''  const position = decision?.position;
-          old_state += '''  const managing = position?.state === "MANAGING" || position?.state === "UNMANAGED";
-  const displayedEntry = managing ? position?.entry : preTrade?.entry;
-  const displayedStop = managing ? position?.stopLoss : preTrade?.stopLoss;
-  const displayedTp1 = managing ? position?.tp1 : preTrade?.tp1;
-  const displayedTp2 = managing ? position?.tp2 : preTrade?.tp2;
-  const displayedLot = managing ? position?.volume : preTrade?.finalLot;
-  const displayedPnl = managing ? position?.floatingPnlUsd : null;
-  const displayedRisk = managing ? null : preTrade?.estimatedRiskUsd;
-  const entryReason = managing
-    ? (position?.entryReason ?? "Chưa có lý do vào lệnh.")
-    : mode === "PAUSE"
-      ? "Bot đang PAUSE; executor vẫn chạy nhưng không mở kế hoạch giao dịch mới. Chỉ bật AUTO thủ công từ Web sau khi hoàn tất kiểm tra an toàn."
-      : (preTrade?.decisionReason ?? "Chưa có setup hợp lệ; tiếp tục chờ tín hiệu.");
-  const holdReason = managing
-    ? (position?.holdReason ?? "Executor đang kiểm tra điều kiện giữ lệnh.")
-    : "Chưa có vị thế đang mở; executor tiếp tục chờ setup hợp lệ.";
-'''
-          new_state = '''  const position = decision?.position;
-  const managing = position?.state === "MANAGING";
-  const unmanaged = position?.state === "UNMANAGED";
-  const hasOpenPosition = managing || unmanaged;
-  const displayedEntry = hasOpenPosition ? position?.entry : preTrade?.entry;
-  const displayedStop = hasOpenPosition ? position?.stopLoss : preTrade?.stopLoss;
-  const displayedTp1 = managing ? position?.tp1 : unmanaged ? null : preTrade?.tp1;
-  const displayedTp2 = managing ? position?.tp2 : unmanaged ? null : preTrade?.tp2;
-  const displayedLot = hasOpenPosition ? position?.volume : preTrade?.finalLot;
-  const displayedPnl = hasOpenPosition ? position?.floatingPnlUsd : null;
-  const displayedRisk = hasOpenPosition ? null : preTrade?.estimatedRiskUsd;
-  const entryReason = hasOpenPosition
-    ? (position?.entryReason ?? "Chưa có lý do vào lệnh.")
-    : mode === "PAUSE"
-      ? "Bot đang PAUSE; executor vẫn chạy nhưng không mở kế hoạch giao dịch mới. Chỉ bật AUTO thủ công từ Web sau khi hoàn tất kiểm tra an toàn."
-      : (preTrade?.decisionReason ?? "Chưa có setup hợp lệ; tiếp tục chờ tín hiệu.");
-  const holdReason = hasOpenPosition
-    ? (position?.holdReason ?? "Executor đang kiểm tra điều kiện giữ lệnh.")
-    : "Chưa có vị thế đang mở; executor tiếp tục chờ setup hợp lệ.";
-'''
-          if source.count(old_state) != 1:
-              raise SystemExit(f"state block match count={source.count(old_state)}")
-          source = source.replace(old_state, new_state)
-
-          replacements = {
-            '''              <Chip color={preTrade?.approved ? "success" : "warning"} label={managing ? position?.state : (preTrade?.stage ?? "ĐANG ĐỌC")} />''': '''              <Chip color={unmanaged ? "error" : preTrade?.approved || managing ? "success" : "warning"} label={hasOpenPosition ? position?.state : (preTrade?.stage ?? "ĐANG ĐỌC")} />''',
-            '''                  <MetricCard label="Trạng thái" value={managing ? `${position?.side ?? "—"} · ${position?.state}` : preTrade?.approved ? "SETUP HỢP LỆ" : "CHỜ SETUP"} detail={`${decision.mode.effectiveStrategy} · ${preTrade?.setup ?? "WAIT"}`} tone={managing || preTrade?.approved ? "success.main" : "warning.main"} />''': '''                  <MetricCard label="Trạng thái" value={unmanaged ? `CẢNH BÁO · ${position?.count ?? "—"} VỊ THẾ XAUUSD` : managing ? `${position?.side ?? "—"} · ${position?.state}` : preTrade?.approved ? "SETUP HỢP LỆ" : "CHỜ SETUP"} detail={unmanaged ? "UNMANAGED · không có canonical executor ownership" : `${decision.mode.effectiveStrategy} · ${preTrade?.setup ?? "WAIT"}`} tone={unmanaged ? "error.main" : managing || preTrade?.approved ? "success.main" : "warning.main"} />''',
-            '''                  <MetricCard label="Entry / Giá hiện tại" value={price(displayedEntry)} detail={managing ? `Hiện tại ${price(position?.currentPrice)}` : `${preTrade?.side ?? "—"} · ${preTrade?.source ?? "canonical"}`} />''': '''                  <MetricCard label="Entry / Giá hiện tại" value={price(displayedEntry)} detail={hasOpenPosition ? `Hiện tại ${price(position?.currentPrice)}` : `${preTrade?.side ?? "—"} · ${preTrade?.source ?? "canonical"}`} />''',
-            '''                  <MetricCard label="Stop Loss" value={price(displayedStop)} detail={`${managing ? position?.favorableDistance : (preTrade?.stopDistance ?? "—")} giá`} tone="error.main" />''': '''                  <MetricCard label="Stop Loss" value={price(displayedStop)} detail={`${hasOpenPosition ? position?.favorableDistance : (preTrade?.stopDistance ?? "—")} giá`} tone="error.main" />''',
-            '''                  <MetricCard label="TP1 / TP2" value={`${price(displayedTp1)} / ${price(displayedTp2)}`} detail="BE +6 · chốt 1/3 tại +10" tone="success.main" />''': '''                  <MetricCard label="TP1 / TP2" value={`${price(displayedTp1)} / ${price(displayedTp2)}`} detail={unmanaged ? "UNMANAGED · không suy diễn TP quản lý" : "BE +6 · chốt 1/3 tại +10"} tone={unmanaged ? "error.main" : "success.main"} />''',
-            '''                  <MetricCard label="Lot" value={Number.isFinite(displayedLot) ? `${Number(displayedLot).toFixed(2)} lot` : "—"} detail={managing ? `Ticket ${position?.ticket ?? "—"}` : `Raw ${preTrade?.rawLot == null ? "—" : preTrade.rawLot.toFixed(4)} · cap ${preTrade?.lotCap == null ? "—" : preTrade.lotCap.toFixed(2)}`} />''': '''                  <MetricCard label="Lot" value={Number.isFinite(displayedLot) ? `${Number(displayedLot).toFixed(2)} lot` : "—"} detail={unmanaged ? `Broker diagnostic · ${position?.count ?? "—"} vị thế · ticket tham chiếu ${position?.ticket ?? "—"}` : managing ? `Ticket ${position?.ticket ?? "—"}` : `Raw ${preTrade?.rawLot == null ? "—" : preTrade.rawLot.toFixed(4)} · cap ${preTrade?.lotCap == null ? "—" : preTrade.lotCap.toFixed(2)}`} />''',
-            '''                  <MetricCard label={managing ? "Lãi / Lỗ đang chạy" : "Rủi ro dự kiến"} value={money(managing ? displayedPnl : displayedRisk, currency)} detail={managing ? `${position?.floatingPnlPercent == null ? "—" : position.floatingPnlPercent.toFixed(3)}% equity` : `${preTrade?.estimatedRiskPercent == null ? "—" : preTrade.estimatedRiskPercent.toFixed(3)}% balance`} tone={(managing ? (displayedPnl ?? 0) : 0) < 0 ? "error.main" : "success.main"} />''': '''                  <MetricCard label={unmanaged ? "P/L vị thế tham chiếu" : managing ? "Lãi / Lỗ đang chạy" : "Rủi ro dự kiến"} value={money(hasOpenPosition ? displayedPnl : displayedRisk, currency)} detail={unmanaged ? "Broker diagnostic · không phải tổng P/L các vị thế XAUUSD" : managing ? `${position?.floatingPnlPercent == null ? "—" : position.floatingPnlPercent.toFixed(3)}% equity` : `${preTrade?.estimatedRiskPercent == null ? "—" : preTrade.estimatedRiskPercent.toFixed(3)}% balance`} tone={(hasOpenPosition ? (displayedPnl ?? 0) : 0) < 0 ? "error.main" : "success.main"} />''',
-          }
-          for old, new in replacements.items():
+          def replace_once(old, new, label):
+              global source
               count = source.count(old)
               if count != 1:
-                  raise SystemExit(f"render replacement match count={count}: {old[:80]}")
+                  raise SystemExit(f"{label} match count={count}")
               source = source.replace(old, new)
 
+          replace_once(
+              '  const managing = position?.state === "MANAGING" || position?.state === "UNMANAGED";',
+              '\n'.join([
+                  '  const managing = position?.state === "MANAGING";',
+                  '  const unmanaged = position?.state === "UNMANAGED";',
+                  '  const hasOpenPosition = managing || unmanaged;',
+              ]),
+              "position-state split",
+          )
+          replace_once('  const displayedEntry = managing ? position?.entry : preTrade?.entry;', '  const displayedEntry = hasOpenPosition ? position?.entry : preTrade?.entry;', "displayed entry")
+          replace_once('  const displayedStop = managing ? position?.stopLoss : preTrade?.stopLoss;', '  const displayedStop = hasOpenPosition ? position?.stopLoss : preTrade?.stopLoss;', "displayed stop")
+          replace_once('  const displayedTp1 = managing ? position?.tp1 : preTrade?.tp1;', '  const displayedTp1 = managing ? position?.tp1 : unmanaged ? null : preTrade?.tp1;', "displayed tp1")
+          replace_once('  const displayedTp2 = managing ? position?.tp2 : preTrade?.tp2;', '  const displayedTp2 = managing ? position?.tp2 : unmanaged ? null : preTrade?.tp2;', "displayed tp2")
+          replace_once('  const displayedLot = managing ? position?.volume : preTrade?.finalLot;', '  const displayedLot = hasOpenPosition ? position?.volume : preTrade?.finalLot;', "displayed lot")
+          replace_once('  const displayedPnl = managing ? position?.floatingPnlUsd : null;', '  const displayedPnl = hasOpenPosition ? position?.floatingPnlUsd : null;', "displayed pnl")
+          replace_once('  const displayedRisk = managing ? null : preTrade?.estimatedRiskUsd;', '  const displayedRisk = hasOpenPosition ? null : preTrade?.estimatedRiskUsd;', "displayed risk")
+          replace_once('  const entryReason = managing', '  const entryReason = hasOpenPosition', "entry reason")
+          replace_once('  const holdReason = managing', '  const holdReason = hasOpenPosition', "hold reason")
+
+          replace_once(
+              '              <Chip color={preTrade?.approved ? "success" : "warning"} label={managing ? position?.state : (preTrade?.stage ?? "ĐANG ĐỌC")} />',
+              '              <Chip color={unmanaged ? "error" : preTrade?.approved || managing ? "success" : "warning"} label={hasOpenPosition ? position?.state : (preTrade?.stage ?? "ĐANG ĐỌC")} />',
+              "status chip",
+          )
+          replace_once(
+              '                  <MetricCard label="Trạng thái" value={managing ? `${position?.side ?? "—"} · ${position?.state}` : preTrade?.approved ? "SETUP HỢP LỆ" : "CHỜ SETUP"} detail={`${decision.mode.effectiveStrategy} · ${preTrade?.setup ?? "WAIT"}`} tone={managing || preTrade?.approved ? "success.main" : "warning.main"} />',
+              '                  <MetricCard label="Trạng thái" value={unmanaged ? `CẢNH BÁO · ${position?.count ?? "—"} VỊ THẾ XAUUSD` : managing ? `${position?.side ?? "—"} · ${position?.state}` : preTrade?.approved ? "SETUP HỢP LỆ" : "CHỜ SETUP"} detail={unmanaged ? "UNMANAGED · không có canonical executor ownership" : `${decision.mode.effectiveStrategy} · ${preTrade?.setup ?? "WAIT"}`} tone={unmanaged ? "error.main" : managing || preTrade?.approved ? "success.main" : "warning.main"} />',
+              "status metric",
+          )
+          replace_once(
+              '                  <MetricCard label="Entry / Giá hiện tại" value={price(displayedEntry)} detail={managing ? `Hiện tại ${price(position?.currentPrice)}` : `${preTrade?.side ?? "—"} · ${preTrade?.source ?? "canonical"}`} />',
+              '                  <MetricCard label="Entry / Giá hiện tại" value={price(displayedEntry)} detail={hasOpenPosition ? `Hiện tại ${price(position?.currentPrice)}` : `${preTrade?.side ?? "—"} · ${preTrade?.source ?? "canonical"}`} />',
+              "entry metric",
+          )
+          replace_once(
+              '                  <MetricCard label="Stop Loss" value={price(displayedStop)} detail={`${managing ? position?.favorableDistance : (preTrade?.stopDistance ?? "—")} giá`} tone="error.main" />',
+              '                  <MetricCard label="Stop Loss" value={price(displayedStop)} detail={`${hasOpenPosition ? position?.favorableDistance : (preTrade?.stopDistance ?? "—")} giá`} tone="error.main" />',
+              "stop metric",
+          )
+          replace_once(
+              '                  <MetricCard label="TP1 / TP2" value={`${price(displayedTp1)} / ${price(displayedTp2)}`} detail="BE +6 · chốt 1/3 tại +10" tone="success.main" />',
+              '                  <MetricCard label="TP1 / TP2" value={`${price(displayedTp1)} / ${price(displayedTp2)}`} detail={unmanaged ? "UNMANAGED · không suy diễn TP quản lý" : "BE +6 · chốt 1/3 tại +10"} tone={unmanaged ? "error.main" : "success.main"} />',
+              "tp metric",
+          )
+          replace_once(
+              '                  <MetricCard label="Lot" value={Number.isFinite(displayedLot) ? `${Number(displayedLot).toFixed(2)} lot` : "—"} detail={managing ? `Ticket ${position?.ticket ?? "—"}` : `Raw ${preTrade?.rawLot == null ? "—" : preTrade.rawLot.toFixed(4)} · cap ${preTrade?.lotCap == null ? "—" : preTrade.lotCap.toFixed(2)}`} />',
+              '                  <MetricCard label="Lot" value={Number.isFinite(displayedLot) ? `${Number(displayedLot).toFixed(2)} lot` : "—"} detail={unmanaged ? `Broker diagnostic · ${position?.count ?? "—"} vị thế · ticket tham chiếu ${position?.ticket ?? "—"}` : managing ? `Ticket ${position?.ticket ?? "—"}` : `Raw ${preTrade?.rawLot == null ? "—" : preTrade.rawLot.toFixed(4)} · cap ${preTrade?.lotCap == null ? "—" : preTrade.lotCap.toFixed(2)}`} />',
+              "lot metric",
+          )
+          replace_once(
+              '                  <MetricCard label={managing ? "Lãi / Lỗ đang chạy" : "Rủi ro dự kiến"} value={money(managing ? displayedPnl : displayedRisk, currency)} detail={managing ? `${position?.floatingPnlPercent == null ? "—" : position.floatingPnlPercent.toFixed(3)}% equity` : `${preTrade?.estimatedRiskPercent == null ? "—" : preTrade.estimatedRiskPercent.toFixed(3)}% balance`} tone={(managing ? (displayedPnl ?? 0) : 0) < 0 ? "error.main" : "success.main"} />',
+              '                  <MetricCard label={unmanaged ? "P/L vị thế tham chiếu" : managing ? "Lãi / Lỗ đang chạy" : "Rủi ro dự kiến"} value={money(hasOpenPosition ? displayedPnl : displayedRisk, currency)} detail={unmanaged ? "Broker diagnostic · không phải tổng P/L các vị thế XAUUSD" : managing ? `${position?.floatingPnlPercent == null ? "—" : position.floatingPnlPercent.toFixed(3)}% equity` : `${preTrade?.estimatedRiskPercent == null ? "—" : preTrade.estimatedRiskPercent.toFixed(3)}% balance`} tone={(hasOpenPosition ? (displayedPnl ?? 0) : 0) < 0 ? "error.main" : "success.main"} />',
+              "pnl metric",
+          )
+
           path.write_text(source, encoding="utf-8")
+          PY
       - name: Remove one-shot workflow
         run: rm .github/workflows/phase7c-web-unmanaged-multi-position-patch-once.yml
       - name: Commit production fix
