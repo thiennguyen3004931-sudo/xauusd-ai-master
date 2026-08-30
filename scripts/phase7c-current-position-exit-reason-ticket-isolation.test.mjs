@@ -83,6 +83,13 @@ function row(event, reason, ticket) {
   };
 }
 
+function mt5Field(payload, key) {
+  const line = payload
+    .split("\n")
+    .find((candidate) => candidate.startsWith(`${key}=`));
+  return line ? line.slice(key.length + 1) : undefined;
+}
+
 test("current MANAGING exit reasons are isolated to the open MT5 ticket", () => {
   const oldExit = row("REGIME_LEFT_RANGE", "OLD_TICKET_EXIT_REASON", OLD_TICKET);
   const unknownExit = row("POSITION_CLOSED", "UNKNOWN_TICKET_EXIT_REASON", undefined);
@@ -99,8 +106,9 @@ test("current MANAGING exit reasons are isolated to the open MT5 ticket", () => 
     ["CURRENT_TICKET_EXIT_REASON"],
     "historical exit reasons from another or unknown ticket must not describe the current open position",
   );
-  assert.match(mt5, /(?:^|\n)exitReason1=CURRENT_TICKET_EXIT_REASON(?:\n|$)/);
-  assert.doesNotMatch(mt5, /OLD_TICKET_EXIT_REASON|UNKNOWN_TICKET_EXIT_REASON/);
+  assert.equal(mt5Field(mt5, "exitReason1"), "CURRENT_TICKET_EXIT_REASON");
+  assert.equal(mt5Field(mt5, "exitReason2"), "n/a");
+  assert.equal(mt5Field(mt5, "exitReason3"), "n/a");
 
   assert.equal(history.length, 3, "decision audit history must remain intact");
   assert.equal(history[0], oldExit);
