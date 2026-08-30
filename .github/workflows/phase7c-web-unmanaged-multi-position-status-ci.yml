@@ -1,0 +1,49 @@
+name: Phase7C Web Unmanaged Multi Position Status CI
+
+on:
+  push:
+    branches:
+      - fix/phase7c-web-unmanaged-multi-position-status
+    paths:
+      - "apps/web/src/pages/Phase7CControlCenterPage.tsx"
+      - "apps/api/src/services/phase7c-decision-monitor.service.ts"
+      - "scripts/phase7c-web-unmanaged-multi-position-status.test.mjs"
+      - "scripts/phase7c-mt5-unmanaged-multi-position-status.test.mjs"
+      - ".github/workflows/phase7c-web-unmanaged-multi-position-status-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "apps/web/src/pages/Phase7CControlCenterPage.tsx"
+      - "apps/api/src/services/phase7c-decision-monitor.service.ts"
+      - "scripts/phase7c-web-unmanaged-multi-position-status.test.mjs"
+      - ".github/workflows/phase7c-web-unmanaged-multi-position-status-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  web-unmanaged-multi-position-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build Web dependency graph
+        run: pnpm --filter @xauusd/web... build
+      - name: Existing MT5 unmanaged multi-position status contract
+        run: node --test scripts/phase7c-mt5-unmanaged-multi-position-status.test.mjs
+      - name: Web unmanaged multi-position status contract
+        run: node --test scripts/phase7c-web-unmanaged-multi-position-status.test.mjs
