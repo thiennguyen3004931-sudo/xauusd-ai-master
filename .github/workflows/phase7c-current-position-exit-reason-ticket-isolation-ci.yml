@@ -1,5 +1,6 @@
 name: Phase7C Current Position Exit Reason Ticket Isolation CI
 
+# GREEN checkpoint after minimal production ticket isolation fix.
 on:
   push:
     branches:
