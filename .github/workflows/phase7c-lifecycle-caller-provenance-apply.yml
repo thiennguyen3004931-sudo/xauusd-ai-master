@@ -1,0 +1,160 @@
+name: Phase7C Lifecycle Caller Provenance Apply
+
+on:
+  push:
+    branches:
+      - feat/phase7c-lifecycle-caller-provenance
+    paths:
+      - ".github/workflows/phase7c-lifecycle-caller-provenance-apply.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-minimal-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/phase7c-lifecycle-caller-provenance
+
+      - name: Apply exact provenance patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected exactly one replacement in {path}, found {count}")
+              file.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          service = "apps/api/src/services/phase7c-lifecycle.service.ts"
+          replace_once(
+              service,
+              'const TELEGRAM_STALE_MS = 15_000;\n',
+              'const TELEGRAM_STALE_MS = 15_000;\n\n'
+              'export type Phase7CLifecycleStopProvenance =\n'
+              '  | "web-control-center-stop"\n'
+              '  | "local-lifecycle-api-stop";\n',
+          )
+          replace_once(
+              service,
+              'export async function stopPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {',
+              'export async function stopPhase7C(\n'
+              '  telemetry: Mt5TelemetrySnapshot,\n'
+              '  provenance: Phase7CLifecycleStopProvenance,\n'
+              ') {',
+          )
+          replace_once(
+              service,
+              '  const mode = phase7CBotModeService.set("PAUSE", "web-control-center-stop");',
+              '  const mode = phase7CBotModeService.set("PAUSE", provenance);',
+          )
+
+          route = "apps/api/src/routes/phase7c.route.ts"
+          replace_once(
+              route,
+              '  startPhase7CFromWeb,\n  stopPhase7CFromWeb,\n',
+              '  startPhase7CFromWeb,\n  stopPhase7C,\n',
+          )
+          old_stop = '''router.post("/lifecycle/stop", async (req: Request, res: Response) => {
+            if (!isLoopbackRequest(req)) {
+              res.status(403).json({ error: "Bot lifecycle controls are restricted to localhost." });
+              return;
+            }
+            if (lifecycleActionInProgress) {
+              res.status(409).json({ error: "Một thao tác Bật/Dừng Bot đang chạy. Vui lòng chờ hoàn tất." });
+              return;
+            }
+            lifecycleActionInProgress = true;
+            try {
+              res.json(await stopPhase7CFromWeb(await getMt5Telemetry("XAUUSD")));
+            } catch (error) {
+              res.status(409).json({ error: error instanceof Error ? error.message : "Phase 7C stop failed." });
+            } finally {
+              lifecycleActionInProgress = false;
+            }
+          });
+          '''
+          new_stop = '''router.post("/lifecycle/stop/web", async (req: Request, res: Response) => {
+            if (!isLoopbackRequest(req)) {
+              res.status(403).json({ error: "Bot lifecycle controls are restricted to localhost." });
+              return;
+            }
+            if (lifecycleActionInProgress) {
+              res.status(409).json({ error: "Một thao tác Bật/Dừng Bot đang chạy. Vui lòng chờ hoàn tất." });
+              return;
+            }
+            lifecycleActionInProgress = true;
+            try {
+              res.json(await stopPhase7C(await getMt5Telemetry("XAUUSD"), "web-control-center-stop"));
+            } catch (error) {
+              res.status(409).json({ error: error instanceof Error ? error.message : "Phase 7C stop failed." });
+            } finally {
+              lifecycleActionInProgress = false;
+            }
+          });
+
+          router.post("/lifecycle/stop", async (req: Request, res: Response) => {
+            if (!isLoopbackRequest(req)) {
+              res.status(403).json({ error: "Bot lifecycle controls are restricted to localhost." });
+              return;
+            }
+            if (lifecycleActionInProgress) {
+              res.status(409).json({ error: "Một thao tác Bật/Dừng Bot đang chạy. Vui lòng chờ hoàn tất." });
+              return;
+            }
+            lifecycleActionInProgress = true;
+            try {
+              res.json(await stopPhase7C(await getMt5Telemetry("XAUUSD"), "local-lifecycle-api-stop"));
+            } catch (error) {
+              res.status(409).json({ error: error instanceof Error ? error.message : "Phase 7C stop failed." });
+            } finally {
+              lifecycleActionInProgress = false;
+            }
+          });
+          '''
+          replace_once(route, old_stop, new_stop)
+
+          web_api = "apps/web/src/api.ts"
+          old_web = '''export async function runPhase7CLifecycleAction(action: "start" | "stop"): Promise<Phase7CLifecycleActionResponse> {
+            return read<Phase7CLifecycleActionResponse>(await fetch(`${API_BASE}/api/v1/phase7c/lifecycle/${action}`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: "{}",
+            }));
+          }
+          '''
+          new_web = '''export async function runPhase7CLifecycleAction(action: "start" | "stop"): Promise<Phase7CLifecycleActionResponse> {
+            const lifecyclePath = action === "stop"
+              ? "/api/v1/phase7c/lifecycle/stop/web"
+              : `/api/v1/phase7c/lifecycle/${action}`;
+            return read<Phase7CLifecycleActionResponse>(await fetch(`${API_BASE}${lifecyclePath}`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: "{}",
+            }));
+          }
+          '''
+          replace_once(web_api, old_web, new_web)
+
+      - name: Prove GREEN contract before commit
+        run: node scripts/test-phase7c-lifecycle-caller-provenance.mjs
+
+      - name: Verify patch shape
+        run: |
+          git diff --check
+          git diff -- apps/api/src/services/phase7c-lifecycle.service.ts apps/api/src/routes/phase7c.route.ts apps/web/src/api.ts
+
+      - name: Commit minimal production fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/api/src/services/phase7c-lifecycle.service.ts apps/api/src/routes/phase7c.route.ts apps/web/src/api.ts
+          git commit -m "fix: preserve lifecycle stop caller provenance"
+          git push origin HEAD:feat/phase7c-lifecycle-caller-provenance
