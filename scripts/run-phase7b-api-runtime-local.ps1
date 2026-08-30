@@ -11,13 +11,58 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 if (-not [System.IO.Path]::IsPathRooted($WorkDir)) {
   $WorkDir = Join-Path $ProjectRoot $WorkDir
 }
-if (-not [System.IO.Path]::IsPathRooted($BridgeEnv)) {
-  $BridgeEnv = Join-Path $ProjectRoot $BridgeEnv
-}
 if (-not (Test-Path -LiteralPath $WorkDir)) { throw "API runtime WorkDir not found: $WorkDir" }
-if (-not (Test-Path -LiteralPath $BridgeEnv)) { throw "API bridge env not found: $BridgeEnv" }
 $WorkDir = (Resolve-Path -LiteralPath $WorkDir).Path
-$BridgeEnv = (Resolve-Path -LiteralPath $BridgeEnv).Path
+
+$AccountStatePath = Join-Path $WorkDir "phase7c-account-mode.json"
+$bridgeEnvSource = "TASK_FALLBACK"
+
+if (Test-Path -LiteralPath $AccountStatePath) {
+  try {
+    $accountState = Get-Content -LiteralPath $AccountStatePath -Raw | ConvertFrom-Json
+  } catch {
+    throw "API runtime canonical account-mode state is unreadable or invalid JSON: $AccountStatePath. $($_.Exception.Message)"
+  }
+
+  if ([int]$accountState.version -ne 1) {
+    throw "API runtime canonical account-mode state version must be 1."
+  }
+
+  $accountMode = ([string]$accountState.accountMode).Trim().ToUpperInvariant()
+  if ($accountMode -notin @("DEMO", "LIVE")) {
+    throw "API runtime canonical accountMode must be DEMO or LIVE. Actual=$accountMode"
+  }
+
+  $liveExecutionEnabled = [bool]$accountState.liveExecutionEnabled
+  if ($accountMode -eq "LIVE" -and -not $liveExecutionEnabled) {
+    throw "API runtime canonical LIVE state must have liveExecutionEnabled=true."
+  }
+  if ($accountMode -eq "DEMO" -and $liveExecutionEnabled) {
+    throw "API runtime canonical DEMO state must have liveExecutionEnabled=false."
+  }
+
+  $canonicalBridgeEnv = ([string]$accountState.envFile).Trim()
+  if ([string]::IsNullOrWhiteSpace($canonicalBridgeEnv)) {
+    throw "API runtime canonical account-mode state envFile is missing."
+  }
+  if (-not [System.IO.Path]::IsPathRooted($canonicalBridgeEnv)) {
+    $canonicalBridgeEnv = Join-Path $ProjectRoot $canonicalBridgeEnv
+  }
+  if (-not (Test-Path -LiteralPath $canonicalBridgeEnv)) {
+    throw "API runtime canonical bridge env not found: $canonicalBridgeEnv"
+  }
+
+  $BridgeEnv = (Resolve-Path -LiteralPath $canonicalBridgeEnv).Path
+  $bridgeEnvSource = "ACCOUNT_MODE_STATE"
+} else {
+  if (-not [System.IO.Path]::IsPathRooted($BridgeEnv)) {
+    $BridgeEnv = Join-Path $ProjectRoot $BridgeEnv
+  }
+  if (-not (Test-Path -LiteralPath $BridgeEnv)) { throw "API bridge env not found: $BridgeEnv" }
+  $BridgeEnv = (Resolve-Path -LiteralPath $BridgeEnv).Path
+}
+
+Write-Host "PHASE7B_API_BRIDGE_ENV_SOURCE=$bridgeEnvSource"
 
 function Read-EnvValue([string]$Name) {
   foreach ($raw in Get-Content -LiteralPath $BridgeEnv) {
@@ -36,13 +81,13 @@ function Read-EnvValue([string]$Name) {
 
 $apiKey = Read-EnvValue "MT5_API_KEY"
 if ([string]::IsNullOrWhiteSpace($apiKey) -or $apiKey.Length -lt 16) {
-  throw "MT5_API_KEY in the DEMO bridge env is invalid."
+  throw "MT5_API_KEY in the selected bridge env is invalid."
 }
 $systemMagic = Read-EnvValue "MT5_MAGIC_NUMBER"
 if ([string]::IsNullOrWhiteSpace($systemMagic)) { $systemMagic = "270713" }
 $systemMagicNumber = 0
 if (-not [int]::TryParse($systemMagic, [ref]$systemMagicNumber) -or $systemMagicNumber -le 0) {
-  throw "MT5_MAGIC_NUMBER in the DEMO bridge env is invalid."
+  throw "MT5_MAGIC_NUMBER in the selected bridge env is invalid."
 }
 $bridgeHost = Read-EnvValue "MT5_BRIDGE_HOST"
 if ([string]::IsNullOrWhiteSpace($bridgeHost)) { $bridgeHost = "127.0.0.1" }
