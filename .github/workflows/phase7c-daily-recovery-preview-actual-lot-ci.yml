@@ -1,5 +1,6 @@
 name: Phase7C Daily Recovery Preview Actual Lot CI
 
+# Re-run after the minimal production patch to capture the GREEN checkpoint.
 on:
   push:
     branches:
