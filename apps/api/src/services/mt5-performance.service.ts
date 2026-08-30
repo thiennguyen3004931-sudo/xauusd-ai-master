@@ -4,6 +4,7 @@ import { getPhase7CCanonicalDeals } from "./phase7c-canonical-deal-ledger.servic
 import { resolvePhase7CDailyRecoveryMagicNumbers } from "./phase7c-daily-recovery-view.service";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const PERFORMANCE_CARRY_IN_DAYS = 365;
 const MIN_RECOMMENDATION_SAMPLE = 30;
 
 export interface Mt5PerformanceMetrics {
@@ -363,10 +364,11 @@ export async function getMt5PerformanceSnapshot(days = 90, symbol = "XAUUSD"): P
   const bridgeTradingEnabled = Boolean(telemetry.health.tradingEnabled);
   const brokerNow = telemetry.quote?.timestamp ?? Date.now();
   const fromMs = Math.max(0, brokerNow - days * DAY_MS);
+  const historyFromMs = Math.max(0, fromMs - PERFORMANCE_CARRY_IN_DAYS * DAY_MS);
   const deals = (await getPhase7CCanonicalDeals({
     telemetry,
     symbol: normalizedSymbol,
-    fromMs,
+    fromMs: historyFromMs,
     toMs: brokerNow,
   })).filter((deal) => deal.isTradingDeal);
 
@@ -379,7 +381,8 @@ export async function getMt5PerformanceSnapshot(days = 90, symbol = "XAUUSD"): P
   if (!Number.isInteger(sidewayMagic) || sidewayMagic <= 0) throw new Error("Configured Sideway magic is invalid.");
   if (trendMagic === sidewayMagic) throw new Error("Trend and Sideway magic numbers must be distinct.");
 
-  const trades = reconstructTrades(deals, trendMagic, sidewayMagic);
+  const trades = reconstructTrades(deals, trendMagic, sidewayMagic)
+    .filter((trade) => trade.closedAt >= fromMs && trade.closedAt < brokerNow);
   const currentBalance = telemetry.health.accountBalance;
   const accountWindowPnl = trades.reduce((sum, trade) => sum + trade.netPnl, 0);
   const startingBalance = typeof currentBalance === "number" && Number.isFinite(currentBalance) && currentBalance > 0
