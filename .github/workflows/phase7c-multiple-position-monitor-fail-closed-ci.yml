@@ -42,3 +42,5 @@ jobs:
         run: pnpm --filter @xauusd/api... build
       - name: Multiple-position monitor fail-closed contract
         run: node --import ./apps/api/node_modules/tsx/dist/loader.mjs --test scripts/phase7c-multiple-position-monitor-fail-closed.test.mjs
+
+# Scoped GREEN checkpoint after the minimal production fix.
