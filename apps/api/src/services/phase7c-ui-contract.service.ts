@@ -262,7 +262,7 @@ function holdReasons(snapshot: Snapshot, state: Phase7CUiState): string[] {
 }
 
 function managementReasons(snapshot: Snapshot, kind: "STOP" | "PARTIAL"): string[] {
-  if (snapshot.position.count <= 0) return [];
+  if (snapshot.position.state != "MANAGING" || snapshot.position.count <= 0) return [];
   const reasons: string[] = [];
   const ticket = String(snapshot.position.ticket ?? "");
   for (const row of snapshot.recentDecisions) {
@@ -283,6 +283,7 @@ function managementReasons(snapshot: Snapshot, kind: "STOP" | "PARTIAL"): string
 }
 
 function exitReasons(snapshot: Snapshot): string[] {
+  if (snapshot.position.state != "MANAGING") return [];
   const reasons: string[] = [];
   const ticket = String(snapshot.position.ticket ?? "");
   for (const row of snapshot.recentDecisions) {
