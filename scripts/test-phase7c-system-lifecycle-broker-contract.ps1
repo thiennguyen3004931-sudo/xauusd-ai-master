@@ -15,13 +15,13 @@ if (-not (Test-Path -LiteralPath $Library)) {
 . $Library
 
 $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-function New-ValidRequest([string]$Action = "START") {
+function New-ValidRequest([string]$Action = "START", [string]$Source = "WEB_CONTROL_CENTER") {
   [pscustomobject]@{
     version = 1
     requestId = [Guid]::NewGuid().ToString()
     action = $Action
     requestedAt = $now
-    source = "WEB_CONTROL_CENTER"
+    source = $Source
     reason = if ($Action -eq "STOP") { "USER_STOP" } elseif ($Action -eq "RESTART") { "LOT_SETTINGS_CHANGED" } else { "USER_START" }
   }
 }
@@ -33,6 +33,12 @@ foreach ($action in @("START", "STOP", "RESTART")) {
   $result = Test-Phase7CLifecycleBrokerRequest -Request (New-ValidRequest $action) -NowMs $now
   Assert-True $result.valid "action $action must be accepted"
 }
+foreach ($source in @("WEB_CONTROL_CENTER", "LOCAL_LIFECYCLE_API")) {
+  $sourceResult = Test-Phase7CLifecycleBrokerRequest -Request (New-ValidRequest "START" $source) -NowMs $now
+  Assert-True $sourceResult.valid "trusted lifecycle source $source must be accepted"
+}
+$badSource = New-ValidRequest "START" "REQUEST_BODY_FREE_FORM"
+Assert-Equal (Test-Phase7CLifecycleBrokerRequest -Request $badSource -NowMs $now).reasonCode "REJECT_REQUEST_INVALID" "unknown/free-form lifecycle source must be rejected"
 $badAction = New-ValidRequest "START"
 $badAction.action = "SHELL"
 Assert-Equal (Test-Phase7CLifecycleBrokerRequest -Request $badAction -NowMs $now).reasonCode "REJECT_REQUEST_INVALID" "unknown action must be rejected"
