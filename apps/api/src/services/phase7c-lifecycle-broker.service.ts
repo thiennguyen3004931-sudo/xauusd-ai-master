@@ -8,6 +8,9 @@ export type Phase7CLifecycleBrokerReason =
   | "USER_STOP"
   | "LOT_SETTINGS_CHANGED"
   | "RECOVERY_START";
+export type Phase7CLifecycleBrokerRequestSource =
+  | "WEB_CONTROL_CENTER"
+  | "LOCAL_LIFECYCLE_API";
 
 export type Phase7CLifecycleBrokerResult = {
   version: 1;
@@ -90,7 +93,7 @@ function publishRequestAtomic(request: {
   requestId: string;
   action: Phase7CLifecycleBrokerAction;
   requestedAt: number;
-  source: "WEB_CONTROL_CENTER";
+  source: Phase7CLifecycleBrokerRequestSource;
   reason: Phase7CLifecycleBrokerReason;
 }): void {
   const root = brokerRoot();
@@ -138,6 +141,7 @@ export function getPhase7CLifecycleBrokerClientStatus() {
 export async function submitPhase7CLifecycleBrokerRequest(
   action: Phase7CLifecycleBrokerAction,
   reason: Phase7CLifecycleBrokerReason,
+  source: Phase7CLifecycleBrokerRequestSource,
 ): Promise<Phase7CLifecycleBrokerResult> {
   assertBrokerHeartbeat();
   const requestId = randomUUID();
@@ -146,7 +150,7 @@ export async function submitPhase7CLifecycleBrokerRequest(
     requestId,
     action,
     requestedAt: Date.now(),
-    source: "WEB_CONTROL_CENTER",
+    source,
     reason,
   });
 
