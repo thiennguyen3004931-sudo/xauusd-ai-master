@@ -70,6 +70,9 @@ try {
   $liveEnv = Join-Path $tempRoot "live.env"
   $badDemoEnv = Join-Path $tempRoot "bad-demo.env"
   $badLiveEnv = Join-Path $tempRoot "bad-live.env"
+  $missingLiveMagicEnv = Join-Path $tempRoot "missing-live-magic.env"
+  $wrongLiveMagicEnv = Join-Path $tempRoot "wrong-live-magic.env"
+  $wrongSidewayMagicEnv = Join-Path $tempRoot "wrong-sideway-magic.env"
   $common = @(
     "MT5_API_KEY=unit-test-shared-key-123456789",
     "MT5_BRIDGE_HOST=127.0.0.1",
@@ -78,9 +81,12 @@ try {
     "MT5_ALLOWED_LOGINS=123456"
   )
   Set-Content -LiteralPath $demoEnv -Value (@($common) + "MT5_ALLOW_REAL_ACCOUNT=false") -Encoding utf8
-  Set-Content -LiteralPath $liveEnv -Value (@($common) + "MT5_ALLOW_REAL_ACCOUNT=true") -Encoding utf8
+  Set-Content -LiteralPath $liveEnv -Value (@($common) + @("MT5_ALLOW_REAL_ACCOUNT=true", "MT5_MAGIC_NUMBER=270715")) -Encoding utf8
   Set-Content -LiteralPath $badDemoEnv -Value (@($common) + "MT5_ALLOW_REAL_ACCOUNT=true") -Encoding utf8
-  Set-Content -LiteralPath $badLiveEnv -Value (@($common) + "MT5_ALLOW_REAL_ACCOUNT=false") -Encoding utf8
+  Set-Content -LiteralPath $badLiveEnv -Value (@($common) + @("MT5_ALLOW_REAL_ACCOUNT=false", "MT5_MAGIC_NUMBER=270715")) -Encoding utf8
+  Set-Content -LiteralPath $missingLiveMagicEnv -Value (@($common) + "MT5_ALLOW_REAL_ACCOUNT=true") -Encoding utf8
+  Set-Content -LiteralPath $wrongLiveMagicEnv -Value (@($common) + @("MT5_ALLOW_REAL_ACCOUNT=true", "MT5_MAGIC_NUMBER=270999")) -Encoding utf8
+  Set-Content -LiteralPath $wrongSidewayMagicEnv -Value (@($common) + @("MT5_ALLOW_REAL_ACCOUNT=true", "MT5_MAGIC_NUMBER=270715", "ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER=270999")) -Encoding utf8
 
   $demo = Assert-Phase7CAccountEnv -EnvFile $demoEnv -AccountMode DEMO -RequireTrading
   $live = Assert-Phase7CAccountEnv -EnvFile $liveEnv -AccountMode LIVE -RequireTrading
@@ -89,6 +95,9 @@ try {
   Assert-Equal $demo.apiKey $live.apiKey "DEMO/LIVE test envs should share bridge API key"
   Assert-Throws { Assert-Phase7CAccountEnv -EnvFile $badDemoEnv -AccountMode DEMO -RequireTrading } "must keep MT5_ALLOW_REAL_ACCOUNT=false" "DEMO must reject real-account permission"
   Assert-Throws { Assert-Phase7CAccountEnv -EnvFile $badLiveEnv -AccountMode LIVE -RequireTrading } "requires MT5_ALLOW_REAL_ACCOUNT=true" "LIVE must require explicit real-account permission"
+  Assert-Throws { Assert-Phase7CAccountEnv -EnvFile $missingLiveMagicEnv -AccountMode LIVE -RequireTrading } "LIVE env requires MT5_MAGIC_NUMBER=270715" "LIVE must reject a missing canonical Trend magic"
+  Assert-Throws { Assert-Phase7CAccountEnv -EnvFile $wrongLiveMagicEnv -AccountMode LIVE -RequireTrading } "LIVE env requires MT5_MAGIC_NUMBER=270715" "LIVE must reject a drifting Trend magic"
+  Assert-Throws { Assert-Phase7CAccountEnv -EnvFile $wrongSidewayMagicEnv -AccountMode LIVE -RequireTrading } "LIVE env requires ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER=270714 when configured" "LIVE must reject a drifting Sideway magic override"
 
   $validRisk = Assert-Phase7CRiskProfile ([pscustomobject]@{
     version = 1
