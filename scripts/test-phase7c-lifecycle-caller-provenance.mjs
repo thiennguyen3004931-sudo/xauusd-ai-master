@@ -7,6 +7,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (relativePath) => fs.readFileSync(path.resolve(root, relativePath), "utf8");
 
 const lifecycle = read("apps/api/src/services/phase7c-lifecycle.service.ts");
+const brokerClient = read("apps/api/src/services/phase7c-lifecycle-broker.service.ts");
 const route = read("apps/api/src/routes/phase7c.route.ts");
 const webApi = read("apps/web/src/api.ts");
 
@@ -34,6 +35,18 @@ assert.match(
   "lifecycle START must persist the caller provenance supplied by the trusted server route",
 );
 
+// Broker request provenance must remain a trusted closed enum all the way to the SYSTEM broker.
+assert.match(
+  brokerClient,
+  /export type Phase7CLifecycleBrokerRequestSource\s*=\s*[\s\S]*?["']WEB_CONTROL_CENTER["'][\s\S]*?["']LOCAL_LIFECYCLE_API["'][\s\S]*?;/,
+  "broker client must define the two trusted lifecycle request sources",
+);
+assert.match(
+  brokerClient,
+  /submitPhase7CLifecycleBrokerRequest\([\s\S]*?source\s*:\s*Phase7CLifecycleBrokerRequestSource/,
+  "broker submit API must require trusted caller provenance instead of hard-coding Web",
+);
+
 // Local lifecycle START must not inherit Web account-selection/account-switch behavior.
 const lifecycleStartFunctionStart = lifecycle.indexOf("export async function startPhase7CFromWeb(");
 assert.ok(lifecycleStartFunctionStart >= 0, "cannot locate lifecycle START implementation");
@@ -49,6 +62,58 @@ assert.match(
   lifecycleStartFunction,
   /if\s*\(\s*provenance\s*===\s*["']web-control-center-start["']\s*\)[\s\S]*?resolvePhase7CWebStartAccount[\s\S]*?activatePhase7CAccountRiskProfile[\s\S]*?setPhase7CAccountModeFromWebAutoDetection/,
   "Web account selection and account-mode mutation must be isolated behind the Web START provenance",
+);
+
+// Local LIVE START must prove the already-durable authorization before any privileged broker request.
+const initialAccountStateIndex = lifecycleStartFunction.indexOf("const initialAccountState = getPhase7CAccountModeState()");
+assert.ok(initialAccountStateIndex >= 0, "cannot locate canonical account state read in lifecycle START");
+const localAccountBoundaryStart = lifecycleStartFunction.indexOf(
+  'if (provenance === "local-lifecycle-api-start")',
+  initialAccountStateIndex,
+);
+const webAccountBoundaryStart = lifecycleStartFunction.indexOf(
+  'if (provenance === "web-control-center-start")',
+  localAccountBoundaryStart,
+);
+assert.ok(localAccountBoundaryStart >= 0 && webAccountBoundaryStart > localAccountBoundaryStart, "cannot isolate local START account boundary");
+const localAccountBoundary = lifecycleStartFunction.slice(localAccountBoundaryStart, webAccountBoundaryStart);
+assert.match(
+  localAccountBoundary,
+  /targetAccountMode\s*===\s*["']LIVE["'][\s\S]*?!liveAuthorization\.valid[\s\S]*?!liveAuthorization\.identity[\s\S]*?throw\s+new\s+Error/,
+  "local LIVE lifecycle START must fail closed on missing durable LIVE authorization before broker mutation",
+);
+assert.doesNotMatch(
+  localAccountBoundary,
+  /ensurePhase7CLiveAuthorizationForWebStart|preserveLegacyExplicitLiveAuthorization|resolvePhase7CWebStartAccount|setPhase7CAccountModeFromWebAutoDetection|activatePhase7CAccountRiskProfile/,
+  "local lifecycle START must never create, migrate, auto-select, or persist Web LIVE/account authorization state",
+);
+const firstBrokerSubmit = lifecycleStartFunction.indexOf("submitPhase7CLifecycleBrokerRequest(");
+const localLiveAuthGuard = lifecycleStartFunction.indexOf("!liveAuthorization.valid", localAccountBoundaryStart);
+assert.ok(
+  localLiveAuthGuard >= localAccountBoundaryStart && localLiveAuthGuard < webAccountBoundaryStart && localLiveAuthGuard < firstBrokerSubmit,
+  "local LIVE authorization guard must execute before the first broker START/RESTART submission",
+);
+assert.match(
+  lifecycleStartFunction,
+  /const\s+brokerSource\s*:\s*Phase7CLifecycleBrokerRequestSource\s*=\s*provenance\s*===\s*["']local-lifecycle-api-start["'][\s\S]*?["']LOCAL_LIFECYCLE_API["'][\s\S]*?["']WEB_CONTROL_CENTER["']/,
+  "START must map trusted route provenance to trusted broker request provenance",
+);
+assert.match(
+  lifecycleStartFunction,
+  /submitPhase7CLifecycleBrokerRequest\(\s*brokerRequest\.action\s*,\s*brokerRequest\.reason\s*,\s*brokerSource\s*\)/,
+  "START/RESTART must submit the trusted broker source",
+);
+
+const lifecycleStopFunction = lifecycle.slice(lifecycleStopFunctionStart);
+assert.match(
+  lifecycleStopFunction,
+  /const\s+brokerSource\s*:\s*Phase7CLifecycleBrokerRequestSource\s*=\s*provenance\s*===\s*["']local-lifecycle-api-stop["'][\s\S]*?["']LOCAL_LIFECYCLE_API["'][\s\S]*?["']WEB_CONTROL_CENTER["']/,
+  "STOP must map trusted route provenance to trusted broker request provenance",
+);
+assert.match(
+  lifecycleStopFunction,
+  /submitPhase7CLifecycleBrokerRequest\(\s*["']STOP["']\s*,\s*["']USER_STOP["']\s*,\s*brokerSource\s*\)/,
+  "STOP must submit the trusted broker source",
 );
 
 // Generic localhost lifecycle API remains the maintenance/automation surface.
