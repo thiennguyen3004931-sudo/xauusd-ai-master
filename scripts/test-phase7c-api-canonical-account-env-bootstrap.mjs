@@ -39,13 +39,18 @@ assert.match(
 );
 assert.match(
   source,
-  /PHASE7B_API_BRIDGE_ENV_SOURCE=ACCOUNT_MODE_STATE/,
-  "runtime must expose non-secret evidence when canonical account env wins",
+  /\$bridgeEnvSource\s*=\s*["']ACCOUNT_MODE_STATE["']/,
+  "canonical account state must select ACCOUNT_MODE_STATE provenance",
 );
 assert.match(
   source,
-  /PHASE7B_API_BRIDGE_ENV_SOURCE=TASK_FALLBACK/,
-  "legacy task BridgeEnv may remain only as an explicit fallback when account state is absent",
+  /\$bridgeEnvSource\s*=\s*["']TASK_FALLBACK["']/,
+  "legacy task BridgeEnv must remain explicitly labeled TASK_FALLBACK",
+);
+assert.match(
+  source,
+  /Write-Host\s+["']PHASE7B_API_BRIDGE_ENV_SOURCE=\$bridgeEnvSource["']/,
+  "runtime must expose the selected non-secret bridge env provenance",
 );
 assert.doesNotMatch(
   source,
