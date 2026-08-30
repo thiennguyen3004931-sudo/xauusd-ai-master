@@ -1,0 +1,49 @@
+name: Apply Phase7C Daily Recovery Preview Actual Lot Patch
+
+on:
+  push:
+    branches:
+      - fix/phase7c-daily-recovery-preview-actual-lot
+    paths:
+      - ".github/workflows/_apply-phase7c-daily-recovery-preview-actual-lot.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-exact-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/phase7c-daily-recovery-preview-actual-lot
+      - name: Apply exact Web-only production transform
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("apps/web/src/pages/Phase7CControlCenterPage.tsx")
+          text = path.read_text(encoding="utf-8")
+
+          old_preview = '''  const decision = decisionMonitor.data;\n\n  const recoveryPreviewVolume =\n    decision?.engine.recommendedMode === "SIDEWAY"\n      ? configuredSidewayMaxLot\n      : configuredTrendLot;\n'''
+          new_preview = '''  const decision = decisionMonitor.data;\n  const preTrade = decision?.preTrade;\n\n  const recoveryPreviewVolume =\n    preTrade?.approved === true &&\n    Number.isFinite(preTrade.finalLot) &&\n    Number(preTrade.finalLot) > 0\n      ? Number(preTrade.finalLot)\n      : decision?.engine.recommendedMode === "SIDEWAY"\n        ? configuredSidewayMaxLot\n        : configuredTrendLot;\n'''
+          old_late = '''  const position = decision?.position;\n  const preTrade = decision?.preTrade;\n  const managing = position?.state === "MANAGING" || position?.state === "UNMANAGED";\n'''
+          new_late = '''  const position = decision?.position;\n  const managing = position?.state === "MANAGING" || position?.state === "UNMANAGED";\n'''
+
+          if text.count(old_preview) != 1:
+              raise SystemExit(f"expected exactly one preview block, found {text.count(old_preview)}")
+          if text.count(old_late) != 1:
+              raise SystemExit(f"expected exactly one late preTrade block, found {text.count(old_late)}")
+
+          text = text.replace(old_preview, new_preview, 1).replace(old_late, new_late, 1)
+          path.write_text(text, encoding="utf-8")
+      - name: Commit production patch and remove one-shot workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/_apply-phase7c-daily-recovery-preview-actual-lot.yml
+          git add apps/web/src/pages/Phase7CControlCenterPage.tsx
+          git diff --cached --check
+          git commit -m "fix(phase7c): preview recovery with approved final lot"
+          git push origin HEAD:fix/phase7c-daily-recovery-preview-actual-lot
