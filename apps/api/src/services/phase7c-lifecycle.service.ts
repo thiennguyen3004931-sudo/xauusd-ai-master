@@ -22,6 +22,7 @@ import {
   submitPhase7CLifecycleBrokerRequest,
   type Phase7CLifecycleBrokerAction,
   type Phase7CLifecycleBrokerReason,
+  type Phase7CLifecycleBrokerRequestSource,
 } from "./phase7c-lifecycle-broker.service";
 
 const START_TIMEOUT_MS = 50_000;
@@ -272,6 +273,9 @@ export async function startPhase7CFromWeb(
       throw new Error(`Account-mode state không hợp lệ. ${initialAccountState.error ?? ""}`.trim());
     }
     targetAccountMode = initialAccountState.accountMode;
+    if (targetAccountMode === "LIVE" && (!liveAuthorization.valid || !liveAuthorization.identity)) {
+      throw new Error(`LIVE authorization không hợp lệ: ${liveAuthorizationError(liveAuthorization)}. Bot giữ PAUSE.`);
+    }
   }
 
   if (provenance === "web-control-center-start") {
@@ -324,6 +328,10 @@ export async function startPhase7CFromWeb(
     }
   }
 
+  const brokerSource: Phase7CLifecycleBrokerRequestSource = provenance === "local-lifecycle-api-start"
+    ? "LOCAL_LIFECYCLE_API"
+    : "WEB_CONTROL_CENTER";
+
   assertPhase7CSelectedAccountReady(telemetry);
   if (telemetry.positions.length > 0) {
     throw new Error(`Không khởi động sạch khi đang có ${telemetry.positions.length} vị thế XAUUSD. Hãy kiểm tra/quản lý vị thế trước.`);
@@ -349,7 +357,7 @@ export async function startPhase7CFromWeb(
   }
 
   const brokerRequest = chooseStartBrokerAction(current);
-  const brokerResult = await submitPhase7CLifecycleBrokerRequest(brokerRequest.action, brokerRequest.reason);
+  const brokerResult = await submitPhase7CLifecycleBrokerRequest(brokerRequest.action, brokerRequest.reason, brokerSource);
   const ready = await waitForReady();
   if (!ready) {
     if (provenance === "local-lifecycle-api-start") {
@@ -357,7 +365,7 @@ export async function startPhase7CFromWeb(
     } else {
       phase7CBotModeService.set("PAUSE", "web-control-center-start-failed");
     }
-    await submitPhase7CLifecycleBrokerRequest("STOP", "USER_STOP").catch(() => undefined);
+    await submitPhase7CLifecycleBrokerRequest("STOP", "USER_STOP", brokerSource).catch(() => undefined);
     throw new Error(`Bot chưa đạt READY trong ${START_TIMEOUT_MS / 1000} giây; broker đã được yêu cầu dừng executor và Bot giữ PAUSE.`);
   }
 
@@ -385,7 +393,7 @@ export async function startPhase7CFromWeb(
     } else {
       phase7CBotModeService.set("PAUSE", "web-control-center-final-preflight-failed");
     }
-    await submitPhase7CLifecycleBrokerRequest("STOP", "USER_STOP").catch(() => undefined);
+    await submitPhase7CLifecycleBrokerRequest("STOP", "USER_STOP", brokerSource).catch(() => undefined);
     throw new Error(`Kiểm tra cuối trước READY thất bại; broker đã được yêu cầu dừng executor và giữ PAUSE. ${error instanceof Error ? error.message : String(error)}`);
   }
 
@@ -419,7 +427,10 @@ export async function stopPhase7C(
   if (!broker.ready) {
     throw new Error("Lifecycle broker SYSTEM chưa READY; không cho Web user tự dừng privileged executor tree.");
   }
-  const result = await submitPhase7CLifecycleBrokerRequest("STOP", "USER_STOP");
+  const brokerSource: Phase7CLifecycleBrokerRequestSource = provenance === "local-lifecycle-api-stop"
+    ? "LOCAL_LIFECYCLE_API"
+    : "WEB_CONTROL_CENTER";
+  const result = await submitPhase7CLifecycleBrokerRequest("STOP", "USER_STOP", brokerSource);
   const lifecycle = await waitForStopped();
   if (lifecycle.running || Object.values(lifecycle.processes).some((entry) => entry.alive)) {
     throw new Error("Executor vẫn còn chạy sau lệnh STOP của broker. Giữ PAUSE và kiểm tra Lifecycle Broker/Scheduled Task.");
