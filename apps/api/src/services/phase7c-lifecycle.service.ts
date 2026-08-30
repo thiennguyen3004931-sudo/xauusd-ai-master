@@ -28,6 +28,10 @@ const START_TIMEOUT_MS = 50_000;
 const STOP_VERIFY_TIMEOUT_MS = 10_000;
 const TELEGRAM_STALE_MS = 15_000;
 
+export type Phase7CLifecycleStartProvenance =
+  | "web-control-center-start"
+  | "local-lifecycle-api-start";
+
 export type Phase7CLifecycleStopProvenance =
   | "web-control-center-stop"
   | "local-lifecycle-api-stop";
@@ -245,10 +249,17 @@ function chooseStartBrokerAction(current: ReturnType<typeof getPhase7CLifecycleR
   return { action: "START", reason: "USER_START" };
 }
 
-export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
+export async function startPhase7CFromWeb(
+  telemetry: Mt5TelemetrySnapshot,
+  provenance: Phase7CLifecycleStartProvenance = "web-control-center-start",
+) {
   if (!controlEnabled()) throw new Error("Điều khiển Bot chỉ khả dụng trên localhost Windows.");
 
-  phase7CBotModeService.set("PAUSE", "web-control-center-preflight");
+  if (provenance === "local-lifecycle-api-start") {
+    phase7CBotModeService.set("PAUSE", provenance);
+  } else {
+    phase7CBotModeService.set("PAUSE", "web-control-center-preflight");
+  }
   const initialAccountState = getPhase7CAccountModeState();
   let liveAuthorization = getPhase7CLiveAuthorizationStatus(
     telemetry.health?.server ?? null,
@@ -314,7 +325,9 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
     throw new Error("Lifecycle broker SYSTEM chưa READY. Bot giữ PAUSE; không thực hiện mutation từ Web user.");
   }
   if (current.ready) {
-    const mode = phase7CBotModeService.set("PAUSE", "web-control-center-ready-pause");
+    const mode = provenance === "local-lifecycle-api-start"
+      ? phase7CBotModeService.set("PAUSE", provenance)
+      : phase7CBotModeService.set("PAUSE", "web-control-center-ready-pause");
     return {
       action: "ALREADY_RUNNING",
       message: `Bot ${accountModeState.accountMode} đã chạy và đã verify; giữ PAUSE. Bật AUTO thủ công từ Web khi sẵn sàng.`,
@@ -328,7 +341,11 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
   const brokerResult = await submitPhase7CLifecycleBrokerRequest(brokerRequest.action, brokerRequest.reason);
   const ready = await waitForReady();
   if (!ready) {
-    phase7CBotModeService.set("PAUSE", "web-control-center-start-failed");
+    if (provenance === "local-lifecycle-api-start") {
+      phase7CBotModeService.set("PAUSE", provenance);
+    } else {
+      phase7CBotModeService.set("PAUSE", "web-control-center-start-failed");
+    }
     await submitPhase7CLifecycleBrokerRequest("STOP", "USER_STOP").catch(() => undefined);
     throw new Error(`Bot chưa đạt READY trong ${START_TIMEOUT_MS / 1000} giây; broker đã được yêu cầu dừng executor và Bot giữ PAUSE.`);
   }
@@ -352,12 +369,18 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
       throw new Error(`Phát hiện ${finalTelemetry.positions.length} vị thế XAUUSD trong lúc khởi động.`);
     }
   } catch (error) {
-    phase7CBotModeService.set("PAUSE", "web-control-center-final-preflight-failed");
+    if (provenance === "local-lifecycle-api-start") {
+      phase7CBotModeService.set("PAUSE", provenance);
+    } else {
+      phase7CBotModeService.set("PAUSE", "web-control-center-final-preflight-failed");
+    }
     await submitPhase7CLifecycleBrokerRequest("STOP", "USER_STOP").catch(() => undefined);
     throw new Error(`Kiểm tra cuối trước READY thất bại; broker đã được yêu cầu dừng executor và giữ PAUSE. ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  const mode = phase7CBotModeService.set("PAUSE", "web-control-center-ready-pause");
+  const mode = provenance === "local-lifecycle-api-start"
+    ? phase7CBotModeService.set("PAUSE", provenance)
+    : phase7CBotModeService.set("PAUSE", "web-control-center-ready-pause");
   return {
     action: brokerRequest.action === "RESTART" ? "RESTARTED" : "STARTED",
     brokerReasonCode: brokerResult.reasonCode,
