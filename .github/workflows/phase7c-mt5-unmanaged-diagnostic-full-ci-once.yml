@@ -1,0 +1,62 @@
+name: Phase7C MT5 Unmanaged Diagnostic Full CI Once
+
+on:
+  push:
+    branches:
+      - fix/phase7c-mt5-unmanaged-diagnostic-details
+    paths:
+      - ".github/workflows/phase7c-mt5-unmanaged-diagnostic-full-ci-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  expand:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/phase7c-mt5-unmanaged-diagnostic-details
+      - name: Expand scope workflow from verified full-CI template
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          scope_path = Path('.github/workflows/phase7c-mt5-unmanaged-diagnostic-details-ci.yml')
+          template_path = Path('.github/workflows/phase7c-web-unmanaged-multi-position-status-ci.yml')
+          scope = scope_path.read_text(encoding='utf-8')
+          template = template_path.read_text(encoding='utf-8')
+          header = scope.split('jobs:', 1)[0]
+          jobs = template.split('jobs:', 1)[1]
+
+          jobs = jobs.replace('  web-unmanaged-multi-position-status:', '  mt5-unmanaged-diagnostic-details:', 1)
+          jobs = jobs.replace('      - name: Build Web dependency graph\n        run: pnpm --filter @xauusd/web... build', '      - name: Build API dependency graph\n        run: pnpm --filter @xauusd/api... build', 1)
+
+          primary = '''      - name: Existing MT5 unmanaged multi-position status contract
+            run: node --test scripts/phase7c-mt5-unmanaged-multi-position-status.test.mjs
+'''.replace('            run:', '        run:')
+          detail = '''      - name: MT5 unmanaged diagnostic detail contract
+        run: node --test scripts/phase7c-mt5-unmanaged-diagnostic-details.test.mjs
+'''
+          if primary not in jobs:
+              raise SystemExit('primary MT5 status step not found')
+          jobs = jobs.replace(primary, primary + detail, 1)
+
+          integrated = '          node --test scripts/phase7c-mt5-unmanaged-multi-position-status.test.mjs\n          node --test scripts/phase7c-web-unmanaged-multi-position-status.test.mjs\n'
+          integrated_new = '          node --test scripts/phase7c-mt5-unmanaged-multi-position-status.test.mjs\n          node --test scripts/phase7c-mt5-unmanaged-diagnostic-details.test.mjs\n          node --test scripts/phase7c-web-unmanaged-multi-position-status.test.mjs\n'
+          if integrated not in jobs:
+              raise SystemExit('integrated MT5/Web sequence not found')
+          jobs = jobs.replace(integrated, integrated_new, 1)
+
+          scope_path.write_text(header + 'jobs:' + jobs, encoding='utf-8')
+          PY
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/phase7c-mt5-unmanaged-diagnostic-full-ci-once.yml
+      - name: Commit full CI expansion
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/phase7c-mt5-unmanaged-diagnostic-details-ci.yml .github/workflows/phase7c-mt5-unmanaged-diagnostic-full-ci-once.yml
+          git commit -m "ci(phase7c): run full MT5 unmanaged diagnostic regressions"
+          git push origin HEAD:fix/phase7c-mt5-unmanaged-diagnostic-details
