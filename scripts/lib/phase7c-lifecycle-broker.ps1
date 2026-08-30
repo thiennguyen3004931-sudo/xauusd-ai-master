@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 
 $script:Phase7CLifecycleBrokerActions = @("START", "STOP", "RESTART")
-$script:Phase7CLifecycleBrokerSources = @("WEB_CONTROL_CENTER")
+$script:Phase7CLifecycleBrokerSources = @("WEB_CONTROL_CENTER", "LOCAL_LIFECYCLE_API")
 $script:Phase7CLifecycleBrokerReasons = @("USER_START", "USER_STOP", "LOT_SETTINGS_CHANGED", "RECOVERY_START")
 $script:Phase7CLifecycleBrokerRequestFields = @("version", "requestId", "action", "requestedAt", "source", "reason")
 $script:Phase7CLifecycleBrokerFreshnessMs = 120000L
