@@ -328,7 +328,7 @@ function trendEntryChecks(snapshot: Snapshot): Phase7CEntryCheck[] {
     "TREND_MODE_REGIME",
     "Mode / Regime",
     gate === "ALLOWED" ? "PASS" : "BLOCKED",
-    `${snapshot.mode.active} → ${snapshot.engine.recommendedMode}`,
+    `${snapshot.mode.active} → ${snapshot.mode.effectiveStrategy}`,
     "TREND được phép mở entry",
     gate === "ALLOWED"
       ? "Mode/regime hiện cho phép Trend."
