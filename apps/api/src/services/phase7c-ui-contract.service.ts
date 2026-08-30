@@ -477,7 +477,10 @@ function trendEntryChecks(snapshot: Snapshot): Phase7CEntryCheck[] {
 
 function sidewayEntryChecks(snapshot: Snapshot): Phase7CEntryCheck[] {
   const gate = gateFor(snapshot, "SIDEWAY");
-  const latest = snapshot.recentDecisions.find((row) => row.strategy === "SIDEWAY") ?? null;
+  const latest = snapshot.recentDecisions.find((row) =>
+    row.strategy === "SIDEWAY" &&
+    snapshot.generatedAt - Number(row.timestamp) <= 30 * 60_000
+  ) ?? null;
   const event = String(latest?.event ?? "").toUpperCase();
   const stage = String(latest?.stage ?? "").toUpperCase();
   const latestReason = String(latest?.reason ?? "Chưa có Sideway decision mới.");
