@@ -1,0 +1,44 @@
+name: Phase7C AUTO Reversal Entry Check Actual CI
+
+on:
+  push:
+    branches:
+      - fix/phase7c-auto-reversal-entry-check-actual
+    paths:
+      - "apps/api/src/services/phase7c-decision-monitor.service.ts"
+      - "apps/api/src/services/phase7c-ui-contract.service.ts"
+      - "scripts/phase7c-auto-reversal-entry-check-actual.test.mjs"
+      - ".github/workflows/phase7c-auto-reversal-entry-check-actual-ci.yml"
+  pull_request:
+    paths:
+      - "apps/api/src/services/phase7c-decision-monitor.service.ts"
+      - "apps/api/src/services/phase7c-ui-contract.service.ts"
+      - "scripts/phase7c-auto-reversal-entry-check-actual.test.mjs"
+      - ".github/workflows/phase7c-auto-reversal-entry-check-actual-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  auto-reversal-entry-check-actual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build API dependency graph
+        run: pnpm --filter @xauusd/api... build
+      - name: AUTO REVERSAL entry-check actual contract
+        run: node --import ./apps/api/node_modules/tsx/dist/loader.mjs --test scripts/phase7c-auto-reversal-entry-check-actual.test.mjs
