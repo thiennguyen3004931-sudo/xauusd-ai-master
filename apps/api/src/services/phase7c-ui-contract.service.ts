@@ -266,7 +266,7 @@ function managementReasons(snapshot: Snapshot, kind: "STOP" | "PARTIAL"): string
   const reasons: string[] = [];
   const ticket = String(snapshot.position.ticket ?? "");
   for (const row of snapshot.recentDecisions) {
-    if (ticket && String(row.management?.ticket ?? "") && String(row.management?.ticket ?? "") !== ticket) continue;
+    if (ticket && String(row.management?.ticket ?? "") !== ticket) continue;
     const event = String(row.event ?? "");
     if (kind === "STOP") {
       if (/^PLUS6_(?:SL_TO_ENTRY|BREAK_EVEN_APPLIED)/.test(event)) {
