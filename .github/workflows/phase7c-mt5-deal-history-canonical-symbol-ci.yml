@@ -1,0 +1,39 @@
+name: Phase7C MT5 Deal History Canonical Symbol CI
+
+on:
+  push:
+    branches:
+      - fix/phase7c-mt5-deal-history-canonical-symbol
+    paths:
+      - "packages/mt5-broker/bridge/mt5_bridge/mt5_gateway.py"
+      - "packages/mt5-broker/bridge/tests/test_deal_history_canonical_symbol.py"
+      - ".github/workflows/phase7c-mt5-deal-history-canonical-symbol-ci.yml"
+  pull_request:
+    paths:
+      - "packages/mt5-broker/bridge/mt5_bridge/mt5_gateway.py"
+      - "packages/mt5-broker/bridge/tests/test_deal_history_canonical_symbol.py"
+      - ".github/workflows/phase7c-mt5-deal-history-canonical-symbol-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  canonical-symbol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependency
+        run: python -m pip install "pydantic>=2,<3"
+
+      - name: Run MT5 deal-history canonical symbol contract
+        env:
+          PYTHONPATH: packages/mt5-broker/bridge
+        run: python -m unittest discover -s packages/mt5-broker/bridge/tests -p "test_deal_history_canonical_symbol.py" -v
