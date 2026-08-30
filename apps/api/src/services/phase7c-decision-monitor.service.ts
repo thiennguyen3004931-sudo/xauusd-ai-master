@@ -535,11 +535,14 @@ function positionMonitor(input: {
 
   const states = input.managedStates ?? { TREND: null, SIDEWAY: null };
   const ticket = String(position.ticket);
-  const trendManaged = String(states.TREND?.ticket ?? "") === ticket ? states.TREND : null;
-  const sidewayManaged = String(states.SIDEWAY?.ticket ?? "") === ticket ? states.SIDEWAY : null;
+  const hasExactlyOnePosition = positions.length === 1;
+  const trendManaged = hasExactlyOnePosition && String(states.TREND?.ticket ?? "") === ticket ? states.TREND : null;
+  const sidewayManaged = hasExactlyOnePosition && String(states.SIDEWAY?.ticket ?? "") === ticket ? states.SIDEWAY : null;
   const strategy: Strategy | null = trendManaged ? "TREND" : sidewayManaged ? "SIDEWAY" : null;
   const managed = trendManaged ?? sidewayManaged;
-  const ticketAudit = input.audit.filter((row) => String(row.management?.ticket ?? "") === ticket);
+  const ticketAudit = hasExactlyOnePosition
+    ? input.audit.filter((row) => String(row.management?.ticket ?? "") === ticket)
+    : [];
   const entryAudit = ticketAudit.find((row) =>
     row.event === "ENTRY_FILLED" || row.event === "PENDING_ENTRY_RECOVERED") ?? null;
   const latestManagement = ticketAudit.find((row) =>
