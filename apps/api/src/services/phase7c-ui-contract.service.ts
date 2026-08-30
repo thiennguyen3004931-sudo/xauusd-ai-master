@@ -284,7 +284,9 @@ function managementReasons(snapshot: Snapshot, kind: "STOP" | "PARTIAL"): string
 
 function exitReasons(snapshot: Snapshot): string[] {
   const reasons: string[] = [];
+  const ticket = String(snapshot.position.ticket ?? "");
   for (const row of snapshot.recentDecisions) {
+    if (ticket && String(row.management?.ticket ?? "") !== ticket) continue;
     const event = String(row.event ?? "");
     if (!/(?:EXIT|CLOSE|CLOSED|TAKE_PROFIT|STOP_LOSS|POSITION_GONE|REGIME_LEFT_RANGE|TIME_STOP)/i.test(event)) continue;
     pushUnique(reasons, row.reason || event, 3);
