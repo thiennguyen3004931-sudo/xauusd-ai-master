@@ -44,3 +44,5 @@ jobs:
         run: pnpm --filter @xauusd/api... build
       - name: Multiple-position UI management-reason fail-closed contract
         run: node --import ./apps/api/node_modules/tsx/dist/loader.mjs --test scripts/phase7c-multiple-position-ui-management-reason-fail-closed.test.mjs
+
+# Scoped GREEN checkpoint after the minimal UI reason guard fix.
