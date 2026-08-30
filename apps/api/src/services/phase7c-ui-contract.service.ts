@@ -65,6 +65,7 @@ export interface Phase7CUiContract {
   };
   position: null | {
     state: string;
+    count: number;
     strategy: string | null;
     ticket: string | null;
     side: string | null;
@@ -677,6 +678,7 @@ export function buildPhase7CUiContract(snapshot: Snapshot): Phase7CUiContract {
   } : null;
   const position = state === "MANAGING" ? {
     state: snapshot.position.state,
+    count: snapshot.position.count,
     strategy: snapshot.position.strategy,
     ticket: snapshot.position.ticket,
     side: snapshot.position.side,
@@ -813,6 +815,7 @@ export function formatPhase7CUiContractForMt5(ui: Phase7CUiContract): string {
     ["setupFinalLot", setup?.finalLot],
     ["setupRiskPercent", setup?.estimatedRiskPercent],
     ["positionState", position?.state],
+    ["positionCount", position?.count],
     ["positionStrategy", position?.strategy],
     ["ticket", position?.ticket],
     ["positionSide", position?.side],

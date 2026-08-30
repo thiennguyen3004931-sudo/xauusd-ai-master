@@ -675,10 +675,17 @@ void DrawManaging(const string payload, const int width)
 
    const int x = 10;
    const int w = width - 20;
-   Card(x, 316, w, 64, C'8,26,20', C'45,130,70');
+   string position_state = Clean(Field(payload, "positionState"), "UNMANAGED");
+   string position_count = Clean(Field(payload, "positionCount"), "?");
+   bool position_unmanaged = position_state == "UNMANAGED";
+   color position_tone = position_unmanaged ? clrTomato : clrLimeGreen;
+   string position_title = position_unmanaged
+      ? "CẢNH BÁO: " + position_count + " VỊ THẾ CHƯA ĐƯỢC QUẢN LÝ"
+      : "ĐANG GIỮ LỆNH";
+   Card(x, 316, w, 64, position_unmanaged ? C'35,18,18' : C'8,26,20', position_tone);
    int top_y = CenteredTextY(322, 24, SECTION_FONT_SIZE);
    int bottom_y = CenteredTextY(348, 24, BODY_FONT_SIZE);
-   Text(x + 18, top_y, "ĐANG GIỮ LỆNH", clrLimeGreen, SECTION_FONT_SIZE);
+   Text(x + 18, top_y, FitText(position_title, w / 2 - 30, SECTION_FONT_SIZE), position_tone, SECTION_FONT_SIZE);
    TextRight(x + w - 18, top_y, FitText("Lãi/lỗ: " + Clean(Field(payload, "floatingPnlUsd")) + " USD", w / 2 - 30, BODY_FONT_SIZE), clrWhite, BODY_FONT_SIZE);
    Text(x + 18, bottom_y, FitText("Hướng: " + SideVi(Field(payload, "positionSide")) + " · Lot: " + Clean(Field(payload, "positionVolume")), w / 2 - 30, BODY_FONT_SIZE), clrSilver, BODY_FONT_SIZE);
    TextRight(x + w - 18, bottom_y, FitText(Clean(Field(payload, "floatingPnlPercent")) + "%", w / 3, BODY_FONT_SIZE), clrSilver, BODY_FONT_SIZE);
