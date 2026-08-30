@@ -199,20 +199,22 @@ export function Phase7CControlCenterPage() {
   const mode = lifecycleData?.mode.mode ?? decision?.mode.active ?? "—";
   const currency = decision?.account.currency ?? "USD";
   const position = decision?.position;
-  const managing = position?.state === "MANAGING" || position?.state === "UNMANAGED";
-  const displayedEntry = managing ? position?.entry : preTrade?.entry;
-  const displayedStop = managing ? position?.stopLoss : preTrade?.stopLoss;
-  const displayedTp1 = managing ? position?.tp1 : preTrade?.tp1;
-  const displayedTp2 = managing ? position?.tp2 : preTrade?.tp2;
-  const displayedLot = managing ? position?.volume : preTrade?.finalLot;
-  const displayedPnl = managing ? position?.floatingPnlUsd : null;
-  const displayedRisk = managing ? null : preTrade?.estimatedRiskUsd;
-  const entryReason = managing
+  const managing = position?.state === "MANAGING";
+  const unmanaged = position?.state === "UNMANAGED";
+  const hasOpenPosition = managing || unmanaged;
+  const displayedEntry = hasOpenPosition ? position?.entry : preTrade?.entry;
+  const displayedStop = hasOpenPosition ? position?.stopLoss : preTrade?.stopLoss;
+  const displayedTp1 = managing ? position?.tp1 : unmanaged ? null : preTrade?.tp1;
+  const displayedTp2 = managing ? position?.tp2 : unmanaged ? null : preTrade?.tp2;
+  const displayedLot = hasOpenPosition ? position?.volume : preTrade?.finalLot;
+  const displayedPnl = hasOpenPosition ? position?.floatingPnlUsd : null;
+  const displayedRisk = hasOpenPosition ? null : preTrade?.estimatedRiskUsd;
+  const entryReason = hasOpenPosition
     ? (position?.entryReason ?? "Chưa có lý do vào lệnh.")
     : mode === "PAUSE"
       ? "Bot đang PAUSE; executor vẫn chạy nhưng không mở kế hoạch giao dịch mới. Chỉ bật AUTO thủ công từ Web sau khi hoàn tất kiểm tra an toàn."
       : (preTrade?.decisionReason ?? "Chưa có setup hợp lệ; tiếp tục chờ tín hiệu.");
-  const holdReason = managing
+  const holdReason = hasOpenPosition
     ? (position?.holdReason ?? "Executor đang kiểm tra điều kiện giữ lệnh.")
     : "Chưa có vị thế đang mở; executor tiếp tục chờ setup hợp lệ.";
   const isLiveAccount = lifecycleData?.bridge.accountMode === "real";
@@ -368,7 +370,7 @@ export function Phase7CControlCenterPage() {
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Chip label={`${decision?.mode.active ?? mode} → ${decision?.mode.effectiveStrategy ?? "—"}`} variant="outlined" />
               <Chip label={`${decision?.engine.regime ?? "ĐANG ĐỌC"} · ${decision?.engine.confidence ?? "—"}`} variant="outlined" />
-              <Chip color={preTrade?.approved ? "success" : "warning"} label={managing ? position?.state : (preTrade?.stage ?? "ĐANG ĐỌC")} />
+              <Chip color={unmanaged ? "error" : preTrade?.approved || managing ? "success" : "warning"} label={hasOpenPosition ? position?.state : (preTrade?.stage ?? "ĐANG ĐỌC")} />
             </Stack>
           </Stack>
 
@@ -382,22 +384,22 @@ export function Phase7CControlCenterPage() {
             <>
               <Grid container spacing={2} sx={{ mt: 0.5 }}>
                 <Grid size={{ xs: 12, sm: 6, xl: 2 }}>
-                  <MetricCard label="Trạng thái" value={managing ? `${position?.side ?? "—"} · ${position?.state}` : preTrade?.approved ? "SETUP HỢP LỆ" : "CHỜ SETUP"} detail={`${decision.mode.effectiveStrategy} · ${preTrade?.setup ?? "WAIT"}`} tone={managing || preTrade?.approved ? "success.main" : "warning.main"} />
+                  <MetricCard label="Trạng thái" value={unmanaged ? `CẢNH BÁO · ${position?.count ?? "—"} VỊ THẾ XAUUSD` : managing ? `${position?.side ?? "—"} · ${position?.state}` : preTrade?.approved ? "SETUP HỢP LỆ" : "CHỜ SETUP"} detail={unmanaged ? "UNMANAGED · không có canonical executor ownership" : `${decision.mode.effectiveStrategy} · ${preTrade?.setup ?? "WAIT"}`} tone={unmanaged ? "error.main" : managing || preTrade?.approved ? "success.main" : "warning.main"} />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, xl: 2 }}>
-                  <MetricCard label="Entry / Giá hiện tại" value={price(displayedEntry)} detail={managing ? `Hiện tại ${price(position?.currentPrice)}` : `${preTrade?.side ?? "—"} · ${preTrade?.source ?? "canonical"}`} />
+                  <MetricCard label="Entry / Giá hiện tại" value={price(displayedEntry)} detail={hasOpenPosition ? `Hiện tại ${price(position?.currentPrice)}` : `${preTrade?.side ?? "—"} · ${preTrade?.source ?? "canonical"}`} />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, xl: 2 }}>
-                  <MetricCard label="Stop Loss" value={price(displayedStop)} detail={`${managing ? position?.favorableDistance : (preTrade?.stopDistance ?? "—")} giá`} tone="error.main" />
+                  <MetricCard label="Stop Loss" value={price(displayedStop)} detail={`${hasOpenPosition ? position?.favorableDistance : (preTrade?.stopDistance ?? "—")} giá`} tone="error.main" />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, xl: 2 }}>
-                  <MetricCard label="TP1 / TP2" value={`${price(displayedTp1)} / ${price(displayedTp2)}`} detail="BE +6 · chốt 1/3 tại +10" tone="success.main" />
+                  <MetricCard label="TP1 / TP2" value={`${price(displayedTp1)} / ${price(displayedTp2)}`} detail={unmanaged ? "UNMANAGED · không suy diễn TP quản lý" : "BE +6 · chốt 1/3 tại +10"} tone={unmanaged ? "error.main" : "success.main"} />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, xl: 2 }}>
-                  <MetricCard label="Lot" value={Number.isFinite(displayedLot) ? `${Number(displayedLot).toFixed(2)} lot` : "—"} detail={managing ? `Ticket ${position?.ticket ?? "—"}` : `Raw ${preTrade?.rawLot == null ? "—" : preTrade.rawLot.toFixed(4)} · cap ${preTrade?.lotCap == null ? "—" : preTrade.lotCap.toFixed(2)}`} />
+                  <MetricCard label="Lot" value={Number.isFinite(displayedLot) ? `${Number(displayedLot).toFixed(2)} lot` : "—"} detail={unmanaged ? `Broker diagnostic · ${position?.count ?? "—"} vị thế · ticket tham chiếu ${position?.ticket ?? "—"}` : managing ? `Ticket ${position?.ticket ?? "—"}` : `Raw ${preTrade?.rawLot == null ? "—" : preTrade.rawLot.toFixed(4)} · cap ${preTrade?.lotCap == null ? "—" : preTrade.lotCap.toFixed(2)}`} />
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, xl: 2 }}>
-                  <MetricCard label={managing ? "Lãi / Lỗ đang chạy" : "Rủi ro dự kiến"} value={money(managing ? displayedPnl : displayedRisk, currency)} detail={managing ? `${position?.floatingPnlPercent == null ? "—" : position.floatingPnlPercent.toFixed(3)}% equity` : `${preTrade?.estimatedRiskPercent == null ? "—" : preTrade.estimatedRiskPercent.toFixed(3)}% balance`} tone={(managing ? (displayedPnl ?? 0) : 0) < 0 ? "error.main" : "success.main"} />
+                  <MetricCard label={unmanaged ? "P/L vị thế tham chiếu" : managing ? "Lãi / Lỗ đang chạy" : "Rủi ro dự kiến"} value={money(hasOpenPosition ? displayedPnl : displayedRisk, currency)} detail={unmanaged ? "Broker diagnostic · không phải tổng P/L các vị thế XAUUSD" : managing ? `${position?.floatingPnlPercent == null ? "—" : position.floatingPnlPercent.toFixed(3)}% equity` : `${preTrade?.estimatedRiskPercent == null ? "—" : preTrade.estimatedRiskPercent.toFixed(3)}% balance`} tone={(hasOpenPosition ? (displayedPnl ?? 0) : 0) < 0 ? "error.main" : "success.main"} />
                 </Grid>
               </Grid>
 
