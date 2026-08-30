@@ -34,7 +34,7 @@ import {
 import {
   getPhase7CLifecycleRuntimeStatus,
   startPhase7CFromWeb,
-  stopPhase7CFromWeb,
+  stopPhase7C,
 } from "../services/phase7c-lifecycle.service";
 import {
   Phase7CStrategyEntryConfigError,
@@ -214,6 +214,25 @@ router.post("/lifecycle/start", async (req: Request, res: Response) => {
   }
 });
 
+router.post("/lifecycle/stop/web", async (req: Request, res: Response) => {
+  if (!isLoopbackRequest(req)) {
+    res.status(403).json({ error: "Bot lifecycle controls are restricted to localhost." });
+    return;
+  }
+  if (lifecycleActionInProgress) {
+    res.status(409).json({ error: "Một thao tác Bật/Dừng Bot đang chạy. Vui lòng chờ hoàn tất." });
+    return;
+  }
+  lifecycleActionInProgress = true;
+  try {
+    res.json(await stopPhase7C(await getMt5Telemetry("XAUUSD"), "web-control-center-stop"));
+  } catch (error) {
+    res.status(409).json({ error: error instanceof Error ? error.message : "Phase 7C stop failed." });
+  } finally {
+    lifecycleActionInProgress = false;
+  }
+});
+
 router.post("/lifecycle/stop", async (req: Request, res: Response) => {
   if (!isLoopbackRequest(req)) {
     res.status(403).json({ error: "Bot lifecycle controls are restricted to localhost." });
@@ -225,7 +244,7 @@ router.post("/lifecycle/stop", async (req: Request, res: Response) => {
   }
   lifecycleActionInProgress = true;
   try {
-    res.json(await stopPhase7CFromWeb(await getMt5Telemetry("XAUUSD")));
+    res.json(await stopPhase7C(await getMt5Telemetry("XAUUSD"), "local-lifecycle-api-stop"));
   } catch (error) {
     res.status(409).json({ error: error instanceof Error ? error.message : "Phase 7C stop failed." });
   } finally {

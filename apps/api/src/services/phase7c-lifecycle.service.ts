@@ -28,6 +28,10 @@ const START_TIMEOUT_MS = 50_000;
 const STOP_VERIFY_TIMEOUT_MS = 10_000;
 const TELEGRAM_STALE_MS = 15_000;
 
+export type Phase7CLifecycleStopProvenance =
+  | "web-control-center-stop"
+  | "local-lifecycle-api-stop";
+
 type TelegramModeStatus = {
   ready?: boolean;
   status?: string;
@@ -365,7 +369,10 @@ export async function startPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
   };
 }
 
-export async function stopPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
+export async function stopPhase7C(
+  telemetry: Mt5TelemetrySnapshot,
+  provenance: Phase7CLifecycleStopProvenance,
+) {
   if (!controlEnabled()) throw new Error("Điều khiển Bot chỉ khả dụng trên localhost Windows.");
   assertPhase7CSelectedAccountReady(telemetry);
   if (telemetry.positions.length > 0) {
@@ -373,7 +380,7 @@ export async function stopPhase7CFromWeb(telemetry: Mt5TelemetrySnapshot) {
   }
 
   const accountModeState = getPhase7CAccountModeState();
-  const mode = phase7CBotModeService.set("PAUSE", "web-control-center-stop");
+  const mode = phase7CBotModeService.set("PAUSE", provenance);
   const broker = getPhase7CLifecycleBrokerClientStatus();
   if (!broker.ready) {
     throw new Error("Lifecycle broker SYSTEM chưa READY; không cho Web user tự dừng privileged executor tree.");
