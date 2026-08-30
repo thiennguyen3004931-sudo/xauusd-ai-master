@@ -1,5 +1,6 @@
 name: Phase7C UI Entry Wait Reason Freshness CI
 
+# GREEN checkpoint after minimal production freshness fix.
 on:
   push:
     branches:
