@@ -22,6 +22,7 @@ on:
 permissions:
   contents: read
 
+# Scoped GREEN checkpoint after the production-only Web patch.
 jobs:
   web-unmanaged-multi-position-status:
     runs-on: ubuntu-latest
