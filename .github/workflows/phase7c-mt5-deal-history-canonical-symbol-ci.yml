@@ -1,5 +1,6 @@
 name: Phase7C MT5 Deal History Canonical Symbol CI
 
+# GREEN checkpoint after canonical deal-symbol production fix.
 on:
   push:
     branches:
