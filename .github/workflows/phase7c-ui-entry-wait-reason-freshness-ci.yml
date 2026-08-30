@@ -1,0 +1,44 @@
+name: Phase7C UI Entry Wait Reason Freshness CI
+
+on:
+  push:
+    branches:
+      - fix/phase7c-ui-entry-wait-reason-freshness
+    paths:
+      - "apps/api/src/services/phase7c-ui-contract.service.ts"
+      - "scripts/test-phase7c-ui-entry-wait-reason-freshness.ts"
+      - ".github/workflows/phase7c-ui-entry-wait-reason-freshness-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "apps/api/src/services/phase7c-ui-contract.service.ts"
+      - "scripts/test-phase7c-ui-entry-wait-reason-freshness.ts"
+      - ".github/workflows/phase7c-ui-entry-wait-reason-freshness-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ui-entry-wait-reason-freshness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build API dependency graph
+        run: pnpm --filter @xauusd/api... build
+      - name: UI entry wait reason freshness contract
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/test-phase7c-ui-entry-wait-reason-freshness.ts
