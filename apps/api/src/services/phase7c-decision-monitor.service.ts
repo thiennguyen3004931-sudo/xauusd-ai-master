@@ -390,6 +390,7 @@ function sidewayDecision(input: {
     lots.activeAlive && lots.active?.armed === true &&
     !lots.restartRequired;
   const currentDecision = Boolean(latest && now - latest.timestamp <= 30 * 60_000);
+  const current = currentDecision ? latest : null;
   const executorReady = currentDecision && new Set(["READY", "SUBMITTED"]).has(String(latest?.stage));
   const approved = modeAllows && safetyAllows && executorReady;
   const stage = !modeAllows || !safetyAllows
@@ -402,34 +403,34 @@ function sidewayDecision(input: {
     strategy: "SIDEWAY",
     stage,
     approved,
-    side: latest?.setup?.side ?? null,
-    setup: latest?.setup?.pattern ?? null,
+    side: current?.setup?.side ?? null,
+    setup: current?.setup?.pattern ?? null,
     confidenceScore: finite(regime.confidence),
     confidenceLabel: null,
-    entry: round(finite(latest?.plan?.entry), 5),
-    stopLoss: round(finite(latest?.plan?.stopLoss), 5),
-    stopDistance: round(finite(latest?.plan?.stopDistance), 5),
-    breakEvenPrice: round(finite(latest?.plan?.breakEvenPrice), 5),
+    entry: round(finite(current?.plan?.entry), 5),
+    stopLoss: round(finite(current?.plan?.stopLoss), 5),
+    stopDistance: round(finite(current?.plan?.stopDistance), 5),
+    breakEvenPrice: round(finite(current?.plan?.breakEvenPrice), 5),
     breakEvenTriggerDistance: 6,
-    tp1: round(finite(latest?.plan?.tp1), 5),
-    tp2: round(finite(latest?.plan?.tp2), 5),
+    tp1: round(finite(current?.plan?.tp1), 5),
+    tp2: round(finite(current?.plan?.tp2), 5),
     partialTriggerDistance: 10,
     partialFraction: "1/3",
-    rawLot: round(finite(latest?.sizing?.rawLot), 4),
-    finalLot: round(finite(latest?.sizing?.finalLot), 2),
-    lotCap: round(finite(latest?.sizing?.maxLot) ?? activeMaxLot, 2),
-    riskTargetPercent: round(finite(latest?.sizing?.riskPercent) ?? activeRisk, 2),
-    estimatedRiskUsd: round(finite(latest?.sizing?.estimatedRiskUsd), 2),
-    estimatedRiskPercent: round(finite(latest?.sizing?.estimatedRiskPercent), 4),
+    rawLot: round(finite(current?.sizing?.rawLot), 4),
+    finalLot: round(finite(current?.sizing?.finalLot), 2),
+    lotCap: round(finite(current?.sizing?.maxLot) ?? activeMaxLot, 2),
+    riskTargetPercent: round(finite(current?.sizing?.riskPercent) ?? activeRisk, 2),
+    estimatedRiskUsd: round(finite(current?.sizing?.estimatedRiskUsd), 2),
+    estimatedRiskPercent: round(finite(current?.sizing?.estimatedRiskPercent), 4),
     limitReason: !accountModeState.valid
       ? `Account-mode state không hợp lệ: ${accountModeState.error ?? "unknown"}.`
-      : latest?.sizing?.limitReason ??
+      : current?.sizing?.limitReason ??
         `Sideway tính lot sau final gate theo ${activeRisk.toFixed(2)}% balance, cap ${activeMaxLot.toFixed(2)} lot và bước chốt đúng 1/3.`,
     decisionReason: currentDecision
-      ? latest?.reason ?? "Chờ Sideway setup."
+      ? current?.reason ?? "Chờ Sideway setup."
       : "Chưa có Sideway setup mới trong 30 phút; lot chỉ được tính sau Supply/Demand + ATR + M5 final gate.",
-    source: latest?.source ?? "SIDEWAY_EXECUTOR_CANONICAL_JOURNAL",
-    updatedAt: latest?.timestamp ?? now,
+    source: current?.source ?? "SIDEWAY_EXECUTOR_CANONICAL_JOURNAL",
+    updatedAt: current?.timestamp ?? now,
   };
 }
 
