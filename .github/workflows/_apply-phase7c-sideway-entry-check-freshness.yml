@@ -1,0 +1,44 @@
+name: Apply Phase7C Sideway Entry Check Freshness Patch
+
+on:
+  push:
+    branches:
+      - fix/phase7c-sideway-entry-check-freshness
+    paths:
+      - ".github/workflows/_apply-phase7c-sideway-entry-check-freshness.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-exact-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/phase7c-sideway-entry-check-freshness
+      - name: Apply exact UI freshness transform
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("apps/api/src/services/phase7c-ui-contract.service.ts")
+          text = path.read_text(encoding="utf-8")
+
+          old = '''  const latest = snapshot.recentDecisions.find((row) => row.strategy === "SIDEWAY") ?? null;\n'''
+          new = '''  const latest = snapshot.recentDecisions.find((row) =>\n    row.strategy === "SIDEWAY" &&\n    snapshot.generatedAt - Number(row.timestamp) <= 30 * 60_000\n  ) ?? null;\n'''
+
+          if text.count(old) != 1:
+              raise SystemExit(f"expected exactly one Sideway latest-decision lookup, found {text.count(old)}")
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding="utf-8")
+      - name: Commit production patch and remove one-shot workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/_apply-phase7c-sideway-entry-check-freshness.yml
+          git add apps/api/src/services/phase7c-ui-contract.service.ts
+          git diff --cached --check
+          git commit -m "fix(phase7c): expire stale Sideway entry checks"
+          git push origin HEAD:fix/phase7c-sideway-entry-check-freshness
