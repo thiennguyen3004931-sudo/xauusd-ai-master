@@ -1,0 +1,46 @@
+name: Phase7C Multiple Position UI Management Reason Patch Once
+
+on:
+  push:
+    branches:
+      - fix/phase7c-multiple-position-ui-management-reason-fail-closed
+    paths:
+      - .github/workflows/phase7c-multiple-position-ui-management-reason-patch-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply exact UI reason guards
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('apps/api/src/services/phase7c-ui-contract.service.ts')
+          text = path.read_text(encoding='utf-8')
+          management_old = 'function managementReasons(snapshot: Snapshot, kind: "STOP" | "PARTIAL"): string[] {\n  if (snapshot.position.count <= 0) return [];'
+          management_new = 'function managementReasons(snapshot: Snapshot, kind: "STOP" | "PARTIAL"): string[] {\n  if (snapshot.position.state != "MANAGING" || snapshot.position.count <= 0) return [];'
+          exit_old = 'function exitReasons(snapshot: Snapshot): string[] {\n  const reasons: string[] = [];'
+          exit_new = 'function exitReasons(snapshot: Snapshot): string[] {\n  if (snapshot.position.state != "MANAGING") return [];\n  const reasons: string[] = [];'
+          if management_old not in text:
+              raise SystemExit('MANAGEMENT_PATCH_TARGET_NOT_FOUND')
+          if exit_old not in text:
+              raise SystemExit('EXIT_PATCH_TARGET_NOT_FOUND')
+          text = text.replace(management_old, management_new, 1)
+          text = text.replace(exit_old, exit_new, 1)
+          path.write_text(text, encoding='utf-8')
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/phase7c-multiple-position-ui-management-reason-patch-once.yml
+      - name: Commit production fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/api/src/services/phase7c-ui-contract.service.ts .github/workflows/phase7c-multiple-position-ui-management-reason-patch-once.yml
+          git commit -m "fix(phase7c): hide managed reasons for unmanaged positions"
+          git push origin HEAD:fix/phase7c-multiple-position-ui-management-reason-fail-closed
