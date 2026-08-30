@@ -1,0 +1,36 @@
+name: Phase7C Web Start Broker Account Context CI
+
+on:
+  push:
+    branches:
+      - fix/phase7c-web-start-broker-account-context
+    paths:
+      - "scripts/run-phase7c-executor-task-runner-local.ps1"
+      - "scripts/lib/phase7c-account-mode.ps1"
+      - "scripts/test-phase7c-web-start-broker-account-context.ps1"
+      - ".github/workflows/phase7c-web-start-broker-account-context-ci.yml"
+  pull_request:
+    paths:
+      - "scripts/run-phase7c-executor-task-runner-local.ps1"
+      - "scripts/lib/phase7c-account-mode.ps1"
+      - "scripts/test-phase7c-web-start-broker-account-context.ps1"
+      - ".github/workflows/phase7c-web-start-broker-account-context-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  account-context-contract:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Canonical Web account context contract with PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-web-start-broker-account-context.ps1
+
+      - name: Canonical Web account context contract with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-web-start-broker-account-context.ps1
