@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - fix/phase7c-legacy-background-cleanup
+      - fix/phase7c-web-api-canonical-account-env-bootstrap
     paths:
       - "apps/api/src/routes/phase7c.route.ts"
       - "apps/api/src/services/mt5.service.ts"
@@ -17,7 +18,9 @@ on:
       - "apps/web/src/phase7c-types.ts"
       - "scripts/lib/phase7c-account-mode.ps1"
       - "scripts/switch-phase7c-account-mode-local.ps1"
+      - "scripts/run-phase7b-api-runtime-local.ps1"
       - "scripts/test-phase7c-web-auto-account-start.ts"
+      - "scripts/test-phase7c-api-canonical-account-env-bootstrap.mjs"
       - ".github/workflows/phase7c-web-auto-account-start-ci.yml"
   pull_request:
     paths:
@@ -33,7 +36,9 @@ on:
       - "apps/web/src/phase7c-types.ts"
       - "scripts/lib/phase7c-account-mode.ps1"
       - "scripts/switch-phase7c-account-mode-local.ps1"
+      - "scripts/run-phase7b-api-runtime-local.ps1"
       - "scripts/test-phase7c-web-auto-account-start.ts"
+      - "scripts/test-phase7c-api-canonical-account-env-bootstrap.mjs"
       - ".github/workflows/phase7c-web-auto-account-start-ci.yml"
 
 permissions:
@@ -68,7 +73,8 @@ jobs:
           $failed = $false
           foreach ($file in @(
             "scripts/lib/phase7c-account-mode.ps1",
-            "scripts/switch-phase7c-account-mode-local.ps1"
+            "scripts/switch-phase7c-account-mode-local.ps1",
+            "scripts/run-phase7b-api-runtime-local.ps1"
           )) {
             $tokens = $null
             $parseErrors = $null
@@ -86,6 +92,9 @@ jobs:
             }
           }
           if ($failed) { exit 1 }
+
+      - name: Canonical API account env bootstrap regression
+        run: node scripts/test-phase7c-api-canonical-account-env-bootstrap.mjs
 
       - name: Web auto-account start regression
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/test-phase7c-web-auto-account-start.ts
