@@ -155,9 +155,13 @@ function autoReasons(snapshot: Snapshot): string[] {
     const confidence = Number.isFinite(Number(snapshot.engine.confidence))
       ? ` (${Number(snapshot.engine.confidence)}%)`
       : "";
+    const recommendation = snapshot.engine.recommendedMode;
+    const effectiveStrategy = snapshot.mode.effectiveStrategy;
     pushUnique(
       reasons,
-      `AUTO: regime ${snapshot.engine.regime}${confidence} → chọn ${snapshot.engine.recommendedMode}.`,
+      effectiveStrategy !== recommendation
+        ? `AUTO: regime ${snapshot.engine.regime}${confidence} → khuyến nghị ${recommendation}; strategy hiệu lực ${effectiveStrategy}.`
+        : `AUTO: regime ${snapshot.engine.regime}${confidence} → chọn ${recommendation}.`,
     );
     for (const reason of snapshot.engine.reasons) pushUnique(reasons, reason);
   } else {
