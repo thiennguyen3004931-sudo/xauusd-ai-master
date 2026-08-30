@@ -22,6 +22,18 @@ assert.match(
   "lifecycle STOP must persist the caller provenance supplied by the trusted server route",
 );
 
+// Lifecycle START needs the same trusted caller boundary as STOP.
+assert.match(
+  lifecycle,
+  /export type Phase7CLifecycleStartProvenance\s*=\s*[\s\S]*?["']web-control-center-start["'][\s\S]*?["']local-lifecycle-api-start["'][\s\S]*?;/,
+  "lifecycle service must define the two canonical START provenance values",
+);
+assert.match(
+  lifecycle,
+  /startPhase7C[\s\S]*?phase7CBotModeService\.set\(\s*["']PAUSE["']\s*,\s*provenance\s*\)/,
+  "lifecycle START must persist the caller provenance supplied by the trusted server route",
+);
+
 // Generic localhost lifecycle API remains the maintenance/automation surface.
 const genericStopStart = route.indexOf('router.post("/lifecycle/stop"');
 assert.ok(genericStopStart >= 0, "generic lifecycle STOP route must remain available");
@@ -39,7 +51,23 @@ assert.doesNotMatch(
   "generic STOP must not accept arbitrary caller provenance from the request body",
 );
 
-// Web UI uses a dedicated server route so maintenance callers cannot accidentally inherit Web provenance.
+const genericStartStart = route.indexOf('router.post("/lifecycle/start"');
+assert.ok(genericStartStart >= 0, "generic lifecycle START route must remain available");
+const genericStartEnd = route.indexOf("router.", genericStartStart + 12);
+assert.ok(genericStartEnd > genericStartStart, "cannot isolate generic lifecycle START route");
+const genericStart = route.slice(genericStartStart, genericStartEnd);
+assert.match(
+  genericStart,
+  /["']local-lifecycle-api-start["']/,
+  "direct localhost lifecycle START must be attributed to local-lifecycle-api-start",
+);
+assert.doesNotMatch(
+  genericStart,
+  /req\.body[\s\S]{0,120}source|source[\s\S]{0,120}req\.body/,
+  "generic START must not accept arbitrary caller provenance from the request body",
+);
+
+// Web UI uses dedicated server routes so maintenance callers cannot accidentally inherit Web provenance.
 const webStopStart = route.indexOf('router.post("/lifecycle/stop/web"');
 assert.ok(webStopStart >= 0, "dedicated Web lifecycle STOP route is required");
 const webStopEnd = route.indexOf("router.", webStopStart + 12);
@@ -49,10 +77,22 @@ assert.match(webStop, /["']web-control-center-stop["']/);
 assert.doesNotMatch(
   webStop,
   /req\.body[\s\S]{0,120}source|source[\s\S]{0,120}req\.body/,
-  "Web provenance must be selected by the dedicated route, not client-supplied free text",
+  "Web STOP provenance must be selected by the dedicated route, not client-supplied free text",
 );
 
-// The browser must call the dedicated Web STOP endpoint while START stays on the existing lifecycle endpoint.
+const webStartStart = route.indexOf('router.post("/lifecycle/start/web"');
+assert.ok(webStartStart >= 0, "dedicated Web lifecycle START route is required");
+const webStartEnd = route.indexOf("router.", webStartStart + 12);
+assert.ok(webStartEnd > webStartStart, "cannot isolate Web lifecycle START route");
+const webStart = route.slice(webStartStart, webStartEnd);
+assert.match(webStart, /["']web-control-center-start["']/);
+assert.doesNotMatch(
+  webStart,
+  /req\.body[\s\S]{0,120}source|source[\s\S]{0,120}req\.body/,
+  "Web START provenance must be selected by the dedicated route, not client-supplied free text",
+);
+
+// The browser must call only the dedicated Web lifecycle endpoints.
 assert.match(
   webApi,
   /action\s*===\s*["']stop["'][\s\S]*?\/api\/v1\/phase7c\/lifecycle\/stop\/web/,
@@ -60,8 +100,8 @@ assert.match(
 );
 assert.match(
   webApi,
-  /\/api\/v1\/phase7c\/lifecycle\/\$\{action\}/,
-  "existing lifecycle START endpoint behavior must remain available",
+  /action\s*===\s*["']stop["'][\s\S]*?\/api\/v1\/phase7c\/lifecycle\/stop\/web[\s\S]*?:\s*["']\/api\/v1\/phase7c\/lifecycle\/start\/web["']/,
+  "Web START must use the dedicated provenance-preserving endpoint",
 );
 
 console.log("PHASE7C_LIFECYCLE_CALLER_PROVENANCE_TEST=PASS");

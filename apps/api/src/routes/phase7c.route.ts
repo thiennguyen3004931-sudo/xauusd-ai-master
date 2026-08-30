@@ -206,7 +206,32 @@ router.post("/lifecycle/start", async (req: Request, res: Response) => {
   }
   lifecycleActionInProgress = true;
   try {
-    res.json(await startPhase7CFromWeb(await getMt5Telemetry("XAUUSD")));
+    res.json(await startPhase7CFromWeb(
+      await getMt5Telemetry("XAUUSD"),
+      "local-lifecycle-api-start",
+    ));
+  } catch (error) {
+    res.status(409).json({ error: error instanceof Error ? error.message : "Phase 7C start failed." });
+  } finally {
+    lifecycleActionInProgress = false;
+  }
+});
+
+router.post("/lifecycle/start/web", async (req: Request, res: Response) => {
+  if (!isLoopbackRequest(req)) {
+    res.status(403).json({ error: "Bot lifecycle controls are restricted to localhost." });
+    return;
+  }
+  if (lifecycleActionInProgress) {
+    res.status(409).json({ error: "Một thao tác Bật/Dừng Bot đang chạy. Vui lòng chờ hoàn tất." });
+    return;
+  }
+  lifecycleActionInProgress = true;
+  try {
+    res.json(await startPhase7CFromWeb(
+      await getMt5Telemetry("XAUUSD"),
+      "web-control-center-start",
+    ));
   } catch (error) {
     res.status(409).json({ error: error instanceof Error ? error.message : "Phase 7C start failed." });
   } finally {
