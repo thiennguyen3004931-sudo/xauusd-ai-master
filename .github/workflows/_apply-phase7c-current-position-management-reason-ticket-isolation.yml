@@ -1,0 +1,44 @@
+name: Apply Phase7C Current Position Management Reason Ticket Isolation Patch
+
+on:
+  push:
+    branches:
+      - fix/phase7c-current-position-management-reason-ticket-isolation
+    paths:
+      - ".github/workflows/_apply-phase7c-current-position-management-reason-ticket-isolation.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-exact-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/phase7c-current-position-management-reason-ticket-isolation
+          fetch-depth: 0
+      - name: Apply exact management-reason ticket transform
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path("apps/api/src/services/phase7c-ui-contract.service.ts")
+          text = path.read_text(encoding="utf-8")
+          old = '    if (ticket && String(row.management?.ticket ?? "") && String(row.management?.ticket ?? "") !== ticket) continue;'
+          new = '    if (ticket && String(row.management?.ticket ?? "") !== ticket) continue;'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f"Expected exactly one managementReasons ticket guard, found {count}")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+      - name: Commit production patch and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff -- apps/api/src/services/phase7c-ui-contract.service.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/api/src/services/phase7c-ui-contract.service.ts
+          git rm .github/workflows/_apply-phase7c-current-position-management-reason-ticket-isolation.yml
+          git commit -m "fix(phase7c): isolate current management reasons by ticket"
+          git push origin HEAD:fix/phase7c-current-position-management-reason-ticket-isolation
