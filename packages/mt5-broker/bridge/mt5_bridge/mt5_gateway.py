@@ -367,7 +367,7 @@ class Mt5Gateway:
                     "ticket": str(getattr(row, "ticket", "")),
                     "orderId": str(getattr(row, "order", "")),
                     "positionId": str(getattr(row, "position_id", "")),
-                    "symbol": row_symbol,
+                    "symbol": self.settings.canonical_symbol(row_symbol),
                     "side": side,
                     "entry": entry_names.get(
                         int(getattr(row, "entry", -1)),
