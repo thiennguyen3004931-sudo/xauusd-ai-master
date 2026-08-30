@@ -265,52 +265,63 @@ export async function startPhase7CFromWeb(
     telemetry.health?.server ?? null,
     telemetry.accountLogin,
   );
-  const accountDecision = resolvePhase7CWebStartAccount({
-    reachable: telemetry.reachable,
-    brokerAccountMode: telemetry.health?.accountMode ?? null,
-    currentState: initialAccountState,
-    durableLiveAuthorizationValid: liveAuthorization.valid,
-  });
-  if (!accountDecision.allowed || !accountDecision.targetAccountMode) {
-    throw new Error(
-      accountDecision.reason === "LIVE_NOT_PREAUTHORIZED"
-        ? "MT5 đang đăng nhập LIVE nhưng tài khoản LIVE này chưa được cấp quyền trước. Web không tự ARM LIVE lần đầu; hãy dùng flow Admin -ConfirmLiveExecution một lần. Bot giữ PAUSE."
-        : `Không thể chọn account runtime từ MT5 hiện tại: ${accountDecision.reason}. Bot giữ PAUSE.`,
-    );
+  let targetAccountMode: Phase7CAccountMode = initialAccountState.accountMode;
+
+  if (provenance === "local-lifecycle-api-start") {
+    if (!initialAccountState.valid) {
+      throw new Error(`Account-mode state không hợp lệ. ${initialAccountState.error ?? ""}`.trim());
+    }
+    targetAccountMode = initialAccountState.accountMode;
   }
 
-  const targetAccountMode = accountDecision.targetAccountMode;
-  if (targetAccountMode === "LIVE") {
-    if (accountDecision.authorizationSource === "LEGACY_EXPLICIT_LIVE_STATE") {
-      liveAuthorization = ensurePhase7CLiveAuthorizationForWebStart(
-        telemetry.health?.server ?? null,
-        telemetry.accountLogin,
+  if (provenance === "web-control-center-start") {
+    const accountDecision = resolvePhase7CWebStartAccount({
+      reachable: telemetry.reachable,
+      brokerAccountMode: telemetry.health?.accountMode ?? null,
+      currentState: initialAccountState,
+      durableLiveAuthorizationValid: liveAuthorization.valid,
+    });
+    if (!accountDecision.allowed || !accountDecision.targetAccountMode) {
+      throw new Error(
+        accountDecision.reason === "LIVE_NOT_PREAUTHORIZED"
+          ? "MT5 đang đăng nhập LIVE nhưng tài khoản LIVE này chưa được cấp quyền trước. Web không tự ARM LIVE lần đầu; hãy dùng flow Admin -ConfirmLiveExecution một lần. Bot giữ PAUSE."
+          : `Không thể chọn account runtime từ MT5 hiện tại: ${accountDecision.reason}. Bot giữ PAUSE.`,
       );
     }
-    if (!liveAuthorization.valid || !liveAuthorization.identity) {
-      throw new Error(`LIVE authorization không hợp lệ: ${liveAuthorizationError(liveAuthorization)}. Bot giữ PAUSE.`);
-    }
-  } else if (
-    initialAccountState.valid &&
-    initialAccountState.accountMode === "LIVE" &&
-    initialAccountState.liveExecutionEnabled
-  ) {
-    preserveLegacyExplicitLiveAuthorization();
-  }
 
-  if (initialAccountState.accountMode !== targetAccountMode) {
-    const liveIdentity = targetAccountMode === "LIVE" ? liveAuthorization.identity : null;
-    activatePhase7CAccountRiskProfile({
-      accountMode: targetAccountMode,
-      liveIdentity,
-      updatedBy: `web-auto-detect:${targetAccountMode}`,
-    });
-    setPhase7CAccountModeFromWebAutoDetection({
-      accountMode: targetAccountMode,
-      envFile: accountEnvFile(targetAccountMode),
-      liveAuthorizationValidated: targetAccountMode === "LIVE",
-      updatedBy: `web-auto-detect:${targetAccountMode}`,
-    });
+    targetAccountMode = accountDecision.targetAccountMode;
+    if (targetAccountMode === "LIVE") {
+      if (accountDecision.authorizationSource === "LEGACY_EXPLICIT_LIVE_STATE") {
+        liveAuthorization = ensurePhase7CLiveAuthorizationForWebStart(
+          telemetry.health?.server ?? null,
+          telemetry.accountLogin,
+        );
+      }
+      if (!liveAuthorization.valid || !liveAuthorization.identity) {
+        throw new Error(`LIVE authorization không hợp lệ: ${liveAuthorizationError(liveAuthorization)}. Bot giữ PAUSE.`);
+      }
+    } else if (
+      initialAccountState.valid &&
+      initialAccountState.accountMode === "LIVE" &&
+      initialAccountState.liveExecutionEnabled
+    ) {
+      preserveLegacyExplicitLiveAuthorization();
+    }
+
+    if (initialAccountState.accountMode !== targetAccountMode) {
+      const liveIdentity = targetAccountMode === "LIVE" ? liveAuthorization.identity : null;
+      activatePhase7CAccountRiskProfile({
+        accountMode: targetAccountMode,
+        liveIdentity,
+        updatedBy: `web-auto-detect:${targetAccountMode}`,
+      });
+      setPhase7CAccountModeFromWebAutoDetection({
+        accountMode: targetAccountMode,
+        envFile: accountEnvFile(targetAccountMode),
+        liveAuthorizationValidated: targetAccountMode === "LIVE",
+        updatedBy: `web-auto-detect:${targetAccountMode}`,
+      });
+    }
   }
 
   assertPhase7CSelectedAccountReady(telemetry);

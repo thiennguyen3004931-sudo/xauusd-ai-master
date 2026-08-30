@@ -34,6 +34,23 @@ assert.match(
   "lifecycle START must persist the caller provenance supplied by the trusted server route",
 );
 
+// Local lifecycle START must not inherit Web account-selection/account-switch behavior.
+const lifecycleStartFunctionStart = lifecycle.indexOf("export async function startPhase7CFromWeb(");
+assert.ok(lifecycleStartFunctionStart >= 0, "cannot locate lifecycle START implementation");
+const lifecycleStopFunctionStart = lifecycle.indexOf("export async function stopPhase7C(", lifecycleStartFunctionStart);
+assert.ok(lifecycleStopFunctionStart > lifecycleStartFunctionStart, "cannot isolate lifecycle START implementation");
+const lifecycleStartFunction = lifecycle.slice(lifecycleStartFunctionStart, lifecycleStopFunctionStart);
+assert.match(
+  lifecycleStartFunction,
+  /if\s*\(\s*provenance\s*===\s*["']local-lifecycle-api-start["']\s*\)[\s\S]*?targetAccountMode\s*=\s*initialAccountState\.accountMode/,
+  "local lifecycle START must keep the currently selected canonical account instead of auto-selecting from MT5",
+);
+assert.match(
+  lifecycleStartFunction,
+  /if\s*\(\s*provenance\s*===\s*["']web-control-center-start["']\s*\)[\s\S]*?resolvePhase7CWebStartAccount[\s\S]*?activatePhase7CAccountRiskProfile[\s\S]*?setPhase7CAccountModeFromWebAutoDetection/,
+  "Web account selection and account-mode mutation must be isolated behind the Web START provenance",
+);
+
 // Generic localhost lifecycle API remains the maintenance/automation surface.
 const genericStopStart = route.indexOf('router.post("/lifecycle/stop"');
 assert.ok(genericStopStart >= 0, "generic lifecycle STOP route must remain available");
