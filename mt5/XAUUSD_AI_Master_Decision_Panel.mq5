@@ -505,20 +505,22 @@ void DrawTradePlan(const string payload, const int width, const bool managing)
    int bx1 = x + 12;
    int bx2 = bx1 + box_w + gap;
    int bx3 = bx2 + box_w + gap;
+   string position_state = managing ? Clean(Field(payload, "positionState"), "UNMANAGED") : "SETUP";
+   bool position_unmanaged = managing && position_state == "UNMANAGED";
    string entry = managing ? Field(payload, "positionEntry") : Field(payload, "setupEntry");
    string stop = managing ? Field(payload, "positionStopLoss") : Field(payload, "setupStopLoss");
-   string tp2 = managing ? Field(payload, "positionTp2") : Field(payload, "setupTp2");
-   string tp1 = managing ? Field(payload, "positionTp1") : Field(payload, "setupTp1");
-   string strategy = managing ? Field(payload, "positionStrategy") : Field(payload, "setupStrategy");
-   string tp = EmptyValue(tp2) ? tp1 : tp2;
-   string tp_label = strategy == "TREND" && EmptyValue(tp2) ? "MỐC +10" : "TP";
+   string tp2 = managing ? (position_unmanaged ? "n/a" : Field(payload, "positionTp2")) : Field(payload, "setupTp2");
+   string tp1 = managing ? (position_unmanaged ? "n/a" : Field(payload, "positionTp1")) : Field(payload, "setupTp1");
+   string strategy = managing ? (position_unmanaged ? "UNMANAGED" : Field(payload, "positionStrategy")) : Field(payload, "setupStrategy");
+   string tp = position_unmanaged ? "n/a" : (EmptyValue(tp2) ? tp1 : tp2);
+   string tp_label = position_unmanaged ? "TP KHÔNG QUẢN LÝ" : (strategy == "TREND" && EmptyValue(tp2) ? "MỐC +10" : "TP");
 
    Card(bx1, y + 12, box_w, 64, C'7,25,38', C'0,110,155');
    Card(bx2, y + 12, box_w, 64, C'30,14,22', C'140,45,60');
-   Card(bx3, y + 12, box_w, 64, C'12,28,20', C'45,140,70');
+   Card(bx3, y + 12, box_w, 64, position_unmanaged ? C'35,18,18' : C'12,28,20', position_unmanaged ? clrTomato : C'45,140,70');
    Text(bx1 + 12, CenteredTextY(y + 14, 22, BODY_FONT_SIZE), "ENTRY", clrDeepSkyBlue, BODY_FONT_SIZE);
    Text(bx2 + 12, CenteredTextY(y + 14, 22, BODY_FONT_SIZE), "STOPLOSS", clrTomato, BODY_FONT_SIZE);
-   Text(bx3 + 12, CenteredTextY(y + 14, 22, BODY_FONT_SIZE), tp_label, clrLimeGreen, BODY_FONT_SIZE);
+   Text(bx3 + 12, CenteredTextY(y + 14, 22, BODY_FONT_SIZE), tp_label, position_unmanaged ? clrTomato : clrLimeGreen, BODY_FONT_SIZE);
    Text(bx1 + 12, CenteredTextY(y + 38, 32, BODY_FONT_SIZE), FitText(Clean(entry), box_w - 24, BODY_FONT_SIZE), clrWhite, BODY_FONT_SIZE);
    Text(bx2 + 12, CenteredTextY(y + 38, 32, BODY_FONT_SIZE), FitText(Clean(stop), box_w - 24, BODY_FONT_SIZE), clrWhite, BODY_FONT_SIZE);
    Text(bx3 + 12, CenteredTextY(y + 38, 32, BODY_FONT_SIZE), FitText(Clean(tp), box_w - 24, BODY_FONT_SIZE), clrWhite, BODY_FONT_SIZE);
@@ -686,7 +688,8 @@ void DrawManaging(const string payload, const int width)
    int top_y = CenteredTextY(322, 24, SECTION_FONT_SIZE);
    int bottom_y = CenteredTextY(348, 24, BODY_FONT_SIZE);
    Text(x + 18, top_y, FitText(position_title, w / 2 - 30, SECTION_FONT_SIZE), position_tone, SECTION_FONT_SIZE);
-   TextRight(x + w - 18, top_y, FitText("Lãi/lỗ: " + Clean(Field(payload, "floatingPnlUsd")) + " USD", w / 2 - 30, BODY_FONT_SIZE), clrWhite, BODY_FONT_SIZE);
+   string pnl_label = position_unmanaged ? "P/L tham chiếu: " : "Lãi/lỗ: ";
+   TextRight(x + w - 18, top_y, FitText(pnl_label + Clean(Field(payload, "floatingPnlUsd")) + " USD", w / 2 - 30, BODY_FONT_SIZE), clrWhite, BODY_FONT_SIZE);
    Text(x + 18, bottom_y, FitText("Hướng: " + SideVi(Field(payload, "positionSide")) + " · Lot: " + Clean(Field(payload, "positionVolume")), w / 2 - 30, BODY_FONT_SIZE), clrSilver, BODY_FONT_SIZE);
    TextRight(x + w - 18, bottom_y, FitText(Clean(Field(payload, "floatingPnlPercent")) + "%", w / 3, BODY_FONT_SIZE), clrSilver, BODY_FONT_SIZE);
 
