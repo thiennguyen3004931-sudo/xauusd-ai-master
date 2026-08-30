@@ -136,7 +136,7 @@ export async function getPhase7CLifecycle(): Promise<Phase7CLifecycleSnapshot> {
 export async function runPhase7CLifecycleAction(action: "start" | "stop"): Promise<Phase7CLifecycleActionResponse> {
   const lifecyclePath = action === "stop"
     ? "/api/v1/phase7c/lifecycle/stop/web"
-    : `/api/v1/phase7c/lifecycle/${action}`;
+    : "/api/v1/phase7c/lifecycle/start/web";
   return read<Phase7CLifecycleActionResponse>(await fetch(`${API_BASE}${lifecyclePath}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
