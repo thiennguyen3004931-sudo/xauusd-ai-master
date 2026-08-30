@@ -33,6 +33,11 @@ assert.match(
   /startPhase7C[\s\S]*?phase7CBotModeService\.set\(\s*["']PAUSE["']\s*,\s*provenance\s*\)/,
   "lifecycle START must persist the caller provenance supplied by the trusted server route",
 );
+assert.doesNotMatch(
+  lifecycle,
+  /provenance\s*:\s*Phase7CLifecycleStartProvenance\s*=\s*["']web-control-center-start["']/,
+  "lifecycle START provenance must be explicit; omitting provenance must never silently inherit Web authority",
+);
 
 // Local lifecycle START must not inherit Web account-selection/account-switch behavior.
 const lifecycleStartFunctionStart = lifecycle.indexOf("export async function startPhase7CFromWeb(");
