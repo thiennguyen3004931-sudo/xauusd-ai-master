@@ -73,6 +73,37 @@ function Read-Phase7CCanonicalLaunchConfig {
 
   if (-not (Test-Path -LiteralPath $workDir)) { throw "Executor task WorkDir not found: $workDir" }
   $workDir = (Resolve-Path -LiteralPath $workDir).Path
+
+  # Web account selection is canonical durable state, while the SYSTEM task config
+  # remains the privileged launch definition. Reconcile only v2 account context here
+  # so a stale task config cannot override a guarded Web/local account selection.
+  if ($configVersion -eq 2) {
+    $accountStatePath = Join-Path $workDir "phase7c-account-mode.json"
+    if (Test-Path -LiteralPath $accountStatePath) {
+      try {
+        $accountState = Get-Content -LiteralPath $accountStatePath -Raw | ConvertFrom-Json
+        if ([int]$accountState.version -ne 1) { throw "account-mode state version must be 1." }
+        $canonicalAccountMode = ConvertTo-Phase7CAccountMode ([string]$accountState.accountMode)
+        $canonicalLiveExecutionEnabled = [bool]$accountState.liveExecutionEnabled
+        if ($canonicalAccountMode -eq "DEMO" -and $canonicalLiveExecutionEnabled) {
+          throw "Canonical DEMO account state cannot enable liveExecutionEnabled."
+        }
+        if ($canonicalAccountMode -eq "LIVE" -and -not $canonicalLiveExecutionEnabled) {
+          throw "Canonical LIVE account state requires liveExecutionEnabled=true."
+        }
+        $canonicalEnvFile = ([string]$accountState.envFile).Trim()
+        if ([string]::IsNullOrWhiteSpace($canonicalEnvFile)) {
+          throw "Canonical account state envFile is required."
+        }
+        $accountMode = $canonicalAccountMode
+        $liveExecutionEnabled = $canonicalLiveExecutionEnabled
+        $envFile = $canonicalEnvFile
+      } catch {
+        throw "Canonical account-mode state is invalid at $accountStatePath. $($_.Exception.Message)"
+      }
+    }
+  }
+
   if ([string]::IsNullOrWhiteSpace($controlApiUrl) -or $controlApiUrl -notmatch '^http://(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$') {
     throw "Executor task ControlApiUrl must be localhost HTTP."
   }
@@ -197,7 +228,6 @@ function Write-BrokerStatus {
     updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   }) -Depth 6
 }
-
 function Set-BrokerState([string]$State, [string]$ReasonCode = $null, [string]$ErrorMessage = $null) {
   $script:brokerState = $State
   $script:stateReasonCode = $ReasonCode
