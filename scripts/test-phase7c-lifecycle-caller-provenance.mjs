@@ -100,7 +100,7 @@ assert.match(
 );
 assert.match(
   webApi,
-  /action\s*===\s*["']start["'][\s\S]*?\/api\/v1\/phase7c\/lifecycle\/start\/web/,
+  /action\s*===\s*["']stop["'][\s\S]*?\/api\/v1\/phase7c\/lifecycle\/stop\/web[\s\S]*?:\s*["']\/api\/v1\/phase7c\/lifecycle\/start\/web["']/,
   "Web START must use the dedicated provenance-preserving endpoint",
 );
 
