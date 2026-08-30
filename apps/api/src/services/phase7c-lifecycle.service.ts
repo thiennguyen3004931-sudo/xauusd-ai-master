@@ -252,7 +252,7 @@ function chooseStartBrokerAction(current: ReturnType<typeof getPhase7CLifecycleR
 
 export async function startPhase7CFromWeb(
   telemetry: Mt5TelemetrySnapshot,
-  provenance: Phase7CLifecycleStartProvenance = "web-control-center-start",
+  provenance: Phase7CLifecycleStartProvenance,
 ) {
   if (!controlEnabled()) throw new Error("Điều khiển Bot chỉ khả dụng trên localhost Windows.");
 
