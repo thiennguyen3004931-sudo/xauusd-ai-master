@@ -85,6 +85,21 @@ function Assert-Phase7CAccountEnv(
   if ($mode -eq "LIVE" -and -not $allowReal) {
     throw "LIVE env requires MT5_ALLOW_REAL_ACCOUNT=true."
   }
+  if ($mode -eq "LIVE") {
+    $trendMagicRaw = ([string](Get-Phase7CEnvValue $EnvFile "MT5_MAGIC_NUMBER")).Trim()
+    $trendMagic = 0
+    if (-not [int]::TryParse($trendMagicRaw, [ref]$trendMagic) -or $trendMagic -ne 270715) {
+      throw "LIVE env requires MT5_MAGIC_NUMBER=270715."
+    }
+
+    $sidewayMagicRaw = ([string](Get-Phase7CEnvValue $EnvFile "ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER")).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($sidewayMagicRaw)) {
+      $sidewayMagic = 0
+      if (-not [int]::TryParse($sidewayMagicRaw, [ref]$sidewayMagic) -or $sidewayMagic -ne 270714) {
+        throw "LIVE env requires ZIQ_PHASE7C_SIDEWAY_MAGIC_NUMBER=270714 when configured."
+      }
+    }
+  }
   if ($RequireTrading -and -not $tradingEnabled) {
     throw "$mode execution requires MT5_TRADING_ENABLED=true."
   }
