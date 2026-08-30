@@ -118,11 +118,16 @@ export function Phase7CControlCenterPage() {
     enabled: bridgeReady,
   });
   const decision = decisionMonitor.data;
+  const preTrade = decision?.preTrade;
 
   const recoveryPreviewVolume =
-    decision?.engine.recommendedMode === "SIDEWAY"
-      ? configuredSidewayMaxLot
-      : configuredTrendLot;
+    preTrade?.approved === true &&
+    Number.isFinite(preTrade.finalLot) &&
+    Number(preTrade.finalLot) > 0
+      ? Number(preTrade.finalLot)
+      : decision?.engine.recommendedMode === "SIDEWAY"
+        ? configuredSidewayMaxLot
+        : configuredTrendLot;
   const dailyRecovery = useQuery({
     queryKey: ["phase7c-daily-recovery-control-center", recoveryPreviewVolume],
     queryFn: () => getPhase7CDailyRecovery(recoveryPreviewVolume),
@@ -194,7 +199,6 @@ export function Phase7CControlCenterPage() {
   const mode = lifecycleData?.mode.mode ?? decision?.mode.active ?? "—";
   const currency = decision?.account.currency ?? "USD";
   const position = decision?.position;
-  const preTrade = decision?.preTrade;
   const managing = position?.state === "MANAGING" || position?.state === "UNMANAGED";
   const displayedEntry = managing ? position?.entry : preTrade?.entry;
   const displayedStop = managing ? position?.stopLoss : preTrade?.stopLoss;
