@@ -22,6 +22,7 @@ on:
 permissions:
   contents: read
 
+# Scoped GREEN checkpoint after the production-only MT5 patch.
 jobs:
   mt5-unmanaged-diagnostic-details:
     runs-on: ubuntu-latest
