@@ -25,25 +25,27 @@ jobs:
           from pathlib import Path
           path = Path('apps/api/src/services/phase7c-decision-monitor.service.ts')
           text = path.read_text(encoding='utf-8')
-          old = '''  const states = input.managedStates ?? { TREND: null, SIDEWAY: null };
-          const ticket = String(position.ticket);
-          const trendManaged = String(states.TREND?.ticket ?? "") === ticket ? states.TREND : null;
-          const sidewayManaged = String(states.SIDEWAY?.ticket ?? "") === ticket ? states.SIDEWAY : null;
-          const strategy: Strategy | null = trendManaged ? "TREND" : sidewayManaged ? "SIDEWAY" : null;
-          const managed = trendManaged ?? sidewayManaged;
-          const ticketAudit = input.audit.filter((row) => String(row.management?.ticket ?? "") === ticket);
-          '''
-          new = '''  const states = input.managedStates ?? { TREND: null, SIDEWAY: null };
-          const ticket = String(position.ticket);
-          const hasExactlyOnePosition = positions.length === 1;
-          const trendManaged = hasExactlyOnePosition && String(states.TREND?.ticket ?? "") === ticket ? states.TREND : null;
-          const sidewayManaged = hasExactlyOnePosition && String(states.SIDEWAY?.ticket ?? "") === ticket ? states.SIDEWAY : null;
-          const strategy: Strategy | null = trendManaged ? "TREND" : sidewayManaged ? "SIDEWAY" : null;
-          const managed = trendManaged ?? sidewayManaged;
-          const ticketAudit = hasExactlyOnePosition
-            ? input.audit.filter((row) => String(row.management?.ticket ?? "") === ticket)
-            : [];
-          '''
+          old = "\n".join([
+              '  const states = input.managedStates ?? { TREND: null, SIDEWAY: null };',
+              '  const ticket = String(position.ticket);',
+              '  const trendManaged = String(states.TREND?.ticket ?? "") === ticket ? states.TREND : null;',
+              '  const sidewayManaged = String(states.SIDEWAY?.ticket ?? "") === ticket ? states.SIDEWAY : null;',
+              '  const strategy: Strategy | null = trendManaged ? "TREND" : sidewayManaged ? "SIDEWAY" : null;',
+              '  const managed = trendManaged ?? sidewayManaged;',
+              '  const ticketAudit = input.audit.filter((row) => String(row.management?.ticket ?? "") === ticket);',
+          ])
+          new = "\n".join([
+              '  const states = input.managedStates ?? { TREND: null, SIDEWAY: null };',
+              '  const ticket = String(position.ticket);',
+              '  const hasExactlyOnePosition = positions.length === 1;',
+              '  const trendManaged = hasExactlyOnePosition && String(states.TREND?.ticket ?? "") === ticket ? states.TREND : null;',
+              '  const sidewayManaged = hasExactlyOnePosition && String(states.SIDEWAY?.ticket ?? "") === ticket ? states.SIDEWAY : null;',
+              '  const strategy: Strategy | null = trendManaged ? "TREND" : sidewayManaged ? "SIDEWAY" : null;',
+              '  const managed = trendManaged ?? sidewayManaged;',
+              '  const ticketAudit = hasExactlyOnePosition',
+              '    ? input.audit.filter((row) => String(row.management?.ticket ?? "") === ticket)',
+              '    : [];',
+          ])
           if old not in text:
               raise SystemExit('PATCH_TARGET_NOT_FOUND')
           path.write_text(text.replace(old, new, 1), encoding='utf-8')
