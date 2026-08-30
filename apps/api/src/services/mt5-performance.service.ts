@@ -143,43 +143,94 @@ function reconstructTrades(deals: readonly Mt5BridgeDeal[], trendMagic: number, 
     groups.set(deal.positionId, group);
   }
 
+  const EPSILON = 1e-8;
   const trades: Mt5PerformanceTrade[] = [];
   for (const [positionId, group] of groups) {
     group.sort((a, b) => a.timestamp - b.timestamp);
-    const opens = group.filter((deal) => deal.entry === "IN" && deal.side !== null);
-    const closes = group.filter((deal) => deal.entry === "OUT" || deal.entry === "OUT_BY" || deal.entry === "INOUT");
-    const firstOpen = opens.at(0);
-    const lastClose = closes.at(-1);
-    if (!firstOpen || !lastClose || firstOpen.side === null) continue;
+    let nextLegIndex = 0;
+    let active: {
+      opening: Mt5BridgeDeal;
+      side: "BUY" | "SELL";
+      legIndex: number;
+      openedAt: number;
+      openVolume: number;
+      remainingVolume: number;
+      entryNotional: number;
+      closedVolume: number;
+      exitNotional: number;
+      netPnl: number;
+    } | null = null;
 
-    const openVolume = opens.reduce((sum, deal) => sum + deal.volume, 0);
-    const closeVolume = closes.reduce((sum, deal) => sum + deal.volume, 0);
-    if (openVolume <= 0 || closeVolume <= 0 || closeVolume + 1e-8 < openVolume) continue;
+    const startLeg = (opening: Mt5BridgeDeal, volume: number, netPnl: number) => {
+      if (opening.side === null || volume <= EPSILON) return null;
+      return {
+        opening,
+        side: opening.side,
+        legIndex: nextLegIndex++,
+        openedAt: opening.timestamp,
+        openVolume: volume,
+        remainingVolume: volume,
+        entryNotional: opening.price * volume,
+        closedVolume: 0,
+        exitNotional: 0,
+        netPnl,
+      };
+    };
 
-    const entry = opens.reduce((sum, deal) => sum + deal.price * deal.volume, 0) / openVolume;
-    const exit = closes.reduce((sum, deal) => sum + deal.price * deal.volume, 0) / closeVolume;
-    const netPnl = group.reduce((sum, deal) => sum + deal.netPnl, 0);
-    const hour = new Date(firstOpen.timestamp).getUTCHours();
-    const day = new Date(firstOpen.timestamp).getUTCDay();
+    const finishLeg = (closedAt: number) => {
+      if (!active || active.remainingVolume > EPSILON || active.closedVolume <= EPSILON || active.openVolume <= EPSILON) return;
+      const hour = new Date(active.openedAt).getUTCHours();
+      const day = new Date(active.openedAt).getUTCDay();
+      trades.push({
+        id: active.legIndex === 0 ? `mt5-${positionId}` : `mt5-${positionId}-r${active.legIndex}`,
+        symbol: active.opening.symbol || "XAUUSD",
+        side: active.side,
+        ownership: ownershipOf(active.opening, trendMagic, sidewayMagic),
+        strategy: strategyOf(active.opening, trendMagic, sidewayMagic),
+        openedAt: active.openedAt,
+        closedAt,
+        durationMinutes: round(Math.max(0, closedAt - active.openedAt) / 60_000, 1),
+        volume: round(active.openVolume, 2),
+        entry: round(active.entryNotional / active.openVolume, 2),
+        exit: round(active.exitNotional / active.closedVolume, 2),
+        netPnl: round(active.netPnl, 2),
+        session: sessionFromHour(hour),
+        brokerHour: hour,
+        weekday: WEEKDAYS[day] ?? String(day),
+        exitReason: "UNKNOWN",
+      });
+      active = null;
+    };
 
-    trades.push({
-      id: `mt5-${positionId}`,
-      symbol: firstOpen.symbol || "XAUUSD",
-      side: firstOpen.side,
-      ownership: ownershipOf(firstOpen, trendMagic, sidewayMagic),
-      strategy: strategyOf(firstOpen, trendMagic, sidewayMagic),
-      openedAt: firstOpen.timestamp,
-      closedAt: lastClose.timestamp,
-      durationMinutes: round(Math.max(0, lastClose.timestamp - firstOpen.timestamp) / 60_000, 1),
-      volume: round(openVolume, 2),
-      entry: round(entry, 2),
-      exit: round(exit, 2),
-      netPnl: round(netPnl, 2),
-      session: sessionFromHour(hour),
-      brokerHour: hour,
-      weekday: WEEKDAYS[day] ?? String(day),
-      exitReason: "UNKNOWN",
-    });
+    for (const deal of group) {
+      if (deal.entry === "IN" && deal.side !== null && deal.volume > EPSILON) {
+        if (!active) {
+          active = startLeg(deal, deal.volume, deal.netPnl);
+        } else if (active.side === deal.side) {
+          active.openVolume += deal.volume;
+          active.remainingVolume += deal.volume;
+          active.entryNotional += deal.price * deal.volume;
+          active.netPnl += deal.netPnl;
+        }
+        continue;
+      }
+
+      if (!active || (deal.entry !== "OUT" && deal.entry !== "OUT_BY" && deal.entry !== "INOUT")) continue;
+      const closeVolume = Math.min(deal.volume, active.remainingVolume);
+      if (closeVolume <= EPSILON) continue;
+
+      active.remainingVolume = Math.max(0, active.remainingVolume - closeVolume);
+      active.closedVolume += closeVolume;
+      active.exitNotional += deal.price * closeVolume;
+      active.netPnl += deal.netPnl;
+
+      const reversalResidual = deal.entry === "INOUT" ? Math.max(0, deal.volume - closeVolume) : 0;
+      const reversalOpening = reversalResidual > EPSILON && deal.side !== null ? deal : null;
+      if (active.remainingVolume <= EPSILON) {
+        finishLeg(deal.timestamp);
+        if (reversalOpening) active = startLeg(reversalOpening, reversalResidual, 0);
+      }
+    }
   }
   return trades.sort((a, b) => b.closedAt - a.closedAt);
 }
