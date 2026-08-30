@@ -19,6 +19,7 @@ on:
 permissions:
   contents: read
 
+# Scoped GREEN verification after the exact production ticket guard fix.
 jobs:
   current-position-management-reason-ticket-isolation:
     runs-on: ubuntu-latest
