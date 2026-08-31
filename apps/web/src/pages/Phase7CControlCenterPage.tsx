@@ -28,6 +28,7 @@ import {
   getPhase7CDailyRecovery,
   getPhase7CLifecycle,
   getPhase7CLotSettings,
+  getPhase7CSourceSafety,
   runPhase7CLifecycleAction,
   setPhase7CBotMode,
   setPhase7CLotSettings,
@@ -99,6 +100,14 @@ export function Phase7CControlCenterPage() {
     retry: false,
   });
   const bridgeReady = lifecycle.data?.bridge.reachable === true;
+
+  const sourceSafety = useQuery({
+    queryKey: ["phase7c-source-safety"],
+    queryFn: getPhase7CSourceSafety,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const performanceSafety = sourceSafety.data?.performanceAttribution;
 
   const lotSettings = useQuery({
     queryKey: ["phase7c-lot-settings"],
@@ -355,6 +364,48 @@ export function Phase7CControlCenterPage() {
               Đang có vị thế XAUUSD; DỪNG HỆ THỐNG bị khóa. Yêu cầu AUTO sẽ bị backend từ chối cho tới khi vị thế về 0. TẠM DỪNG mode vẫn khả dụng và không dừng executor quản lý vị thế.
             </Alert>
           ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2} alignItems={{ md: "center" }}>
+            <Box>
+              <Typography fontWeight={950}>Các safety contract đã đạt</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Nguồn backend PHASE7C_SOURCE_SAFETY_CONTRACT · đây là contract phần mềm đã kiểm thử, tách biệt với ARM/MODE runtime.
+              </Typography>
+            </Box>
+            <Chip
+              color={performanceSafety ? "success" : "default"}
+              label={performanceSafety ? "BACKEND ENFORCED" : "ĐANG ĐỌC"}
+              size="small"
+              variant="outlined"
+            />
+          </Stack>
+          {sourceSafety.error ? (
+            <Alert severity="warning" sx={{ mt: 2 }}>{friendlyError(sourceSafety.error)}</Alert>
+          ) : !performanceSafety ? (
+            <LinearProgress sx={{ mt: 2 }} />
+          ) : (
+            <Grid container spacing={2} sx={{ mt: 0.5 }}>
+              <Grid size={{ xs: 12, lg: 4 }}>
+                <ReasonBox title={`LIVE MAGIC · ${performanceSafety.liveMagic.status}`}>
+                  {`Trend ${performanceSafety.liveMagic.trendMagicNumber} · Sideway ${performanceSafety.liveMagic.sidewayMagicNumber} · ${performanceSafety.liveMagic.policy}`}
+                </ReasonBox>
+              </Grid>
+              <Grid size={{ xs: 12, lg: 4 }}>
+                <ReasonBox title={`VALIDATION · ${performanceSafety.validationIsolation.status}`}>
+                  {`Gate2/Gate3 không được tính vào System Summary · ${performanceSafety.validationIsolation.policy}`}
+                </ReasonBox>
+              </Grid>
+              <Grid size={{ xs: 12, lg: 4 }}>
+                <ReasonBox title={`MIXED PROVENANCE · ${performanceSafety.mixedOpeningProvenance.status}`}>
+                  {`Opening leg có provenance xung đột bị loại khỏi SYSTEM · ${performanceSafety.mixedOpeningProvenance.policy}`}
+                </ReasonBox>
+              </Grid>
+            </Grid>
+          )}
         </CardContent>
       </Card>
 
