@@ -3,7 +3,7 @@ name: Phase7C Web UI Safe Deploy CI
 on:
   push:
     branches:
-      - feat/phase7c-web-ui-safe-deploy
+      - main
     paths:
       - "apps/web/**"
       - "scripts/deploy-phase7c-web-ui-local.ps1"
@@ -16,7 +16,7 @@ on:
       - ".github/workflows/phase7c-web-ui-safe-deploy-ci.yml"
   pull_request:
     branches:
-      - fix/phase7c-legacy-background-cleanup
+      - main
     paths:
       - "apps/web/**"
       - "scripts/deploy-phase7c-web-ui-local.ps1"
