@@ -17,6 +17,7 @@ import type {
   Phase7CLifecycleSnapshot,
   Phase7CLiveRegimeSnapshot,
   Phase7CLotSettingsSnapshot,
+  Phase7CSourceSafetySnapshot,
 } from "./phase7c-types";
 import type { Phase7CForwardRangeResult } from "./phase7c-forward-types";
 import type { Phase7CAutoLotPreview } from "./phase7c-autolot-types";
@@ -127,6 +128,10 @@ export async function getPhase7CLiveRegime(): Promise<Phase7CLiveRegimeSnapshot>
 
 export async function getPhase7CDecisionMonitor(): Promise<Phase7CDecisionMonitorSnapshot> {
   return read<Phase7CDecisionMonitorSnapshot>(await fetch(`${API_BASE}/api/v1/phase7c/decision-monitor?symbol=XAUUSD`, { cache: "no-store" }));
+}
+
+export async function getPhase7CSourceSafety(): Promise<Phase7CSourceSafetySnapshot> {
+  return read<Phase7CSourceSafetySnapshot>(await fetch(`${API_BASE}/api/v1/phase7c/source-safety`, { cache: "no-store" }));
 }
 
 export async function getPhase7CLifecycle(): Promise<Phase7CLifecycleSnapshot> {

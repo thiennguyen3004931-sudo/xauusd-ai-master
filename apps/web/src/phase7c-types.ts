@@ -205,6 +205,28 @@ export type Phase7CBotExecutionMode =
   | "SIDEWAY"
   | "PAUSE";
 
+export interface Phase7CSourceSafetySnapshot {
+  version: 1;
+  source: "PHASE7C_SOURCE_SAFETY_CONTRACT";
+  generatedAt: number;
+  performanceAttribution: {
+    liveMagic: {
+      status: "ENFORCED";
+      trendMagicNumber: number;
+      sidewayMagicNumber: number;
+      policy: "FAIL_CLOSED_ON_DRIFT";
+    };
+    validationIsolation: {
+      status: "ENFORCED";
+      policy: "EXCLUDE_FROM_SYSTEM_SUMMARY";
+    };
+    mixedOpeningProvenance: {
+      status: "ENFORCED";
+      policy: "FAIL_CLOSED_TO_NON_SYSTEM";
+    };
+  };
+}
+
 export interface Phase7CLifecycleSnapshot {
   controlEnabled: boolean;
   running: boolean;
@@ -536,7 +558,7 @@ export interface Phase7CDecisionMonitorSnapshot {
     openedAt: number | null;
     entryReason: string;
     holdReasonCode: string | null;
-  holdReason: string;
+    holdReason: string;
   };
   lotSettings: Phase7CLotSettingsSnapshot;
   preTrade: {
