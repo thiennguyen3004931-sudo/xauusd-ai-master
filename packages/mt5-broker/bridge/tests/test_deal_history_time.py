@@ -13,14 +13,23 @@ if str(BRIDGE_ROOT) not in sys.path:
     sys.path.insert(0, str(BRIDGE_ROOT))
 
 # mt5_gateway only needs the request classes for type annotations in this
-# read-only regression. Stub that module so the test stays stdlib-only on
-# Linux CI and never needs the Windows-only MetaTrader5 package.
+# read-only regression. Stub that module so the dedicated stdlib-only Linux CI
+# never needs the Windows-only MetaTrader5 dependency. Restore sys.modules
+# immediately after importing Mt5Gateway so broader unittest discovery can
+# import the real request models without cross-test contamination.
+_previous_models = sys.modules.get("mt5_bridge.models")
 models = types.ModuleType("mt5_bridge.models")
 for model_name in ("CloseRequest", "ModifyRequest", "OrderRequest"):
     setattr(models, model_name, type(model_name, (), {}))
 sys.modules["mt5_bridge.models"] = models
 
-from mt5_bridge.mt5_gateway import Mt5Gateway
+try:
+    from mt5_bridge.mt5_gateway import Mt5Gateway
+finally:
+    if _previous_models is None:
+        sys.modules.pop("mt5_bridge.models", None)
+    else:
+        sys.modules["mt5_bridge.models"] = _previous_models
 
 
 class _Settings:
