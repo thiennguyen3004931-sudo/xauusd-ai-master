@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 
 const allowedWriter = "apps/api/src/services/phase7c-bot-mode.service.ts";
+const provenanceWorkflow = ".github/workflows/phase7c-bot-mode-provenance-ci.yml";
 const testFixtures = new Set([
   "scripts/test-phase7c-bot-mode-provenance.ts",
   "scripts/test-phase7c-bot-mode-provenance-writers.mjs",
@@ -48,6 +49,17 @@ if (suspicious.length > 0) {
   throw new Error(
     `Potential direct bot-mode state writer(s) bypass provenance service: ${suspicious.join(", ")}`,
   );
+}
+
+const workflowSource = fs.readFileSync(provenanceWorkflow, "utf8");
+const protectsMainPullRequests = /pull_request:\s*\r?\n\s+branches:\s*\r?\n\s+- main(?:\r?\n|$)/.test(
+  workflowSource,
+);
+if (!protectsMainPullRequests) {
+  throw new Error("Bot Mode Provenance CI must protect pull requests targeting main");
+}
+if (workflowSource.includes("- fix/phase7c-legacy-background-cleanup")) {
+  throw new Error("Bot Mode Provenance CI must not target the retired legacy integration branch");
 }
 
 console.log(`PHASE7C_BOT_MODE_PROVENANCE_WRITER_AUDIT=PASS|REFERENCES=${references.length}`);
