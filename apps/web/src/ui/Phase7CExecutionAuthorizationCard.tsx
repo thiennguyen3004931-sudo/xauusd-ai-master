@@ -161,8 +161,9 @@ export function Phase7CExecutionAuthorizationCard() {
 
   const accountMode = capability.data?.accountMode ?? autoStatus.data?.accountMode ?? "DEMO";
   const botMode = autoStatus.data?.botMode ?? capability.data?.botMode ?? "—";
+  const isAutoActive = botMode === "AUTO";
   const armed = capability.data?.liveExecutionArmed === true;
-  const canAttemptAuto = botMode !== "AUTO" && !autoMutation.isPending;
+  const canAttemptAuto = !isAutoActive && !autoMutation.isPending;
   const armPreflightCount = checkCount(armPreflight?.checks);
   const autoChecks = accountMode === "DEMO"
     ? Object.fromEntries(
@@ -332,11 +333,13 @@ export function Phase7CExecutionAuthorizationCard() {
                 onClick={() => autoMutation.mutate()}
                 sx={{ fontWeight: 950, minWidth: 170 }}
               >
-                {autoMutation.isPending
-                  ? "ĐANG KIỂM TRA..."
-                  : accountMode === "DEMO"
-                    ? "Bật tự động Demo"
-                    : "Bật tự động Live"}
+                {isAutoActive
+                  ? "AUTO ĐANG BẬT"
+                  : autoMutation.isPending
+                    ? "ĐANG KIỂM TRA..."
+                    : accountMode === "DEMO"
+                      ? "Bật tự động Demo"
+                      : "Bật tự động Live"}
               </Button>
             </Stack>
           </Stack>
@@ -363,7 +366,7 @@ export function Phase7CExecutionAuthorizationCard() {
             {armStatus.data.action} · {armStatus.data.status} · {armStatus.data.phase} · {armStatus.data.message} · ARM {armStatus.data.finalArmStatus}
           </Alert>
         ) : null}
-        {autoMutation.isSuccess ? (
+        {autoMutation.isSuccess && isAutoActive ? (
           <Alert severity="success" sx={{ mt: 1.5 }}>
             AUTO đã bật qua guarded backend · source {autoMutation.data.state.updatedBy}.
           </Alert>
