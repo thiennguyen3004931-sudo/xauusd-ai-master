@@ -4,7 +4,9 @@ param(
   [int]$ApiPort = 3711,
   [int]$WebPort = 5717,
   [int]$StartupTimeoutSeconds = 90,
-  [string]$RequiredCommit = "ecf784047b5c573cb3a2083df92714f3fdad1986"
+  [Parameter(Mandatory = $true)]
+  [ValidatePattern('^[0-9a-fA-F]{40}$')]
+  [string]$ExpectedCommit
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,8 +23,16 @@ try {
   $pnpm = Get-Command pnpm -ErrorAction Stop
 
   $branch = (& $git.Source branch --show-current).Trim()
-  if ($LASTEXITCODE -ne 0 -or $branch -ne "fix/phase7c-legacy-background-cleanup") {
-    throw "Web UI deploy requires branch fix/phase7c-legacy-background-cleanup. Current=$branch"
+  if ($LASTEXITCODE -ne 0 -or $branch -ne "main") {
+    throw "Web UI deploy requires branch main. Current=$branch"
+  }
+
+  $head = (& $git.Source rev-parse HEAD).Trim()
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($head)) {
+    throw "Could not resolve current git HEAD. No runtime process was restarted."
+  }
+  if ($head -ne $ExpectedCommit) {
+    throw "Web UI deploy requires exact HEAD $ExpectedCommit. Current=$head. Sync main to the intended merged SHA first."
   }
 
   $dirty = @(& $git.Source status --porcelain)
@@ -31,20 +41,10 @@ try {
     throw "Web UI deploy requires a clean working tree. No runtime process was restarted."
   }
 
-  if (-not [string]::IsNullOrWhiteSpace($RequiredCommit)) {
-    & $git.Source cat-file -e "$RequiredCommit^{commit}" 2>$null
-    if ($LASTEXITCODE -ne 0) {
-      throw "Required web UI commit is not present locally: $RequiredCommit. Sync the integration branch first."
-    }
-    & $git.Source merge-base --is-ancestor $RequiredCommit HEAD 2>$null
-    if ($LASTEXITCODE -ne 0) {
-      throw "Current branch does not contain required web UI commit: $RequiredCommit. Sync the integration branch first."
-    }
-  }
-
   Write-Host "PHASE7C_WEB_UI_DEPLOY=START"
   Write-Host "PHASE7C_WEB_UI_DEPLOY_BRANCH=$branch"
-  Write-Host "PHASE7C_WEB_UI_DEPLOY_REQUIRED_COMMIT=$RequiredCommit"
+  Write-Host "PHASE7C_WEB_UI_DEPLOY_EXPECTED_COMMIT=$ExpectedCommit"
+  Write-Host "PHASE7C_WEB_UI_DEPLOY_HEAD=$head"
   Write-Host "PHASE7C_WEB_UI_DEPLOY_GIT_CLEAN=PASS"
 
   & $pnpm.Source --filter '@xauusd/web' build
