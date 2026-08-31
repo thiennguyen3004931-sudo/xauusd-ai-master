@@ -22,6 +22,13 @@ function Assert-Contains([string]$Pattern, [string]$Label) {
 function Assert-Literal([string]$Text, [string]$Label) {
   if ($Source.IndexOf($Text, [System.StringComparison]::Ordinal) -lt 0) { throw "Missing web UI deploy literal: $Label" }
 }
+function Assert-LiteralOrder([string]$Earlier, [string]$Later, [string]$Label) {
+  $EarlierIndex = $Source.IndexOf($Earlier, [System.StringComparison]::Ordinal)
+  $LaterIndex = $Source.IndexOf($Later, [System.StringComparison]::Ordinal)
+  if ($EarlierIndex -lt 0 -or $LaterIndex -lt 0 -or $EarlierIndex -ge $LaterIndex) {
+    throw "Invalid web UI deploy literal order: $Label"
+  }
+}
 function Assert-NotContains([string]$Pattern, [string]$Label) {
   if ($Source -match $Pattern) { throw "Forbidden web UI deploy pattern detected: $Label" }
 }
@@ -47,6 +54,9 @@ Assert-Literal '$currentCommit = (& $git.Source rev-parse HEAD).Trim()' 'current
 Assert-Literal '$currentCommit -ne $ExpectedCommit' 'exact HEAD equality guard'
 Assert-Literal 'PHASE7C_WEB_UI_DEPLOY_EXPECTED_COMMIT=$ExpectedCommit' 'exact SHA audit marker'
 Assert-Literal 'git working tree' 'clean working tree guard'
+Assert-Literal "--filter '@xauusd/mt5-broker' build" 'mt5 broker build before web build'
+Assert-Contains '(?ms)&\s+\$pnpm\.Source\s+--filter\s+''@xauusd/mt5-broker''\s+build\s*if\s*\(\$LASTEXITCODE\s+-ne\s+0\)\s*\{' 'mt5 broker build fail-fast guard'
+Assert-LiteralOrder "--filter '@xauusd/mt5-broker' build" "--filter '@xauusd/web' build" 'mt5 broker build precedes web build'
 Assert-Literal "--filter '@xauusd/web' build" 'web build before restart'
 Assert-Literal 'deploy-phase7c-mt5-dashboard-local.ps1' 'reuse verified dashboard restart helper'
 Assert-Literal '-SkipPanelInstall' 'web-only restart path'
