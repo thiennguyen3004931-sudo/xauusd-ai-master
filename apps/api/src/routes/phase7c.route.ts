@@ -18,6 +18,7 @@ import {
 } from "../services/phase7c-bot-mode.service";
 import { getPhase7CLiveRegime } from "../services/phase7c-live-regime.service";
 import { getPhase7CDailyRecoveryView } from "../services/phase7c-daily-recovery-view.service";
+import { getPhase7CSourceSafetyContract } from "../services/phase7c-source-safety.service";
 import {
   phase7CLotSettingsService,
   validatePhase7CLotSettings,
@@ -85,6 +86,11 @@ async function getStrategyEntryConditionGuards() {
     };
   }
 }
+
+router.get("/source-safety", (_req: Request, res: Response) => {
+  res.setHeader("cache-control", "no-store");
+  res.json(getPhase7CSourceSafetyContract());
+});
 
 router.get("/account-mode", (_req: Request, res: Response) => {
   res.setHeader("cache-control", "no-store");
