@@ -3,7 +3,7 @@ name: Phase7C Bot Mode Provenance CI
 on:
   pull_request:
     branches:
-      - fix/phase7c-legacy-background-cleanup
+      - main
     paths:
       - "apps/api/src/routes/phase7c.route.ts"
       - "apps/api/src/services/phase7c-bot-mode.service.ts"
