@@ -127,6 +127,22 @@ function ownershipOf(opening: Mt5BridgeDeal, trendMagic: number, sidewayMagic: n
   return strategyOf(opening, trendMagic, sidewayMagic) === "OTHER" ? "OTHER" : "SYSTEM";
 }
 
+function strategyOfOpenings(openings: readonly Mt5BridgeDeal[], trendMagic: number, sidewayMagic: number): Mt5PerformanceTrade["strategy"] {
+  const strategies = new Set(openings.map((opening) => strategyOf(opening, trendMagic, sidewayMagic)));
+  if (strategies.size !== 1) return "OTHER";
+  const [strategy] = strategies;
+  return strategy ?? "OTHER";
+}
+
+function ownershipOfOpenings(openings: readonly Mt5BridgeDeal[], trendMagic: number, sidewayMagic: number): Mt5PerformanceTrade["ownership"] {
+  const ownerships = openings.map((opening) => ownershipOf(opening, trendMagic, sidewayMagic));
+  if (ownerships.includes("VALIDATION")) return "VALIDATION";
+  if (ownerships.every((ownership) => ownership === "SYSTEM") && strategyOfOpenings(openings, trendMagic, sidewayMagic) !== "OTHER") {
+    return "SYSTEM";
+  }
+  return "OTHER";
+}
+
 function sessionFromHour(hour: number): string {
   if (hour < 8) return "ASIAN";
   if (hour < 13) return "LONDON";
@@ -151,6 +167,7 @@ function reconstructTrades(deals: readonly Mt5BridgeDeal[], trendMagic: number, 
     let nextLegIndex = 0;
     let active: {
       opening: Mt5BridgeDeal;
+      openings: Mt5BridgeDeal[];
       side: "BUY" | "SELL";
       legIndex: number;
       openedAt: number;
@@ -166,6 +183,7 @@ function reconstructTrades(deals: readonly Mt5BridgeDeal[], trendMagic: number, 
       if (opening.side === null || volume <= EPSILON) return null;
       return {
         opening,
+        openings: [opening],
         side: opening.side,
         legIndex: nextLegIndex++,
         openedAt: opening.timestamp,
@@ -186,8 +204,8 @@ function reconstructTrades(deals: readonly Mt5BridgeDeal[], trendMagic: number, 
         id: active.legIndex === 0 ? `mt5-${positionId}` : `mt5-${positionId}-r${active.legIndex}`,
         symbol: active.opening.symbol || "XAUUSD",
         side: active.side,
-        ownership: ownershipOf(active.opening, trendMagic, sidewayMagic),
-        strategy: strategyOf(active.opening, trendMagic, sidewayMagic),
+        ownership: ownershipOfOpenings(active.openings, trendMagic, sidewayMagic),
+        strategy: strategyOfOpenings(active.openings, trendMagic, sidewayMagic),
         openedAt: active.openedAt,
         closedAt,
         durationMinutes: round(Math.max(0, closedAt - active.openedAt) / 60_000, 1),
@@ -208,6 +226,7 @@ function reconstructTrades(deals: readonly Mt5BridgeDeal[], trendMagic: number, 
         if (!active) {
           active = startLeg(deal, deal.volume, deal.netPnl);
         } else if (active.side === deal.side) {
+          active.openings.push(deal);
           active.openVolume += deal.volume;
           active.remainingVolume += deal.volume;
           active.entryNotional += deal.price * deal.volume;
