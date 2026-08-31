@@ -2,15 +2,17 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $DeployScript = Join-Path $ProjectRoot "scripts\deploy-phase7c-web-ui-local.ps1"
 $DashboardDeployScript = Join-Path $ProjectRoot "scripts\deploy-phase7c-mt5-dashboard-local.ps1"
+$WorkflowPath = Join-Path $ProjectRoot ".github\workflows\phase7c-web-ui-safe-deploy-ci.yml"
 
-foreach ($path in @($DeployScript, $DashboardDeployScript)) {
+foreach ($path in @($DeployScript, $DashboardDeployScript, $WorkflowPath)) {
   if (-not (Test-Path -LiteralPath $path)) {
-    throw "Web UI deploy source not found: $path"
+    throw "Web UI safe deploy source not found: $path"
   }
 }
 
 $Source = Get-Content -LiteralPath $DeployScript -Raw
 $DashboardSource = Get-Content -LiteralPath $DashboardDeployScript -Raw
+$WorkflowSource = Get-Content -LiteralPath $WorkflowPath -Raw
 [void][scriptblock]::Create($Source)
 [void][scriptblock]::Create($DashboardSource)
 
@@ -29,22 +31,41 @@ function Assert-DashboardLiteral([string]$Text, [string]$Label) {
 function Assert-DashboardNotContains([string]$Pattern, [string]$Label) {
   if ($DashboardSource -match $Pattern) { throw "Forbidden dashboard deploy pattern detected: $Label" }
 }
+function Assert-WorkflowContains([string]$Pattern, [string]$Label) {
+  if ($WorkflowSource -notmatch $Pattern) { throw "Missing safe deploy workflow marker: $Label" }
+}
+function Assert-WorkflowNotContains([string]$Pattern, [string]$Label) {
+  if ($WorkflowSource -match $Pattern) { throw "Forbidden safe deploy workflow pattern detected: $Label" }
+}
 
-Assert-Literal 'fix/phase7c-legacy-background-cleanup' 'integration branch guard'
+Assert-Literal '[Parameter(Mandatory = $true)]' 'ExpectedCommit mandatory parameter guard'
+Assert-Literal '[ValidateNotNullOrEmpty()]' 'ExpectedCommit non-empty guard'
+Assert-Literal '[string]$ExpectedCommit' 'exact deployment SHA parameter'
+Assert-Literal '$branch -ne "main"' 'main branch guard'
+Assert-Literal 'Web UI deploy requires branch main.' 'main branch failure reason'
+Assert-Literal '$currentCommit = (& $git.Source rev-parse HEAD).Trim()' 'current HEAD capture'
+Assert-Literal '$currentCommit -ne $ExpectedCommit' 'exact HEAD equality guard'
+Assert-Literal 'PHASE7C_WEB_UI_DEPLOY_EXPECTED_COMMIT=$ExpectedCommit' 'exact SHA audit marker'
 Assert-Literal 'git working tree' 'clean working tree guard'
-Assert-Literal 'merge-base --is-ancestor' 'required commit ancestry guard'
 Assert-Literal "--filter '@xauusd/web' build" 'web build before restart'
 Assert-Literal 'deploy-phase7c-mt5-dashboard-local.ps1' 'reuse verified dashboard restart helper'
 Assert-Literal '-SkipPanelInstall' 'web-only restart path'
 Assert-Literal 'PHASE7C_WEB_UI_DEPLOY_BUILD=PASS' 'build pass marker'
 Assert-Literal 'PHASE7C_WEB_UI_DEPLOY_RUNTIME_RESTART=PASS' 'runtime restart marker'
 Assert-Literal 'PHASE7C_WEB_UI_DEPLOY_STATUS=PASS' 'final pass marker'
+Assert-NotContains 'fix/phase7c-legacy-background-cleanup' 'legacy integration branch guard'
+Assert-NotContains '\$RequiredCommit\b' 'legacy optional pinned commit contract'
 Assert-NotContains 'activate-phase7c-local\.ps1' 'must not run full activation'
 Assert-NotContains 'run-phase7c-executors' 'must not start or stop executors directly'
 Assert-NotContains 'switch-phase7c-account-mode' 'must not switch account mode'
 Assert-NotContains 'git\s+(reset|clean|checkout)' 'must not mutate git working tree destructively'
 Assert-NotContains 'git\s+pull' 'deploy helper must not self-update while running'
 Assert-NotContains 'LIVE_EXECUTION|MT5_ALLOW_REAL_ACCOUNT' 'must not enable LIVE execution'
+
+Assert-WorkflowContains '(?ms)push:\s*branches:\s*- main\s*paths:' 'safe deploy CI push targets main'
+Assert-WorkflowContains '(?ms)pull_request:\s*branches:\s*- main\s*paths:' 'safe deploy CI PR targets main'
+Assert-WorkflowNotContains 'fix/phase7c-legacy-background-cleanup' 'legacy safe deploy CI base branch'
+Assert-WorkflowNotContains 'feat/phase7c-web-ui-safe-deploy' 'legacy safe deploy CI push branch'
 
 Assert-DashboardLiteral 'Read-UiAccountMode' 'derive selected DEMO/LIVE from read-only UI contract'
 Assert-DashboardLiteral '$expectedAccountMode -notin @("DEMO", "LIVE")' 'only DEMO/LIVE accepted'
