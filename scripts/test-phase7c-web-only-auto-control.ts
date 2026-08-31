@@ -37,11 +37,18 @@ assert.match(apiSource, /export async function setPhase7CBotMode/);
 assert.match(apiSource, /\/api\/v1\/phase7c\/bot-mode/);
 assert.match(apiSource, /source:\s*["']web-control-center["']/);
 
+// The main Control Center owns fail-safe PAUSE only. AUTO lives in one guarded authorization card.
 const pageSource = read("apps/web/src/pages/Phase7CControlCenterPage.tsx");
 assert.match(pageSource, /setPhase7CBotMode/);
-assert.match(pageSource, /mutationFn:\s*setPhase7CBotMode/);
-assert.match(pageSource, /botModeAction\.mutate\(["']PAUSE["']\)/);
-assert.match(pageSource, /botModeAction\.mutate\(["']AUTO["']\)/);
+assert.match(pageSource, /mutationFn:\s*\(\)\s*=>\s*setPhase7CBotMode\(["']PAUSE["']\)/);
+assert.match(pageSource, /onClick=\{\(\)\s*=>\s*botModeAction\.mutate\(\)\}/);
+assert.doesNotMatch(pageSource, /setPhase7CBotMode\(["']AUTO["']\)/);
+assert.doesNotMatch(pageSource, /botModeAction\.mutate\(["']AUTO["']\)/);
+
+const authorizationSource = read("apps/web/src/ui/Phase7CExecutionAuthorizationCard.tsx");
+assert.match(authorizationSource, /enablePhase7CAuto/);
+assert.match(authorizationSource, /mutationFn:\s*enablePhase7CAuto/);
+assert.match(authorizationSource, /onClick=\{\(\)\s*=>\s*autoMutation\.mutate\(\)\}/);
 
 // PAUSE is the fail-safe mode and must remain available even when executors are not running.
 const pauseStart = pageSource.indexOf("const canPause =");
