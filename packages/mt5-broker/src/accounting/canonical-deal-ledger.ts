@@ -68,19 +68,27 @@ export class CanonicalDealLedger {
   ): { inserted: number; total: number } {
     const normalizedAccount = requireText(account, "account");
     let inserted = 0;
+    let changed = false;
 
     for (const deal of deals) {
       const normalized = canonicalizeDeal(normalizedAccount, deal);
       const identity = dealIdentity(normalized.account, normalized.ticket);
-      if (this.#dealsByIdentity.has(identity)) {
+      const existing = this.#dealsByIdentity.get(identity);
+      if (existing) {
+        if (sameCanonicalDeal(existing, normalized)) {
+          continue;
+        }
+        this.#dealsByIdentity.set(identity, normalized);
+        changed = true;
         continue;
       }
 
       this.#dealsByIdentity.set(identity, normalized);
       inserted += 1;
+      changed = true;
     }
 
-    if (inserted > 0) {
+    if (changed) {
       this.#persist();
     }
 
@@ -194,6 +202,32 @@ function canonicalizeDeal(
     fee,
     netPnl: normalizeNumber(profit + commission + swap + fee),
   };
+}
+
+function sameCanonicalDeal(
+  left: CanonicalDealRecord,
+  right: CanonicalDealRecord,
+): boolean {
+  return (
+    left.account === right.account &&
+    left.ticket === right.ticket &&
+    left.orderId === right.orderId &&
+    left.positionId === right.positionId &&
+    left.symbol === right.symbol &&
+    left.side === right.side &&
+    left.entry === right.entry &&
+    left.volume === right.volume &&
+    left.price === right.price &&
+    left.profit === right.profit &&
+    left.commission === right.commission &&
+    left.swap === right.swap &&
+    left.fee === right.fee &&
+    left.netPnl === right.netPnl &&
+    left.magic === right.magic &&
+    left.comment === right.comment &&
+    left.timestamp === right.timestamp &&
+    left.isTradingDeal === right.isTradingDeal
+  );
 }
 
 function dealIdentity(account: string, ticket: string): string {

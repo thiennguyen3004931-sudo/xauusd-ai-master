@@ -78,6 +78,22 @@ describe("CanonicalDealLedger identity and durability", () => {
     ).toEqual({ inserted: 0, total: 2 });
   });
 
+  it("persists an authoritative correction when the same account + MT5 deal ticket is replayed", () => {
+    const store = fileStore("authoritative-replay");
+    const first = new CanonicalDealLedger({ store });
+
+    first.mergeBackfill("LIVE:10001", [deal({ ticket: "1150", symbol: "XAUUSD.G" })]);
+    expect(
+      first.mergeBackfill("LIVE:10001", [deal({ ticket: "1150", symbol: "XAUUSD" })]),
+    ).toEqual({ inserted: 0, total: 1 });
+    expect(first.deals()).toHaveLength(1);
+    expect(first.deals()[0]?.symbol).toBe("XAUUSD");
+
+    const restarted = new CanonicalDealLedger({ store });
+    expect(restarted.deals()).toHaveLength(1);
+    expect(restarted.deals()[0]?.symbol).toBe("XAUUSD");
+  });
+
   it("merges historical deals that arrive older than already persisted deals without a timestamp cursor", () => {
     const ledger = new CanonicalDealLedger({ store: fileStore("historical") });
     const newer = deal({ ticket: "1202", timestamp: Date.UTC(2026, 7, 29, 9) });
