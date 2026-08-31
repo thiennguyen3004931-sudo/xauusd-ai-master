@@ -46,6 +46,11 @@ try {
   Write-Host "PHASE7C_WEB_UI_DEPLOY_EXPECTED_COMMIT=$ExpectedCommit"
   Write-Host "PHASE7C_WEB_UI_DEPLOY_GIT_CLEAN=PASS"
 
+  & $pnpm.Source --filter '@xauusd/mt5-broker' build
+  if ($LASTEXITCODE -ne 0) {
+    throw "Phase7C MT5 broker build failed with exit code $LASTEXITCODE. Runtime was not restarted."
+  }
+
   & $pnpm.Source --filter '@xauusd/web' build
   if ($LASTEXITCODE -ne 0) {
     throw "Phase7C web build failed with exit code $LASTEXITCODE. Runtime was not restarted."
