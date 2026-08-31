@@ -49,6 +49,24 @@ jobs:
         with:
           node-version: 22
 
+      - name: Align temporary patch helper with exact notifier shape
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path("scripts/apply-phase7c-telegram-recovery-context-fix.mjs")
+          source = path.read_text(encoding="utf-8")
+          source, count = re.subn(
+              r'("ENTRY_FILLED Lot rendering",[\s\S]*?\n  )3(,\n\);)',
+              r'\g<1>2\2',
+              source,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f"Expected one ENTRY_FILLED Lot helper count, changed {count}")
+          path.write_text(source, encoding="utf-8")
+
       - name: Apply exact notifier source patch
         run: node ./scripts/apply-phase7c-telegram-recovery-context-fix.mjs
 
