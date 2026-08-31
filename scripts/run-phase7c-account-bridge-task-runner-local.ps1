@@ -5,6 +5,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $AccountLibrary = Join-Path $PSScriptRoot "lib\phase7c-account-mode.ps1"
+$JobObjectHelper = Join-Path $PSScriptRoot "lib\phase7b-windows-job-object.ps1"
 $BridgeDir = Join-Path $ProjectRoot "packages\mt5-broker\bridge"
 $BridgeRunner = Join-Path $BridgeDir "run.ps1"
 $RuntimeRoot = Join-Path $ProjectRoot ".runtime"
@@ -16,11 +17,12 @@ $StdOut = Join-Path $RuntimeDir "bridge.out.log"
 $StdErr = Join-Path $RuntimeDir "bridge.err.log"
 $ErrorLog = Join-Path $RuntimeDir "startup-runner.err.log"
 
-foreach ($required in @($AccountLibrary, $BridgeRunner, $AccountStatePath)) {
+foreach ($required in @($AccountLibrary, $JobObjectHelper, $BridgeRunner, $AccountStatePath)) {
   if (-not (Test-Path -LiteralPath $required)) { throw "Phase7C account bridge required file not found: $required" }
 }
 if ($RestartDelaySeconds -lt 5 -or $RestartDelaySeconds -gt 300) { throw "RestartDelaySeconds must be between 5 and 300." }
 . $AccountLibrary
+. $JobObjectHelper
 New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
 $LiveArmStatePath = Get-Phase7CLiveArmPath $RuntimeRoot
 
@@ -39,6 +41,7 @@ function Read-AccountState {
 }
 
 $lock = $null
+$runtimeJob = $null
 try {
   try {
     $lock = [System.IO.File]::Open(
@@ -58,6 +61,14 @@ try {
   } | ConvertTo-Json -Compress
   $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($lockMeta)
   $lock.SetLength(0); $lock.Write($bytes, 0, $bytes.Length); $lock.Flush($true); $lock.Position = 0
+
+  # Mirror the canonical Phase7B Web lifecycle boundary: bind the supervisor
+  # itself to a kill-on-close Job Object before spawning the Bridge wrapper.
+  # The wrapper and its Uvicorn/Python descendants then inherit the same job,
+  # so forced Scheduled Task termination cannot orphan the Bridge listener.
+  $runtimeJob = New-Phase7BKillOnCloseJob -Name ("Phase7C-Account-Bridge-{0}-{1}" -f $PID, [guid]::NewGuid().ToString('N'))
+  Add-Phase7BProcessToJob -Job $runtimeJob -ProcessId $PID
+  Write-Host "PHASE7C_ACCOUNT_BRIDGE_JOB_OBJECT=ACTIVE"
 
   $attempt = 0
   while ($true) {
