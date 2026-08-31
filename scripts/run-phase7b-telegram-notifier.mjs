@@ -1148,10 +1148,18 @@ async function formatEvent(event, enrichment) {
         event.side,
       );
 
-    const pnl =
+    const canonicalDealCount =
       numberOrNull(
-        enrichment.canonicalRealized?.realizedNetPnl,
+        enrichment.canonicalRealized?.dealCount,
       );
+
+    const pnl =
+      canonicalDealCount !== null &&
+      canonicalDealCount > 0
+        ? numberOrNull(
+            enrichment.canonicalRealized?.realizedNetPnl,
+          )
+        : null;
 
     const averageMove =
       closed
