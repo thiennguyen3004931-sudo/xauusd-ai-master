@@ -1,3 +1,5 @@
+import { resolvePhase7CDailyRecoveryMagicNumbers } from "./phase7c-daily-recovery-view.service";
+
 export interface Phase7CSourceSafetySnapshot {
   version: 1;
   source: "PHASE7C_SOURCE_SAFETY_CONTRACT";
@@ -5,8 +7,8 @@ export interface Phase7CSourceSafetySnapshot {
   performanceAttribution: {
     liveMagic: {
       status: "ENFORCED";
-      trendMagicNumber: 270715;
-      sidewayMagicNumber: 270714;
+      trendMagicNumber: number;
+      sidewayMagicNumber: number;
       policy: "FAIL_CLOSED_ON_DRIFT";
     };
     validationIsolation: {
@@ -21,6 +23,8 @@ export interface Phase7CSourceSafetySnapshot {
 }
 
 export function getPhase7CSourceSafetyContract(generatedAt = Date.now()): Phase7CSourceSafetySnapshot {
+  const liveMagicNumbers = resolvePhase7CDailyRecoveryMagicNumbers({ accountMode: "LIVE" });
+
   return {
     version: 1,
     source: "PHASE7C_SOURCE_SAFETY_CONTRACT",
@@ -28,8 +32,8 @@ export function getPhase7CSourceSafetyContract(generatedAt = Date.now()): Phase7
     performanceAttribution: {
       liveMagic: {
         status: "ENFORCED",
-        trendMagicNumber: 270715,
-        sidewayMagicNumber: 270714,
+        trendMagicNumber: liveMagicNumbers.trendMagicNumber,
+        sidewayMagicNumber: liveMagicNumbers.sidewayMagicNumber,
         policy: "FAIL_CLOSED_ON_DRIFT",
       },
       validationIsolation: {
