@@ -34,7 +34,7 @@ permissions:
 jobs:
   apply-recovery-context-fix:
     name: apply-recovery-context-fix
-    if: github.event_name == 'push' && github.ref == 'refs/heads/fix/phase7c-telegram-recovery-position-context' && github.actor != 'github-actions[bot]'
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'fix/phase7c-telegram-recovery-position-context' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
