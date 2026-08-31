@@ -1,0 +1,71 @@
+name: Phase7C Apply Recent Deal History Fix
+
+on:
+  push:
+    branches:
+      - fix/phase7c-recent-deal-history-time
+    paths:
+      - ".github/workflows/phase7c-apply-recent-deal-history-fix.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/phase7c-recent-deal-history-time
+          fetch-depth: 0
+
+      - name: Apply minimal production fix
+        shell: python
+        run: |
+          from pathlib import Path
+
+          gateway_path = Path("packages/mt5-broker/bridge/mt5_bridge/mt5_gateway.py")
+          gateway = gateway_path.read_text(encoding="utf-8")
+
+          old_import = "from .config import Settings\n"
+          new_import = "from .broker_time import denormalize_timestamp_ms\nfrom .config import Settings\n"
+          if gateway.count(old_import) != 1:
+              raise SystemExit("gateway import anchor mismatch")
+          gateway = gateway.replace(old_import, new_import, 1)
+
+          old_range = """        start = datetime.fromtimestamp(start_ms / 1000.0, tz=timezone.utc)\n        end = datetime.fromtimestamp(end_ms / 1000.0, tz=timezone.utc)\n"""
+          new_range = """        broker_start_ms = denormalize_timestamp_ms(start_ms)\n        broker_end_ms = denormalize_timestamp_ms(end_ms)\n        start = datetime.fromtimestamp(broker_start_ms / 1000.0, tz=timezone.utc)\n        end = datetime.fromtimestamp(broker_end_ms / 1000.0, tz=timezone.utc)\n"""
+          if gateway.count(old_range) != 1:
+              raise SystemExit("gateway deal-range anchor mismatch")
+          gateway = gateway.replace(old_range, new_range, 1)
+          gateway_path.write_text(gateway, encoding="utf-8")
+
+          notifier_path = Path("scripts/run-phase7b-telegram-notifier.mjs")
+          notifier = notifier_path.read_text(encoding="utf-8")
+          old_pnl = """    const pnl =\n      numberOrNull(\n        enrichment.canonicalRealized?.realizedNetPnl,\n      );\n"""
+          new_pnl = """    const canonicalDealCount =\n      numberOrNull(\n        enrichment.canonicalRealized?.dealCount,\n      );\n\n    const pnl =\n      canonicalDealCount !== null &&\n      canonicalDealCount > 0\n        ? numberOrNull(\n            enrichment.canonicalRealized?.realizedNetPnl,\n          )\n        : null;\n"""
+          if notifier.count(old_pnl) != 1:
+              raise SystemExit("telegram realized-PnL anchor mismatch")
+          notifier = notifier.replace(old_pnl, new_pnl, 1)
+          notifier_path.write_text(notifier, encoding="utf-8")
+
+      - name: MT5 broker-time targeted GREEN
+        run: python -m unittest discover -s packages/mt5-broker/bridge/tests -p 'test_deal_history_time.py' -v
+
+      - name: Telegram targeted GREEN
+        run: |
+          node --test scripts/phase7c-trade-notifier-synthetic.test.mjs
+          node --test scripts/phase7c-telegram-zero-deal-pnl.test.mjs
+
+      - name: Diff hygiene
+        run: git diff --check
+
+      - name: Commit minimal production fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/mt5-broker/bridge/mt5_bridge/mt5_gateway.py scripts/run-phase7b-telegram-notifier.mjs
+          git commit -m "fix(phase7c): align recent deal history with broker time"
+          git push origin HEAD:fix/phase7c-recent-deal-history-time
