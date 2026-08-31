@@ -81,3 +81,41 @@ test("reconstructTrades splits an INOUT reversal into the closed leg and opposit
     ],
   );
 });
+
+test("reconstructTrades fails closed when a later opening is validation provenance", async () => {
+  const reconstructTrades = await loadReconstructTrades();
+  const t0 = Date.UTC(2026, 7, 31, 1, 0, 0);
+
+  const trades = reconstructTrades(
+    [
+      deal({ ticket: "201", timestamp: t0, entry: "IN", side: "BUY", volume: 1, price: 2100, magic: 270715, comment: "phase7b-demo-trend" }),
+      deal({ ticket: "202", timestamp: t0 + 60_000, entry: "IN", side: "BUY", volume: 0.5, price: 2102, magic: 270715, comment: "phase7b-demo-trend-gate2" }),
+      deal({ ticket: "203", timestamp: t0 + 120_000, entry: "OUT", side: "SELL", volume: 1.5, price: 2110 }),
+    ],
+    270715,
+    270714,
+  );
+
+  assert.equal(trades.length, 1);
+  assert.equal(trades[0].ownership, "VALIDATION", "any validation opening must keep the aggregate trade out of SYSTEM metrics");
+  assert.equal(trades[0].strategy, "TREND", "coherent Trend provenance remains visible even when ownership is validation");
+});
+
+test("reconstructTrades fails closed when opening deals conflict between Trend and Sideway", async () => {
+  const reconstructTrades = await loadReconstructTrades();
+  const t0 = Date.UTC(2026, 7, 31, 2, 0, 0);
+
+  const trades = reconstructTrades(
+    [
+      deal({ ticket: "301", timestamp: t0, entry: "IN", side: "BUY", volume: 1, price: 2200, magic: 270715, comment: "phase7b-demo-trend" }),
+      deal({ ticket: "302", timestamp: t0 + 60_000, entry: "IN", side: "BUY", volume: 0.5, price: 2202, magic: 270714, comment: "phase7c-sideway" }),
+      deal({ ticket: "303", timestamp: t0 + 120_000, entry: "OUT", side: "SELL", volume: 1.5, price: 2210 }),
+    ],
+    270715,
+    270714,
+  );
+
+  assert.equal(trades.length, 1);
+  assert.equal(trades[0].ownership, "OTHER", "conflicting strategy provenance must fail closed instead of entering SYSTEM metrics");
+  assert.equal(trades[0].strategy, "OTHER", "conflicting Trend/Sideway openings must not be attributed to the first opening strategy");
+});
