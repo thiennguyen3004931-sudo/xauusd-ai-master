@@ -731,14 +731,29 @@ async function formatEvent(event, enrichment) {
           : normalizeSide(event.side);
 
     const entry =
-      numberOrNull(
-        position.entry ??
+      firstPositiveNumber(
+        position.entry,
         event.fillPrice,
+        event.management?.entry,
+        event.lastKnownState?.entry,
       );
 
     const sl =
-      numberOrNull(
+      firstPositiveNumber(
         position.stopLoss,
+        event.stopLoss,
+        event.management?.stopLoss,
+        event.lastKnownState?.stopLoss,
+      );
+
+    const entryVolume =
+      firstPositiveNumber(
+        position.volume,
+        event.volume,
+        event.management?.expectedRemainingVolume,
+        event.management?.initialVolume,
+        event.lastKnownState?.expectedRemainingVolume,
+        event.lastKnownState?.initialVolume,
       );
 
     const slDistance =
@@ -785,7 +800,7 @@ async function formatEvent(event, enrichment) {
             "📦",
             "Lot",
             `${value(
-              position.volume,
+              entryVolume,
             )} lot`,
           ),
           line(
@@ -843,7 +858,7 @@ async function formatEvent(event, enrichment) {
             "📦",
             "Lot",
             `${value(
-              position.volume,
+              entryVolume,
             )} lot`,
           ),
           line(
@@ -1367,11 +1382,13 @@ function recoveryMetadata(event) {
       ),
 
     takeProfit:
-      numberOrNull(
-        event?.recoveryTakeProfit ??
-        management?.recoveryTakeProfit ??
-        event?.plan?.takeProfit ??
+      firstPositiveNumber(
+        event?.recoveryTakeProfit,
+        management?.recoveryTakeProfit,
+        management?.tp2,
+        event?.plan?.takeProfit,
         state.trade?.recoveryTakeProfit,
+        state.trade?.takeProfit,
       ),
   };
 }
@@ -1760,33 +1777,51 @@ function applyEventState(event, enrichment) {
       side,
 
       entry:
-        numberOrNull(
-          position.entry ??
+        firstPositiveNumber(
+          position.entry,
           event.fillPrice,
+          event.management?.entry,
+          event.lastKnownState?.entry,
+          enrichment.metrics?.entry,
         ),
 
       initialVolume:
-        numberOrNull(
+        firstPositiveNumber(
           position.volume,
+          event.volume,
+          event.management?.initialVolume,
+          event.management?.expectedRemainingVolume,
+          event.lastKnownState?.initialVolume,
+          enrichment.metrics?.volume,
         ),
 
       remainingVolume:
-        numberOrNull(
+        firstPositiveNumber(
           position.volume,
+          event.volume,
+          event.management?.expectedRemainingVolume,
+          event.management?.initialVolume,
+          event.lastKnownState?.expectedRemainingVolume,
+          enrichment.metrics?.volume,
         ),
 
       stopLoss:
-        numberOrNull(
+        firstPositiveNumber(
           position.stopLoss,
+          event.stopLoss,
+          event.management?.stopLoss,
+          event.lastKnownState?.stopLoss,
+          enrichment.metrics?.stopLoss,
         ),
 
       takeProfit:
         recovery.active
           ? recovery.takeProfit
           : event.journalSource === "SIDEWAY"
-            ? numberOrNull(
-                event.management?.tp2 ??
+            ? firstPositiveNumber(
+                event.management?.tp2,
                 position.takeProfit,
+                event.lastKnownState?.tp2,
               )
             : null,
 
@@ -1838,15 +1873,73 @@ function applyEventState(event, enrichment) {
     return;
   }
 
+  const contextEntry =
+    firstPositiveNumber(
+      event.position?.entry,
+      event.fillPrice,
+      enrichment.metrics?.entry,
+      event.management?.entry,
+      event.lastKnownState?.entry,
+    );
+  if (contextEntry !== null) {
+    state.trade.entry = contextEntry;
+  }
+
+  const contextStopLoss =
+    firstPositiveNumber(
+      event.stopLoss,
+      event.position?.stopLoss,
+      enrichment.metrics?.stopLoss,
+      event.management?.stopLoss,
+      event.lastKnownState?.stopLoss,
+    );
+  if (contextStopLoss !== null) {
+    state.trade.stopLoss = contextStopLoss;
+  }
+
+  const contextVolume =
+    firstPositiveNumber(
+      event.remainingVolume,
+      event.position?.volume,
+      enrichment.metrics?.volume,
+      event.management?.expectedRemainingVolume,
+      event.lastKnownState?.expectedRemainingVolume,
+      state.trade.remainingVolume,
+      state.trade.initialVolume,
+    );
+  if (contextVolume !== null) {
+    state.trade.remainingVolume = contextVolume;
+  }
+
+  const contextTakeProfit =
+    firstPositiveNumber(
+      event.recoveryTakeProfit,
+      event.position?.takeProfit,
+      event.management?.recoveryTakeProfit,
+      event.management?.tp2,
+      event.lastKnownState?.recoveryTakeProfit,
+      event.lastKnownState?.tp2,
+      state.trade.recoveryTakeProfit,
+      state.trade.takeProfit,
+    );
+  if (contextTakeProfit !== null) {
+    state.trade.takeProfit = contextTakeProfit;
+    if (state.trade.dailyMode === "RECOVERY_TP") {
+      state.trade.recoveryTakeProfit = contextTakeProfit;
+    }
+  }
+
   if (
     type === "PLUS6_SL_TO_ENTRY" ||
     type === "STRUCTURAL_SL_TIGHTEN" ||
     type === "TP1_BREAK_EVEN_APPLIED"
   ) {
     const stop =
-      numberOrNull(
-        event.stopLoss ??
+      firstPositiveNumber(
+        event.stopLoss,
         enrichment.metrics?.stopLoss,
+        event.management?.stopLoss,
+        state.trade?.stopLoss,
       );
 
     if (stop !== null) {
@@ -1859,8 +1952,11 @@ function applyEventState(event, enrichment) {
     type === "PLUS10_PARTIAL_ONE_THIRD"
   ) {
     state.trade.remainingVolume =
-      numberOrNull(
+      firstPositiveNumber(
         event.remainingVolume,
+        enrichment.metrics?.volume,
+        state.trade.remainingVolume,
+        state.trade.initialVolume,
       ) ??
       state.trade.remainingVolume;
 
@@ -1868,8 +1964,11 @@ function applyEventState(event, enrichment) {
 
   if (type === "TP1_PARTIAL_FILLED") {
     state.trade.remainingVolume =
-      numberOrNull(
+      firstPositiveNumber(
         event.remainingVolume,
+        enrichment.metrics?.volume,
+        state.trade.remainingVolume,
+        state.trade.initialVolume,
       ) ??
       state.trade.remainingVolume;
   }
@@ -1897,11 +1996,33 @@ function liveMetrics(snapshot, event) {
   const managed = snapshot?.mt5?.managedPosition ?? null;
   const managedState = snapshot?.state?.managed ?? null;
   const side = normalizeSide(managedState?.side ?? state.trade?.side ?? event.side);
-  const entry = numberOrNull(managed?.entry ?? managedState?.entry ?? state.trade?.entry);
+  const entry = firstPositiveNumber(
+    managed?.openPrice,
+    managed?.entry,
+    managedState?.entry,
+    event.position?.entry,
+    event.management?.entry,
+    state.trade?.entry,
+  );
   const quote = snapshot?.mt5?.quote ?? null;
   const market = side === "BUY" ? numberOrNull(quote?.bid) : numberOrNull(quote?.ask);
-  const stopLoss = numberOrNull(managed?.stopLoss ?? managedState?.lastStructuralStop ?? event.stopLoss ?? state.trade?.stopLoss);
-  const volume = numberOrNull(managed?.volume ?? managedState?.expectedRemainingVolume ?? state.trade?.remainingVolume);
+  const stopLoss = firstPositiveNumber(
+    managed?.stopLoss,
+    managedState?.lastStructuralStop,
+    event.stopLoss,
+    event.position?.stopLoss,
+    event.management?.stopLoss,
+    state.trade?.stopLoss,
+  );
+  const volume = firstPositiveNumber(
+    managed?.volume,
+    managedState?.expectedRemainingVolume,
+    event.remainingVolume,
+    event.position?.volume,
+    event.management?.expectedRemainingVolume,
+    state.trade?.remainingVolume,
+    state.trade?.initialVolume,
+  );
   const priceMove = entry !== null && market !== null ? sidePriceMove(side, entry, market) : numberOrNull(event.favorable);
   const slPriceMove = entry !== null && stopLoss !== null ? sidePriceMove(side, entry, stopLoss) : null;
   const lockedPnlUsd = estimateLockedPnlUsd(slPriceMove, volume, snapshot?.mt5?.spec);
@@ -1920,14 +2041,33 @@ function liveMetrics(snapshot, event) {
 
 function fallbackMetrics(event) {
   const side = normalizeSide(state.trade?.side ?? event.side);
-  const entry = numberOrNull(state.trade?.entry);
-  const stopLoss = numberOrNull(event.stopLoss ?? state.trade?.stopLoss);
+  const entry = firstPositiveNumber(
+    event.position?.entry,
+    event.fillPrice,
+    event.management?.entry,
+    event.lastKnownState?.entry,
+    state.trade?.entry,
+  );
+  const stopLoss = firstPositiveNumber(
+    event.stopLoss,
+    event.position?.stopLoss,
+    event.management?.stopLoss,
+    event.lastKnownState?.stopLoss,
+    state.trade?.stopLoss,
+  );
   return {
     side,
     entry,
     market: null,
     stopLoss,
-    volume: numberOrNull(state.trade?.remainingVolume),
+    volume: firstPositiveNumber(
+      event.remainingVolume,
+      event.position?.volume,
+      event.management?.expectedRemainingVolume,
+      event.lastKnownState?.expectedRemainingVolume,
+      state.trade?.remainingVolume,
+      state.trade?.initialVolume,
+    ),
     priceMove: numberOrNull(event.favorable),
     slPriceMove: entry !== null && stopLoss !== null ? sidePriceMove(side, entry, stopLoss) : null,
     profitUsd: null,
@@ -2154,10 +2294,12 @@ function lifecycleTakeProfit(event) {
 
   if (lifecycleRegime(event) === "SIDEWAY") {
     return fmtPrice(
-      event?.management?.tp2 ??
-      event?.lastKnownState?.tp2 ??
-      state.trade?.takeProfit ??
-      event?.position?.takeProfit,
+      firstPositiveNumber(
+        event?.management?.tp2,
+        event?.lastKnownState?.tp2,
+        state.trade?.takeProfit,
+        event?.position?.takeProfit,
+      ),
     );
   }
 
@@ -2173,23 +2315,31 @@ function lifecycleContextLines(event, enrichment) {
     state.trade?.ticket ??
     "—",
   );
-  const entry = numberOrNull(
-    position?.entry ??
-    event?.fillPrice ??
-    metrics?.entry ??
+  const entry = firstPositiveNumber(
+    position?.entry,
+    event?.fillPrice,
+    metrics?.entry,
+    event?.management?.entry,
+    event?.lastKnownState?.entry,
     state.trade?.entry,
   );
-  const stopLoss = numberOrNull(
-    event?.stopLoss ??
-    position?.stopLoss ??
-    metrics?.stopLoss ??
+  const stopLoss = firstPositiveNumber(
+    event?.stopLoss,
+    position?.stopLoss,
+    metrics?.stopLoss,
+    event?.management?.stopLoss,
+    event?.lastKnownState?.stopLoss,
     state.trade?.stopLoss,
   );
-  const lot = numberOrNull(
-    event?.remainingVolume ??
-    position?.volume ??
-    metrics?.volume ??
-    state.trade?.remainingVolume ??
+  const lot = firstPositiveNumber(
+    event?.remainingVolume,
+    position?.volume,
+    metrics?.volume,
+    event?.management?.expectedRemainingVolume,
+    event?.lastKnownState?.expectedRemainingVolume,
+    event?.management?.initialVolume,
+    event?.lastKnownState?.initialVolume,
+    state.trade?.remainingVolume,
     state.trade?.initialVolume,
   );
 
@@ -2508,6 +2658,15 @@ function reasonLabel(raw) {
 function numberOrNull(raw) {
   const number = Number(raw);
   return Number.isFinite(number) ? number : null;
+}
+
+function firstPositiveNumber(...rawValues) {
+  for (const raw of rawValues) {
+    if (raw === null || raw === undefined || raw === "") continue;
+    const number = Number(raw);
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+  return null;
 }
 
 function value(raw) {
