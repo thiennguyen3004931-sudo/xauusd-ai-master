@@ -1,0 +1,46 @@
+name: Phase7C Bridge Task Child Cleanup CI
+
+on:
+  push:
+    branches:
+      - fix/phase7c-bridge-task-child-cleanup
+    paths:
+      - "scripts/run-phase7c-account-bridge-task-runner-local.ps1"
+      - "scripts/lib/phase7b-windows-job-object.ps1"
+      - "scripts/test-phase7c-account-bridge-task-child-cleanup-source.ps1"
+      - "scripts/test-phase7b-web-job-object-cleanup-local.ps1"
+      - ".github/workflows/phase7c-bridge-task-child-cleanup-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "scripts/run-phase7c-account-bridge-task-runner-local.ps1"
+      - "scripts/lib/phase7b-windows-job-object.ps1"
+      - "scripts/test-phase7c-account-bridge-task-child-cleanup-source.ps1"
+      - "scripts/test-phase7b-web-job-object-cleanup-local.ps1"
+      - ".github/workflows/phase7c-bridge-task-child-cleanup-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bridge-task-child-cleanup-windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bridge runner source contract - PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-account-bridge-task-child-cleanup-source.ps1
+      - name: Canonical Job Object forced cleanup fixture - PowerShell 7
+        if: always()
+        shell: pwsh
+        run: .\scripts\test-phase7b-web-job-object-cleanup-local.ps1
+      - name: Bridge runner source contract - Windows PowerShell 5.1
+        if: always()
+        shell: powershell
+        run: .\scripts\test-phase7c-account-bridge-task-child-cleanup-source.ps1
+      - name: Canonical Job Object forced cleanup fixture - Windows PowerShell 5.1
+        if: always()
+        shell: powershell
+        run: .\scripts\test-phase7b-web-job-object-cleanup-local.ps1
