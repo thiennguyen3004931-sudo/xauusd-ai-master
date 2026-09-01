@@ -32,7 +32,7 @@ Assert-Text "apps/api/src/services/phase7c-lifecycle.service.ts" 'firstTimeLiveA
 Assert-Text "apps/api/src/services/phase7c-lifecycle.service.ts" 'resolvePhase7CWebStartAccount' "web lifecycle must route account selection through the guarded start policy"
 Assert-Text "apps/api/src/services/phase7c-lifecycle.service.ts" 'LIVE_NOT_PREAUTHORIZED' "web lifecycle must fail closed when LIVE lacks prior authorization"
 Assert-Text "apps/api/src/services/phase7c-lifecycle.service.ts" 'phase7CBotModeService\.set\("PAUSE",\s*"web-control-center-preflight"\)' "web start must freeze bot mode before account/start preflight"
-Assert-Text "apps/api/src/services/phase7c-lifecycle.service.ts" 'liveAuthorization\?\.valid\s*!==\s*true' "LIVE launcher must revalidate prior LIVE authorization"
+Assert-Text "apps/api/src/services/phase7c-lifecycle.service.ts" '!liveAuthorization\.valid\s*\|\|\s*!liveAuthorization\.identity' "LIVE launcher must revalidate prior LIVE authorization"
 Assert-Text "apps/api/src/services/phase7c-lifecycle.service.ts" 'startMode:\s*"PAUSE_UNTIL_MANUAL_WEB_AUTO"' "lifecycle safety contract must require manual Web AUTO"
 Assert-Text "apps/api/src/services/phase7c-lifecycle.service.ts" 'phase7CBotModeService\.set\("PAUSE",\s*"web-control-center-ready-pause"\)' "ready lifecycle must remain PAUSE"
 Assert-NotText "apps/api/src/services/phase7c-lifecycle.service.ts" 'phase7CBotModeService\.set\("AUTO"' "lifecycle must never activate AUTO as a side effect"
