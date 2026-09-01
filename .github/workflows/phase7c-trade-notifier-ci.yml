@@ -1,4 +1,5 @@
 name: Phase7C Trade Notifier CI
+# Includes Recovery close canonical-before-Daily-P/L synchronization regression.
 
 on:
   push:
