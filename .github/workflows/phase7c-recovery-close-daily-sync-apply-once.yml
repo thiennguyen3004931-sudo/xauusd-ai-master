@@ -1,0 +1,60 @@
+name: Phase7C Recovery Close Daily Sync Apply Once
+
+on:
+  push:
+    branches:
+      - fix/phase7c-trade-notifier-recovery-close-daily-sync
+    paths:
+      - scripts/apply-phase7c-recovery-close-daily-sync.mjs
+      - .github/workflows/phase7c-recovery-close-daily-sync-apply-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/phase7c-trade-notifier-recovery-close-daily-sync
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Apply minimal notifier ordering and pending-state fix
+        run: node ./scripts/apply-phase7c-recovery-close-daily-sync.mjs
+
+      - name: Notifier JavaScript syntax
+        run: node --check ./scripts/run-phase7b-telegram-notifier.mjs
+
+      - name: Recovery close Daily P/L regression GREEN
+        run: node --test ./scripts/phase7c-recovery-close-daily-sync.test.mjs
+
+      - name: Existing zero-deal realized-PnL regression
+        run: node --test ./scripts/phase7c-telegram-zero-deal-pnl.test.mjs
+
+      - name: Existing synthetic lifecycle regression
+        run: node --test ./scripts/phase7c-trade-notifier-synthetic.test.mjs
+
+      - name: Existing production Sideway Telegram sample regression
+        run: node --test ./scripts/phase7c-sideway-production-telegram-sample.test.mjs
+
+      - name: Diff hygiene
+        run: git diff --check
+
+      - name: Commit verified production fix and remove one-shot scaffolding
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/run-phase7b-telegram-notifier.mjs
+          git rm scripts/apply-phase7c-recovery-close-daily-sync.mjs
+          git rm .github/workflows/phase7c-recovery-close-daily-sync-apply-once.yml
+          git commit -m "fix: synchronize Recovery close Daily P/L after canonical deal"
+          git push origin HEAD:fix/phase7c-trade-notifier-recovery-close-daily-sync
