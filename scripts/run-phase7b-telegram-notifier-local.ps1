@@ -13,6 +13,8 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $WorkDir = (Resolve-Path $WorkDir).Path
 $AccountMode = $AccountMode.ToUpperInvariant()
 $Notifier = Join-Path $PSScriptRoot "run-phase7b-telegram-notifier.mjs"
+$JobObjectHelper = Join-Path $PSScriptRoot "lib\phase7b-windows-job-object.ps1"
+$IsWindowsHost = $env:OS -eq "Windows_NT"
 
 if (-not [System.IO.Path]::IsPathRooted($EnvFile)) {
   $EnvFile = Join-Path $ProjectRoot $EnvFile
@@ -22,6 +24,12 @@ if (-not (Test-Path $EnvFile)) {
 }
 if (-not (Test-Path $Notifier)) {
   throw "Telegram notifier not found: $Notifier"
+}
+if ($IsWindowsHost) {
+  if (-not (Test-Path -LiteralPath $JobObjectHelper -PathType Leaf)) {
+    throw "Windows Job Object helper not found: $JobObjectHelper"
+  }
+  . $JobObjectHelper
 }
 
 $trendDirName = if ($AccountMode -eq "LIVE") { "phase7b-live-forward" } else { "phase7b-demo-forward" }
@@ -124,6 +132,16 @@ if (-not $SendTest -and -not $Once) {
     Write-Host "PHASE7B_TELEGRAM_EXISTING_PID=$($existingRuntime.pid)"
     return
   }
+}
+
+# On Windows, make the wrapper the owner of a kill-on-close Job Object before it
+# spawns Node. The Node child inherits this job, so forced wrapper termination
+# cannot leave an orphan notifier holding the singleton lock.
+$runtimeJob = $null
+if ($IsWindowsHost) {
+  $runtimeJob = New-Phase7BKillOnCloseJob -Name ("Phase7B-Telegram-Notifier-{0}-{1}" -f $PID, [guid]::NewGuid().ToString('N'))
+  Add-Phase7BProcessToJob -Job $runtimeJob -ProcessId $PID
+  Write-Host "PHASE7B_TELEGRAM_JOB_OBJECT=ACTIVE"
 }
 
 foreach ($raw in Get-Content $EnvFile) {
