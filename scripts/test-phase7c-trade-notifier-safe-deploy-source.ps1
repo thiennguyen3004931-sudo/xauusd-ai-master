@@ -65,12 +65,12 @@ $commandAsts = @($ast.FindAll({
   param($node)
   $node -is [System.Management.Automation.Language.CommandAst]
 }, $true))
-$taskkillAsts = @($commandAsts | Where-Object { $_.Extent.Text -match '(?i)\$taskkillExe' })
-Assert-True ($taskkillAsts.Count -eq 1) 'Deploy script must issue exactly one taskkill command for the trade notifier tree.'
-$taskkillText = [string]$taskkillAsts[0].Extent.Text
-Assert-True ($taskkillText.Contains('$oldTradeNotifierPid')) 'taskkill must target oldTradeNotifierPid only.'
-Assert-True (-not ($taskkillText -match '(?i)supervisor|trend|sideway|telegramMode|regimeNotifier')) 'taskkill must not target supervisor/executor/control child PIDs.'
-Assert-True ($taskkillText -match '(?i)(?:^|\s)/T(?:\s|$)') 'Trade notifier taskkill must include /T so its Node child is not orphaned.'
+$taskkillMatches = [regex]::Matches(
+  $source,
+  '(?im)^\s*&\s+\$taskkillExe\s+/PID\s+\$oldTradeNotifierPid\s+/T\s+/F(?:\s*\|\s*Out-Host)?\s*$'
+)
+Assert-True ($taskkillMatches.Count -eq 1) 'Deploy script must issue exactly one taskkill command targeting oldTradeNotifierPid with /T /F.'
+Assert-True (-not ($source -match '(?im)^\s*&\s+\$taskkillExe\s+/PID\s+\$(?:oldSupervisorPid|oldTrendPid|oldSidewayPid|oldTelegramModePid|oldRegimeNotifierPid)\b')) 'Deploy script must never taskkill supervisor/executor/control child PIDs.'
 
 # Supervisor must recreate a healthy read-only notifier child. Verification stays local to
 # this helper because the legacy -DeploymentGate intentionally requires PAUSE.
