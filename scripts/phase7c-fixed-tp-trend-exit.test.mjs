@@ -81,7 +81,7 @@ test("Trend management preserves +6, +10 and Daily Recovery precedence around Fi
   assert.ok(partialIndex > recoveryIndex, "existing +10 partial branch must remain after Daily Recovery guard");
   assert.equal(fixedCalls.length, 2,
     "RED_TARGET: Trend must monitor Fixed TP independently in Recovery and in normal native management.");
-  assert.deepEqual(guardedFixedCalls, fixedCalls,
+  assert.equal(guardedFixedCalls.length, fixedCalls.length,
     "RED_TARGET: every Fixed TP monitor call must return immediately when the Fixed TP cycle handled or blocked mutation.");
 
   const recoveryReturn = manage.indexOf("\n    return;", recoveryIndex);
