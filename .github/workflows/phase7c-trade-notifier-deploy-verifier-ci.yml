@@ -10,6 +10,7 @@ on:
       - scripts/deploy-phase7c-trade-notifier-local.ps1
       - scripts/test-phase7c-trade-notifier-deploy-verifier-source.ps1
       - scripts/test-phase7c-trade-notifier-safe-deploy-source.ps1
+      - scripts/test-phase7c-trade-notifier-degraded-runtime-recovery-source.ps1
       - scripts/test-phase7c-verifier-strictmode-array.ps1
       - .github/workflows/phase7c-trade-notifier-deploy-verifier-ci.yml
   pull_request:
@@ -21,6 +22,7 @@ on:
       - scripts/deploy-phase7c-trade-notifier-local.ps1
       - scripts/test-phase7c-trade-notifier-deploy-verifier-source.ps1
       - scripts/test-phase7c-trade-notifier-safe-deploy-source.ps1
+      - scripts/test-phase7c-trade-notifier-degraded-runtime-recovery-source.ps1
       - scripts/test-phase7c-verifier-strictmode-array.ps1
       - .github/workflows/phase7c-trade-notifier-deploy-verifier-ci.yml
 
@@ -43,6 +45,10 @@ jobs:
         shell: pwsh
         run: .\scripts\test-phase7c-trade-notifier-safe-deploy-source.ps1
 
+      - name: Degraded runtime recovery contract with PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-trade-notifier-degraded-runtime-recovery-source.ps1
+
       - name: StrictMode array regression with PowerShell 7
         shell: pwsh
         run: .\scripts\test-phase7c-verifier-strictmode-array.ps1
@@ -54,6 +60,10 @@ jobs:
       - name: Safe deploy source contract with Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-trade-notifier-safe-deploy-source.ps1
+
+      - name: Degraded runtime recovery contract with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-trade-notifier-degraded-runtime-recovery-source.ps1
 
       - name: StrictMode array regression with Windows PowerShell 5.1
         shell: powershell
