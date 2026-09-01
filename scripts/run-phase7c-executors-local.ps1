@@ -6,8 +6,12 @@ param(
   [ValidateSet("DEMO", "LIVE")] [string]$AccountMode = "DEMO",
   [switch]$LiveExecutionEnabled,
   [double]$TrendFixedVolume = 0.03,
+  [bool]$TrendFixedTpEnabled = $false,
+  [double]$TrendFixedTpDistance = 0,
   [double]$SidewayRiskPercent = 0.25,
   [double]$SidewayMaxLot = 0.03,
+  [bool]$SidewayFixedTpEnabled = $false,
+  [double]$SidewayFixedTpDistance = 0,
   [int]$DependencyWaitSeconds = 120,
   [switch]$DisableTelegram,
   [switch]$Armed,
@@ -43,6 +47,20 @@ $sidewayCapUnits = $SidewayMaxLot / 0.03
 if ([math]::Abs($sidewayCapUnits - [math]::Round($sidewayCapUnits)) -gt 1e-8) {
   throw "SidewayMaxLot must use 0.03 increments."
 }
+$trendFixedTpDistanceInvalid = [double]::IsNaN($TrendFixedTpDistance) -or [double]::IsInfinity($TrendFixedTpDistance)
+if ($TrendFixedTpEnabled -and ($trendFixedTpDistanceInvalid -or $TrendFixedTpDistance -le 0)) {
+  throw "Trend Fixed TP distance must be positive when Fixed TP is enabled."
+}
+if ($trendFixedTpDistanceInvalid -or $TrendFixedTpDistance -lt 0) {
+  throw "Trend Fixed TP distance must be finite and non-negative."
+}
+$sidewayFixedTpDistanceInvalid = [double]::IsNaN($SidewayFixedTpDistance) -or [double]::IsInfinity($SidewayFixedTpDistance)
+if ($SidewayFixedTpEnabled -and ($sidewayFixedTpDistanceInvalid -or $SidewayFixedTpDistance -le 0)) {
+  throw "Sideway Fixed TP distance must be positive when Fixed TP is enabled."
+}
+if ($sidewayFixedTpDistanceInvalid -or $SidewayFixedTpDistance -lt 0) {
+  throw "Sideway Fixed TP distance must be finite and non-negative."
+}
 
 if (-not [System.IO.Path]::IsPathRooted($WorkDir)) { $WorkDir = Join-Path $ProjectRoot $WorkDir }
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
@@ -51,10 +69,14 @@ $LotSettingsPath = Join-Path $WorkDir "phase7c-lot-settings.json"
 if (Test-Path $LotSettingsPath) {
   try {
     $lotSettings = Get-Content -LiteralPath $LotSettingsPath -Raw | ConvertFrom-Json
-    [void](Assert-Phase7CRiskProfile $lotSettings "Active Phase7C lot settings")
-    $TrendFixedVolume = [double]$lotSettings.trendFixedLot
-    $SidewayRiskPercent = [double]$lotSettings.sidewayRiskPercent
-    $SidewayMaxLot = [double]$lotSettings.sidewayMaxLot
+    $runtimeSettings = Assert-Phase7CRiskProfile $lotSettings "Active Phase7C lot settings"
+    $TrendFixedVolume = [double]$runtimeSettings.trendFixedLot
+    $TrendFixedTpEnabled = [bool]$runtimeSettings.trendFixedTpEnabled
+    $TrendFixedTpDistance = [double]$runtimeSettings.trendFixedTpDistance
+    $SidewayRiskPercent = [double]$runtimeSettings.sidewayRiskPercent
+    $SidewayMaxLot = [double]$runtimeSettings.sidewayMaxLot
+    $SidewayFixedTpEnabled = [bool]$runtimeSettings.sidewayFixedTpEnabled
+    $SidewayFixedTpDistance = [double]$runtimeSettings.sidewayFixedTpDistance
   } catch {
     throw "Phase 7C lot settings are invalid at $LotSettingsPath. $($_.Exception.Message)"
   }
@@ -288,8 +310,10 @@ $trendArgs = @(
   "-EnvFile", ('"{0}"' -f $EnvFile),
   "-WorkDir", ('"{0}"' -f $TrendWorkDir),
   "-AccountMode", $AccountMode,
-  "-FixedVolume", $TrendFixedVolume.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+  "-FixedVolume", $TrendFixedVolume.ToString([System.Globalization.CultureInfo]::InvariantCulture),
+  "-FixedTpDistance", $TrendFixedTpDistance.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 )
+if ($TrendFixedTpEnabled) { $trendArgs += "-FixedTpEnabled" }
 $sidewayArgs = @(
   "-File", ('"{0}"' -f $SidewayLauncher),
   "-ControlApiUrl", ('"{0}"' -f $ControlApiUrl),
@@ -297,8 +321,10 @@ $sidewayArgs = @(
   "-WorkDir", ('"{0}"' -f $SidewayWorkDir),
   "-AccountMode", $AccountMode,
   "-RiskPercent", $SidewayRiskPercent.ToString([System.Globalization.CultureInfo]::InvariantCulture),
-  "-MaxLot", $SidewayMaxLot.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+  "-MaxLot", $SidewayMaxLot.ToString([System.Globalization.CultureInfo]::InvariantCulture),
+  "-FixedTpDistance", $SidewayFixedTpDistance.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 )
+if ($SidewayFixedTpEnabled) { $sidewayArgs += "-FixedTpEnabled" }
 if ($AccountMode -eq "LIVE" -and $LiveExecutionEnabled) {
   $trendArgs += "-LiveExecutionEnabled"
   $sidewayArgs += "-LiveExecutionEnabled"
@@ -340,16 +366,24 @@ Write-Host "PHASE7C_TELEGRAM_CONFIGURED=$TelegramConfigured"
 Write-Host "PHASE7C_TELEGRAM_MT5_ORDER_PERMISSION=NONE"
 Write-Host "PHASE7C_TRADE_NOTIFIER_RUNTIME=$TradeNotifierRuntimePath"
 Write-Host "PHASE7C_TREND_FIXED_LOT=$TrendFixedVolume"
+Write-Host "PHASE7C_TREND_FIXED_TP_ENABLED=$TrendFixedTpEnabled"
+Write-Host "PHASE7C_TREND_FIXED_TP_DISTANCE=$TrendFixedTpDistance"
 Write-Host "PHASE7C_SIDEWAY_RISK_PERCENT=$SidewayRiskPercent"
 Write-Host "PHASE7C_SIDEWAY_MAX_LOT=$SidewayMaxLot"
+Write-Host "PHASE7C_SIDEWAY_FIXED_TP_ENABLED=$SidewayFixedTpEnabled"
+Write-Host "PHASE7C_SIDEWAY_FIXED_TP_DISTANCE=$SidewayFixedTpDistance"
 
 function Write-ActiveLotSettings {
   $activeLotSettings = [pscustomobject]@{
-    version = 1
+    version = 2
     accountMode = $AccountMode
     trendFixedLot = $TrendFixedVolume
     sidewayRiskPercent = $SidewayRiskPercent
     sidewayMaxLot = $SidewayMaxLot
+    trendFixedTpEnabled = $TrendFixedTpEnabled
+    trendFixedTpDistance = $TrendFixedTpDistance
+    sidewayFixedTpEnabled = $SidewayFixedTpEnabled
+    sidewayFixedTpDistance = $SidewayFixedTpDistance
     armed = $Armed.IsPresent
     supervisorPid = $PID
     appliedAt = [DateTimeOffset]::UtcNow.ToString("o")
