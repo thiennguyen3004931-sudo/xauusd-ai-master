@@ -6,6 +6,7 @@ on:
       - feat/phase7c-fixed-tp-additive
     paths:
       - "scripts/.tmp-apply-trend-fixed-tp-exit.mjs"
+      - "scripts/phase7c-fixed-tp-trend-exit.test.mjs"
       - ".github/workflows/.tmp-apply-trend-fixed-tp-exit.yml"
 
 permissions:
