@@ -98,6 +98,42 @@ function Assert-InvariantPid([string]$Path, [string]$Label, [int]$ExpectedPid, [
   Write-Host "$Marker=PASS"
 }
 
+function Get-Phase7CTradeNotifierProcesses {
+  $wrapperScript = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "run-phase7b-telegram-notifier-local.ps1"))
+  $nodeScript = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "run-phase7b-telegram-notifier.mjs"))
+  return @(
+    Get-CimInstance Win32_Process -ErrorAction Stop |
+      Where-Object {
+        $commandLine = [string]$_.CommandLine
+        if ([string]::IsNullOrWhiteSpace($commandLine)) { return $false }
+        return (
+          $commandLine.IndexOf($wrapperScript, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+          $commandLine.IndexOf($nodeScript, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        )
+      } |
+      Sort-Object ProcessId -Unique
+  )
+}
+
+function Stop-Phase7CTradeNotifierProcesses {
+  param(
+    [Parameter(Mandatory = $true)] [object[]]$Processes,
+    [Parameter(Mandatory = $true)] [string]$TaskkillExe
+  )
+  foreach ($processInfo in @($Processes | Sort-Object ProcessId -Descending)) {
+    $processId = [int]$processInfo.ProcessId
+    if ($processId -le 0 -or $processId -eq $PID) { continue }
+    if ($null -eq (Get-LiveProcess $processId)) { continue }
+    Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_DEGRADED_PROCESS_STOP=$processId"
+    & $TaskkillExe /PID $processId /T /F | Out-Host
+    $exitCode = $LASTEXITCODE
+    if ($null -eq $exitCode) { $exitCode = 0 }
+    if ([int]$exitCode -ne 0 -and $null -ne (Get-LiveProcess $processId)) {
+      throw "Failed to terminate degraded trade notifier process tree. pid=$processId exitCode=$exitCode"
+    }
+  }
+}
+
 Assert-Phase7CDeployAdministrator
 
 $gitCommand = Get-Command git -ErrorAction Stop
@@ -235,7 +271,6 @@ $oldTrendPid = Read-RequiredPid -Path $TrendPidPath -Label "Trend"
 $oldSidewayPid = Read-RequiredPid -Path $SidewayPidPath -Label "Sideway"
 $oldTelegramModePid = Read-RequiredPid -Path $TelegramModePidPath -Label "Telegram mode"
 $oldRegimeNotifierPid = Read-RequiredPid -Path $RegimeNotifierPidPath -Label "Regime notifier"
-$oldTradeNotifierPid = Read-RequiredPid -Path $TradeNotifierPidPath -Label "Trade notifier"
 
 $activeBefore = Read-JsonFile -Path $ActiveLotSettingsPath -Label "Active lot settings"
 $armedBefore = [bool]$activeBefore.armed
@@ -252,41 +287,69 @@ Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_TREND_PID=$oldTrendPid"
 Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_SIDEWAY_PID=$oldSidewayPid"
 Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_TELEGRAM_MODE_PID=$oldTelegramModePid"
 Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_REGIME_NOTIFIER_PID=$oldRegimeNotifierPid"
-Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_OLD_TRADE_NOTIFIER_PID=$oldTradeNotifierPid"
 
-$oldRuntime = Read-JsonFile -Path $TradeNotifierRuntimePath -Label "Trade notifier runtime"
-if ([string]$oldRuntime.status -ne "RUNNING" -or [string]$oldRuntime.accountMode -ne $AccountMode -or [string]$oldRuntime.orderPermission -ne "NONE") {
-  throw "Existing trade notifier is not a healthy read-only $AccountMode runtime. status=$($oldRuntime.status) accountMode=$($oldRuntime.accountMode) orderPermission=$($oldRuntime.orderPermission)"
-}
-if ([int]$oldRuntime.wrapperPid -ne $oldTradeNotifierPid) {
-  throw "Existing trade notifier wrapper PID mismatch. runtime=$($oldRuntime.wrapperPid) pidFile=$oldTradeNotifierPid"
-}
-$oldNodePid = [int]$oldRuntime.pid
-if ($oldNodePid -le 0 -or $null -eq (Get-LiveProcess $oldNodePid)) {
-  throw "Existing trade notifier Node process is not alive. pid=$oldNodePid"
-}
-$oldHeartbeatAgeMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$oldRuntime.heartbeatAt
-if ($oldHeartbeatAgeMs -lt -10000 -or $oldHeartbeatAgeMs -gt 15000) {
-  throw "Existing trade notifier heartbeat is stale/invalid. ageMs=$oldHeartbeatAgeMs"
+$taskkillExe = Join-Path $env:SystemRoot "System32\taskkill.exe"
+if (-not (Test-Path -LiteralPath $taskkillExe -PathType Leaf)) { throw "taskkill.exe not found: $taskkillExe" }
+
+$degradedRuntime = $false
+$oldTradeNotifierPid = 0
+try {
+  $oldTradeNotifierPid = Read-RequiredPid -Path $TradeNotifierPidPath -Label "Trade notifier"
+} catch {
+  $degradedRuntime = $true
+  Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_DEGRADED_RUNTIME=DETECTED"
+  Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_DEGRADED_RUNTIME_REASON=$($_.Exception.Message)"
 }
 
 $expectedTrendDir = if ($AccountMode -eq "LIVE") { Join-Path $WorkDir "phase7b-live-forward" } else { Join-Path $WorkDir "phase7b-demo-forward" }
 $expectedSidewayDir = if ($AccountMode -eq "LIVE") { Join-Path $WorkDir "phase7c-sideway-live-forward" } else { Join-Path $WorkDir "phase7c-sideway-forward" }
 $expectedTrendJournal = Join-Path $expectedTrendDir "phase7b-demo-events.jsonl"
 $expectedSidewayJournal = Join-Path $expectedSidewayDir "phase7c-sideway-events.jsonl"
-if (-not (Test-SamePath ([string]$oldRuntime.trendJournal) $expectedTrendJournal) -or -not (Test-SamePath ([string]$oldRuntime.sidewayJournal) $expectedSidewayJournal)) {
-  throw "Existing trade notifier journal mapping is not canonical for $AccountMode."
-}
 
-$taskkillExe = Join-Path $env:SystemRoot "System32\taskkill.exe"
-if (-not (Test-Path -LiteralPath $taskkillExe -PathType Leaf)) { throw "taskkill.exe not found: $taskkillExe" }
-& $taskkillExe /PID $oldTradeNotifierPid /T /F | Out-Host
-$taskkillExit = $LASTEXITCODE
-if ($null -eq $taskkillExit) { $taskkillExit = 0 }
-if ([int]$taskkillExit -ne 0) {
-  throw "Failed to terminate trade notifier process tree. pid=$oldTradeNotifierPid exitCode=$taskkillExit"
+if (-not $degradedRuntime) {
+  Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_OLD_TRADE_NOTIFIER_PID=$oldTradeNotifierPid"
+  $oldRuntime = Read-JsonFile -Path $TradeNotifierRuntimePath -Label "Trade notifier runtime"
+  if ([string]$oldRuntime.status -ne "RUNNING" -or [string]$oldRuntime.accountMode -ne $AccountMode -or [string]$oldRuntime.orderPermission -ne "NONE") {
+    throw "Existing trade notifier is not a healthy read-only $AccountMode runtime. status=$($oldRuntime.status) accountMode=$($oldRuntime.accountMode) orderPermission=$($oldRuntime.orderPermission)"
+  }
+  if ([int]$oldRuntime.wrapperPid -ne $oldTradeNotifierPid) {
+    throw "Existing trade notifier wrapper PID mismatch. runtime=$($oldRuntime.wrapperPid) pidFile=$oldTradeNotifierPid"
+  }
+  $oldNodePid = [int]$oldRuntime.pid
+  if ($oldNodePid -le 0 -or $null -eq (Get-LiveProcess $oldNodePid)) {
+    throw "Existing trade notifier Node process is not alive. pid=$oldNodePid"
+  }
+  $oldHeartbeatAgeMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$oldRuntime.heartbeatAt
+  if ($oldHeartbeatAgeMs -lt -10000 -or $oldHeartbeatAgeMs -gt 15000) {
+    throw "Existing trade notifier heartbeat is stale/invalid. ageMs=$oldHeartbeatAgeMs"
+  }
+  if (-not (Test-SamePath ([string]$oldRuntime.trendJournal) $expectedTrendJournal) -or -not (Test-SamePath ([string]$oldRuntime.sidewayJournal) $expectedSidewayJournal)) {
+    throw "Existing trade notifier journal mapping is not canonical for $AccountMode."
+  }
+
+  & $taskkillExe /PID $oldTradeNotifierPid /T /F | Out-Host
+  $taskkillExit = $LASTEXITCODE
+  if ($null -eq $taskkillExit) { $taskkillExit = 0 }
+  if ([int]$taskkillExit -ne 0) {
+    throw "Failed to terminate trade notifier process tree. pid=$oldTradeNotifierPid exitCode=$taskkillExit"
+  }
+  Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_OLD_TRADE_NOTIFIER_TREE_STOP=PASS"
+} else {
+  if (Test-Path -LiteralPath $TradeNotifierRuntimePath -PathType Leaf) {
+    $degradedRuntimeSnapshot = Read-JsonFile -Path $TradeNotifierRuntimePath -Label "Degraded trade notifier runtime"
+    if (-not [string]::IsNullOrWhiteSpace([string]$degradedRuntimeSnapshot.accountMode) -and [string]$degradedRuntimeSnapshot.accountMode -ne $AccountMode) {
+      throw "Degraded trade notifier account mode mismatch. expected=$AccountMode actual=$($degradedRuntimeSnapshot.accountMode)"
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$degradedRuntimeSnapshot.orderPermission) -and [string]$degradedRuntimeSnapshot.orderPermission -ne "NONE") {
+      throw "Degraded trade notifier orderPermission must remain NONE. actual=$($degradedRuntimeSnapshot.orderPermission)"
+    }
+  }
+
+  $degradedProcesses = @(Get-Phase7CTradeNotifierProcesses)
+  Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_DEGRADED_PROCESS_COUNT=$($degradedProcesses.Count)"
+  Stop-Phase7CTradeNotifierProcesses -Processes $degradedProcesses -TaskkillExe $taskkillExe
+  Remove-Item -LiteralPath $TradeNotifierPidPath -Force -ErrorAction SilentlyContinue
 }
-Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_OLD_TRADE_NOTIFIER_TREE_STOP=PASS"
 
 $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 $newTradeNotifierPid = 0
@@ -300,7 +363,7 @@ while ((Get-Date) -lt $deadline) {
       continue
     }
     $candidatePid = [int](Get-Content -LiteralPath $TradeNotifierPidPath -Raw).Trim()
-    if ($candidatePid -le 0 -or $candidatePid -eq $oldTradeNotifierPid -or $null -eq (Get-LiveProcess $candidatePid)) {
+    if ($candidatePid -le 0 -or ($oldTradeNotifierPid -gt 0 -and $candidatePid -eq $oldTradeNotifierPid) -or $null -eq (Get-LiveProcess $candidatePid)) {
       $lastNotifierError = "replacement wrapper not alive/new yet. pid=$candidatePid"
       continue
     }
@@ -351,6 +414,9 @@ if ($newTradeNotifierPid -le 0) {
 }
 Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_NEW_TRADE_NOTIFIER_PID=$newTradeNotifierPid"
 Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_NEW_TRADE_NOTIFIER_NODE_PID=$newTradeNotifierNodePid"
+if ($degradedRuntime) {
+  Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_DEGRADED_RUNTIME_RECOVERY=PASS"
+}
 
 Assert-InvariantPid -Path $SupervisorPidPath -Label "Supervisor" -ExpectedPid $oldSupervisorPid -Marker "PHASE7C_TRADE_NOTIFIER_DEPLOY_SUPERVISOR_PID_UNCHANGED"
 Assert-InvariantPid -Path $TrendPidPath -Label "Trend" -ExpectedPid $oldTrendPid -Marker "PHASE7C_TRADE_NOTIFIER_DEPLOY_TREND_PID_UNCHANGED"
