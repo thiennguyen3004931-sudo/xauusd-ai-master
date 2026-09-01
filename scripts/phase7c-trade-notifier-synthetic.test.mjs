@@ -152,6 +152,62 @@ const sidewayRecoveryEvents = [
   },
 ];
 
+const recoveryZeroPlaceholderEvents = [
+  {
+    type: "ENTRY_FILLED",
+    timestamp: "2026-08-26T07:00:00.000Z",
+    position: {
+      ticket: "RECOVERY-ZERO-1",
+      side: "SHORT",
+      entry: 0,
+      stopLoss: 0,
+      takeProfit: 0,
+      volume: 0,
+    },
+    management: {
+      side: "SELL",
+      entry: 4435.5,
+      initialVolume: 0.03,
+      expectedRemainingVolume: 0.03,
+      stopLoss: 4443.5,
+      dailyMode: "RECOVERY_TP",
+      recoveryTpDistance: 10.49,
+      recoveryTakeProfit: 4425.01,
+      tp2: 4425.01,
+    },
+    dailyMode: "RECOVERY_TP",
+    dailyNetPnlAtEntry: -30,
+    recoveryTargetNetPnl: 1,
+    recoveryTpDistance: 10.49,
+    recoveryTakeProfit: 0,
+  },
+  {
+    type: "FVG_HOLD_CONFIRMED",
+    timestamp: "2026-08-26T07:01:00.000Z",
+    ticket: "RECOVERY-ZERO-1",
+    side: "SELL",
+    position: {
+      entry: 0,
+      stopLoss: 0,
+      takeProfit: 0,
+      volume: 0,
+    },
+    stopLoss: 0,
+    favorable: 3.5,
+    recoveryTakeProfit: 0,
+    management: {
+      entry: 4435.5,
+      stopLoss: 4443.5,
+      expectedRemainingVolume: 0.03,
+      recoveryTakeProfit: 4425.01,
+      tp2: 4425.01,
+      dailyMode: "RECOVERY_TP",
+    },
+    dailyMode: "RECOVERY_TP",
+    m15CloseTime: 1787727660000,
+  },
+];
+
 const rejectedEntryEvents = [
   {
     type: "ENTRY_SUBMIT",
@@ -311,6 +367,27 @@ test("Sideway Recovery keeps +6 BE but disables native +10 partial", () => {
   assert.match(notifications[0].text, /không \+10 partial/i);
   assert.doesNotMatch(notifications[0].text, /bỏ native TP1 partial\/BE/i);
   assert.match(notifications[1].text, /\+6 → BE/);
+});
+
+test("Recovery Telegram skips zero placeholders for Entry, SL, TP, and Lot", () => {
+  const notifications = runJournal(
+    "LIVE",
+    recoveryZeroPlaceholderEvents,
+    "recovery-zero-context",
+  );
+
+  assert.equal(notifications.length, 2, "Recovery entry + HOLD must emit exactly two notifications");
+
+  const hold = notifications[1].text;
+  assert.match(hold, /HOLD CONFIRMED/);
+  assert.match(hold, /4435\.50/);
+  assert.match(hold, /4443\.50/);
+  assert.match(hold, /4425\.01/);
+  assert.match(hold, /0\.03 lot/);
+  assert.doesNotMatch(hold, /Entry:<\/b> <code>0\.00<\/code>/);
+  assert.doesNotMatch(hold, /SL:<\/b> <code>0\.00<\/code>/);
+  assert.doesNotMatch(hold, /TP:<\/b> <code>0\.00<\/code>/);
+  assert.doesNotMatch(hold, /Lot:<\/b> <code>— lot<\/code>/);
 });
 
 test("ENTRY_SUBMIT is pending truthfully and ARM_FILE_MISSING rejection says MT5 did not enter", () => {
