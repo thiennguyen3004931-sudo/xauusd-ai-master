@@ -6,6 +6,8 @@ param(
   [switch]$LiveExecutionEnabled,
   [double]$RiskPercent = 0.25,
   [double]$MaxLot = 0.03,
+  [switch]$FixedTpEnabled,
+  [double]$FixedTpDistance = 0,
   [int]$IntervalSeconds = 5,
   [switch]$Armed,
   [switch]$Once
@@ -28,6 +30,13 @@ if ($MaxLot -lt 0.03 -or $MaxLot -gt 1.2) { throw "MaxLot must be between 0.03 a
 $maxLotUnits = $MaxLot / 0.03
 if ([math]::Abs($maxLotUnits - [math]::Round($maxLotUnits)) -gt 1e-8) {
   throw "MaxLot must use 0.03 increments so +10 can close exactly one-third."
+}
+$fixedTpDistanceInvalid = [double]::IsNaN($FixedTpDistance) -or [double]::IsInfinity($FixedTpDistance)
+if ($FixedTpEnabled -and ($fixedTpDistanceInvalid -or $FixedTpDistance -le 0)) {
+  throw "Sideway Fixed TP distance must be positive when Fixed TP is enabled."
+}
+if ($fixedTpDistanceInvalid -or $FixedTpDistance -lt 0) {
+  throw "Sideway Fixed TP distance must be finite and non-negative."
 }
 if ($IntervalSeconds -lt 1) { throw "IntervalSeconds must be >= 1." }
 
@@ -54,6 +63,8 @@ $env:ZIQ_PHASE7C_ACCOUNT_MODE = $mode
 $env:ZIQ_PHASE7C_LIVE_EXECUTION_ENABLED = if ($mode -eq "LIVE" -and $LiveExecutionEnabled) { "true" } else { "false" }
 $env:ZIQ_PHASE7C_SIDEWAY_RISK_PERCENT = $RiskPercent.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 $env:ZIQ_PHASE7C_SIDEWAY_MAX_LOT = $MaxLot.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+$env:ZIQ_PHASE7C_SIDEWAY_FIXED_TP_ENABLED = if ($FixedTpEnabled) { "true" } else { "false" }
+$env:ZIQ_PHASE7C_SIDEWAY_FIXED_TP_DISTANCE = $FixedTpDistance.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 $env:ZIQ_PHASE7C_SIDEWAY_INTERVAL_SECONDS = $IntervalSeconds.ToString()
 $env:ZIQ_PHASE7C_SIDEWAY_ARMED = if ($Armed) { "true" } else { "false" }
 $env:ZIQ_PHASE7C_SIDEWAY_ONCE = if ($Once) { "true" } else { "false" }
@@ -66,6 +77,8 @@ Write-Host "PHASE7C_SIDEWAY_ACCOUNT_MODE=$mode"
 Write-Host "PHASE7C_CONTROL_API=$($env:ZIQ_PHASE7C_CONTROL_API_URL)"
 Write-Host "PHASE7C_SIDEWAY_RISK_PERCENT=$($env:ZIQ_PHASE7C_SIDEWAY_RISK_PERCENT)"
 Write-Host "PHASE7C_SIDEWAY_MAX_LOT=$($env:ZIQ_PHASE7C_SIDEWAY_MAX_LOT)"
+Write-Host "PHASE7C_SIDEWAY_FIXED_TP_ENABLED=$($env:ZIQ_PHASE7C_SIDEWAY_FIXED_TP_ENABLED)"
+Write-Host "PHASE7C_SIDEWAY_FIXED_TP_DISTANCE=$($env:ZIQ_PHASE7C_SIDEWAY_FIXED_TP_DISTANCE)"
 Write-Host "PHASE7C_SIDEWAY_ARMED=$($env:ZIQ_PHASE7C_SIDEWAY_ARMED)"
 if (-not [string]::IsNullOrWhiteSpace($env:ZIQ_PHASE7C_SIDEWAY_WORK_DIR)) {
   Write-Host "PHASE7C_SIDEWAY_WORK_DIR=$($env:ZIQ_PHASE7C_SIDEWAY_WORK_DIR)"
