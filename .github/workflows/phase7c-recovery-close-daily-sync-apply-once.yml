@@ -1,5 +1,5 @@
 name: Phase7C Recovery Close Daily Sync Apply Once
-# Retry after correcting the regression's Unicode-negative formatting expectation.
+# Retry after correcting production Telegram bold-markup expectations.
 
 on:
   push:
