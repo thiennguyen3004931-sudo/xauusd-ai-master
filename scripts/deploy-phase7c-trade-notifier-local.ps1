@@ -196,6 +196,23 @@ $modeBefore = [string]$modeBeforeResponse.state.mode
 if ([string]::IsNullOrWhiteSpace($modeBefore)) { throw "Bot mode response is missing state.mode." }
 Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_MODE_BEFORE=$modeBefore"
 
+$liveArmBridgeSessionBefore = ""
+if ($AccountMode -eq "LIVE") {
+  $liveArmCapabilityBefore = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 5
+  if ([string]$liveArmCapabilityBefore.accountMode -ne "LIVE") {
+    throw "Canonical LIVE ARM capability account mismatch. actual=$($liveArmCapabilityBefore.accountMode)"
+  }
+  if ([string]$liveArmCapabilityBefore.liveArmStatus -ne "ARMED" -or [bool]$liveArmCapabilityBefore.liveExecutionArmed -ne $true) {
+    throw "Trade notifier LIVE hot reload requires canonical ARM=ARMED. status=$($liveArmCapabilityBefore.liveArmStatus) armed=$($liveArmCapabilityBefore.liveExecutionArmed)"
+  }
+  $liveArmBridgeSessionBefore = [string]$liveArmCapabilityBefore.bridgeSessionId
+  if ([string]::IsNullOrWhiteSpace($liveArmBridgeSessionBefore)) {
+    throw "Canonical LIVE ARM capability is missing bridgeSessionId."
+  }
+  Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_LIVE_ARM_BEFORE=ARMED"
+  Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_BRIDGE_SESSION_BEFORE=$liveArmBridgeSessionBefore"
+}
+
 $envInfo = Assert-Phase7CAccountEnv -EnvFile $EnvFile -AccountMode $AccountMode -RequireTrading
 $bridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
 $headers = @{ "x-mt5-api-key" = $envInfo.apiKey }
@@ -350,6 +367,19 @@ if ([string]$activeAfter.accountMode -ne $AccountMode -or [int]$activeAfter.supe
   throw "Active executor identity changed during notifier-only deploy."
 }
 Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_ARMED_UNCHANGED=PASS"
+
+if ($AccountMode -eq "LIVE") {
+  $liveArmCapabilityAfter = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c-live-arm-control/capability" -Method Get -TimeoutSec 5
+  if ([string]$liveArmCapabilityAfter.accountMode -ne "LIVE" -or [string]$liveArmCapabilityAfter.liveArmStatus -ne "ARMED" -or [bool]$liveArmCapabilityAfter.liveExecutionArmed -ne $true) {
+    throw "Canonical LIVE ARM changed during notifier-only deploy. status=$($liveArmCapabilityAfter.liveArmStatus) armed=$($liveArmCapabilityAfter.liveExecutionArmed) account=$($liveArmCapabilityAfter.accountMode)"
+  }
+  $liveArmBridgeSessionAfter = [string]$liveArmCapabilityAfter.bridgeSessionId
+  if ([string]::IsNullOrWhiteSpace($liveArmBridgeSessionAfter) -or $liveArmBridgeSessionAfter -ne $liveArmBridgeSessionBefore) {
+    throw "Bridge session changed during notifier-only deploy. before=$liveArmBridgeSessionBefore after=$liveArmBridgeSessionAfter"
+  }
+  Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_LIVE_ARM_UNCHANGED=PASS"
+  Write-Host "PHASE7C_TRADE_NOTIFIER_DEPLOY_BRIDGE_SESSION_UNCHANGED=PASS"
+}
 
 $modeAfterResponse = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/bot-mode" -Method Get -TimeoutSec 5
 $modeAfter = [string]$modeAfterResponse.state.mode
