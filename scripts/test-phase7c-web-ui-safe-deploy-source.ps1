@@ -54,6 +54,23 @@ Assert-Literal '$currentCommit = (& $git.Source rev-parse HEAD).Trim()' 'current
 Assert-Literal '$currentCommit -ne $ExpectedCommit' 'exact HEAD equality guard'
 Assert-Literal 'PHASE7C_WEB_UI_DEPLOY_EXPECTED_COMMIT=$ExpectedCommit' 'exact SHA audit marker'
 Assert-Literal 'git working tree' 'clean working tree guard'
+
+# Lifecycle broker is a long-running SYSTEM PowerShell process. It dot-sources these
+# helpers once at startup, so a Web/API deployment must fail before any build when
+# the checked-out startup-loaded source is newer than the running broker process.
+Assert-Literal 'run-phase7c-executor-task-runner-local.ps1' 'lifecycle broker runner freshness input'
+Assert-Literal 'lib\phase7c-startup-runner-guard.ps1' 'startup runner guard freshness input'
+Assert-Literal 'lib\phase7c-account-mode.ps1' 'account-mode/risk validator freshness input'
+Assert-Literal 'lib\phase7c-lifecycle-broker.ps1' 'lifecycle broker protocol freshness input'
+Assert-Literal 'phase7c-lifecycle-broker\state\heartbeat.json' 'broker heartbeat freshness evidence'
+Assert-Literal 'phase7c-lifecycle-broker\logs\broker.log' 'broker boot log freshness evidence'
+Assert-Literal 'Lifecycle broker starting. PID=$brokerPid' 'broker boot PID marker'
+Assert-Literal '[DateTimeOffset]::Parse' 'broker boot timestamp parsing'
+Assert-Literal 'LastWriteTimeUtc' 'loaded lifecycle source timestamp comparison'
+Assert-Literal 'PHASE7C_WEB_UI_DEPLOY_BROKER_SOURCE_FRESH=PASS' 'broker freshness pass marker'
+Assert-Literal '[void](Assert-LifecycleBrokerSourceFresh -WorkDir $WorkDir)' 'broker freshness preflight invocation'
+Assert-LiteralOrder '[void](Assert-LifecycleBrokerSourceFresh -WorkDir $WorkDir)' "--filter '@xauusd/mt5-broker' build" 'broker freshness must pass before any build/runtime restart'
+
 Assert-Literal "--filter '@xauusd/mt5-broker' build" 'mt5 broker build before web build'
 Assert-Contains '(?ms)&\s+\$pnpm\.Source\s+--filter\s+''@xauusd/mt5-broker''\s+build\s*if\s*\(\$LASTEXITCODE\s+-ne\s+0\)\s*\{' 'mt5 broker build fail-fast guard'
 Assert-LiteralOrder "--filter '@xauusd/mt5-broker' build" "--filter '@xauusd/web' build" 'mt5 broker build precedes web build'
