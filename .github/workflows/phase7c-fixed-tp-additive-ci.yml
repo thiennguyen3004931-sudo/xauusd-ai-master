@@ -1,5 +1,5 @@
 name: Phase7C Fixed TP Additive CI
-# Task 6 Sideway snapshot RED/GREEN verification
+# Task 6 Sideway snapshot full GREEN verification
 
 on:
   push:
