@@ -1,5 +1,5 @@
 name: Phase7C Fixed TP Additive CI
-# Task 5 GREEN verification marker
+# Task 6 Sideway snapshot RED/GREEN verification
 
 on:
   push:
@@ -17,6 +17,7 @@ on:
       - "scripts/phase7c-fixed-tp-runtime-wiring.test.mjs"
       - "scripts/phase7c-fixed-tp-trend-snapshot.test.mjs"
       - "scripts/phase7c-fixed-tp-trend-exit.test.mjs"
+      - "scripts/phase7c-fixed-tp-sideway-snapshot.test.mjs"
       - "scripts/phase7c-lot-settings.test.mjs"
       - "scripts/lib/phase7c-account-mode.ps1"
       - "scripts/run-phase7c-executors-local.ps1"
@@ -43,6 +44,7 @@ on:
       - "scripts/phase7c-fixed-tp-runtime-wiring.test.mjs"
       - "scripts/phase7c-fixed-tp-trend-snapshot.test.mjs"
       - "scripts/phase7c-fixed-tp-trend-exit.test.mjs"
+      - "scripts/phase7c-fixed-tp-sideway-snapshot.test.mjs"
       - "scripts/phase7c-lot-settings.test.mjs"
       - "scripts/lib/phase7c-account-mode.ps1"
       - "scripts/run-phase7c-executors-local.ps1"
@@ -84,6 +86,8 @@ jobs:
         run: node --test scripts/phase7c-fixed-tp-trend-snapshot.test.mjs
       - name: Trend Fixed TP exit contract
         run: node --test scripts/phase7c-fixed-tp-trend-exit.test.mjs
+      - name: Sideway Fixed TP snapshot contract
+        run: node --test scripts/phase7c-fixed-tp-sideway-snapshot.test.mjs
       - name: Existing lot settings regression
         run: node --test scripts/phase7c-lot-settings.test.mjs
       - name: Diff hygiene
@@ -114,6 +118,8 @@ jobs:
         run: node --test scripts/phase7c-fixed-tp-trend-snapshot.test.mjs
       - name: Trend Fixed TP exit contract
         run: node --test scripts/phase7c-fixed-tp-trend-exit.test.mjs
+      - name: Sideway Fixed TP snapshot contract
+        run: node --test scripts/phase7c-fixed-tp-sideway-snapshot.test.mjs
       - name: Existing lot settings regression
         run: node --test scripts/phase7c-lot-settings.test.mjs
       - name: Diff hygiene
