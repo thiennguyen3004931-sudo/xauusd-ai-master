@@ -105,15 +105,27 @@ export class CanonicalDealLedger {
     const ownedMagics = new Set(
       Array.from(query.ownedMagics, (magic) => Number(magic)),
     );
+    const ownedPositionIds = collectOwnedPositionIds(
+      this.#dealsByIdentity.values(),
+      query.account,
+      query.symbol,
+      ownedMagics,
+    );
     let dealCount = 0;
     let dailyNetPnl = 0;
 
     for (const deal of this.#dealsByIdentity.values()) {
+      const directlyOwned = ownedMagics.has(Number(deal.magic));
+      const magicZeroOwnedPositionClose =
+        Number(deal.magic) === 0 &&
+        ownedPositionIds.has(deal.positionId) &&
+        CLOSING_ENTRIES.has(deal.entry);
+
       if (
         deal.account !== query.account ||
         deal.symbol !== query.symbol ||
         deal.isTradingDeal !== true ||
-        !ownedMagics.has(Number(deal.magic)) ||
+        (!directlyOwned && !magicZeroOwnedPositionClose) ||
         deal.timestamp < query.from ||
         deal.timestamp >= query.to
       ) {
@@ -136,17 +148,29 @@ export class CanonicalDealLedger {
     const ownedMagics = new Set(
       Array.from(query.ownedMagics, (magic) => Number(magic)),
     );
+    const ownedPositionIds = collectOwnedPositionIds(
+      this.#dealsByIdentity.values(),
+      query.account,
+      query.symbol,
+      ownedMagics,
+    );
+
+    if (!ownedPositionIds.has(query.positionId)) {
+      return [];
+    }
 
     return Array.from(this.#dealsByIdentity.values())
-      .filter(
-        (deal) =>
+      .filter((deal) => {
+        const closeMagic = Number(deal.magic);
+        return (
           deal.account === query.account &&
           deal.positionId === query.positionId &&
           deal.symbol === query.symbol &&
           deal.isTradingDeal === true &&
-          ownedMagics.has(Number(deal.magic)) &&
-          CLOSING_ENTRIES.has(deal.entry),
-      )
+          CLOSING_ENTRIES.has(deal.entry) &&
+          (ownedMagics.has(closeMagic) || closeMagic === 0)
+        );
+      })
       .map((deal) => ({ ...deal }))
       .sort(compareDeals);
   }
@@ -180,6 +204,28 @@ export class CanonicalDealLedger {
 
     this.#store.save(`${JSON.stringify(payload, null, 2)}\n`);
   }
+}
+
+function collectOwnedPositionIds(
+  deals: Iterable<CanonicalDealRecord>,
+  account: string,
+  symbol: string,
+  ownedMagics: ReadonlySet<number>,
+): Set<string> {
+  const positionIds = new Set<string>();
+
+  for (const deal of deals) {
+    if (
+      deal.account === account &&
+      deal.symbol === symbol &&
+      deal.isTradingDeal === true &&
+      ownedMagics.has(Number(deal.magic))
+    ) {
+      positionIds.add(deal.positionId);
+    }
+  }
+
+  return positionIds;
 }
 
 function canonicalizeDeal(
