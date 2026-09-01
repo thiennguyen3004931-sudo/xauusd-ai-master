@@ -10,6 +10,7 @@ import {
 } from "@xauusd/risk-engine";
 import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
 import { canonicalHoldReason } from "./phase7c-hold-observability.mjs";
+import { buildFixedTpSnapshot } from "./phase7c-fixed-tp.mjs";
 import {
   stopIsAtLeastAsTight,
   stopStrictlyTightens,
@@ -142,6 +143,9 @@ type ManagedState = {
   initialVolume: number;
   expectedRemainingVolume: number;
   stopDistance: number;
+  fixedTpEnabled: boolean;
+  fixedTpDistance: number;
+  fixedTpPrice: number | null;
   breakEvenApplied: boolean;
   partialApplied: boolean;
   partialActivatedAt: number | null;
@@ -189,6 +193,9 @@ type PendingTrendEntry = {
   stopDistance: number;
   stopLoss: number;
   takeProfit: number;
+  fixedTpEnabled: boolean;
+  fixedTpDistance: number;
+  fixedTpPrice: number | null;
   createdAt: number;
   brokerReferenceTimestamp: number;
   dailyMode: DailyMode;
@@ -222,6 +229,8 @@ type PersistedBotState = {
 const symbol = process.env.ZIQ_DEMO_SYMBOL ?? "XAUUSD";
 const MAX_TREND_FIXED_VOLUME = 1.2;
 const fixedVolume = Number(process.env.ZIQ_FIXED_VOLUME ?? "0.03");
+const trendFixedTpEnabled = /^(1|true|yes|on)$/i.test(process.env.ZIQ_PHASE7C_TREND_FIXED_TP_ENABLED ?? "false");
+const trendFixedTpDistance = Number(process.env.ZIQ_PHASE7C_TREND_FIXED_TP_DISTANCE ?? "0");
 const intervalSeconds = Math.max(1, Number(process.env.ZIQ_DEMO_INTERVAL_SECONDS ?? "5"));
 const armed = /^(1|true|yes|on)$/i.test(process.env.ZIQ_DEMO_ARMED ?? "false");
 const once = /^(1|true|yes|on)$/i.test(process.env.ZIQ_DEMO_ONCE ?? "false");
@@ -269,6 +278,9 @@ if (![fixedVolume, intervalSeconds, magicNumber, sidewayMagicNumber, deviationPo
 if (fixedVolume < 0.03 - 1e-9 || fixedVolume > MAX_TREND_FIXED_VOLUME + 1e-9) {
   throw new Error(`Phase 7B DEMO fixed volume must be between 0.03 and ${MAX_TREND_FIXED_VOLUME}.`);
 }
+if (!Number.isFinite(trendFixedTpDistance) || trendFixedTpDistance < 0 || (trendFixedTpEnabled && trendFixedTpDistance <= 0)) {
+  throw new Error("Phase 7B Trend Fixed TP distance must be finite and positive when enabled.");
+}
 
 fs.mkdirSync(workDir, { recursive: true });
 const statePath = path.join(workDir, "phase7b-demo-state.json");
@@ -304,7 +316,7 @@ console.log("PHASE7B_DEMO_PLUS6=SL_TO_ENTRY");
 console.log("PHASE7B_DEMO_PLUS10=PARTIAL_ONE_THIRD");
 console.log("PHASE7B_DEMO_POST_PLUS10_SL=M15_CONFIRMED_SWING_STRUCTURE_ONLY_TIGHTEN");
 console.log("PHASE7B_DEMO_REVERSAL_EXIT=OPPOSING_M15_FVG_PLUS_REJECTION_CLOSE_AFTER_PLUS10");
-console.log("PHASE7B_DEMO_FIXED_TP=OFF_IN_TREND");
+console.log(`PHASE7B_DEMO_FIXED_TP=${trendFixedTpEnabled ? `ON|DISTANCE=${trendFixedTpDistance}` : "OFF"}`);
 console.log("PHASE7B_DEMO_DAILY_RECOVERY=REALIZED_NET_PNL_ALL_BOT_MAGICS");
 console.log(`PHASE7B_DEMO_DAILY_RECOVERY_MAGICS=${[...dailyBotMagicNumbers].join(",")}`);
 console.log("PHASE7B_DEMO_DAILY_RECOVERY_DAY=MT5_D1_CURRENT_BAR");
@@ -879,6 +891,13 @@ async function submitTrendEntry(
     return "REJECTED";
   }
 
+  const fixedTpSnapshot = buildFixedTpSnapshot({
+    enabled: trendFixedTpEnabled,
+    distance: trendFixedTpDistance,
+    side: signal.side,
+    entry: marketEntry,
+  });
+
   const pendingEntry: PendingTrendEntry = {
     orderId,
     brokerTicket: null,
@@ -892,6 +911,9 @@ async function submitTrendEntry(
     stopDistance,
     stopLoss,
     takeProfit,
+    fixedTpEnabled: fixedTpSnapshot.enabled,
+    fixedTpDistance: fixedTpSnapshot.distance,
+    fixedTpPrice: fixedTpSnapshot.targetPrice,
     createdAt: Date.now(),
     brokerReferenceTimestamp,
     dailyMode: dailyRecovery.mode,
@@ -988,6 +1010,13 @@ async function submitTrendEntry(
     return "UNRESOLVED";
   }
 
+  const filledFixedTpSnapshot = buildFixedTpSnapshot({
+    enabled: pendingEntry.fixedTpEnabled,
+    distance: pendingEntry.fixedTpDistance,
+    side: pendingEntry.side,
+    entry: opened.entry,
+  });
+
   state.managed = {
     ticket: opened.ticket,
     side: signal.side,
@@ -998,6 +1027,9 @@ async function submitTrendEntry(
     initialVolume: opened.volume,
     expectedRemainingVolume: opened.volume,
     stopDistance,
+    fixedTpEnabled: filledFixedTpSnapshot.enabled,
+    fixedTpDistance: filledFixedTpSnapshot.distance,
+    fixedTpPrice: filledFixedTpSnapshot.targetPrice,
     breakEvenApplied: false,
     partialApplied: false,
     partialActivatedAt: null,
@@ -1815,6 +1847,12 @@ function managedFromPending(
   pending: PendingTrendEntry,
   position: Position,
 ): ManagedState {
+  const fixedTpSnapshot = buildFixedTpSnapshot({
+    enabled: pending.fixedTpEnabled,
+    distance: pending.fixedTpDistance,
+    side: pending.side,
+    entry: position.entry,
+  });
   return {
     ticket: position.ticket,
     side: pending.side,
@@ -1825,6 +1863,9 @@ function managedFromPending(
     initialVolume: position.volume,
     expectedRemainingVolume: position.volume,
     stopDistance: pending.stopDistance,
+    fixedTpEnabled: pending.fixedTpEnabled,
+    fixedTpDistance: pending.fixedTpDistance,
+    fixedTpPrice: fixedTpSnapshot.targetPrice,
     breakEvenApplied: false,
     partialApplied: false,
     partialActivatedAt: null,
@@ -1898,6 +1939,30 @@ function smaPeriod(values: number[], period: number): number {
 }
 
 function loadState(file: string): BotState {
+  const normalizePendingEntry = (raw: PendingTrendEntry | null | undefined): PendingTrendEntry | null => {
+    if (!raw) return null;
+    const distance = Number(raw.fixedTpDistance);
+    const price = Number(raw.fixedTpPrice);
+    const fixedTpEnabled = raw.fixedTpEnabled === true && Number.isFinite(distance) && distance > 0 && Number.isFinite(price);
+    return {
+      ...raw,
+      fixedTpEnabled: fixedTpEnabled ? true : false,
+      fixedTpDistance: fixedTpEnabled ? distance : 0,
+      fixedTpPrice: fixedTpEnabled ? price : null,
+    };
+  };
+  const normalizeManagedState = (raw: ManagedState | null | undefined): ManagedState | null => {
+    if (!raw) return null;
+    const distance = Number(raw.fixedTpDistance);
+    const price = Number(raw.fixedTpPrice);
+    const fixedTpEnabled = raw.fixedTpEnabled === true && Number.isFinite(distance) && distance > 0 && Number.isFinite(price);
+    return {
+      ...raw,
+      fixedTpEnabled: fixedTpEnabled ? true : false,
+      fixedTpDistance: fixedTpEnabled ? distance : 0,
+      fixedTpPrice: fixedTpEnabled ? price : null,
+    };
+  };
   if (!fs.existsSync(file)) {
     return {
       version: 2,
@@ -1918,7 +1983,7 @@ function loadState(file: string): BotState {
       lastEvaluatedM5Close: 0,
       pendingPullback: null,
       pendingEntry: null,
-      managed: parsed.managed ?? null,
+      managed: normalizeManagedState(parsed.managed),
     };
   }
   if (parsed.version !== 2) throw new Error("Unsupported Phase 7B demo state version.");
@@ -1928,7 +1993,7 @@ function loadState(file: string): BotState {
     lastEvaluatedM15Close: parsed.lastEvaluatedM15Close ?? 0,
     lastEvaluatedM5Close: parsed.lastEvaluatedM5Close ?? 0,
     pendingPullback: parsed.pendingPullback ?? null,
-    pendingEntry: parsed.pendingEntry ?? null,
+    pendingEntry: normalizePendingEntry(parsed.pendingEntry),
     managed: parsed.managed ?? null,
   };
 }
