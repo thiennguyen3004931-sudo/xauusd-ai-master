@@ -116,7 +116,8 @@ export class CanonicalDealLedger {
 
     for (const deal of this.#dealsByIdentity.values()) {
       const directlyOwned = ownedMagics.has(Number(deal.magic));
-      const ownedPositionClose =
+      const magicZeroOwnedPositionClose =
+        Number(deal.magic) === 0 &&
         ownedPositionIds.has(deal.positionId) &&
         CLOSING_ENTRIES.has(deal.entry);
 
@@ -124,7 +125,7 @@ export class CanonicalDealLedger {
         deal.account !== query.account ||
         deal.symbol !== query.symbol ||
         deal.isTradingDeal !== true ||
-        (!directlyOwned && !ownedPositionClose) ||
+        (!directlyOwned && !magicZeroOwnedPositionClose) ||
         deal.timestamp < query.from ||
         deal.timestamp >= query.to
       ) {
@@ -159,14 +160,17 @@ export class CanonicalDealLedger {
     }
 
     return Array.from(this.#dealsByIdentity.values())
-      .filter(
-        (deal) =>
+      .filter((deal) => {
+        const closeMagic = Number(deal.magic);
+        return (
           deal.account === query.account &&
           deal.positionId === query.positionId &&
           deal.symbol === query.symbol &&
           deal.isTradingDeal === true &&
-          CLOSING_ENTRIES.has(deal.entry),
-      )
+          CLOSING_ENTRIES.has(deal.entry) &&
+          (ownedMagics.has(closeMagic) || closeMagic === 0)
+        );
+      })
       .map((deal) => ({ ...deal }))
       .sort(compareDeals);
   }
