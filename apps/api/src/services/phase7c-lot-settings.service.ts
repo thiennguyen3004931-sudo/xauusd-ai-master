@@ -111,11 +111,11 @@ function normalizeFixedTp(
     ? 0
     : Number(distanceValue);
 
-  if (!Number.isFinite(distance) || distance < 0) {
-    throw new Error(`${label} fixed TP distance must be finite and non-negative.`);
-  }
-  if (enabled && distance <= 0) {
+  if (enabled && (!Number.isFinite(distance) || distance <= 0)) {
     throw new Error(`${label} fixed TP distance must be positive when Fixed TP is enabled.`);
+  }
+  if (!enabled && (!Number.isFinite(distance) || distance < 0)) {
+    throw new Error(`${label} fixed TP distance must be finite and non-negative when Fixed TP is disabled.`);
   }
 
   return { enabled, distance: round(distance, 8) };
