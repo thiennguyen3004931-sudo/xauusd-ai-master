@@ -6,20 +6,28 @@ import {
 } from "./phase7c-account-mode.service.js";
 
 export interface Phase7CLotSettingsState {
-  version: 1;
+  version: 2;
   trendFixedLot: number;
   sidewayRiskPercent: number;
   sidewayMaxLot: number;
+  trendFixedTpEnabled: boolean;
+  trendFixedTpDistance: number;
+  sidewayFixedTpEnabled: boolean;
+  sidewayFixedTpDistance: number;
   updatedAt: string;
   updatedBy: string;
 }
 
 export interface Phase7CActiveLotSettings {
-  version: 1;
+  version: 2;
   accountMode: Phase7CAccountMode;
   trendFixedLot: number;
   sidewayRiskPercent: number;
   sidewayMaxLot: number;
+  trendFixedTpEnabled: boolean;
+  trendFixedTpDistance: number;
+  sidewayFixedTpEnabled: boolean;
+  sidewayFixedTpDistance: number;
   armed: boolean;
   supervisorPid: number;
   appliedAt: string;
@@ -29,6 +37,20 @@ export interface Phase7CLotSettingsInput {
   trendFixedLot: number;
   sidewayRiskPercent: number;
   sidewayMaxLot: number;
+  trendFixedTpEnabled?: boolean;
+  trendFixedTpDistance?: number;
+  sidewayFixedTpEnabled?: boolean;
+  sidewayFixedTpDistance?: number;
+}
+
+export interface Phase7CNormalizedLotSettings {
+  trendFixedLot: number;
+  sidewayRiskPercent: number;
+  sidewayMaxLot: number;
+  trendFixedTpEnabled: boolean;
+  trendFixedTpDistance: number;
+  sidewayFixedTpEnabled: boolean;
+  sidewayFixedTpDistance: number;
 }
 
 export const PHASE7C_LOT_LIMITS = {
@@ -50,10 +72,14 @@ function round(value: number, digits = 8): number {
 
 function defaultState(): Phase7CLotSettingsState {
   return {
-    version: 1,
+    version: 2,
     trendFixedLot: 0.03,
     sidewayRiskPercent: 0.25,
     sidewayMaxLot: 0.03,
+    trendFixedTpEnabled: false,
+    trendFixedTpDistance: 0,
+    sidewayFixedTpEnabled: false,
+    sidewayFixedTpDistance: 0,
     updatedAt: new Date(0).toISOString(),
     updatedBy: "safe-default",
   };
@@ -75,9 +101,29 @@ function isSidewayCap(value: number): boolean {
   return Math.abs(units - Math.round(units)) <= 1e-8;
 }
 
+function normalizeFixedTp(
+  enabledValue: unknown,
+  distanceValue: unknown,
+  label: "Trend" | "Sideway",
+): { enabled: boolean; distance: number } {
+  const enabled = enabledValue === true;
+  const distance = distanceValue === undefined || distanceValue === null || distanceValue === ""
+    ? 0
+    : Number(distanceValue);
+
+  if (!Number.isFinite(distance) || distance < 0) {
+    throw new Error(`${label} fixed TP distance must be finite and non-negative.`);
+  }
+  if (enabled && distance <= 0) {
+    throw new Error(`${label} fixed TP distance must be positive when Fixed TP is enabled.`);
+  }
+
+  return { enabled, distance: round(distance, 8) };
+}
+
 export function validatePhase7CLotSettings(
   input: Phase7CLotSettingsInput,
-): Phase7CLotSettingsInput {
+): Phase7CNormalizedLotSettings {
   const trendFixedLot = Number(input.trendFixedLot);
   const sidewayRiskPercent = Number(input.sidewayRiskPercent);
   const sidewayMaxLot = Number(input.sidewayMaxLot);
@@ -100,24 +146,47 @@ export function validatePhase7CLotSettings(
     throw new Error("Sideway risk percent must be between 0.01% and 1.00%.");
   }
 
+  const trendFixedTp = normalizeFixedTp(
+    input.trendFixedTpEnabled,
+    input.trendFixedTpDistance,
+    "Trend",
+  );
+  const sidewayFixedTp = normalizeFixedTp(
+    input.sidewayFixedTpEnabled,
+    input.sidewayFixedTpDistance,
+    "Sideway",
+  );
+
   return {
     trendFixedLot: round(trendFixedLot, 2),
     sidewayRiskPercent: round(sidewayRiskPercent, 2),
     sidewayMaxLot: round(sidewayMaxLot, 2),
+    trendFixedTpEnabled: trendFixedTp.enabled,
+    trendFixedTpDistance: trendFixedTp.distance,
+    sidewayFixedTpEnabled: sidewayFixedTp.enabled,
+    sidewayFixedTpDistance: sidewayFixedTp.distance,
   };
 }
 
+type PersistedSettings = Partial<Phase7CLotSettingsState> & { version?: unknown };
+
 function parseState(value: unknown): Phase7CLotSettingsState | null {
   if (!value || typeof value !== "object") return null;
-  const raw = value as Partial<Phase7CLotSettingsState>;
+  const raw = value as PersistedSettings;
+  const version = Number(raw.version ?? 1);
+  if (version !== 1 && version !== 2) return null;
   try {
     const normalized = validatePhase7CLotSettings({
       trendFixedLot: Number(raw.trendFixedLot),
       sidewayRiskPercent: Number(raw.sidewayRiskPercent),
       sidewayMaxLot: Number(raw.sidewayMaxLot),
+      trendFixedTpEnabled: version >= 2 ? raw.trendFixedTpEnabled === true : false,
+      trendFixedTpDistance: version >= 2 ? Number(raw.trendFixedTpDistance ?? 0) : 0,
+      sidewayFixedTpEnabled: version >= 2 ? raw.sidewayFixedTpEnabled === true : false,
+      sidewayFixedTpDistance: version >= 2 ? Number(raw.sidewayFixedTpDistance ?? 0) : 0,
     });
     return {
-      version: 1,
+      version: 2,
       ...normalized,
       updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : new Date(0).toISOString(),
       updatedBy: typeof raw.updatedBy === "string" && raw.updatedBy.trim()
@@ -129,21 +198,32 @@ function parseState(value: unknown): Phase7CLotSettingsState | null {
   }
 }
 
+type PersistedActiveSettings = Partial<Phase7CActiveLotSettings> & {
+  version?: unknown;
+  accountMode?: unknown;
+};
+
 function parseActive(value: unknown): Phase7CActiveLotSettings | null {
   if (!value || typeof value !== "object") return null;
-  const raw = value as Partial<Phase7CActiveLotSettings> & { accountMode?: unknown };
+  const raw = value as PersistedActiveSettings;
+  const version = Number(raw.version ?? 1);
+  if (version !== 1 && version !== 2) return null;
   try {
     const normalized = validatePhase7CLotSettings({
       trendFixedLot: Number(raw.trendFixedLot),
       sidewayRiskPercent: Number(raw.sidewayRiskPercent),
       sidewayMaxLot: Number(raw.sidewayMaxLot),
+      trendFixedTpEnabled: version >= 2 ? raw.trendFixedTpEnabled === true : false,
+      trendFixedTpDistance: version >= 2 ? Number(raw.trendFixedTpDistance ?? 0) : 0,
+      sidewayFixedTpEnabled: version >= 2 ? raw.sidewayFixedTpEnabled === true : false,
+      sidewayFixedTpDistance: version >= 2 ? Number(raw.sidewayFixedTpDistance ?? 0) : 0,
     });
     const supervisorPid = Number(raw.supervisorPid);
     if (!Number.isInteger(supervisorPid) || supervisorPid <= 0) return null;
     const accountModeText = String(raw.accountMode ?? "DEMO").trim().toUpperCase();
     if (accountModeText !== "DEMO" && accountModeText !== "LIVE") return null;
     return {
-      version: 1,
+      version: 2,
       accountMode: accountModeText,
       ...normalized,
       armed: raw.armed === true,
@@ -220,7 +300,11 @@ export class Phase7CLotSettingsService {
       active.accountMode !== accountModeState.accountMode ||
       active.trendFixedLot !== state.trendFixedLot ||
       active.sidewayRiskPercent !== state.sidewayRiskPercent ||
-      active.sidewayMaxLot !== state.sidewayMaxLot;
+      active.sidewayMaxLot !== state.sidewayMaxLot ||
+      active.trendFixedTpEnabled !== state.trendFixedTpEnabled ||
+      active.trendFixedTpDistance !== state.trendFixedTpDistance ||
+      active.sidewayFixedTpEnabled !== state.sidewayFixedTpEnabled ||
+      active.sidewayFixedTpDistance !== state.sidewayFixedTpDistance;
 
     return {
       state,
@@ -249,7 +333,7 @@ export class Phase7CLotSettingsService {
     }
     const normalized = validatePhase7CLotSettings(input);
     const state: Phase7CLotSettingsState = {
-      version: 1,
+      version: 2,
       ...normalized,
       updatedAt: new Date().toISOString(),
       updatedBy: updatedBy.trim() || "operator",
