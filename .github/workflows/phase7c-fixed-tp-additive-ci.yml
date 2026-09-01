@@ -63,8 +63,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build API contract
-        run: pnpm --filter @xauusd/api build
+      - name: Build API contract with workspace dependencies
+        run: pnpm exec turbo run build --filter=@xauusd/api
       - name: Fixed TP RED/GREEN contract
         run: node --test scripts/phase7c-fixed-tp.test.mjs
       - name: Existing lot settings regression
@@ -85,8 +85,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build API contract
-        run: pnpm --filter @xauusd/api build
+      - name: Build API contract with workspace dependencies
+        run: pnpm exec turbo run build --filter=@xauusd/api
       - name: Fixed TP RED/GREEN contract
         run: node --test scripts/phase7c-fixed-tp.test.mjs
       - name: Existing lot settings regression
