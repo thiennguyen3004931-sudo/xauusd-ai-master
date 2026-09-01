@@ -30,6 +30,15 @@ type LotInput = {
   sidewayMaxLot: number;
 };
 
+type FixedTpSnapshot = {
+  trendFixedTpEnabled: boolean;
+  trendFixedTpDistance: number;
+  sidewayFixedTpEnabled: boolean;
+  sidewayFixedTpDistance: number;
+};
+
+type LotSettingsMutationInput = LotInput & FixedTpSnapshot;
+
 const LOT_SETTINGS_URL = "/api/v1/phase7c/lot-settings";
 const CONTROL_BASE = "http://127.0.0.1:3711";
 const MANAGED_LOT_STEP = 0.03;
@@ -44,7 +53,7 @@ function numberText(value: unknown, fallback: string) {
   return cleaned;
 }
 
-async function saveLotSettings(input: LotInput) {
+async function saveLotSettings(input: LotSettingsMutationInput) {
   const urls = [LOT_SETTINGS_URL, `${CONTROL_BASE}${LOT_SETTINGS_URL}`];
   const body = JSON.stringify({ ...input, source: "web-account-risk-v6" });
   const errors: string[] = [];
@@ -182,6 +191,25 @@ export function Phase7BOpsPage() {
   const resolvedConfiguredLot = resolveConfiguredLotSettings(data?.lotSettings, configuration);
   const hasConfiguredLot = resolvedConfiguredLot !== null;
   const configuredLot = asRecord(resolvedConfiguredLot);
+  const canonicalLotSettingsState = asRecord(asRecord(data?.lotSettings).state);
+  const trendFixedTpDistance = Number(canonicalLotSettingsState.trendFixedTpDistance);
+  const sidewayFixedTpDistance = Number(canonicalLotSettingsState.sidewayFixedTpDistance);
+  const canonicalFixedTp: FixedTpSnapshot | null =
+    typeof canonicalLotSettingsState.trendFixedTpEnabled === "boolean" &&
+    Number.isFinite(trendFixedTpDistance) &&
+    trendFixedTpDistance >= 0 &&
+    (!canonicalLotSettingsState.trendFixedTpEnabled || trendFixedTpDistance > 0) &&
+    typeof canonicalLotSettingsState.sidewayFixedTpEnabled === "boolean" &&
+    Number.isFinite(sidewayFixedTpDistance) &&
+    sidewayFixedTpDistance >= 0 &&
+    (!canonicalLotSettingsState.sidewayFixedTpEnabled || sidewayFixedTpDistance > 0)
+      ? {
+          trendFixedTpEnabled: canonicalLotSettingsState.trendFixedTpEnabled,
+          trendFixedTpDistance,
+          sidewayFixedTpEnabled: canonicalLotSettingsState.sidewayFixedTpEnabled,
+          sidewayFixedTpDistance,
+        }
+      : null;
   const currency = clean(account.accountCurrency, "USD");
   const accountModeRaw = pickText(raw(panel, "accountMode"), account.accountMode, bridge.accountMode);
   const accountModeKey = accountModeRaw.trim().toLowerCase();
@@ -222,12 +250,15 @@ export function Phase7BOpsPage() {
   }
 
   const onSubmit = () => {
-    if (!savedLot || !hasConfiguredLot || !canSafelyApply || validationErrors.length > 0 || !hasChanges) return;
+    if (!savedLot || !hasConfiguredLot || !canonicalFixedTp || !canSafelyApply || validationErrors.length > 0 || !hasChanges) return;
     const confirmed = window.confirm(
-      `Xác nhận lưu cấu hình lot cho LỆNH MỚI?\n\nTrend: ${savedLot.trendFixedLot.toFixed(2)} → ${draftLot.trendFixedLot.toFixed(2)}\nSideway risk: ${savedLot.sidewayRiskPercent.toFixed(2)}% → ${draftLot.sidewayRiskPercent.toFixed(2)}%\nSideway max lot: ${savedLot.sidewayMaxLot.toFixed(2)} → ${draftLot.sidewayMaxLot.toFixed(2)}\n\nKhông thay đổi vị thế đang mở.`,
+      `Xác nhận lưu cấu hình lot cho LỆNH MỚI?\n\nTrend: ${savedLot.trendFixedLot.toFixed(2)} → ${draftLot.trendFixedLot.toFixed(2)}\nSideway risk: ${savedLot.sidewayRiskPercent.toFixed(2)}% → ${draftLot.sidewayRiskPercent.toFixed(2)}%\nSideway max lot: ${savedLot.sidewayMaxLot.toFixed(2)} → ${draftLot.sidewayMaxLot.toFixed(2)}\n\nKhông thay đổi vị thế đang mở. Fixed TP hiện hành được giữ nguyên.`,
     );
     if (!confirmed) return;
-    mutation.mutate(draftLot);
+    mutation.mutate({
+      ...draftLot,
+      ...canonicalFixedTp,
+    });
   };
 
   const resetToSaved = () => {
@@ -269,9 +300,14 @@ export function Phase7BOpsPage() {
           Chưa đọc được cấu hình lot đã lưu. Web không tự điền lot mặc định và khóa thao tác lưu cho đến khi nguồn cấu hình canonical sẵn sàng.
         </Alert>
       )}
+      {!canonicalFixedTp && (
+        <Alert severity="warning">
+          Chưa đọc được trạng thái Fixed TP canonical. Web khóa lưu Lot/Risk để không vô tình thay đổi Fixed TP hiện hành.
+        </Alert>
+      )}
       {validationErrors.length > 0 && <Alert severity="error">{validationErrors.join(" ")}</Alert>}
       {mutation.isError && <Alert severity="error">Không lưu được lot: {mutation.error instanceof Error ? mutation.error.message : "lỗi không xác định"}</Alert>}
-      {mutation.isSuccess && <Alert severity="success">Đã lưu cấu hình lot. Kiểm tra “Lot restart required” bên dưới; nếu Yes, chạy lại activation để runtime dùng cấu hình mới.</Alert>}
+      {mutation.isSuccess && <Alert severity="success">Đã lưu cấu hình lot và giữ nguyên Fixed TP canonical. Kiểm tra “Lot restart required” bên dưới; nếu Yes, chạy lại activation để runtime dùng cấu hình mới.</Alert>}
 
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, md: 6, xl: 3 }}><HealthTile label="Supervisor" valueText={supervisor.alive ? `Alive · PID ${clean(supervisor.pid, "—")}` : "Chưa xác nhận"} good={Boolean(supervisor.alive)} /></Grid>
@@ -333,11 +369,11 @@ export function Phase7BOpsPage() {
                 <InfoRow label="Giá trị đã lưu" valueText={savedLot ? `${savedLot.trendFixedLot.toFixed(2)} / ${savedLot.sidewayRiskPercent.toFixed(2)}% / ${savedLot.sidewayMaxLot.toFixed(2)}` : "Chưa có dữ liệu"} />
                 <InfoRow label="Giá trị đang nhập" valueText={`${numberText(trendFixedLot, "—")} / ${numberText(sidewayRiskPercent, "—")}% / ${numberText(sidewayMaxLot, "—")}`} />
                 <InfoRow label="Có thay đổi" valueText={hasChanges ? "Yes" : "No"} />
-                <InfoRow label="Safety gate" valueText={canSafelyApply && hasConfiguredLot ? "PASS" : "LOCKED"} strong />
+                <InfoRow label="Safety gate" valueText={canSafelyApply && hasConfiguredLot && canonicalFixedTp ? "PASS" : "LOCKED"} strong />
               </Box>
 
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2}>
-                <Button variant="contained" size="large" onClick={onSubmit} disabled={mutation.isPending || !hasConfiguredLot || !canSafelyApply || validationErrors.length > 0 || !hasChanges} sx={{ fontWeight: 950, flex: 1 }}>
+                <Button variant="contained" size="large" onClick={onSubmit} disabled={mutation.isPending || !hasConfiguredLot || !canonicalFixedTp || !canSafelyApply || validationErrors.length > 0 || !hasChanges} sx={{ fontWeight: 950, flex: 1 }}>
                   {mutation.isPending ? "Đang lưu..." : "Lưu cấu hình lot"}
                 </Button>
                 <Button variant="outlined" size="large" onClick={resetToSaved} disabled={mutation.isPending || !hasConfiguredLot || !hasChanges} sx={{ fontWeight: 900 }}>
@@ -346,7 +382,7 @@ export function Phase7BOpsPage() {
               </Stack>
 
               <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.6 }}>
-                Cơ chế an toàn: NEW POSITIONS ONLY · lot quản lý theo bước 0.03 · không martingale · không recovery lot escalation · không chỉnh vị thế đang mở.
+                Cơ chế an toàn: NEW POSITIONS ONLY · lot quản lý theo bước 0.03 · giữ nguyên Fixed TP canonical · không martingale · không recovery lot escalation · không chỉnh vị thế đang mở.
               </Typography>
             </Stack>
           </SectionCard>
