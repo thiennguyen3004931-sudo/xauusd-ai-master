@@ -10,7 +10,12 @@ import {
 } from "@xauusd/risk-engine";
 import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
 import { canonicalHoldReason } from "./phase7c-hold-observability.mjs";
-import { buildFixedTpSnapshot } from "./phase7c-fixed-tp.mjs";
+import { acquireExecutionLock } from "./phase7c-execution-lock.mjs";
+import {
+  buildFixedTpSnapshot,
+  isFixedTpTriggered,
+  fixedTpCommandId,
+} from "./phase7c-fixed-tp.mjs";
 import {
   stopIsAtLeastAsTight,
   stopStrictlyTightens,
@@ -1363,6 +1368,187 @@ function detectEntryPattern(
   return null;
 }
 
+async function closeFixedTpIfTriggered(
+  position: Position,
+  quote: Quote,
+): Promise<boolean> {
+  const managed = state.managed!;
+
+  // Keep the migration/default path production-equivalent: no extra broker I/O
+  // when this additive feature is disabled for the immutable managed snapshot.
+  if (!managed.fixedTpEnabled || !Number.isFinite(Number(managed.fixedTpPrice))) {
+    return false;
+  }
+
+  const positions = await get<Position[]>(
+    `/v1/positions?symbol=${encodeURIComponent(symbol)}`,
+  );
+  if (positions.length !== 1) {
+    journal("FIXED_TP_CLOSE_BLOCKED", {
+      ticket: managed.ticket,
+      reason: "FIXED_TP_RECONCILE_REQUIRES_EXACTLY_ONE_POSITION",
+      positions: positions.map((row) => ({ ticket: row.ticket, side: row.side, volume: row.volume })),
+    });
+    return true;
+  }
+
+  // Reconcile again at the Fixed TP decision point. This matters after a +10
+  // partial in the same management cycle: position.volume must be the actual
+  // remaining broker volume, not the pre-partial snapshot passed by cycle().
+  position = positions[0]!;
+
+  if (!isFixedTpTriggered({
+    enabled: managed.fixedTpEnabled,
+    side: managed.side,
+    targetPrice: managed.fixedTpPrice,
+    bid: quote.bid,
+    ask: quote.ask,
+  })) {
+    return false;
+  }
+
+  journal("FIXED_TP_TRIGGERED", {
+    ticket: managed.ticket,
+    side: managed.side,
+    targetPrice: managed.fixedTpPrice,
+    bid: quote.bid,
+    ask: quote.ask,
+    volume: position.volume,
+  });
+
+  if (position.ticket !== managed.ticket) {
+    journal("FIXED_TP_CLOSE_BLOCKED", {
+      ticket: managed.ticket,
+      actualTicket: position.ticket,
+      reason: "MANAGED_TICKET_MISMATCH",
+    });
+    return true;
+  }
+
+  const expectedSide = managed.side === "BUY" ? "LONG" : "SHORT";
+  if (position.side !== expectedSide) {
+    journal("FIXED_TP_CLOSE_BLOCKED", {
+      ticket: managed.ticket,
+      expectedSide,
+      actualSide: position.side,
+      reason: "MANAGED_SIDE_MISMATCH",
+    });
+    return true;
+  }
+
+  if (!(Number.isFinite(position.volume) && position.volume > 0)) {
+    journal("FIXED_TP_CLOSE_BLOCKED", {
+      ticket: managed.ticket,
+      volume: position.volume,
+      reason: "POSITION_VOLUME_INVALID",
+    });
+    return true;
+  }
+
+  const health = await get<Health>("/health");
+  const accountLogin = Number(health.accountLogin);
+  if (
+    health.status !== "ok" ||
+    health.accountMode !== "demo" ||
+    !health.connected ||
+    !health.tradingEnabled ||
+    !health.terminalTradeAllowed ||
+    !health.expertTradeAllowed ||
+    !Number.isFinite(accountLogin) ||
+    state.accountLogin !== accountLogin ||
+    !allowedLogins.has(accountLogin)
+  ) {
+    journal("FIXED_TP_CLOSE_BLOCKED", {
+      ticket: managed.ticket,
+      reason: "EXECUTION_GUARD_BLOCK",
+      accountLogin: health.accountLogin ?? null,
+      expectedAccountLogin: state.accountLogin,
+      accountMode: health.accountMode ?? null,
+      connected: health.connected,
+      tradingEnabled: health.tradingEnabled,
+      terminalTradeAllowed: health.terminalTradeAllowed,
+      expertTradeAllowed: health.expertTradeAllowed,
+    });
+    return true;
+  }
+
+  const commandId = fixedTpCommandId("trend", managed.ticket);
+  const lock = acquireExecutionLock({
+    owner: `TREND_FIXED_TP:${managed.ticket}`,
+  });
+
+  if (!lock.acquired) {
+    journal("FIXED_TP_CLOSE_BLOCKED", {
+      ticket: managed.ticket,
+      commandId,
+      reason: lock.reason ?? "LOCK_BUSY",
+      lockFile: lock.file,
+      lockAgeMs: lock.ageMs ?? null,
+    });
+    return true;
+  }
+
+  try {
+    journal("FIXED_TP_CLOSE_ATTEMPT", {
+      ticket: managed.ticket,
+      side: managed.side,
+      volume: position.volume,
+      targetPrice: managed.fixedTpPrice,
+      commandId,
+    });
+
+    const response = await post<CommandResponse>(
+      `/v1/positions/${encodeURIComponent(managed.ticket)}/close`,
+      {
+        volume: position.volume,
+        commandId,
+      },
+    );
+
+    if (!response.success) {
+      journal("FIXED_TP_CLOSE_BLOCKED", {
+        ticket: managed.ticket,
+        commandId,
+        volume: position.volume,
+        reason: "BROKER_CLOSE_REJECTED",
+        response,
+      });
+      return true;
+    }
+
+    if (response.idempotentReplay) {
+      journal("FIXED_TP_CLOSE_REPLAY", {
+        ticket: managed.ticket,
+        commandId,
+        volume: position.volume,
+        response,
+      });
+    } else {
+      journal("FIXED_TP_CLOSE_CONFIRMED", {
+        ticket: managed.ticket,
+        commandId,
+        volume: position.volume,
+        response,
+      });
+    }
+
+    state.managed = null;
+    saveState();
+    return true;
+  } catch (error) {
+    journal("FIXED_TP_CLOSE_BLOCKED", {
+      ticket: managed.ticket,
+      commandId,
+      volume: position.volume,
+      reason: "BROKER_CLOSE_ERROR",
+      message: errorMessage(error),
+    });
+    return true;
+  } finally {
+    lock.release();
+  }
+}
+
 async function managePosition(position: Position, quote: Quote, spec: SymbolSpec, m15: Phase7Bar[]): Promise<void> {
   const managed = state.managed!;
   const exitPrice = managed.side === "BUY" ? quote.bid : quote.ask;
@@ -1402,6 +1588,8 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
   }
 
   if (managed.dailyMode === "RECOVERY_TP") {
+    if (await closeFixedTpIfTriggered(position, quote)) return;
+
     const hold =
       canonicalHoldReason(
         "TREND",
@@ -1492,6 +1680,8 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
       journal("PLUS10_PARTIAL_NOT_FEASIBLE", { ticket: managed.ticket, initialVolume: managed.initialVolume, currentVolume: position.volume });
     }
   }
+
+  if (await closeFixedTpIfTriggered(position, quote)) return;
 
   const latest = latestM15;
   if (!latest) return;
