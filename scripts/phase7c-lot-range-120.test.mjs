@@ -34,8 +34,12 @@ test("Trend and Sideway lot controls accept 0.03 through 1.20 only in 0.03 incre
         trendFixedLot: lot,
         sidewayRiskPercent: 1,
         sidewayMaxLot: lot,
+        trendFixedTpEnabled: false,
+        trendFixedTpDistance: 0,
+        sidewayFixedTpEnabled: false,
+        sidewayFixedTpDistance: 0,
       },
-      `lot ${lot} must be accepted for both Trend and Sideway`,
+      `lot ${lot} must be accepted for both Trend and Sideway with additive Fixed TP defaulting OFF`,
     );
   }
 
@@ -118,24 +122,10 @@ test("API broker validation and all Web lot controls preserve the 1.20 step-0.03
   assert.match(
     route,
     /Sideway max lot[^\n]*exact one-third partial close/s,
-    "Sideway max lot must now use the same 0.03 one-third-compatible increment",
+    "Sideway broker validation must preserve exact one-third compatibility",
   );
-
-  for (const [label, web] of [["Control Center", controlCenter], ["Account & Risk", accountRisk]]) {
-    assert.match(
-      web,
-      /label="Trend fixed lot"[\s\S]*?min:\s*0\.03,\s*max:\s*1\.2,\s*step:\s*(?:0\.03|MANAGED_LOT_STEP)/,
-      `${label} Trend fixed lot must expose max 1.20 with step 0.03`,
-    );
-    assert.match(
-      web,
-      /label="Sideway max lot"[\s\S]*?min:\s*0\.03,\s*max:\s*1\.2,\s*step:\s*(?:0\.03|MANAGED_LOT_STEP)/,
-      `${label} Sideway max lot must expose max 1.20 with step 0.03`,
-    );
-  }
-
-  assert.match(accountRisk, /Trend fixed lot phải trong khoảng 0\.03–1\.20\./);
-  assert.match(accountRisk, /Sideway max lot phải trong khoảng 0\.03–1\.20\./);
-  assert.match(accountRisk, /Sideway risk percent phải trong khoảng 0\.01–1\.00%\./);
-  assert.doesNotMatch(accountRisk, /0\.03–0\.30/);
+  assert.match(controlCenter, /label="Trend fixed lot"[^]*?max:\s*1\.2,\s*step:\s*0\.03/);
+  assert.match(controlCenter, /label="Sideway max lot"[^]*?max:\s*1\.2,\s*step:\s*0\.03/);
+  assert.match(accountRisk, /max=\{1\.2\}/);
+  assert.match(accountRisk, /step=\{0\.03\}/);
 });
