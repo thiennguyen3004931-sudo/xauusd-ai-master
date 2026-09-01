@@ -3,7 +3,7 @@ name: Phase7C Trade Notifier Deploy Verifier CI
 on:
   push:
     branches:
-      - fix/phase7c-trade-notifier-deploy-verification
+      - fix/phase7c-trade-notifier-*
       - fix/phase7c-verifier-strictmode-count
     paths:
       - scripts/verify-phase7c-executors-local.ps1
@@ -14,6 +14,7 @@ on:
       - .github/workflows/phase7c-trade-notifier-deploy-verifier-ci.yml
   pull_request:
     branches:
+      - main
       - fix/phase7c-legacy-background-cleanup
     paths:
       - scripts/verify-phase7c-executors-local.ps1
