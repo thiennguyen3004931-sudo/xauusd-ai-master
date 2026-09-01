@@ -74,3 +74,5 @@ test("Daily Recovery broker takeProfit remains independent from Fixed TP snapsho
   assert.doesNotMatch(trendSource, /takeProfit\s*:\s*[^,\n]*fixedTp/i,
     "Fixed TP must never overwrite the broker/native takeProfit payload.");
 });
+
+// GREEN rerun marker: production snapshot implementation must satisfy this unchanged contract.
