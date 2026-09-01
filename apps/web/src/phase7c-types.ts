@@ -436,19 +436,28 @@ export interface Phase7CBacktestResult {
   notes: string[];
 }
 export interface Phase7CLotSettingsState {
-  version: 1;
+  version: 2;
   trendFixedLot: number;
   sidewayRiskPercent: number;
   sidewayMaxLot: number;
+  trendFixedTpEnabled: boolean;
+  trendFixedTpDistance: number;
+  sidewayFixedTpEnabled: boolean;
+  sidewayFixedTpDistance: number;
   updatedAt: string;
   updatedBy: string;
 }
 
 export interface Phase7CActiveLotSettings {
-  version: 1;
+  version: 2;
+  accountMode: "DEMO" | "LIVE";
   trendFixedLot: number;
   sidewayRiskPercent: number;
   sidewayMaxLot: number;
+  trendFixedTpEnabled: boolean;
+  trendFixedTpDistance: number;
+  sidewayFixedTpEnabled: boolean;
+  sidewayFixedTpDistance: number;
   armed: boolean;
   supervisorPid: number;
   appliedAt: string;

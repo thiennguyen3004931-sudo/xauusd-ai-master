@@ -173,7 +173,15 @@ export async function getPhase7CLotSettings(): Promise<Phase7CLotSettingsSnapsho
   return read<Phase7CLotSettingsSnapshot>(await fetch(`${API_BASE}/api/v1/phase7c/lot-settings`, { cache: "no-store" }));
 }
 
-export async function setPhase7CLotSettings(input: { trendFixedLot: number; sidewayRiskPercent: number; sidewayMaxLot: number }): Promise<Phase7CLotSettingsSnapshot> {
+export async function setPhase7CLotSettings(input: {
+  trendFixedLot: number;
+  sidewayRiskPercent: number;
+  sidewayMaxLot: number;
+  trendFixedTpEnabled: boolean;
+  trendFixedTpDistance: number;
+  sidewayFixedTpEnabled: boolean;
+  sidewayFixedTpDistance: number;
+}): Promise<Phase7CLotSettingsSnapshot> {
   return read<Phase7CLotSettingsSnapshot>(await fetch(`${API_BASE}/api/v1/phase7c/lot-settings`, {
     method: "POST",
     headers: { "content-type": "application/json" },
