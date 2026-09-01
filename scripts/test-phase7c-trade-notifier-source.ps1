@@ -50,6 +50,16 @@ Assert-True ($supervisorText.Contains('PHASE7C_TRADE_NOTIFIER_STATUS=RESTART_PEN
 Assert-True ($supervisorText.Contains('PHASE7C_TRADE_NOTIFIER_STATUS=RESTARTED')) "executor supervisor must restart the trade notifier"
 Assert-True ($supervisorText.Contains('run-phase7b-telegram-notifier.mjs')) "orphan cleanup must include the trade notifier node process"
 
+# Restart startup race regression: the monitor loop wakes every 2 seconds, while initial
+# notifier startup already receives a 3-second grace period. A restarted wrapper must
+# receive the same bounded grace before the next heartbeat gate can kill it.
+$restartStatement = 'try { $tradeNotifier = Start-TradeNotifierChild; Write-Host "PHASE7C_TRADE_NOTIFIER_STATUS=RESTARTED" }'
+$restartIndex = $supervisorText.IndexOf($restartStatement, [System.StringComparison]::Ordinal)
+Assert-True ($restartIndex -ge 0) "trade notifier restart statement must remain explicit for restart-grace verification"
+$restartWindowLength = [Math]::Min(500, $supervisorText.Length - $restartIndex)
+$restartWindow = $supervisorText.Substring($restartIndex, $restartWindowLength)
+Assert-True ($restartWindow -match 'Start-Sleep\s+-Seconds\s+3') "restarted trade notifier must receive at least the canonical 3-second startup grace before heartbeat enforcement"
+
 # Wrapper account-mode mapping: directory names are account-specific, canonical journal filenames stay unchanged.
 Assert-True ($wrapperText.Contains('[ValidateSet("DEMO", "LIVE")]')) "trade notifier wrapper must accept explicit DEMO/LIVE account mode"
 Assert-True ($wrapperText.Contains('phase7b-live-forward')) "LIVE Trend notifier journal must resolve under phase7b-live-forward"
