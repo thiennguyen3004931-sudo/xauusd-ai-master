@@ -1,0 +1,48 @@
+name: Apply Sideway Fixed TP Task 7
+
+on:
+  push:
+    branches:
+      - feat/phase7c-fixed-tp-additive
+    paths:
+      - "scripts/.tmp-apply-sideway-fixed-tp-exit.mjs"
+      - "scripts/phase7c-fixed-tp-sideway-exit.test.mjs"
+      - ".github/workflows/.tmp-apply-sideway-fixed-tp-exit.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-source-only-patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify exact source-only patch script
+        run: node --check scripts/.tmp-apply-sideway-fixed-tp-exit.mjs
+      - name: Apply Task 7 minimal production exit wiring
+        run: node scripts/.tmp-apply-sideway-fixed-tp-exit.mjs
+      - name: Syntax-check canonical Sideway source
+        run: node --check scripts/run-phase7c-sideway-controller.mjs
+      - name: Prove Sideway snapshot regression remains GREEN
+        run: node --test scripts/phase7c-fixed-tp-sideway-snapshot.test.mjs
+      - name: Prove focused Sideway exit contract before commit
+        run: node --test scripts/phase7c-fixed-tp-sideway-exit.test.mjs
+      - name: Diff hygiene
+        run: git diff --check
+      - name: Commit only canonical Sideway source
+        shell: bash
+        run: |
+          changed="$(git diff --name-only)"
+          if [ "$changed" != "scripts/run-phase7c-sideway-controller.mjs" ]; then
+            echo "UNEXPECTED_DIFF=$changed"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/run-phase7c-sideway-controller.mjs
+          git diff --cached --check
+          git commit -m "feat: enforce Sideway additive fixed TP exit"
+          git push origin HEAD:feat/phase7c-fixed-tp-additive
