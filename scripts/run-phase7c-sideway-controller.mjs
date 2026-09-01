@@ -20,6 +20,7 @@ import {
   targetReached,
 } from "./phase7c-sideway-logic.mjs";
 import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
+import { buildFixedTpSnapshot } from "./phase7c-fixed-tp.mjs";
 import { canonicalHoldReason } from "./phase7c-hold-observability.mjs";
 import { stopIsAtLeastAsTight } from "./phase7c-stop-monotonicity.mjs";
 import {
@@ -43,6 +44,15 @@ if (Math.abs(maxLotUnits - Math.round(maxLotUnits)) > 1e-8) {
   throw new Error("Phase 7C Sideway max lot must use 0.03 increments so +10 can close exactly one-third.");
 }
 const maxLot = rawMaxLot;
+const sidewayFixedTpEnabled = truthy(process.env.ZIQ_PHASE7C_SIDEWAY_FIXED_TP_ENABLED);
+const sidewayFixedTpDistance = Number(process.env.ZIQ_PHASE7C_SIDEWAY_FIXED_TP_DISTANCE ?? "0");
+if (
+  !Number.isFinite(sidewayFixedTpDistance) ||
+  sidewayFixedTpDistance < 0 ||
+  (sidewayFixedTpEnabled && sidewayFixedTpDistance <= 0)
+) {
+  throw new Error("Phase 7C Sideway Fixed TP distance must be finite and positive when enabled.");
+}
 const minRegimeConfidence = clampNumber(process.env.ZIQ_PHASE7C_SIDEWAY_MIN_REGIME_CONFIDENCE, 60, 0, 100);
 const regimeCandleCount = clampInteger(process.env.ZIQ_PHASE7C_REGIME_CANDLE_COUNT, 320, 220, 1000);
 const m5CandleCount = clampInteger(process.env.ZIQ_PHASE7C_SIDEWAY_M5_COUNT, 120, 30, 500);
@@ -625,6 +635,22 @@ async function cycle() {
     return;
   }
 
+  const fixedTpSnapshot = buildFixedTpSnapshot({
+    enabled: sidewayFixedTpEnabled,
+    distance: sidewayFixedTpDistance,
+    side,
+    entry: Number(finalPlan.entry),
+  });
+  journal("FIXED_TP_CONFIG_SNAPSHOT", {
+    strategy: "SIDEWAY",
+    orderId,
+    side,
+    entry: Number(finalPlan.entry),
+    fixedTpEnabled: fixedTpSnapshot.enabled,
+    fixedTpDistance: fixedTpSnapshot.distance,
+    fixedTpPrice: fixedTpSnapshot.targetPrice,
+  });
+
   state.pendingEntry = {
     orderId,
     side,
@@ -635,6 +661,9 @@ async function cycle() {
     tp1: executionPlan.tp1,
     tp1Kind: executionPlan.tp1Kind,
     tp2: executionPlan.takeProfit,
+    fixedTpEnabled: fixedTpSnapshot.enabled,
+    fixedTpDistance: fixedTpSnapshot.distance,
+    fixedTpPrice: fixedTpSnapshot.targetPrice,
     dailyMode: dailyRecovery.mode,
     dailyNetPnlAtEntry: dailyRecovery.dailyNetPnl,
     recoveryTargetNetPnl: dailyRecovery.targetNetPnl,
@@ -853,6 +882,12 @@ function buildManagedState(opened, pending, brokerClockOffsetMs = 0) {
   const brokerOpenedAt = Number(opened.openedAt);
   const normalizedOpenedAt = normalizeBrokerTimestamp(brokerOpenedAt, brokerClockOffsetMs);
   const openedAt = Number.isFinite(normalizedOpenedAt) ? normalizedOpenedAt : Date.now();
+  const fixedTpSnapshot = buildFixedTpSnapshot({
+    enabled: pending.fixedTpEnabled,
+    distance: pending.fixedTpDistance,
+    side: pending.side,
+    entry: Number(opened.entry),
+  });
   return {
     ticket: String(opened.ticket),
     side: pending.side,
@@ -865,6 +900,9 @@ function buildManagedState(opened, pending, brokerClockOffsetMs = 0) {
     tp1: Number(pending.tp1),
     tp1Kind: pending.tp1Kind,
     tp2: Number(pending.tp2),
+    fixedTpEnabled: fixedTpSnapshot.enabled,
+    fixedTpDistance: fixedTpSnapshot.distance,
+    fixedTpPrice: fixedTpSnapshot.targetPrice,
     dailyMode: pending.dailyMode ?? "SIDEWAY_NATIVE",
     dailyNetPnlAtEntry: Number(pending.dailyNetPnlAtEntry ?? 0),
     recoveryTargetNetPnl: Number(pending.recoveryTargetNetPnl ?? 0),
@@ -1147,6 +1185,40 @@ function validateVolume(volume, spec) {
   }
 }
 
+function normalizePendingEntry(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const distance = Number(raw.fixedTpDistance);
+  const price = Number(raw.fixedTpPrice);
+  const fixedTpEnabled =
+    raw.fixedTpEnabled === true &&
+    Number.isFinite(distance) &&
+    distance > 0 &&
+    Number.isFinite(price);
+  return {
+    ...raw,
+    fixedTpEnabled: fixedTpEnabled ? true : false,
+    fixedTpDistance: fixedTpEnabled ? distance : 0,
+    fixedTpPrice: fixedTpEnabled ? price : null,
+  };
+}
+
+function normalizeManagedState(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const distance = Number(raw.fixedTpDistance);
+  const price = Number(raw.fixedTpPrice);
+  const fixedTpEnabled =
+    raw.fixedTpEnabled === true &&
+    Number.isFinite(distance) &&
+    distance > 0 &&
+    Number.isFinite(price);
+  return {
+    ...raw,
+    fixedTpEnabled: fixedTpEnabled ? true : false,
+    fixedTpDistance: fixedTpEnabled ? distance : 0,
+    fixedTpPrice: fixedTpEnabled ? price : null,
+  };
+}
+
 function loadState() {
   if (!fs.existsSync(statePath)) {
     return { version: 1, accountLogin: null, lastEvaluatedM5Close: 0, pendingEntry: null, managed: null };
@@ -1158,8 +1230,8 @@ function loadState() {
       version: 1,
       accountLogin: Number.isFinite(Number(parsed.accountLogin)) ? Number(parsed.accountLogin) : null,
       lastEvaluatedM5Close: Number(parsed.lastEvaluatedM5Close ?? 0),
-      pendingEntry: parsed.pendingEntry ?? null,
-      managed: parsed.managed ?? null,
+      pendingEntry: normalizePendingEntry(parsed.pendingEntry),
+      managed: normalizeManagedState(parsed.managed),
     };
   } catch (error) {
     throw new Error(`Cannot load Phase 7C Sideway state: ${errorMessage(error)}`);
