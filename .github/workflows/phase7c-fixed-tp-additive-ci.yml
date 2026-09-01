@@ -1,5 +1,5 @@
 name: Phase7C Fixed TP Additive CI
-# Task 7 Sideway exit full GREEN verification
+# Task 8 API/Web RED/GREEN verification
 
 on:
   push:
@@ -19,6 +19,7 @@ on:
       - "scripts/phase7c-fixed-tp-trend-exit.test.mjs"
       - "scripts/phase7c-fixed-tp-sideway-snapshot.test.mjs"
       - "scripts/phase7c-fixed-tp-sideway-exit.test.mjs"
+      - "scripts/phase7c-fixed-tp-api-web.test.mjs"
       - "scripts/phase7c-lot-settings.test.mjs"
       - "scripts/lib/phase7c-account-mode.ps1"
       - "scripts/run-phase7c-executors-local.ps1"
@@ -47,6 +48,7 @@ on:
       - "scripts/phase7c-fixed-tp-trend-exit.test.mjs"
       - "scripts/phase7c-fixed-tp-sideway-snapshot.test.mjs"
       - "scripts/phase7c-fixed-tp-sideway-exit.test.mjs"
+      - "scripts/phase7c-fixed-tp-api-web.test.mjs"
       - "scripts/phase7c-lot-settings.test.mjs"
       - "scripts/lib/phase7c-account-mode.ps1"
       - "scripts/run-phase7c-executors-local.ps1"
@@ -92,8 +94,12 @@ jobs:
         run: node --test scripts/phase7c-fixed-tp-sideway-snapshot.test.mjs
       - name: Sideway Fixed TP exit contract
         run: node --test scripts/phase7c-fixed-tp-sideway-exit.test.mjs
+      - name: API/Web Fixed TP controls contract
+        run: node --test scripts/phase7c-fixed-tp-api-web.test.mjs
       - name: Existing lot settings regression
         run: node --test scripts/phase7c-lot-settings.test.mjs
+      - name: Build Web
+        run: pnpm --filter @xauusd/web build
       - name: Diff hygiene
         run: git diff --check
 
@@ -126,7 +132,11 @@ jobs:
         run: node --test scripts/phase7c-fixed-tp-sideway-snapshot.test.mjs
       - name: Sideway Fixed TP exit contract
         run: node --test scripts/phase7c-fixed-tp-sideway-exit.test.mjs
+      - name: API/Web Fixed TP controls contract
+        run: node --test scripts/phase7c-fixed-tp-api-web.test.mjs
       - name: Existing lot settings regression
         run: node --test scripts/phase7c-lot-settings.test.mjs
+      - name: Build Web
+        run: pnpm --filter @xauusd/web build
       - name: Diff hygiene
         run: git diff --check
