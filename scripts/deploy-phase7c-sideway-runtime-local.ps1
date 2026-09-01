@@ -42,14 +42,30 @@ function Read-JsonFile([string]$Path, [string]$Label) {
 
 function Assert-LifecycleBrokerSourceFresh([string]$WorkDir) {
   $heartbeatPath = Join-Path $WorkDir "phase7c-lifecycle-broker\state\heartbeat.json"
+  $brokerLogPath = Join-Path $WorkDir "phase7c-lifecycle-broker\logs\broker.log"
   $heartbeat = Read-JsonFile -Path $heartbeatPath -Label "Lifecycle broker heartbeat"
   $brokerPid = [int]$heartbeat.brokerPid
   if ($brokerPid -le 0) { throw "Lifecycle broker heartbeat is missing brokerPid." }
+  if (-not (Test-Path -LiteralPath $brokerLogPath -PathType Leaf)) { throw "Lifecycle broker log is missing: $brokerLogPath" }
 
-  try { $brokerProcess = Get-Process -Id $brokerPid -ErrorAction Stop }
-  catch { throw "Lifecycle broker heartbeat PID is not alive. brokerPid=$brokerPid" }
+  $bootMarker = "Lifecycle broker starting. PID=$brokerPid "
+  $bootMatch = Select-String -LiteralPath $brokerLogPath -SimpleMatch $bootMarker | Select-Object -Last 1
+  if ($null -eq $bootMatch) { throw "Lifecycle broker boot marker is missing for brokerPid=$brokerPid." }
+  $bootLine = [string]$bootMatch.Line
+  if ($bootLine -notmatch '^\[(?<stamp>[^\]]+)\]\s+Lifecycle broker starting\. PID=') {
+    throw "Lifecycle broker boot marker has an invalid timestamp format. brokerPid=$brokerPid"
+  }
 
-  $brokerStartedUtc = $brokerProcess.StartTime.ToUniversalTime()
+  try {
+    $brokerStartedUtc = [DateTimeOffset]::Parse(
+      [string]$Matches['stamp'],
+      [System.Globalization.CultureInfo]::InvariantCulture,
+      [System.Globalization.DateTimeStyles]::RoundtripKind
+    ).UtcDateTime
+  } catch {
+    throw "Lifecycle broker boot timestamp is invalid. brokerPid=$brokerPid"
+  }
+
   $runnerWriteUtc = (Get-Item -LiteralPath $LifecycleBrokerRunner -ErrorAction Stop).LastWriteTimeUtc
   $libraryWriteUtc = (Get-Item -LiteralPath $LifecycleBrokerLibrary -ErrorAction Stop).LastWriteTimeUtc
   $latestSourceWriteUtc = if ($runnerWriteUtc -gt $libraryWriteUtc) { $runnerWriteUtc } else { $libraryWriteUtc }
