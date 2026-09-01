@@ -162,6 +162,13 @@ export function Phase7CExecutionAuthorizationCard() {
   const accountMode = capability.data?.accountMode ?? autoStatus.data?.accountMode ?? "DEMO";
   const botMode = autoStatus.data?.botMode ?? capability.data?.botMode ?? "—";
   const isAutoActive = botMode === "AUTO";
+  const showAutoActivationDiagnostics = !isAutoActive;
+  const autoStatusLabel = isAutoActive
+    ? "ĐANG HOẠT ĐỘNG"
+    : autoStatus.data?.approved
+      ? "READY"
+      : "BLOCKED";
+  const autoStatusColor = isAutoActive || autoStatus.data?.approved ? "success" : "warning";
   const armed = capability.data?.liveExecutionArmed === true;
   const canAttemptAuto = !isAutoActive && !autoMutation.isPending;
   const armPreflightCount = checkCount(armPreflight?.checks);
@@ -305,27 +312,31 @@ export function Phase7CExecutionAuthorizationCard() {
             <Stack direction="row" spacing={0.8} flexWrap="wrap" useFlexGap alignItems="center">
               <Typography fontWeight={950}>AUTO</Typography>
               <Chip
-                label={autoStatus.data?.approved ? "READY" : "BLOCKED"}
-                color={autoStatus.data?.approved ? "success" : "warning"}
+                label={autoStatusLabel}
+                color={autoStatusColor}
                 size="small"
                 sx={{ fontWeight: 950 }}
               />
-              <Chip label={`${autoCount.passed}/${autoCount.total} điều kiện đạt`} size="small" variant="outlined" />
-              {autoBlockedBy.length ? (
+              {showAutoActivationDiagnostics ? (
+                <Chip label={`${autoCount.passed}/${autoCount.total} điều kiện đạt`} size="small" variant="outlined" />
+              ) : null}
+              {showAutoActivationDiagnostics && autoBlockedBy.length ? (
                 <Typography variant="caption" color="warning.main">
                   Khóa bởi: {autoBlockedBy.join(" · ")}
                 </Typography>
               ) : null}
             </Stack>
             <Stack direction="row" spacing={1}>
-              <Button
-                size="small"
-                variant="text"
-                onClick={() => setShowAutoChecks((value) => !value)}
-                sx={{ fontWeight: 900, whiteSpace: "nowrap" }}
-              >
-                {showAutoChecks ? "Ẩn chi tiết tự động" : "Chi tiết tự động"}
-              </Button>
+              {showAutoActivationDiagnostics ? (
+                <Button
+                  size="small"
+                  variant="text"
+                  onClick={() => setShowAutoChecks((value) => !value)}
+                  sx={{ fontWeight: 900, whiteSpace: "nowrap" }}
+                >
+                  {showAutoChecks ? "Ẩn chi tiết tự động" : "Chi tiết tự động"}
+                </Button>
+              ) : null}
               <Button
                 variant="contained"
                 color="primary"
@@ -344,7 +355,7 @@ export function Phase7CExecutionAuthorizationCard() {
             </Stack>
           </Stack>
 
-          {showAutoChecks ? (
+          {showAutoActivationDiagnostics && showAutoChecks ? (
             <Box mt={1.4} pt={1.3} sx={{ borderTop: "1px solid rgba(148,163,184,.14)" }}>
               <CheckRows entries={autoCount.entries} />
             </Box>
