@@ -28,6 +28,16 @@ Assert-True ($source.Contains('/api/v1/phase7c/bot-mode')) 'Deploy script must r
 Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY_MODE_BEFORE')) 'Deploy script must expose pre-deploy mode.'
 Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY_MODE_UNCHANGED=PASS')) 'Deploy script must prove mode is unchanged.'
 
+# LIVE ARM is a separate canonical bridge-session state from supervisor -Armed.
+Assert-True ($source.Contains('/api/v1/phase7c-live-arm-control/capability')) 'LIVE deploy must inspect canonical LIVE ARM capability.'
+Assert-True ($source.Contains('liveArmStatus')) 'LIVE deploy must inspect canonical liveArmStatus.'
+Assert-True ($source.Contains('liveExecutionArmed')) 'LIVE deploy must inspect canonical liveExecutionArmed.'
+Assert-True ($source.Contains('bridgeSessionId')) 'LIVE deploy must bind ARM to the current bridge session.'
+Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY_LIVE_ARM_BEFORE=ARMED')) 'LIVE deploy must expose canonical ARMED precondition.'
+Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY_LIVE_ARM_UNCHANGED=PASS')) 'LIVE deploy must prove canonical LIVE ARM state is unchanged.'
+Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY_BRIDGE_SESSION_UNCHANGED=PASS')) 'LIVE deploy must prove bridge session is unchanged.'
+Assert-True (-not ($source -match '(?i)phase7c-live-arm-control/(?:preflight|execute)')) 'Notifier-only deploy must never call LIVE ARM mutation endpoints.'
+
 # Source deployment is pinned to an exact, clean main commit.
 Assert-True ($source.Contains('[string]$ExpectedCommit')) 'Deploy script must require ExpectedCommit.'
 Assert-True ($source.Contains('branch --show-current')) 'Deploy script must require branch main.'
