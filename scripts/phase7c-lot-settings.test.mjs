@@ -155,10 +155,12 @@ test("API route keeps exact one-third compatibility for Trend and Sideway max lo
   assert.match(route, /Sideway max lot[^\n]*exact one-third partial close/s);
 });
 
-test("Web lot controls expose the shared 1.20 ceiling and 0.03 step", () => {
-  const web = readFileSync(path.join(projectRoot, "apps", "web", "src", "pages", "Phase7CControlCenterPage.tsx"), "utf8");
-  assert.match(web, /label="Trend fixed lot"[\s\S]*?min:\s*0\.03,\s*max:\s*1\.2,\s*step:\s*0\.03/);
-  assert.match(web, /label="Sideway max lot"[\s\S]*?min:\s*0\.03,\s*max:\s*1\.2,\s*step:\s*0\.03/);
+test("canonical Account & Risk lot controls expose the shared bounds and managed 0.03 step", () => {
+  const web = readFileSync(path.join(projectRoot, "apps", "web", "src", "pages", "Phase7BOpsPage.tsx"), "utf8");
+  assert.match(web, /const\s+MANAGED_LOT_STEP\s*=\s*0\.03/);
+  assert.match(web, /label="Trend fixed lot"[\s\S]*?inputProps=\{\{\s*min:\s*0\.03,\s*max:\s*1\.2,\s*step:\s*MANAGED_LOT_STEP\s*\}\}/);
+  assert.match(web, /label="Sideway risk percent"[\s\S]*?inputProps=\{\{\s*min:\s*0\.01,\s*max:\s*1,\s*step:\s*0\.01\s*\}\}/);
+  assert.match(web, /label="Sideway max lot"[\s\S]*?inputProps=\{\{\s*min:\s*0\.03,\s*max:\s*1\.2,\s*step:\s*MANAGED_LOT_STEP\s*\}\}/);
 });
 
 test("Telegram dry-run preserves journal numeric precision and remains orderPermission=NONE", () => {
