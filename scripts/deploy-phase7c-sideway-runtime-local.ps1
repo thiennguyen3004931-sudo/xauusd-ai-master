@@ -9,6 +9,8 @@ Set-StrictMode -Version Latest
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $ConfigPath = Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.json"
 $AccountLibrary = Join-Path $PSScriptRoot "lib\phase7c-account-mode.ps1"
+$LifecycleBrokerRunner = Join-Path $PSScriptRoot "run-phase7c-executor-task-runner-local.ps1"
+$LifecycleBrokerLibrary = Join-Path $PSScriptRoot "lib\phase7c-lifecycle-broker.ps1"
 
 if ($ExpectedCommit -notmatch '^[0-9a-fA-F]{40}$') {
   throw "ExpectedCommit must be an exact 40-character Git SHA."
@@ -16,7 +18,7 @@ if ($ExpectedCommit -notmatch '^[0-9a-fA-F]{40}$') {
 if ($TimeoutSeconds -lt 30 -or $TimeoutSeconds -gt 600) {
   throw "TimeoutSeconds must be between 30 and 600."
 }
-foreach ($required in @($ConfigPath, $AccountLibrary)) {
+foreach ($required in @($ConfigPath, $AccountLibrary, $LifecycleBrokerRunner, $LifecycleBrokerLibrary)) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
     throw "Sideway runtime deploy required file not found: $required"
   }
@@ -36,6 +38,44 @@ function Read-JsonFile([string]$Path, [string]$Label) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "$Label file is missing: $Path" }
   try { return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json }
   catch { throw "$Label file is invalid: $Path. $($_.Exception.Message)" }
+}
+
+function Assert-LifecycleBrokerSourceFresh([string]$WorkDir) {
+  $heartbeatPath = Join-Path $WorkDir "phase7c-lifecycle-broker\state\heartbeat.json"
+  $brokerLogPath = Join-Path $WorkDir "phase7c-lifecycle-broker\logs\broker.log"
+  $heartbeat = Read-JsonFile -Path $heartbeatPath -Label "Lifecycle broker heartbeat"
+  $brokerPid = [int]$heartbeat.brokerPid
+  if ($brokerPid -le 0) { throw "Lifecycle broker heartbeat is missing brokerPid." }
+  if (-not (Test-Path -LiteralPath $brokerLogPath -PathType Leaf)) { throw "Lifecycle broker log is missing: $brokerLogPath" }
+
+  $bootMarker = "Lifecycle broker starting. PID=$brokerPid "
+  $bootMatch = Select-String -LiteralPath $brokerLogPath -SimpleMatch $bootMarker | Select-Object -Last 1
+  if ($null -eq $bootMatch) { throw "Lifecycle broker boot marker is missing for brokerPid=$brokerPid." }
+  $bootLine = [string]$bootMatch.Line
+  if ($bootLine -notmatch '^\[(?<stamp>[^\]]+)\]\s+Lifecycle broker starting\. PID=') {
+    throw "Lifecycle broker boot marker has an invalid timestamp format. brokerPid=$brokerPid"
+  }
+
+  try {
+    $brokerStartedUtc = [DateTimeOffset]::Parse(
+      [string]$Matches['stamp'],
+      [System.Globalization.CultureInfo]::InvariantCulture,
+      [System.Globalization.DateTimeStyles]::RoundtripKind
+    ).UtcDateTime
+  } catch {
+    throw "Lifecycle broker boot timestamp is invalid. brokerPid=$brokerPid"
+  }
+
+  $runnerWriteUtc = (Get-Item -LiteralPath $LifecycleBrokerRunner -ErrorAction Stop).LastWriteTimeUtc
+  $libraryWriteUtc = (Get-Item -LiteralPath $LifecycleBrokerLibrary -ErrorAction Stop).LastWriteTimeUtc
+  $latestSourceWriteUtc = if ($runnerWriteUtc -gt $libraryWriteUtc) { $runnerWriteUtc } else { $libraryWriteUtc }
+
+  if ($brokerStartedUtc -lt $latestSourceWriteUtc) {
+    throw "Lifecycle broker process is stale relative to current source. brokerPid=$brokerPid startedUtc=$($brokerStartedUtc.ToString('o')) sourceUpdatedUtc=$($latestSourceWriteUtc.ToString('o')). Reload lifecycle broker before Sideway runtime deploy."
+  }
+
+  Write-Host "PHASE7C_SIDEWAY_RUNTIME_DEPLOY_BROKER_PID=$brokerPid"
+  Write-Host "PHASE7C_SIDEWAY_RUNTIME_DEPLOY_BROKER_SOURCE_FRESH=PASS"
 }
 
 function Invoke-ApiGet([string]$Path) {
@@ -159,6 +199,7 @@ $oldSupervisorPid = [int]$lifecycleBefore.processes.supervisor.pid
 $oldTrendPid = [int]$lifecycleBefore.processes.trend.pid
 $oldSidewayPid = [int]$lifecycleBefore.processes.sideway.pid
 if ($oldSupervisorPid -le 0 -or $oldTrendPid -le 0 -or $oldSidewayPid -le 0) { throw "Lifecycle PID snapshot is incomplete." }
+[void](Assert-LifecycleBrokerSourceFresh -WorkDir $WorkDir)
 
 $armBefore = Invoke-ApiGet "/api/v1/phase7c-live-arm-control/capability"
 if ([string]$armBefore.accountMode -ne "LIVE" -or [string]$armBefore.liveArmStatus -ne "ARMED" -or -not [bool]$armBefore.liveExecutionArmed) {
