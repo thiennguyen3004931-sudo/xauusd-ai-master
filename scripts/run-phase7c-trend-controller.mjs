@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 import { acquireExecutionLock } from "./phase7c-execution-lock.mjs";
+import { acquireRuntimeSingleton } from "./phase7c-runtime-singleton-lock.mjs";
 import { evaluateAutoTrendEntryModeGate } from "./phase7c-trend-mode-gate.mjs";
 
 const nativeFetch = globalThis.fetch.bind(globalThis);
@@ -18,6 +19,42 @@ const trendRuntimeIntervalSeconds = clampInt(
   60,
 );
 const trendRuntimeStartedAt = Date.now();
+const trendRuntimeOwnershipFile =
+  process.env.ZIQ_PHASE7C_TREND_RUNTIME_LOCK?.trim() ||
+  (process.env.ZIQ_PHASE7C_EXECUTION_LOCK?.trim()
+    ? path.join(
+        path.dirname(process.env.ZIQ_PHASE7C_EXECUTION_LOCK.trim()),
+        "phase7c-trend-runtime.lock",
+      )
+    : path.resolve(
+        ".runtime",
+        "phase7c-executors",
+        "phase7c-trend-runtime.lock",
+      ));
+const trendRuntimeOwnership = acquireRuntimeSingleton({
+  file: trendRuntimeOwnershipFile,
+  owner: "TREND",
+});
+if (!trendRuntimeOwnership.acquired) {
+  const currentPid = Number(trendRuntimeOwnership.current?.pid);
+  throw new Error(
+    "Phase 7C Trend runtime single-writer ownership blocked: " +
+      trendRuntimeOwnership.reason +
+      (Number.isSafeInteger(currentPid) && currentPid > 0
+        ? `|OWNER_PID=${currentPid}`
+        : ""),
+  );
+}
+process.once("exit", () => {
+  try {
+    trendRuntimeOwnership.release();
+  } catch {
+    // Best-effort cleanup. A dead-owner lock is recovered by the next process.
+  }
+});
+console.log(
+  `PHASE7C_TREND_SINGLETON=ACQUIRED|PID=${process.pid}|FILE=${trendRuntimeOwnership.file}`,
+);
 
 startTrendRuntimeHeartbeat();
 
