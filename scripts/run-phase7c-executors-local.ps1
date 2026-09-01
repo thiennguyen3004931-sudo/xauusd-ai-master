@@ -481,7 +481,7 @@ try {
         Write-Host "PHASE7C_TRADE_NOTIFIER_STATUS=RESTART_PENDING"
       }
     } elseif ($TelegramConfigured) {
-      try { $tradeNotifier = Start-TradeNotifierChild; Write-Host "PHASE7C_TRADE_NOTIFIER_STATUS=RESTARTED" }
+      try { $tradeNotifier = Start-TradeNotifierChild; Write-Host "PHASE7C_TRADE_NOTIFIER_STATUS=RESTARTED"; Start-Sleep -Seconds 3 }
       catch { Write-Warning "Trade notifier restart failed: $($_.Exception.Message)" }
     }
 
