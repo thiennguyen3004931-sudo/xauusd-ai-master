@@ -22,7 +22,7 @@ permissions:
   contents: read
 
 jobs:
-  singleton-contract:
+  singleton-contract-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -38,7 +38,28 @@ jobs:
       - name: Source syntax checks
         run: |
           node --check scripts/run-phase7c-trend-controller.mjs
-          if [ -f scripts/phase7c-runtime-singleton-lock.mjs ]; then node --check scripts/phase7c-runtime-singleton-lock.mjs; fi
+          node --check scripts/phase7c-runtime-singleton-lock.mjs
+
+      - name: Diff hygiene
+        run: git diff --check
+
+  singleton-contract-windows:
+    runs-on: windows-latest
+    timeout-minutes: 7
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Trend singleton ownership regression
+        run: node --test scripts/phase7c-trend-singleton-ownership.test.mjs
+
+      - name: Existing shared execution lock regression
+        run: node --test scripts/phase7c-execution-lock.test.mjs
+
+      - name: Source syntax checks
+        run: |
+          node --check scripts/run-phase7c-trend-controller.mjs
+          node --check scripts/phase7c-runtime-singleton-lock.mjs
 
       - name: Diff hygiene
         run: git diff --check
