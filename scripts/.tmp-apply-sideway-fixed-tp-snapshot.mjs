@@ -1,3 +1,4 @@
+// Scoped-marker rerun for Task 6 source-only gate.
 import fs from "node:fs";
 import path from "node:path";
 
