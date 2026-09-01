@@ -19,7 +19,7 @@ function block(source, startMarker, endMarker) {
 }
 
 test("Account & Risk lot save carries forward all four canonical Fixed TP fields", () => {
-  const mutationType = block(page, "type LotSettingsMutationInput =", "const LOT_SETTINGS_URL");
+  const fixedTpSnapshotType = block(page, "type FixedTpSnapshot =", "type LotSettingsMutationInput =");
   for (const field of [
     "trendFixedTpEnabled",
     "trendFixedTpDistance",
@@ -27,11 +27,18 @@ test("Account & Risk lot save carries forward all four canonical Fixed TP fields
     "sidewayFixedTpDistance",
   ]) {
     assert.match(
-      mutationType,
+      fixedTpSnapshotType,
       new RegExp(`${field}\\s*:`),
-      `RED_TARGET: lot mutation input must carry canonical ${field}`,
+      `RED_TARGET: Fixed TP mutation snapshot must carry canonical ${field}`,
     );
   }
+
+  const mutationType = block(page, "type LotSettingsMutationInput =", "const LOT_SETTINGS_URL");
+  assert.match(
+    mutationType,
+    /LotInput\s*&\s*FixedTpSnapshot/,
+    "RED_TARGET: lot mutation input must compose lot/risk edits with the complete canonical Fixed TP snapshot.",
+  );
 
   const canonicalRead = block(
     page,
