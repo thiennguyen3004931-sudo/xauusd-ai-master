@@ -197,8 +197,8 @@ test("Recovery close refreshes canonical deal before reading Daily P/L", async (
     `Daily Recovery must be read after canonical close backfill; order=${requestOrder.join(" -> ")}`,
   );
   assert.match(text, /P&L lệnh:<\/b> <code>\+\$71\.40<\/code>/);
-  assert.match(text, /Daily P\/L sau đóng:<\/b> <code>-\$24\.48<\/code>/);
-  assert.doesNotMatch(text, /Daily P\/L sau đóng:<\/b> <code>-\$95\.88<\/code>/);
+  assert.match(text, /Daily P\/L sau đóng:<\/b> <code>−\$24\.48<\/code>/);
+  assert.doesNotMatch(text, /Daily P\/L sau đóng:<\/b> <code>−\$95\.88<\/code>/);
 });
 
 test("Recovery close does not confirm stale Daily P/L while canonical close deal is still missing", async () => {
@@ -260,5 +260,5 @@ test("Recovery close does not confirm stale Daily P/L while canonical close deal
 
   assert.match(text, /P&L lệnh:<\/b> <code>đang đồng bộ MT5 deal canonical<\/code>/i);
   assert.match(text, /Daily P\/L sau đóng:<\/b> <code>đang đồng bộ MT5 deal canonical<\/code>/i);
-  assert.doesNotMatch(text, /Daily P\/L sau đóng:<\/b> <code>-\$95\.88<\/code>/);
+  assert.doesNotMatch(text, /Daily P\/L sau đóng:<\/b> <code>−\$95\.88<\/code>/);
 });
