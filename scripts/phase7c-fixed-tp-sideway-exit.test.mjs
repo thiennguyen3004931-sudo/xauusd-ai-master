@@ -31,7 +31,7 @@ test("Sideway Fixed TP exit reuses canonical executable trigger, deterministic c
 test("Sideway Fixed TP close re-reconciles managed identity and closes 100% of current remaining broker volume", () => {
   const helper = block("async function closeFixedTpIfTriggered(", "async function managePosition(");
 
-  assert.match(helper, /bridgeGet\s*\(\s*`\/v1\/positions\?symbol=\$\{encodeURIComponent\(symbol\)\}`\s*\)/,
+  assert.match(helper, /bridgeGet\s*\(\s*`\/v1\/positions\?symbol=\$\{encodeURIComponent\(symbol\)\}`\s*,?\s*\)/,
     "RED_TARGET: Fixed TP helper must reconcile the current broker position again so a same-cycle +10 partial cannot leave stale volume.");
   assert.match(helper, /positions\.length\s*!==\s*1/,
     "RED_TARGET: ambiguous broker position state must fail closed.");
