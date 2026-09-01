@@ -9,8 +9,6 @@ const nativeFetch = globalThis.fetch.bind(globalThis);
 const accountRuntime = resolvePhase7CAccountRuntime();
 const controlApiBase = (process.env.ZIQ_PHASE7C_CONTROL_API_URL?.trim() || "http://127.0.0.1:3711").replace(/\/$/, "");
 const symbol = (process.env.ZIQ_PHASE7C_SIDEWAY_SYMBOL || process.env.ZIQ_DEMO_SYMBOL || "XAUUSD").trim().toUpperCase();
-const regimeCandleCount = clampInt(process.env.ZIQ_PHASE7C_REGIME_CANDLE_COUNT, 320, 220, 1000);
-const minRegimeConfidence = clampNumber(process.env.ZIQ_PHASE7C_SIDEWAY_MIN_REGIME_CONFIDENCE, 60, 0, 100);
 
 console.log("PHASE7C_SIDEWAY_EXECUTION_LOCK=ENABLED");
 console.log(`PHASE7C_SIDEWAY_LOCK_ACCOUNT_MODE=${accountRuntime.accountMode}`);
@@ -26,9 +24,8 @@ globalThis.fetch = async function phase7CSidewayLockedFetch(input, init = undefi
   }
 
   try {
-    const [modePayload, regime, health] = await Promise.all([
+    const [modePayload, health] = await Promise.all([
       controlRequest("/api/v1/phase7c/bot-mode"),
-      controlRequest(`/api/v1/phase7c/live-regime?symbol=${encodeURIComponent(symbol)}&count=${regimeCandleCount}`),
       fetchHealthUnderLock(request),
     ]);
 
@@ -39,22 +36,10 @@ globalThis.fetch = async function phase7CSidewayLockedFetch(input, init = undefi
       return blockedResponse("ACCOUNT_GUARD", detail);
     }
 
-    const permission = resolveSidewayPermission(modePayload?.state?.mode, regime?.recommendedMode);
-    if (
-      !permission.allowed ||
-      regime?.regime !== "RANGING" ||
-      regime?.recommendedMode !== "SIDEWAY" ||
-      Number(regime?.confidence ?? 0) < minRegimeConfidence
-    ) {
-      const reason = !permission.allowed
-        ? permission.reason
-        : regime?.regime !== "RANGING"
-          ? `REGIME_${regime?.regime ?? "UNKNOWN"}_BLOCKS_SIDEWAY`
-          : regime?.recommendedMode !== "SIDEWAY"
-            ? `RECOMMENDED_${regime?.recommendedMode ?? "UNKNOWN"}_BLOCKS_SIDEWAY`
-            : "REGIME_CONFIDENCE_BELOW_MINIMUM";
-      console.warn(`PHASE7C_SIDEWAY_ENTRY_BLOCKED=${reason}`);
-      return blockedResponse(reason, `confidence=${regime?.confidence ?? "N/A"};minimum=${minRegimeConfidence}`);
+    const permission = resolveSidewayPermission(modePayload?.state?.mode, "SIDEWAY");
+    if (!permission.allowed) {
+      console.warn(`PHASE7C_SIDEWAY_ENTRY_BLOCKED=${permission.reason}`);
+      return blockedResponse(permission.reason, `activeMode=${modePayload?.state?.mode ?? "UNKNOWN"}`);
     }
 
     const positions = await fetchOpenPositionsUnderLock(request);
@@ -148,16 +133,6 @@ function blockedResponse(reason, detail) {
     }),
     { status: 423, headers: { "content-type": "application/json; charset=utf-8" } },
   );
-}
-
-function clampNumber(raw, fallback, min, max) {
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(max, Math.max(min, parsed));
-}
-
-function clampInt(raw, fallback, min, max) {
-  return Math.trunc(clampNumber(raw, fallback, min, max));
 }
 
 function errorMessage(error) {
