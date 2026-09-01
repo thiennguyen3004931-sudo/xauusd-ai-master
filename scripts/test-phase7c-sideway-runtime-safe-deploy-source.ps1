@@ -22,6 +22,14 @@ function Assert-NotContains([string]$Literal, [string]$Label) {
   }
 }
 
+function Assert-Before([string]$First, [string]$Second, [string]$Label) {
+  $firstIndex = $source.IndexOf($First, [System.StringComparison]::Ordinal)
+  $secondIndex = $source.IndexOf($Second, [System.StringComparison]::Ordinal)
+  if ($firstIndex -lt 0 -or $secondIndex -lt 0 -or $firstIndex -ge $secondIndex) {
+    throw "Invalid Sideway runtime deploy ordering: $Label"
+  }
+}
+
 Assert-Contains '[string]$ExpectedCommit' 'mandatory exact SHA input'
 Assert-Contains '^[0-9a-fA-F]{40}$' '40-character SHA validation'
 Assert-Contains 'branch --show-current' 'branch guard'
@@ -40,6 +48,14 @@ Assert-Contains '/api/v1/phase7c/lifecycle/start' 'canonical lifecycle START'
 Assert-Contains '/v1/positions?symbol=XAUUSD' 'zero-position broker guard'
 Assert-Contains '/v1/orders?symbol=XAUUSD' 'zero-pending-order broker guard'
 Assert-Contains 'bridgeSessionId' 'bridge-session preservation contract'
+Assert-Contains '$LifecycleBrokerRunner' 'lifecycle broker runner freshness input'
+Assert-Contains '$LifecycleBrokerLibrary' 'lifecycle broker library freshness input'
+Assert-Contains 'Get-Process -Id $brokerPid' 'running broker process lookup'
+Assert-Contains 'StartTime.ToUniversalTime()' 'running broker source load timestamp'
+Assert-Contains 'LastWriteTimeUtc' 'current lifecycle source timestamp'
+Assert-Contains 'PHASE7C_SIDEWAY_RUNTIME_DEPLOY_BROKER_SOURCE_FRESH=PASS' 'broker freshness preflight marker'
+Assert-Contains '[void](Assert-LifecycleBrokerSourceFresh -WorkDir $WorkDir)' 'broker freshness preflight invocation'
+Assert-Before '[void](Assert-LifecycleBrokerSourceFresh -WorkDir $WorkDir)' '$mutationStarted = $false' 'broker source freshness must be proven before mutation scope begins'
 Assert-Contains 'PHASE7C_SIDEWAY_RUNTIME_DEPLOY_FINAL_MODE=PAUSE' 'final PAUSE marker'
 Assert-Contains 'PHASE7C_SIDEWAY_RUNTIME_DEPLOY_FINAL_ARM=ARMED' 'final ARMED marker'
 Assert-Contains 'PHASE7C_SIDEWAY_RUNTIME_DEPLOY_LIVE_TEST_ORDER=NONE' 'no LIVE test order marker'
