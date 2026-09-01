@@ -1,5 +1,5 @@
 name: Phase7C Fixed TP Additive CI
-# Task 7 Sideway exit RED/GREEN verification
+# Task 7 Sideway exit full GREEN verification
 
 on:
   push:
