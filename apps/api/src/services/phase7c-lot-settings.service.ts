@@ -244,6 +244,19 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
+function isCanonicalSupervisorAlive(activeFilePath: string, supervisorPid: number): boolean {
+  try {
+    const canonicalPid = Number(
+      readFileSync(resolve(dirname(activeFilePath), "supervisor.pid"), "utf8").trim(),
+    );
+    if (!Number.isInteger(canonicalPid) || canonicalPid <= 0) return false;
+    if (canonicalPid !== supervisorPid) return false;
+    return isProcessAlive(supervisorPid);
+  } catch {
+    return false;
+  }
+}
+
 function writeJsonAtomic(filePath: string, value: unknown) {
   mkdirSync(dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
@@ -291,7 +304,9 @@ export class Phase7CLotSettingsService {
     const state = this.getState();
     const active = this.getActive();
     const accountModeState = getPhase7CAccountModeState();
-    const activeAlive = active ? isProcessAlive(active.supervisorPid) : false;
+    const activeAlive = active
+      ? isCanonicalSupervisorAlive(this.activeFilePath, active.supervisorPid)
+      : false;
     const restartRequired =
       !accountModeState.valid ||
       !active ||
