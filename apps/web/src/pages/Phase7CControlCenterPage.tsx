@@ -155,27 +155,18 @@ export function Phase7CControlCenterPage() {
     enabled: bridgeReady,
   });
 
-  const [lotDraft, setLotDraft] = useState<{
-    trendFixedLot: number;
-    sidewayRiskPercent: number;
-    sidewayMaxLot: number;
+  const [fixedTpDraft, setFixedTpDraft] = useState<{
     trendFixedTpEnabled: boolean;
     trendFixedTpDistance: number;
     sidewayFixedTpEnabled: boolean;
     sidewayFixedTpDistance: number;
   } | null>(null);
-  const trendFixedLot = lotDraft?.trendFixedLot ?? configuredTrendLot;
-  const sidewayRiskPercent = lotDraft?.sidewayRiskPercent ?? configuredSidewayRisk;
-  const sidewayMaxLot = lotDraft?.sidewayMaxLot ?? configuredSidewayMaxLot;
-  const trendFixedTpEnabled = lotDraft?.trendFixedTpEnabled ?? configuredTrendFixedTpEnabled;
-  const trendFixedTpDistance = lotDraft?.trendFixedTpDistance ?? configuredTrendFixedTpDistance;
-  const sidewayFixedTpEnabled = lotDraft?.sidewayFixedTpEnabled ?? configuredSidewayFixedTpEnabled;
-  const sidewayFixedTpDistance = lotDraft?.sidewayFixedTpDistance ?? configuredSidewayFixedTpDistance;
-  const updateLotDraft = (patch: Partial<NonNullable<typeof lotDraft>>) => {
-    setLotDraft((current) => ({
-      trendFixedLot: current?.trendFixedLot ?? configuredTrendLot,
-      sidewayRiskPercent: current?.sidewayRiskPercent ?? configuredSidewayRisk,
-      sidewayMaxLot: current?.sidewayMaxLot ?? configuredSidewayMaxLot,
+  const trendFixedTpEnabled = fixedTpDraft?.trendFixedTpEnabled ?? configuredTrendFixedTpEnabled;
+  const trendFixedTpDistance = fixedTpDraft?.trendFixedTpDistance ?? configuredTrendFixedTpDistance;
+  const sidewayFixedTpEnabled = fixedTpDraft?.sidewayFixedTpEnabled ?? configuredSidewayFixedTpEnabled;
+  const sidewayFixedTpDistance = fixedTpDraft?.sidewayFixedTpDistance ?? configuredSidewayFixedTpDistance;
+  const updateFixedTpDraft = (patch: Partial<NonNullable<typeof fixedTpDraft>>) => {
+    setFixedTpDraft((current) => ({
       trendFixedTpEnabled: current?.trendFixedTpEnabled ?? configuredTrendFixedTpEnabled,
       trendFixedTpDistance: current?.trendFixedTpDistance ?? configuredTrendFixedTpDistance,
       sidewayFixedTpEnabled: current?.sidewayFixedTpEnabled ?? configuredSidewayFixedTpEnabled,
@@ -210,7 +201,7 @@ export function Phase7CControlCenterPage() {
   const saveLotSettings = useMutation({
     mutationFn: setPhase7CLotSettings,
     onSuccess: async () => {
-      setLotDraft(null);
+      setFixedTpDraft(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["phase7c-lot-settings"] }),
         queryClient.invalidateQueries({ queryKey: ["phase7c-decision-monitor"] }),
@@ -253,7 +244,7 @@ export function Phase7CControlCenterPage() {
   const liveArmScope = lifecycleData?.bridge.liveArmScope ?? "—";
   const liveArmReason = lifecycleData?.bridge.liveArmReason ?? "UNKNOWN";
 
-  const canChangeLot =
+  const canChangeFixedTp =
     mode === "PAUSE" &&
     bridgeReady &&
     brokerModeSupported &&
@@ -535,13 +526,10 @@ export function Phase7CControlCenterPage() {
         <CardContent>
           <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2}>
             <Box>
-              <Typography fontWeight={950}>Cấu hình Risk & Lot cho lệnh mới</Typography>
-              <Typography variant="caption" color="text.secondary">DEMO/LIVE theo account mode canonical · NEW_POSITIONS_ONLY · không martingale · không thay đổi vị thế đang quản lý.</Typography>
+              <Typography fontWeight={950}>Cấu hình Fixed TP cho lệnh mới</Typography>
+              <Typography variant="caption" color="text.secondary">DEMO/LIVE theo account mode canonical · NEW_POSITIONS_ONLY · chỉ cấu hình Fixed TP tại đây; Lot/Risk được giữ nguyên từ cấu hình canonical hiện hành.</Typography>
             </Box>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              <Chip label={`Trend ${configuredTrendLot.toFixed(2)} lot`} variant="outlined" />
-              <Chip label={`Sideway ${configuredSidewayRisk.toFixed(2)}%`} variant="outlined" />
-              <Chip label={`Cap ${configuredSidewayMaxLot.toFixed(2)} lot`} variant="outlined" />
               <Chip label={`Configured Trend TP · ${configuredTrendFixedTpEnabled ? `${configuredTrendFixedTpDistance.toFixed(2)} giá` : "OFF"}`} variant="outlined" />
               <Chip label={`Active Trend TP · ${lotSettings.data?.active ? (activeTrendFixedTpEnabled ? `${activeTrendFixedTpDistance.toFixed(2)} giá` : "OFF") : "—"}`} variant="outlined" />
               <Chip label={`Configured Sideway TP · ${configuredSidewayFixedTpEnabled ? `${configuredSidewayFixedTpDistance.toFixed(2)} giá` : "OFF"}`} variant="outlined" />
@@ -550,32 +538,44 @@ export function Phase7CControlCenterPage() {
             </Stack>
           </Stack>
 
-          <Grid container spacing={2} sx={{ mt: 0.5 }}>
-            <Grid size={{ xs: 12, sm: 4 }}><TextField fullWidth size="small" type="number" label="Trend fixed lot" value={trendFixedLot} onChange={(event) => updateLotDraft({ trendFixedLot: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0.03, max: 1.2, step: 0.03 } }} /></Grid>
-            <Grid size={{ xs: 12, sm: 4 }}><TextField fullWidth size="small" type="number" label="Sideway risk / lệnh (%)" value={sidewayRiskPercent} onChange={(event) => updateLotDraft({ sidewayRiskPercent: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0.01, max: 1, step: 0.01 } }} /></Grid>
-            <Grid size={{ xs: 12, sm: 4 }}><TextField fullWidth size="small" type="number" label="Sideway max lot" value={sidewayMaxLot} onChange={(event) => updateLotDraft({ sidewayMaxLot: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0.03, max: 1.2, step: 0.03 } }} /></Grid>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            <Grid size={{ xs: 12, lg: 6 }}>
+              <Box sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: 2, height: "100%" }}>
+                <FormControlLabel control={<Switch checked={trendFixedTpEnabled} onChange={(event) => updateFixedTpDraft({ trendFixedTpEnabled: event.target.checked })} />} label="Trend Fixed TP" />
+                <TextField fullWidth size="small" type="number" label="Trend Fixed TP distance" value={trendFixedTpDistance} disabled={!trendFixedTpEnabled} onChange={(event) => updateFixedTpDraft({ trendFixedTpDistance: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0, step: 0.01 } }} sx={{ mt: 1 }} />
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+                  Áp dụng cho vị thế mới của Trend. Ví dụ distance 8: BUY quanh 3500 sẽ đóng toàn bộ khi Bid đạt khoảng 3508; SELL quanh 3500 sẽ đóng toàn bộ khi Ask đạt khoảng 3492.
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid size={{ xs: 12, lg: 6 }}>
+              <Box sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: 2, height: "100%" }}>
+                <FormControlLabel control={<Switch checked={sidewayFixedTpEnabled} onChange={(event) => updateFixedTpDraft({ sidewayFixedTpEnabled: event.target.checked })} />} label="Sideway Fixed TP" />
+                <TextField fullWidth size="small" type="number" label="Sideway Fixed TP distance" value={sidewayFixedTpDistance} disabled={!sidewayFixedTpEnabled} onChange={(event) => updateFixedTpDraft({ sidewayFixedTpDistance: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0, step: 0.01 } }} sx={{ mt: 1 }} />
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+                  Áp dụng cho vị thế mới của Sideway. Khi đạt distance đã đặt, executor đóng toàn bộ volume còn lại; không ghi đè broker TP/TP2 hoặc Daily Recovery TP.
+                </Typography>
+              </Box>
+            </Grid>
           </Grid>
 
-          <Grid container spacing={2} sx={{ mt: 0.5 }}>
-            <Grid size={{ xs: 12, sm: 3 }}><FormControlLabel control={<Switch checked={trendFixedTpEnabled} onChange={(event) => updateLotDraft({ trendFixedTpEnabled: event.target.checked })} />} label="Trend Fixed TP" /></Grid>
-            <Grid size={{ xs: 12, sm: 3 }}><TextField fullWidth size="small" type="number" label="Trend Fixed TP distance" value={trendFixedTpDistance} disabled={!trendFixedTpEnabled} onChange={(event) => updateLotDraft({ trendFixedTpDistance: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0, step: 0.01 } }} /></Grid>
-            <Grid size={{ xs: 12, sm: 3 }}><FormControlLabel control={<Switch checked={sidewayFixedTpEnabled} onChange={(event) => updateLotDraft({ sidewayFixedTpEnabled: event.target.checked })} />} label="Sideway Fixed TP" /></Grid>
-            <Grid size={{ xs: 12, sm: 3 }}><TextField fullWidth size="small" type="number" label="Sideway Fixed TP distance" value={sidewayFixedTpDistance} disabled={!sidewayFixedTpEnabled} onChange={(event) => updateLotDraft({ sidewayFixedTpDistance: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0, step: 0.01 } }} /></Grid>
-          </Grid>
+          <Alert severity="info" sx={{ mt: 1.5 }}>
+            Fixed TP chỉ snapshot cho vị thế mới (NEW_POSITIONS_ONLY). Bật Fixed TP thì distance phải lớn hơn 0. Chỉ lưu khi Mode PAUSE, MT5 DEMO/LIVE khớp account mode canonical và không có vị thế XAUUSD.
+          </Alert>
 
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }} sx={{ mt: 2 }}>
-            <Button variant="contained" disabled={!canChangeLot || saveLotSettings.isPending || !lotSettings.data} onClick={() => saveLotSettings.mutate({
-              trendFixedLot,
-              sidewayRiskPercent,
-              sidewayMaxLot,
+            <Button variant="contained" disabled={!canChangeFixedTp || saveLotSettings.isPending || !lotSettings.data} onClick={() => saveLotSettings.mutate({
+              trendFixedLot: configuredTrendLot,
+              sidewayRiskPercent: configuredSidewayRisk,
+              sidewayMaxLot: configuredSidewayMaxLot,
               trendFixedTpEnabled,
               trendFixedTpDistance,
               sidewayFixedTpEnabled,
               sidewayFixedTpDistance,
             })}>
-              {saveLotSettings.isPending ? "Đang lưu..." : "Lưu cấu hình lot"}
+              {saveLotSettings.isPending ? "Đang lưu..." : "Lưu cấu hình Fixed TP"}
             </Button>
-            <Typography variant="caption" color="text.secondary">Chỉ lưu khi Mode PAUSE, MT5 DEMO/LIVE khớp account mode canonical và không có vị thế XAUUSD · NEW_POSITIONS_ONLY.</Typography>
+            <Typography variant="caption" color="text.secondary">Lot/Risk không được chỉnh tại đây và được gửi lại nguyên giá trị canonical hiện hành khi lưu Fixed TP.</Typography>
           </Stack>
 
           {saveLotSettings.error ? <Alert severity="error" sx={{ mt: 1.5 }}>{friendlyError(saveLotSettings.error)}</Alert> : null}
