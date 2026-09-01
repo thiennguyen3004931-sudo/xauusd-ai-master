@@ -34,19 +34,22 @@ source = replaceOnce(
 
 const versionGuardIndex = source.indexOf("const versionGuard = compareStrategyEntryConfigVersion(");
 if (versionGuardIndex < 0) throw new Error("Missing patch marker: strategy entry version guard");
-const pendingIndex = source.indexOf("state.pendingEntry = {", versionGuardIndex);
+let pendingIndex = source.indexOf("state.pendingEntry = {", versionGuardIndex);
 if (pendingIndex < 0) throw new Error("Missing patch marker: durable pending entry after version guard");
-const beforePending = source.slice(0, pendingIndex);
-const afterPending = source.slice(pendingIndex);
 const snapshotBlock = `const fixedTpSnapshot = buildFixedTpSnapshot({\n    enabled: sidewayFixedTpEnabled,\n    distance: sidewayFixedTpDistance,\n    side,\n    entry: Number(finalPlan.entry),\n  });\n  journal("FIXED_TP_CONFIG_SNAPSHOT", {\n    strategy: "SIDEWAY",\n    orderId,\n    side,\n    entry: Number(finalPlan.entry),\n    fixedTpEnabled: fixedTpSnapshot.enabled,\n    fixedTpDistance: fixedTpSnapshot.distance,\n    fixedTpPrice: fixedTpSnapshot.targetPrice,\n  });\n\n  `;
-source = beforePending + snapshotBlock + afterPending;
+source = source.slice(0, pendingIndex) + snapshotBlock + source.slice(pendingIndex);
 
-source = replaceOnce(
-  source,
+pendingIndex = source.indexOf("state.pendingEntry = {", versionGuardIndex);
+const pendingEnd = source.indexOf("\n  };", pendingIndex);
+if (pendingEnd < 0) throw new Error("Missing patch marker: durable pending entry end");
+let pendingBlock = source.slice(pendingIndex, pendingEnd);
+pendingBlock = replaceOnce(
+  pendingBlock,
   '    tp2: executionPlan.takeProfit,\n    dailyMode: dailyRecovery.mode,',
   '    tp2: executionPlan.takeProfit,\n    fixedTpEnabled: fixedTpSnapshot.enabled,\n    fixedTpDistance: fixedTpSnapshot.distance,\n    fixedTpPrice: fixedTpSnapshot.targetPrice,\n    dailyMode: dailyRecovery.mode,',
   "durable pending Fixed TP snapshot fields",
 );
+source = source.slice(0, pendingIndex) + pendingBlock + source.slice(pendingEnd);
 
 source = replaceOnce(
   source,
