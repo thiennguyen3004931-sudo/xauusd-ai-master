@@ -1,0 +1,95 @@
+name: Phase7C Fixed TP Additive CI
+
+on:
+  push:
+    branches:
+      - feat/phase7c-fixed-tp-additive
+    paths:
+      - "apps/api/src/services/phase7c-lot-settings.service.ts"
+      - "apps/api/src/routes/phase7c.route.ts"
+      - "apps/web/src/api.ts"
+      - "apps/web/src/phase7c-types.ts"
+      - "apps/web/src/pages/Phase7CControlCenterPage.tsx"
+      - "scripts/phase7c-fixed-tp.mjs"
+      - "scripts/phase7c-fixed-tp.test.mjs"
+      - "scripts/phase7c-lot-settings.test.mjs"
+      - "scripts/lib/phase7c-account-mode.ps1"
+      - "scripts/run-phase7c-executors-local.ps1"
+      - "scripts/run-phase7c-trend-controller-local.ps1"
+      - "scripts/run-phase7c-trend-account-mode.mjs"
+      - "scripts/run-phase7b-demo-controller.ts"
+      - "scripts/run-phase7c-sideway-controller-local.ps1"
+      - "scripts/run-phase7c-sideway-account-mode.mjs"
+      - "scripts/run-phase7c-sideway-locked.mjs"
+      - "scripts/run-phase7c-sideway-controller.mjs"
+      - ".github/workflows/phase7c-fixed-tp-additive-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "apps/api/src/services/phase7c-lot-settings.service.ts"
+      - "apps/api/src/routes/phase7c.route.ts"
+      - "apps/web/src/api.ts"
+      - "apps/web/src/phase7c-types.ts"
+      - "apps/web/src/pages/Phase7CControlCenterPage.tsx"
+      - "scripts/phase7c-fixed-tp.mjs"
+      - "scripts/phase7c-fixed-tp.test.mjs"
+      - "scripts/phase7c-lot-settings.test.mjs"
+      - "scripts/lib/phase7c-account-mode.ps1"
+      - "scripts/run-phase7c-executors-local.ps1"
+      - "scripts/run-phase7c-trend-controller-local.ps1"
+      - "scripts/run-phase7c-trend-account-mode.mjs"
+      - "scripts/run-phase7b-demo-controller.ts"
+      - "scripts/run-phase7c-sideway-controller-local.ps1"
+      - "scripts/run-phase7c-sideway-account-mode.mjs"
+      - "scripts/run-phase7c-sideway-locked.mjs"
+      - "scripts/run-phase7c-sideway-controller.mjs"
+      - ".github/workflows/phase7c-fixed-tp-additive-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  fixed-tp-contract-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build API contract
+        run: pnpm --filter @xauusd/api build
+      - name: Fixed TP RED/GREEN contract
+        run: node --test scripts/phase7c-fixed-tp.test.mjs
+      - name: Existing lot settings regression
+        run: node --test scripts/phase7c-lot-settings.test.mjs
+      - name: Diff hygiene
+        run: git diff --check
+
+  fixed-tp-contract-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build API contract
+        run: pnpm --filter @xauusd/api build
+      - name: Fixed TP RED/GREEN contract
+        run: node --test scripts/phase7c-fixed-tp.test.mjs
+      - name: Existing lot settings regression
+        run: node --test scripts/phase7c-lot-settings.test.mjs
+      - name: Diff hygiene
+        run: git diff --check
