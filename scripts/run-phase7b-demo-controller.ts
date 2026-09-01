@@ -1994,7 +1994,7 @@ function loadState(file: string): BotState {
     lastEvaluatedM5Close: parsed.lastEvaluatedM5Close ?? 0,
     pendingPullback: parsed.pendingPullback ?? null,
     pendingEntry: normalizePendingEntry(parsed.pendingEntry),
-    managed: parsed.managed ?? null,
+    managed: normalizeManagedState(parsed.managed),
   };
 }
 
