@@ -60,12 +60,18 @@ test("Trend recovery copies the pending Fixed TP snapshot into managed state", (
 
 test("legacy persisted Trend state restores Fixed TP disabled", () => {
   const loadState = block("function loadState(file: string): BotState", "function saveState");
-  assert.match(loadState, /fixedTpEnabled\s*:\s*false/,
-    "RED_TARGET: old pending/managed state without Fixed TP fields must restore disabled.");
-  assert.match(loadState, /fixedTpDistance\s*:\s*0/,
+  assert.match(loadState, /const fixedTpEnabled\s*=\s*raw\.fixedTpEnabled\s*===\s*true\s*&&\s*Number\.isFinite\(distance\)\s*&&\s*distance\s*>\s*0\s*&&\s*Number\.isFinite\(price\)/,
+    "RED_TARGET: legacy/malformed state may enable Fixed TP only when all persisted Fixed TP fields are explicitly valid.");
+  assert.match(loadState, /fixedTpEnabled\s*:\s*fixedTpEnabled\s*\?\s*true\s*:\s*false/,
+    "RED_TARGET: old pending/managed state without valid Fixed TP fields must restore disabled.");
+  assert.match(loadState, /fixedTpDistance\s*:\s*fixedTpEnabled\s*\?\s*distance\s*:\s*0/,
     "RED_TARGET: old state must restore Fixed TP distance 0.");
-  assert.match(loadState, /fixedTpPrice\s*:\s*null/,
+  assert.match(loadState, /fixedTpPrice\s*:\s*fixedTpEnabled\s*\?\s*price\s*:\s*null/,
     "RED_TARGET: old state must restore Fixed TP price null.");
+  assert.match(loadState, /pendingEntry\s*:\s*normalizePendingEntry\(parsed\.pendingEntry\)/,
+    "RED_TARGET: v2 pending state must pass through the legacy-safe Fixed TP normalizer.");
+  assert.match(loadState, /managed\s*:\s*normalizeManagedState\(parsed\.managed\)/,
+    "RED_TARGET: persisted managed state must pass through the legacy-safe Fixed TP normalizer.");
 });
 
 test("Daily Recovery broker takeProfit remains independent from Fixed TP snapshot", () => {
