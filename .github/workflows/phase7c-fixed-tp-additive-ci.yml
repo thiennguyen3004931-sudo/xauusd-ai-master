@@ -1,5 +1,5 @@
 name: Phase7C Fixed TP Additive CI
-# Task 8 API/Web RED/GREEN verification
+# Task 8 API/Web RED proof marker
 
 on:
   push:
