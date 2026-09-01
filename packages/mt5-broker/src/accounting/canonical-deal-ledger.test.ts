@@ -152,6 +152,127 @@ describe("CanonicalDealLedger accounting", () => {
     ).toEqual({ dealCount: 1, dailyNetPnl: 10 });
   });
 
+  it("attributes a magic-zero close to a system-owned position even when ownership was established before the broker day", () => {
+    const ledger = new CanonicalDealLedger({ store: fileStore("magic-zero-close") });
+    const dayStart = Date.UTC(2026, 8, 1, 0);
+    const dayEnd = Date.UTC(2026, 8, 2, 0);
+    const positionId = "304565255";
+
+    ledger.mergeBackfill("LIVE:10001", [
+      deal({
+        ticket: "304428974",
+        orderId: positionId,
+        positionId,
+        side: "SELL",
+        entry: "IN",
+        volume: 0.12,
+        price: 4351.08,
+        profit: 0,
+        commission: 0,
+        swap: 0,
+        fee: 0,
+        magic: 270715,
+        timestamp: dayStart - 1,
+      }),
+      deal({
+        ticket: "304429128",
+        orderId: "304565413",
+        positionId,
+        side: "BUY",
+        entry: "OUT",
+        volume: 0.12,
+        price: 4345.09,
+        profit: 71.88,
+        commission: 0,
+        swap: 0,
+        fee: 0,
+        magic: 0,
+        comment: "",
+        timestamp: dayStart + 1,
+      }),
+    ]);
+
+    expect(
+      ledger.summarize({
+        account: "LIVE:10001",
+        symbol: "XAUUSD",
+        ownedMagics: [270715, 270714],
+        from: dayStart,
+        to: dayEnd,
+      }),
+    ).toEqual({ dealCount: 1, dailyNetPnl: 71.88 });
+
+    const closes = ledger.realizedClosingDeals({
+      account: "LIVE:10001",
+      positionId,
+      symbol: "XAUUSD",
+      ownedMagics: [270715, 270714],
+    });
+    expect(closes.map((item) => item.ticket)).toEqual(["304429128"]);
+    expect(closes.map((item) => item.netPnl)).toEqual([71.88]);
+  });
+
+  it("keeps magic-zero closes fail-closed when the position has no system-owned provenance", () => {
+    const ledger = new CanonicalDealLedger({ store: fileStore("magic-zero-foreign") });
+    const dayStart = Date.UTC(2026, 8, 1, 0);
+    const dayEnd = Date.UTC(2026, 8, 2, 0);
+
+    ledger.mergeBackfill("LIVE:10001", [
+      deal({
+        ticket: "1350",
+        positionId: "FOREIGN",
+        entry: "IN",
+        magic: 999999,
+        profit: 0,
+        commission: 0,
+        swap: 0,
+        fee: 0,
+        timestamp: dayStart - 1,
+      }),
+      deal({
+        ticket: "1351",
+        positionId: "FOREIGN",
+        entry: "OUT",
+        magic: 0,
+        profit: 250,
+        commission: 0,
+        swap: 0,
+        fee: 0,
+        timestamp: dayStart + 1,
+      }),
+      deal({
+        ticket: "1352",
+        positionId: "OWNED",
+        entry: "OUT",
+        magic: 270715,
+        profit: 10,
+        commission: 0,
+        swap: 0,
+        fee: 0,
+        timestamp: dayStart + 2,
+      }),
+    ]);
+
+    expect(
+      ledger.summarize({
+        account: "LIVE:10001",
+        symbol: "XAUUSD",
+        ownedMagics: [270715, 270714],
+        from: dayStart,
+        to: dayEnd,
+      }),
+    ).toEqual({ dealCount: 1, dailyNetPnl: 10 });
+
+    expect(
+      ledger.realizedClosingDeals({
+        account: "LIVE:10001",
+        positionId: "FOREIGN",
+        symbol: "XAUUSD",
+        ownedMagics: [270715, 270714],
+      }),
+    ).toEqual([]);
+  });
+
   it("returns all actual MT5 closing deals for multiple partials and the final exit of one position", () => {
     const ledger = new CanonicalDealLedger({ store: fileStore("position") });
     ledger.mergeBackfill("LIVE:10001", [
