@@ -20,7 +20,12 @@ import {
   targetReached,
 } from "./phase7c-sideway-logic.mjs";
 import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
-import { buildFixedTpSnapshot } from "./phase7c-fixed-tp.mjs";
+import { acquireExecutionLock } from "./phase7c-execution-lock.mjs";
+import {
+  buildFixedTpSnapshot,
+  isFixedTpTriggered,
+  fixedTpCommandId,
+} from "./phase7c-fixed-tp.mjs";
 import { canonicalHoldReason } from "./phase7c-hold-observability.mjs";
 import { stopIsAtLeastAsTight } from "./phase7c-stop-monotonicity.mjs";
 import {
@@ -921,6 +926,170 @@ function buildManagedState(opened, pending, brokerClockOffsetMs = 0) {
   };
 }
 
+async function closeFixedTpIfTriggered(position, quote) {
+  const managed = state.managed;
+
+  // Preserve the additive OFF path: no extra broker I/O when the immutable
+  // managed snapshot has Fixed TP disabled.
+  if (!managed?.fixedTpEnabled || !Number.isFinite(Number(managed.fixedTpPrice))) {
+    return false;
+  }
+
+  if (!isFixedTpTriggered({
+    enabled: managed.fixedTpEnabled,
+    side: managed.side,
+    targetPrice: managed.fixedTpPrice,
+    bid: quote.bid,
+    ask: quote.ask,
+  })) {
+    return false;
+  }
+
+  journal("FIXED_TP_TRIGGERED", {
+    ticket: managed.ticket,
+    side: managed.side,
+    targetPrice: managed.fixedTpPrice,
+    bid: quote.bid,
+    ask: quote.ask,
+  });
+
+  let positions;
+  try {
+    positions = await bridgeGet(
+      `/v1/positions?symbol=${encodeURIComponent(symbol)}`,
+    );
+  } catch (error) {
+    journal("FIXED_TP_CLOSE_BLOCKED", {
+      ticket: managed.ticket,
+      reason: "FIXED_TP_RECONCILE_ERROR",
+      message: errorMessage(error),
+    });
+    return true;
+  }
+
+  if (!Array.isArray(positions) || positions.length !== 1) {
+    journal("FIXED_TP_CLOSE_BLOCKED", {
+      ticket: managed.ticket,
+      reason: "FIXED_TP_RECONCILE_REQUIRES_EXACTLY_ONE_POSITION",
+      positions: Array.isArray(positions)
+        ? positions.map((row) => ({ ticket: row.ticket, side: row.side, volume: row.volume }))
+        : null,
+    });
+    return true;
+  }
+
+  // Reconcile at the actual Fixed TP decision point. If the native +10 partial
+  // already succeeded in this cycle, this snapshot contains only the broker's
+  // current remaining volume.
+  position = positions[0];
+
+  if (position.ticket !== managed.ticket) {
+    journal("FIXED_TP_CLOSE_BLOCKED", {
+      ticket: managed.ticket,
+      actualTicket: position.ticket,
+      reason: "MANAGED_TICKET_MISMATCH",
+    });
+    return true;
+  }
+
+  const expectedSide = managed.side === "BUY" ? "LONG" : "SHORT";
+  if (position.side !== expectedSide) {
+    journal("FIXED_TP_CLOSE_BLOCKED", {
+      ticket: managed.ticket,
+      expectedSide,
+      actualSide: position.side,
+      reason: "MANAGED_SIDE_MISMATCH",
+    });
+    return true;
+  }
+
+  if (!(Number.isFinite(Number(position.volume)) && Number(position.volume) > 0)) {
+    journal("FIXED_TP_CLOSE_BLOCKED", {
+      ticket: managed.ticket,
+      volume: position.volume,
+      reason: "POSITION_VOLUME_INVALID",
+    });
+    return true;
+  }
+
+  const commandId = fixedTpCommandId("sideway", managed.ticket);
+  const lock = acquireExecutionLock({
+    owner: `SIDEWAY_FIXED_TP:${managed.ticket}`,
+  });
+
+  if (!lock.acquired) {
+    journal("FIXED_TP_CLOSE_BLOCKED", {
+      ticket: managed.ticket,
+      commandId,
+      reason: lock.reason ?? "LOCK_BUSY",
+      lockFile: lock.file,
+      lockAgeMs: lock.ageMs ?? null,
+    });
+    return true;
+  }
+
+  try {
+    journal("FIXED_TP_CLOSE_ATTEMPT", {
+      ticket: managed.ticket,
+      side: managed.side,
+      volume: Number(position.volume),
+      targetPrice: managed.fixedTpPrice,
+      commandId,
+    });
+
+    const response = await bridgeRequest(
+      "POST",
+      `/v1/positions/${encodeURIComponent(managed.ticket)}/close`,
+      {
+        volume: Number(position.volume),
+        commandId,
+      },
+    );
+
+    if (!response.success) {
+      journal("FIXED_TP_CLOSE_BLOCKED", {
+        ticket: managed.ticket,
+        commandId,
+        volume: Number(position.volume),
+        reason: "BROKER_CLOSE_REJECTED",
+        response,
+      });
+      return true;
+    }
+
+    if (response.idempotentReplay) {
+      journal("FIXED_TP_CLOSE_REPLAY", {
+        ticket: managed.ticket,
+        commandId,
+        volume: Number(position.volume),
+        response,
+      });
+    } else {
+      journal("FIXED_TP_CLOSE_CONFIRMED", {
+        ticket: managed.ticket,
+        commandId,
+        volume: Number(position.volume),
+        response,
+      });
+    }
+
+    state.managed = null;
+    saveState();
+    return true;
+  } catch (error) {
+    journal("FIXED_TP_CLOSE_BLOCKED", {
+      ticket: managed.ticket,
+      commandId,
+      volume: Number(position.volume),
+      reason: "BROKER_CLOSE_ERROR",
+      message: errorMessage(error),
+    });
+    return true;
+  } finally {
+    lock.release();
+  }
+}
+
 async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
   const managed = state.managed;
 
@@ -1014,6 +1183,8 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
   }
 
   if (managed.dailyMode === "RECOVERY_TP") {
+    if (await closeFixedTpIfTriggered(position, quote)) return;
+
     const hold =
       canonicalHoldReason(
         "SIDEWAY",
@@ -1084,6 +1255,8 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
       }
     }
   }
+
+  if (await closeFixedTpIfTriggered(position, quote)) return;
 
   // TP2 is already broker-protected on the position. This fallback closes
   // the remainder if a bridge/broker reports the position before TP handling.
