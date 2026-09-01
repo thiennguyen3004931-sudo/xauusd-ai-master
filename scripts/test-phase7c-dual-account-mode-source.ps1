@@ -78,7 +78,7 @@ Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'PHASE7C_ACCOUNT_
 Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'PHASE7C_ACCOUNT_VERIFY_EXECUTOR_TOPOLOGY=STARTUP_RUNNER' "verifier must expose startup-runner topology"
 Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'Win32_Service' "startup-runner fallback must inspect Windows Task Scheduler service"
 Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'PHASE7C_ACCOUNT_VERIFY_RUNNER_PARENT_IS_SCHEDULE=' "runner must be directly owned by Schedule service"
-Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'PHASE7C_ACCOUNT_VERIFY_RUNNER_STATUS_SUPERVISOR_MATCH=' "runner status supervisor PID must match active supervisor"
+Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'PHASE7C_ACCOUNT_VERIFY_SYSTEM_BROKER_SUPERVISOR_MATCH=' "SYSTEM lifecycle broker supervisor PID must match active supervisor"
 Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'PHASE7C_ACCOUNT_VERIFY_SUPERVISOR_PARENT_IS_RUNNER=' "supervisor must be direct runner child"
 Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'PHASE7C_ACCOUNT_VERIFY_STARTUP_RUNNER_IDENTITY=TOPOLOGY_PROOF' "fallback identity proof must be explicit"
 Assert-Text "scripts/verify-phase7c-account-runtime-local.ps1" 'PHASE7C_ACCOUNT_VERIFY_TASK_FALLBACK=PASS' "verified task-missing fallback marker"
