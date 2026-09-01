@@ -74,22 +74,21 @@ test("Trend management preserves +6, +10 and Daily Recovery precedence around Fi
   const recoveryIndex = manage.indexOf("if (managed.dailyMode === \"RECOVERY_TP\")");
   const partialIndex = manage.indexOf("if (!managed.partialApplied && favorable >= 10)");
   const fixedCalls = [...manage.matchAll(/await closeFixedTpIfTriggered\(position,\s*quote\)/g)].map((match) => match.index);
+  const guardedFixedCalls = [...manage.matchAll(/if\s*\(\s*await closeFixedTpIfTriggered\(position,\s*quote\)\s*\)\s*return\s*;/g)].map((match) => match.index);
 
   assert.ok(beIndex >= 0, "existing +6 BE branch must remain present");
   assert.ok(recoveryIndex > beIndex, "Daily Recovery branch must remain after +6 BE");
   assert.ok(partialIndex > recoveryIndex, "existing +10 partial branch must remain after Daily Recovery guard");
   assert.equal(fixedCalls.length, 2,
     "RED_TARGET: Trend must monitor Fixed TP independently in Recovery and in normal native management.");
+  assert.deepEqual(guardedFixedCalls, fixedCalls,
+    "RED_TARGET: every Fixed TP monitor call must return immediately when the Fixed TP cycle handled or blocked mutation.");
 
   const recoveryReturn = manage.indexOf("\n    return;", recoveryIndex);
   assert.ok(fixedCalls[0] > recoveryIndex && fixedCalls[0] < recoveryReturn,
     "RED_TARGET: Recovery TP must keep its broker TP while executor Fixed TP can independently win before recovery return.");
   assert.ok(fixedCalls[1] > partialIndex,
     "RED_TARGET: normal Fixed TP must run after the native +10 branch so targets above +10 preserve one-third partial first.");
-
-  const afterNormalFixed = manage.slice(fixedCalls[1]);
-  assert.match(afterNormalFixed, /if\s*\(\s*await closeFixedTpIfTriggered\(position,\s*quote\)\s*\)\s*return\s*;/,
-    "RED_TARGET: a triggered/blocked Fixed TP cycle must return before structural/reversal/runner management.");
 });
 
 test("existing Trend non-Fixed-TP full-close command identity stays untouched", () => {
