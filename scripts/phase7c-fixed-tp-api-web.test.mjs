@@ -99,7 +99,7 @@ test("Web API sends Trend and Sideway Fixed TP through the existing single setti
     "all seven settings values must travel in one canonical mutation body.");
 });
 
-test("Control Center edits and saves independent Fixed TP controls with LIVE/DEMO-safe configuration gating", () => {
+test("Control Center exposes a Fixed TP-only editor while preserving canonical lot/risk values on save", () => {
   for (const field of [
     "configuredTrendFixedTpEnabled",
     "configuredTrendFixedTpDistance",
@@ -113,14 +113,31 @@ test("Control Center edits and saves independent Fixed TP controls with LIVE/DEM
     assert.match(page, new RegExp(`const\\s+${field}\\s*=`), `RED_TARGET: Control Center visibility missing ${field}.`);
   }
 
-  const draft = block(page, "const [lotDraft, setLotDraft] = useState<", "const lifecycleAction = useMutation({");
+  const draft = block(page, "const [fixedTpDraft, setFixedTpDraft] = useState<", "const lifecycleAction = useMutation({");
   for (const field of [
     "trendFixedTpEnabled",
     "trendFixedTpDistance",
     "sidewayFixedTpEnabled",
     "sidewayFixedTpDistance",
   ]) {
-    assert.match(draft, new RegExp(`${field}\\s*:`), `RED_TARGET: Control Center draft missing ${field}.`);
+    assert.match(draft, new RegExp(`${field}\\s*:`), `RED_TARGET: Fixed TP draft missing ${field}.`);
+  }
+  for (const removedField of ["trendFixedLot", "sidewayRiskPercent", "sidewayMaxLot"]) {
+    assert.doesNotMatch(draft, new RegExp(`${removedField}\\s*:`),
+      `RED_TARGET: duplicate lot/risk editor state must not remain in the Control Center draft: ${removedField}.`);
+  }
+
+  assert.ok(page.includes("Cấu hình Fixed TP cho lệnh mới"),
+    "RED_TARGET: Control Center section must be named for its single Fixed TP responsibility.");
+  assert.ok(page.includes("Lưu cấu hình Fixed TP"),
+    "RED_TARGET: save action must be labeled for Fixed TP rather than duplicate lot configuration.");
+
+  for (const removedLabel of [
+    'label="Trend fixed lot"',
+    'label="Sideway risk / lệnh (%)"',
+    'label="Sideway max lot"',
+  ]) {
+    assert.ok(!page.includes(removedLabel), `RED_TARGET: duplicate editor must be removed: ${removedLabel}.`);
   }
 
   for (const label of [
@@ -137,20 +154,22 @@ test("Control Center edits and saves independent Fixed TP controls with LIVE/DEM
     assert.ok(page.includes(label), `RED_TARGET: Control Center must visibly render ${label}.`);
   }
 
-  assert.match(page, /saveLotSettings\.mutate\(\{[\s\S]*?trendFixedLot[\s\S]*?sidewayRiskPercent[\s\S]*?sidewayMaxLot[\s\S]*?trendFixedTpEnabled[\s\S]*?trendFixedTpDistance[\s\S]*?sidewayFixedTpEnabled[\s\S]*?sidewayFixedTpDistance[\s\S]*?\}\)/,
-    "RED_TARGET: one Save action must submit lot/risk and both Fixed TP controls together.");
+  assert.match(page, /saveLotSettings\.mutate\(\{[\s\S]*?trendFixedLot\s*:\s*configuredTrendLot[\s\S]*?sidewayRiskPercent\s*:\s*configuredSidewayRisk[\s\S]*?sidewayMaxLot\s*:\s*configuredSidewayMaxLot[\s\S]*?trendFixedTpEnabled[\s\S]*?trendFixedTpDistance[\s\S]*?sidewayFixedTpEnabled[\s\S]*?sidewayFixedTpDistance[\s\S]*?\}\)/,
+    "RED_TARGET: Fixed TP save must preserve the canonical configured lot/risk values while updating only Fixed TP choices.");
 
-  const canChange = block(page, "const canChangeLot =", "const canPause =");
+  const canChange = block(page, "const canChangeFixedTp =", "const canPause =");
   assert.match(canChange, /mode\s*===\s*["']PAUSE["']/,
-    "settings UI must remain PAUSE-gated.");
+    "Fixed TP settings UI must remain PAUSE-gated.");
   assert.match(canChange, /bridgeReady/,
-    "settings UI must require a healthy bridge.");
+    "Fixed TP settings UI must require a healthy bridge.");
   assert.match(canChange, /brokerModeSupported/,
-    "settings UI must recognize the configured DEMO/LIVE broker modes that the canonical backend can validate.");
+    "Fixed TP settings UI must recognize the configured DEMO/LIVE broker modes that the canonical backend can validate.");
   assert.match(canChange, /openXauusdPositions[\s\S]*?===\s*0/,
-    "settings UI must remain zero-XAUUSD-position gated.");
-  assert.doesNotMatch(canChange, /accountMode\s*===\s*["']demo["']/,
-    "settings UI must not silently add a stricter DEMO-only gate than the canonical account-mode-aware backend contract.");
+    "Fixed TP settings UI must remain zero-XAUUSD-position gated.");
+
+  for (const guide of ["vị thế mới", "BUY", "Bid", "SELL", "Ask", "đóng toàn bộ"]) {
+    assert.ok(page.includes(guide), `RED_TARGET: Fixed TP inline guidance must explain ${guide}.`);
+  }
 });
 
 test("Fixed TP settings panel remains configuration-only with no direct broker order/position mutation", () => {
