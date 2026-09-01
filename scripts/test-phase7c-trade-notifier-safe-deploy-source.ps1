@@ -66,15 +66,16 @@ Assert-True ($taskkillText.Contains('$oldTradeNotifierPid')) 'taskkill must targ
 Assert-True (-not ($taskkillText -match '(?i)supervisor|trend|sideway|telegramMode|regimeNotifier')) 'taskkill must not target supervisor/executor/control child PIDs.'
 Assert-True ($taskkillText -match '(?i)(?:^|\s)/T(?:\s|$)') 'Trade notifier taskkill must include /T so its Node child is not orphaned.'
 
-# Supervisor must recreate a healthy read-only notifier child.
+# Supervisor must recreate a healthy read-only notifier child. Verification stays local to
+# this helper because the legacy -DeploymentGate intentionally requires PAUSE.
 Assert-True ($source.Contains('trade-notifier-runtime.json')) 'Deploy script must inspect trade notifier heartbeat runtime.'
+Assert-True ($source.Contains('wrapperPid')) 'Deploy script must bind runtime heartbeat to the replacement wrapper PID.'
 Assert-True ($source.Contains('orderPermission')) 'Deploy script must verify notifier order permission.'
 Assert-True ($source.Contains('"NONE"')) 'Deploy script must require notifier orderPermission NONE.'
 Assert-True ($source.Contains('heartbeatAt')) 'Deploy script must validate notifier heartbeat freshness.'
 Assert-True ($source.Contains('accountMode')) 'Deploy script must validate notifier account mode.'
-Assert-True ($source.Contains('-DeploymentGate')) 'Deploy script must invoke the canonical deployment verifier gate.'
-Assert-True ($source.Contains('-RequireMigratedTask')) 'Deploy script must require the owned startup-runner task.'
-Assert-True (-not $source.Contains('-RequireTelegram')) 'Trade notifier deploy gate must not depend on telegram-mode/regime-notifier readiness.'
+Assert-True (-not $source.Contains('-DeploymentGate')) 'Notifier-only deploy must not call the PAUSE-only deployment gate.'
+Assert-True (-not $source.Contains('-RequireTelegram')) 'Notifier-only deploy must not invoke broad Telegram verification.'
 Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY=PASS')) 'Deploy script must emit an explicit final PASS marker.'
 Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY_FINAL_MODE_UNCHANGED')) 'Final deploy marker must report the unchanged mode.'
 
