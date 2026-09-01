@@ -53,8 +53,8 @@ Assert-True ($supervisorText.Contains('run-phase7b-telegram-notifier.mjs')) "orp
 # Restart startup race regression: the monitor loop wakes every 2 seconds, while initial
 # notifier startup already receives a 3-second grace period. A restarted wrapper must
 # receive the same bounded grace before the next heartbeat gate can kill it.
-$restartStatement = 'try { $tradeNotifier = Start-TradeNotifierChild; Write-Host "PHASE7C_TRADE_NOTIFIER_STATUS=RESTARTED" }'
-$restartIndex = $supervisorText.IndexOf($restartStatement, [System.StringComparison]::Ordinal)
+$restartPrefix = 'try { $tradeNotifier = Start-TradeNotifierChild; Write-Host "PHASE7C_TRADE_NOTIFIER_STATUS=RESTARTED"'
+$restartIndex = $supervisorText.IndexOf($restartPrefix, [System.StringComparison]::Ordinal)
 Assert-True ($restartIndex -ge 0) "trade notifier restart statement must remain explicit for restart-grace verification"
 $restartWindowLength = [Math]::Min(500, $supervisorText.Length - $restartIndex)
 $restartWindow = $supervisorText.Substring($restartIndex, $restartWindowLength)
