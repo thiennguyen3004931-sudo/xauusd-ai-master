@@ -8,6 +8,7 @@ on:
       - "apps/web/src/phase7c-lot-settings.ts"
       - "apps/web/src/pages/Phase7BOpsPage.tsx"
       - "scripts/test-phase7c-web-lot-canonical-ui.ts"
+      - "scripts/phase7c-account-risk-fixed-tp-preservation.test.mjs"
       - ".github/workflows/phase7c-web-lot-canonical-ui-ci.yml"
   pull_request:
     branches:
@@ -16,6 +17,7 @@ on:
       - "apps/web/src/phase7c-lot-settings.ts"
       - "apps/web/src/pages/Phase7BOpsPage.tsx"
       - "scripts/test-phase7c-web-lot-canonical-ui.ts"
+      - "scripts/phase7c-account-risk-fixed-tp-preservation.test.mjs"
       - ".github/workflows/phase7c-web-lot-canonical-ui-ci.yml"
 
 permissions:
@@ -37,5 +39,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Lot canonical UI behavior contract
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/test-phase7c-web-lot-canonical-ui.ts
+      - name: Account Risk preserves canonical Fixed TP
+        run: node --test scripts/phase7c-account-risk-fixed-tp-preservation.test.mjs
       - name: Build Web
         run: pnpm --filter @xauusd/web build
