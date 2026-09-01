@@ -22,9 +22,14 @@ test("lot settings default safely and require an armed matching executor", () =>
     const service = new Phase7CLotSettingsService(settingsPath, activePath);
 
     const initial = service.get();
+    assert.equal(initial.state.version, 2);
     assert.equal(initial.state.trendFixedLot, 0.03);
     assert.equal(initial.state.sidewayRiskPercent, 0.25);
     assert.equal(initial.state.sidewayMaxLot, 0.03);
+    assert.equal(initial.state.trendFixedTpEnabled, false);
+    assert.equal(initial.state.trendFixedTpDistance, 0);
+    assert.equal(initial.state.sidewayFixedTpEnabled, false);
+    assert.equal(initial.state.sidewayFixedTpDistance, 0);
     assert.equal(initial.restartRequired, true);
 
     const saved = service.set({
@@ -32,9 +37,14 @@ test("lot settings default safely and require an armed matching executor", () =>
       sidewayRiskPercent: 0.4,
       sidewayMaxLot: 0.03,
     }, "test");
+    assert.equal(saved.state.version, 2);
     assert.equal(saved.state.trendFixedLot, 0.06);
     assert.equal(saved.state.sidewayRiskPercent, 0.4);
     assert.equal(saved.state.sidewayMaxLot, 0.03);
+    assert.equal(saved.state.trendFixedTpEnabled, false);
+    assert.equal(saved.state.trendFixedTpDistance, 0);
+    assert.equal(saved.state.sidewayFixedTpEnabled, false);
+    assert.equal(saved.state.sidewayFixedTpDistance, 0);
     assert.equal(saved.restartRequired, true);
 
     writeFileSync(activePath, JSON.stringify({
@@ -49,6 +59,11 @@ test("lot settings default safely and require an armed matching executor", () =>
 
     const active = service.get();
     assert.equal(active.activeAlive, true);
+    assert.equal(active.active?.version, 2);
+    assert.equal(active.active?.trendFixedTpEnabled, false);
+    assert.equal(active.active?.trendFixedTpDistance, 0);
+    assert.equal(active.active?.sidewayFixedTpEnabled, false);
+    assert.equal(active.active?.sidewayFixedTpDistance, 0);
     assert.equal(active.restartRequired, false);
     assert.equal(active.safety.existingPositionMutation, false);
     assert.equal(active.safety.recoveryLotEscalation, false);
@@ -89,6 +104,10 @@ test("canonical lot bounds allow Trend and Sideway from 0.03 to 1.20 in 0.03 inc
       trendFixedLot: lot,
       sidewayRiskPercent: 0.25,
       sidewayMaxLot: lot,
+      trendFixedTpEnabled: false,
+      trendFixedTpDistance: 0,
+      sidewayFixedTpEnabled: false,
+      sidewayFixedTpDistance: 0,
     });
   }
   for (const lot of [0.04, 0.05, 1.21, 1.23]) {

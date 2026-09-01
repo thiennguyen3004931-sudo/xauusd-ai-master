@@ -328,6 +328,10 @@ router.post("/lot-settings", async (req: Request, res: Response) => {
       trendFixedLot: Number(req.body?.trendFixedLot),
       sidewayRiskPercent: Number(req.body?.sidewayRiskPercent),
       sidewayMaxLot: Number(req.body?.sidewayMaxLot),
+      trendFixedTpEnabled: req.body?.trendFixedTpEnabled === true,
+      trendFixedTpDistance: Number(req.body?.trendFixedTpDistance),
+      sidewayFixedTpEnabled: req.body?.sidewayFixedTpEnabled === true,
+      sidewayFixedTpDistance: Number(req.body?.sidewayFixedTpDistance),
     });
     const step = Number(telemetry.spec.volumeStep);
     const minVolume = Number(telemetry.spec.minVolume);

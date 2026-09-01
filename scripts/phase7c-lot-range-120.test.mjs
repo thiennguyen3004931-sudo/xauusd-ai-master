@@ -34,8 +34,12 @@ test("Trend and Sideway lot controls accept 0.03 through 1.20 only in 0.03 incre
         trendFixedLot: lot,
         sidewayRiskPercent: 1,
         sidewayMaxLot: lot,
+        trendFixedTpEnabled: false,
+        trendFixedTpDistance: 0,
+        sidewayFixedTpEnabled: false,
+        sidewayFixedTpDistance: 0,
       },
-      `lot ${lot} must be accepted for both Trend and Sideway`,
+      `lot ${lot} must be accepted for both Trend and Sideway with additive Fixed TP defaulting OFF`,
     );
   }
 

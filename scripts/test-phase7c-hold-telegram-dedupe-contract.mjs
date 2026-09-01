@@ -431,23 +431,41 @@ function recoveryBlock(source) {
     "RECOVERY_TP management guard must exist",
   );
 
-  const returnIndex =
-    source.indexOf(
-      "return;",
-      start,
-    );
+  const openBrace =
+    source.indexOf("{", start);
 
   assert.notEqual(
-    returnIndex,
+    openBrace,
     -1,
-    "RECOVERY_TP guard must return",
+    "RECOVERY_TP guard opening brace must exist",
   );
 
-  return source.slice(
-    start,
-    returnIndex +
-      "return;".length,
+  let depth = 0;
+  let end = -1;
+  for (let index = openBrace; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        end = index + 1;
+        break;
+      }
+    }
+  }
+
+  assert.notEqual(
+    end,
+    -1,
+    "RECOVERY_TP management guard must close",
   );
+
+  const block = source.slice(start, end);
+  assert.match(
+    block,
+    /return;/,
+    "RECOVERY_TP guard must retain its management return",
+  );
+  return block;
 }
 
 test(

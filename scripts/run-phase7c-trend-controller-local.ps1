@@ -5,6 +5,8 @@ param(
   [ValidateSet("DEMO", "LIVE")] [string]$AccountMode = "DEMO",
   [switch]$LiveExecutionEnabled,
   [double]$FixedVolume = 0.03,
+  [switch]$FixedTpEnabled,
+  [double]$FixedTpDistance = 0,
   [switch]$Armed,
   [switch]$Once
 )
@@ -25,6 +27,13 @@ if ($FixedVolume -lt 0.03 -or $FixedVolume -gt 1.2) { throw "FixedVolume must be
 $fixedUnits = $FixedVolume / 0.03
 if ([math]::Abs($fixedUnits - [math]::Round($fixedUnits)) -gt 1e-8) {
   throw "FixedVolume must use 0.03 increments so +10 can close exactly one-third."
+}
+$fixedTpDistanceInvalid = [double]::IsNaN($FixedTpDistance) -or [double]::IsInfinity($FixedTpDistance)
+if ($FixedTpEnabled -and ($fixedTpDistanceInvalid -or $FixedTpDistance -le 0)) {
+  throw "Trend Fixed TP distance must be positive when Fixed TP is enabled."
+}
+if ($fixedTpDistanceInvalid -or $FixedTpDistance -lt 0) {
+  throw "Trend Fixed TP distance must be finite and non-negative."
 }
 
 if (-not [System.IO.Path]::IsPathRooted($EnvFile)) { $EnvFile = Join-Path $ProjectRoot $EnvFile }
@@ -54,6 +63,8 @@ $env:ZIQ_PHASE7C_ACCOUNT_MODE = $mode
 $env:ZIQ_PHASE7C_LIVE_EXECUTION_ENABLED = if ($mode -eq "LIVE" -and $LiveExecutionEnabled) { "true" } else { "false" }
 $env:ZIQ_BRIDGE_ENV = $EnvFile
 $env:ZIQ_FIXED_VOLUME = $FixedVolume.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+$env:ZIQ_PHASE7C_TREND_FIXED_TP_ENABLED = if ($FixedTpEnabled) { "true" } else { "false" }
+$env:ZIQ_PHASE7C_TREND_FIXED_TP_DISTANCE = $FixedTpDistance.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 $env:ZIQ_DEMO_ARMED = if ($Armed) { "true" } else { "false" }
 $env:ZIQ_DEMO_ONCE = if ($Once) { "true" } else { "false" }
 
@@ -62,6 +73,8 @@ Write-Host "PHASE7C_TREND_ACCOUNT_MODE=$mode"
 Write-Host "PHASE7C_CONTROL_API=$($env:ZIQ_PHASE7C_CONTROL_API_URL)"
 Write-Host "PHASE7C_TREND_ARMED=$($env:ZIQ_DEMO_ARMED)"
 Write-Host "PHASE7C_TREND_FIXED_LOT=$($env:ZIQ_FIXED_VOLUME)"
+Write-Host "PHASE7C_TREND_FIXED_TP_ENABLED=$($env:ZIQ_PHASE7C_TREND_FIXED_TP_ENABLED)"
+Write-Host "PHASE7C_TREND_FIXED_TP_DISTANCE=$($env:ZIQ_PHASE7C_TREND_FIXED_TP_DISTANCE)"
 Write-Host "PHASE7C_TREND_WORK_DIR=$($env:ZIQ_DEMO_WORK_DIR)"
 Write-Host "PHASE7C_GATE_SCOPE=NEW_TREND_ENTRIES_ONLY"
 Write-Host "PHASE7C_POSITION_MANAGEMENT=PASS_THROUGH"

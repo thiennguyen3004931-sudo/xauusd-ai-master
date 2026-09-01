@@ -122,7 +122,10 @@ function Assert-Phase7CAccountEnv(
 function Assert-Phase7CRiskProfile($Profile, [string]$Label = "Phase7C risk profile") {
   Set-StrictMode -Version Latest
   if ($null -eq $Profile) { throw "$Label is missing." }
-  if ([int]$Profile.version -ne 1) { throw "$Label version must be 1." }
+
+  $version = [int]$Profile.version
+  if ($version -notin @(1, 2)) { throw "$Label version must be 1 or 2." }
+
   $trend = [double]$Profile.trendFixedLot
   $risk = [double]$Profile.sidewayRiskPercent
   $maxLot = [double]$Profile.sidewayMaxLot
@@ -143,11 +146,55 @@ function Assert-Phase7CRiskProfile($Profile, [string]$Label = "Phase7C risk prof
   if ($risk -lt 0.01 -or $risk -gt 1.0) {
     throw "$Label sidewayRiskPercent must be between 0.01 and 1.00."
   }
+
+  $trendFixedTpEnabled = $false
+  $trendFixedTpDistance = 0.0
+  $sidewayFixedTpEnabled = $false
+  $sidewayFixedTpDistance = 0.0
+
+  if ($version -eq 2) {
+    $trendEnabledProperty = $Profile.PSObject.Properties["trendFixedTpEnabled"]
+    $trendDistanceProperty = $Profile.PSObject.Properties["trendFixedTpDistance"]
+    $sidewayEnabledProperty = $Profile.PSObject.Properties["sidewayFixedTpEnabled"]
+    $sidewayDistanceProperty = $Profile.PSObject.Properties["sidewayFixedTpDistance"]
+
+    if ($null -ne $trendEnabledProperty) {
+      if ($trendEnabledProperty.Value -isnot [bool]) { throw "$Label trendFixedTpEnabled must be boolean." }
+      $trendFixedTpEnabled = [bool]$trendEnabledProperty.Value
+    }
+    if ($null -ne $sidewayEnabledProperty) {
+      if ($sidewayEnabledProperty.Value -isnot [bool]) { throw "$Label sidewayFixedTpEnabled must be boolean." }
+      $sidewayFixedTpEnabled = [bool]$sidewayEnabledProperty.Value
+    }
+    if ($null -ne $trendDistanceProperty) { $trendFixedTpDistance = [double]$trendDistanceProperty.Value }
+    if ($null -ne $sidewayDistanceProperty) { $sidewayFixedTpDistance = [double]$sidewayDistanceProperty.Value }
+  }
+
+  $trendDistanceInvalid = [double]::IsNaN($trendFixedTpDistance) -or [double]::IsInfinity($trendFixedTpDistance)
+  if ($trendFixedTpEnabled -and ($trendDistanceInvalid -or $trendFixedTpDistance -le 0)) {
+    throw "$Label Trend fixed TP distance must be positive when Fixed TP is enabled."
+  }
+  if ($trendDistanceInvalid -or $trendFixedTpDistance -lt 0) {
+    throw "$Label Trend fixed TP distance must be finite and non-negative."
+  }
+
+  $sidewayDistanceInvalid = [double]::IsNaN($sidewayFixedTpDistance) -or [double]::IsInfinity($sidewayFixedTpDistance)
+  if ($sidewayFixedTpEnabled -and ($sidewayDistanceInvalid -or $sidewayFixedTpDistance -le 0)) {
+    throw "$Label Sideway fixed TP distance must be positive when Fixed TP is enabled."
+  }
+  if ($sidewayDistanceInvalid -or $sidewayFixedTpDistance -lt 0) {
+    throw "$Label Sideway fixed TP distance must be finite and non-negative."
+  }
+
   return [pscustomobject]@{
-    version = 1
+    version = 2
     trendFixedLot = $trend
     sidewayRiskPercent = $risk
     sidewayMaxLot = $maxLot
+    trendFixedTpEnabled = $trendFixedTpEnabled
+    trendFixedTpDistance = $trendFixedTpDistance
+    sidewayFixedTpEnabled = $sidewayFixedTpEnabled
+    sidewayFixedTpDistance = $sidewayFixedTpDistance
   }
 }
 

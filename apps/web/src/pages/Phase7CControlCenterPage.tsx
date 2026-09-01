@@ -11,6 +11,7 @@ import {
   Card,
   CardContent,
   Chip,
+  FormControlLabel,
   Grid,
   LinearProgress,
   Stack,
@@ -21,6 +22,7 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Switch,
   Typography,
 } from "@mui/material";
 import {
@@ -118,6 +120,14 @@ export function Phase7CControlCenterPage() {
   const configuredTrendLot = lotSettings.data?.state.trendFixedLot ?? 0.03;
   const configuredSidewayRisk = lotSettings.data?.state.sidewayRiskPercent ?? 0.25;
   const configuredSidewayMaxLot = lotSettings.data?.state.sidewayMaxLot ?? 0.03;
+  const configuredTrendFixedTpEnabled = lotSettings.data?.state.trendFixedTpEnabled ?? false;
+  const configuredTrendFixedTpDistance = lotSettings.data?.state.trendFixedTpDistance ?? 0;
+  const configuredSidewayFixedTpEnabled = lotSettings.data?.state.sidewayFixedTpEnabled ?? false;
+  const configuredSidewayFixedTpDistance = lotSettings.data?.state.sidewayFixedTpDistance ?? 0;
+  const activeTrendFixedTpEnabled = lotSettings.data?.active?.trendFixedTpEnabled ?? false;
+  const activeTrendFixedTpDistance = lotSettings.data?.active?.trendFixedTpDistance ?? 0;
+  const activeSidewayFixedTpEnabled = lotSettings.data?.active?.sidewayFixedTpEnabled ?? false;
+  const activeSidewayFixedTpDistance = lotSettings.data?.active?.sidewayFixedTpDistance ?? 0;
 
   const decisionMonitor = useQuery({
     queryKey: ["phase7c-decision-monitor"],
@@ -149,15 +159,27 @@ export function Phase7CControlCenterPage() {
     trendFixedLot: number;
     sidewayRiskPercent: number;
     sidewayMaxLot: number;
+    trendFixedTpEnabled: boolean;
+    trendFixedTpDistance: number;
+    sidewayFixedTpEnabled: boolean;
+    sidewayFixedTpDistance: number;
   } | null>(null);
   const trendFixedLot = lotDraft?.trendFixedLot ?? configuredTrendLot;
   const sidewayRiskPercent = lotDraft?.sidewayRiskPercent ?? configuredSidewayRisk;
   const sidewayMaxLot = lotDraft?.sidewayMaxLot ?? configuredSidewayMaxLot;
+  const trendFixedTpEnabled = lotDraft?.trendFixedTpEnabled ?? configuredTrendFixedTpEnabled;
+  const trendFixedTpDistance = lotDraft?.trendFixedTpDistance ?? configuredTrendFixedTpDistance;
+  const sidewayFixedTpEnabled = lotDraft?.sidewayFixedTpEnabled ?? configuredSidewayFixedTpEnabled;
+  const sidewayFixedTpDistance = lotDraft?.sidewayFixedTpDistance ?? configuredSidewayFixedTpDistance;
   const updateLotDraft = (patch: Partial<NonNullable<typeof lotDraft>>) => {
     setLotDraft((current) => ({
       trendFixedLot: current?.trendFixedLot ?? configuredTrendLot,
       sidewayRiskPercent: current?.sidewayRiskPercent ?? configuredSidewayRisk,
       sidewayMaxLot: current?.sidewayMaxLot ?? configuredSidewayMaxLot,
+      trendFixedTpEnabled: current?.trendFixedTpEnabled ?? configuredTrendFixedTpEnabled,
+      trendFixedTpDistance: current?.trendFixedTpDistance ?? configuredTrendFixedTpDistance,
+      sidewayFixedTpEnabled: current?.sidewayFixedTpEnabled ?? configuredSidewayFixedTpEnabled,
+      sidewayFixedTpDistance: current?.sidewayFixedTpDistance ?? configuredSidewayFixedTpDistance,
       ...patch,
     }));
   };
@@ -234,7 +256,7 @@ export function Phase7CControlCenterPage() {
   const canChangeLot =
     mode === "PAUSE" &&
     bridgeReady &&
-    lifecycleData?.bridge.accountMode === "demo" &&
+    brokerModeSupported &&
     (lifecycleData?.bridge.openXauusdPositions ?? 0) === 0;
   const canPause =
     lifecycleData?.controlEnabled === true &&
@@ -514,12 +536,16 @@ export function Phase7CControlCenterPage() {
           <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2}>
             <Box>
               <Typography fontWeight={950}>Cấu hình Risk & Lot cho lệnh mới</Typography>
-              <Typography variant="caption" color="text.secondary">DEMO only · không martingale · không thay đổi vị thế đang quản lý.</Typography>
+              <Typography variant="caption" color="text.secondary">DEMO/LIVE theo account mode canonical · NEW_POSITIONS_ONLY · không martingale · không thay đổi vị thế đang quản lý.</Typography>
             </Box>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Chip label={`Trend ${configuredTrendLot.toFixed(2)} lot`} variant="outlined" />
               <Chip label={`Sideway ${configuredSidewayRisk.toFixed(2)}%`} variant="outlined" />
               <Chip label={`Cap ${configuredSidewayMaxLot.toFixed(2)} lot`} variant="outlined" />
+              <Chip label={`Configured Trend TP · ${configuredTrendFixedTpEnabled ? `${configuredTrendFixedTpDistance.toFixed(2)} giá` : "OFF"}`} variant="outlined" />
+              <Chip label={`Active Trend TP · ${lotSettings.data?.active ? (activeTrendFixedTpEnabled ? `${activeTrendFixedTpDistance.toFixed(2)} giá` : "OFF") : "—"}`} variant="outlined" />
+              <Chip label={`Configured Sideway TP · ${configuredSidewayFixedTpEnabled ? `${configuredSidewayFixedTpDistance.toFixed(2)} giá` : "OFF"}`} variant="outlined" />
+              <Chip label={`Active Sideway TP · ${lotSettings.data?.active ? (activeSidewayFixedTpEnabled ? `${activeSidewayFixedTpDistance.toFixed(2)} giá` : "OFF") : "—"}`} variant="outlined" />
               <Button component={RouterLink} to="/phase7b-pattern-check" size="small" variant="outlined">Xem điều kiện tín hiệu</Button>
             </Stack>
           </Stack>
@@ -530,11 +556,26 @@ export function Phase7CControlCenterPage() {
             <Grid size={{ xs: 12, sm: 4 }}><TextField fullWidth size="small" type="number" label="Sideway max lot" value={sidewayMaxLot} onChange={(event) => updateLotDraft({ sidewayMaxLot: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0.03, max: 1.2, step: 0.03 } }} /></Grid>
           </Grid>
 
+          <Grid container spacing={2} sx={{ mt: 0.5 }}>
+            <Grid size={{ xs: 12, sm: 3 }}><FormControlLabel control={<Switch checked={trendFixedTpEnabled} onChange={(event) => updateLotDraft({ trendFixedTpEnabled: event.target.checked })} />} label="Trend Fixed TP" /></Grid>
+            <Grid size={{ xs: 12, sm: 3 }}><TextField fullWidth size="small" type="number" label="Trend Fixed TP distance" value={trendFixedTpDistance} disabled={!trendFixedTpEnabled} onChange={(event) => updateLotDraft({ trendFixedTpDistance: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0, step: 0.01 } }} /></Grid>
+            <Grid size={{ xs: 12, sm: 3 }}><FormControlLabel control={<Switch checked={sidewayFixedTpEnabled} onChange={(event) => updateLotDraft({ sidewayFixedTpEnabled: event.target.checked })} />} label="Sideway Fixed TP" /></Grid>
+            <Grid size={{ xs: 12, sm: 3 }}><TextField fullWidth size="small" type="number" label="Sideway Fixed TP distance" value={sidewayFixedTpDistance} disabled={!sidewayFixedTpEnabled} onChange={(event) => updateLotDraft({ sidewayFixedTpDistance: Number(event.target.value) })} slotProps={{ htmlInput: { min: 0, step: 0.01 } }} /></Grid>
+          </Grid>
+
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }} sx={{ mt: 2 }}>
-            <Button variant="contained" disabled={!canChangeLot || saveLotSettings.isPending || !lotSettings.data} onClick={() => saveLotSettings.mutate({ trendFixedLot, sidewayRiskPercent, sidewayMaxLot })}>
+            <Button variant="contained" disabled={!canChangeLot || saveLotSettings.isPending || !lotSettings.data} onClick={() => saveLotSettings.mutate({
+              trendFixedLot,
+              sidewayRiskPercent,
+              sidewayMaxLot,
+              trendFixedTpEnabled,
+              trendFixedTpDistance,
+              sidewayFixedTpEnabled,
+              sidewayFixedTpDistance,
+            })}>
               {saveLotSettings.isPending ? "Đang lưu..." : "Lưu cấu hình lot"}
             </Button>
-            <Typography variant="caption" color="text.secondary">Chỉ lưu khi Mode PAUSE, MT5 DEMO kết nối và không có vị thế XAUUSD.</Typography>
+            <Typography variant="caption" color="text.secondary">Chỉ lưu khi Mode PAUSE, MT5 DEMO/LIVE khớp account mode canonical và không có vị thế XAUUSD · NEW_POSITIONS_ONLY.</Typography>
           </Stack>
 
           {saveLotSettings.error ? <Alert severity="error" sx={{ mt: 1.5 }}>{friendlyError(saveLotSettings.error)}</Alert> : null}
