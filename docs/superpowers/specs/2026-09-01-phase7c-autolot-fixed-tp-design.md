@@ -2,17 +2,17 @@
 
 Date: 2026-09-01
 Status: Approved in-chat design; source-only specification
-Scope: Phase7C Trend + Sideway sizing and additive fixed-TP management
+Scope: Phase7C Trend AutoLot + additive Trend/Sideway fixed-TP management
 Runtime mutation: NONE
 
 ## 1. Goals
 
 Add two independently configurable capabilities without removing or redefining any current trading behavior:
 
-1. Canonical AutoLot support for Trend, aligned with the existing Sideway risk-sizing model while preserving Trend fixed-lot mode as an explicit option.
-2. An optional fixed take-profit hard-exit for Trend and Sideway. The operator enters the fixed TP distance separately for each strategy. When that target is reached, the bot closes 100% of the remaining managed position.
+1. Add canonical AutoLot support to Trend while preserving Trend fixed-lot mode as the default and preserving Sideway's current AutoLot behavior.
+2. Add an optional fixed take-profit hard-exit for Trend and Sideway. The operator enters the fixed TP distance separately for each strategy. When that target is reached, the bot closes 100% of the remaining managed position.
 
-All existing entry rules, initial SL rules, +6 break-even, +10 one-third partial close, Trend structural runner/trailing, Sideway range management/TP2, timeout behavior, daily recovery, account guards, execution locking, idempotency and crash recovery remain intact unless the newly enabled fixed-TP target is reached first.
+All existing entry rules, initial SL rules, +6 break-even, +10 one-third partial close, Trend structural runner/trailing, Sideway range management/TP2, timeout behavior, daily recovery, account guards, execution locking, idempotency and crash recovery remain intact unless a valid existing exit or the newly enabled fixed-TP target closes the position first.
 
 ## 2. Non-goals
 
@@ -23,6 +23,7 @@ All existing entry rules, initial SL rules, +6 break-even, +10 one-third partial
 - No mutation of existing/open positions when settings are changed.
 - No removal of Trend fixed-lot mode.
 - No removal or replacement of Sideway's existing AutoLot behavior.
+- No change to Sideway's existing balance-based AutoLot capital-base semantics in this scope.
 - No replacement of native Daily Recovery TP logic.
 - No direct broker-order mutation from the Web/API preview path.
 
@@ -84,25 +85,27 @@ Migration must preserve current production behavior exactly until the operator e
 
 ## 5. Canonical AutoLot sizing
 
-### 5.1 Capital base
+### 5.1 Trend AUTO_RISK capital base
 
-Use the conservative available account base:
+For the new Trend `AUTO_RISK` mode only, use the conservative account base approved in the design discussion:
 
 ```text
 capitalBase = min(accountBalance, accountEquity)
 ```
 
-If balance/equity is missing, non-finite or <= 0, sizing fails closed and the entry is blocked.
+If balance/equity is missing, non-finite or <= 0, Trend AutoLot sizing fails closed and the entry is blocked.
 
-### 5.2 Risk calculation
+Sideway does not adopt this capital-base change in this scope; its existing capital-base semantics remain unchanged.
 
-For a validated stop distance:
+### 5.2 Trend AUTO_RISK calculation
+
+For a validated Trend stop distance:
 
 ```text
-targetRiskUsd = capitalBase * riskPercent / 100
+targetRiskUsd = capitalBase * trendRiskPercent / 100
 oneLotRiskUsd = stopDistance * cashPerPriceUnitPerLot
 rawLot = targetRiskUsd / oneLotRiskUsd
-cap = min(rawLot, strategyMaxLot, brokerMaxVolume)
+cap = min(rawLot, trendMaxLot, brokerMaxVolume)
 ```
 
 The final lot must use the existing canonical compatibility rule for exact one-third management:
@@ -110,18 +113,19 @@ The final lot must use the existing canonical compatibility rule for exact one-t
 - align to broker volumeStep;
 - be >= broker minVolume;
 - preserve an exact one-third partial close;
-- remain within the configured strategy cap and broker maximum;
+- remain within the configured Trend cap and broker maximum;
 - round down, never up, relative to the risk cap.
 
 If no compatible lot exists, block the entry instead of forcing broker minimum volume.
 
-### 5.3 Trend
+### 5.3 Trend modes
 
 Trend supports two explicit modes:
 
 `FIXED`
 - Existing Trend behavior.
 - Uses `trendFixedLot` unchanged.
+- This is the migration/default mode.
 
 `AUTO_RISK`
 - Uses `trendRiskPercent` and `trendMaxLot`.
@@ -131,7 +135,9 @@ Trend supports two explicit modes:
 
 ### 5.4 Sideway
 
-Sideway retains its current canonical AutoLot flow and final-gate validation. The implementation should reuse the same canonical sizing primitive used by Trend so the calculation cannot drift between strategies.
+Sideway retains its current AutoLot flow, current capital-base semantics and final-gate validation.
+
+The implementation may reuse pure helpers for broker-step and exact-one-third compatibility, but must not silently change Sideway's existing risk-base calculation in this scope.
 
 Existing `sidewayRiskPercent` and `sidewayMaxLot` remain operator-configurable.
 
@@ -186,8 +192,6 @@ On trigger:
 
 All native management remains active until the position is closed.
 
-Examples:
-
 Fixed TP above +10:
 
 ```text
@@ -206,7 +210,7 @@ Entry
 Fixed TP -> close 100% of remaining volume
 ```
 
-The position then no longer exists, so +10 or later native actions naturally do not occur.
+If the operator configures Fixed TP below +6, the full-close target may be reached before break-even. This is intentional: no existing rule is disabled; the position simply no longer exists after the valid full-close exit.
 
 If a native exit, Sideway TP2, reversal exit, timeout, stop loss, or broker-side Daily Recovery TP closes the position before the fixed target, the fixed-TP rule becomes a no-op after reconciliation.
 
@@ -253,12 +257,14 @@ When enabled, distance must be:
 
 - finite;
 - > 0;
-- aligned to the broker symbol price precision when converted to an absolute target;
-- large enough to satisfy broker/execution feasibility checks used by the management path.
+- converted to an absolute target using the managed entry price;
+- rounded only to the broker symbol price precision for comparison/logging.
+
+Because this feature is an executor-owned close trigger and does not place a broker TP order, broker `stopsLevel`/TP-distance validation must not be incorrectly applied to the configured distance.
 
 A disabled fixed TP stores no active target and must not alter order/management payloads.
 
-The API should reject invalid values instead of silently clamping them.
+The API rejects invalid values instead of silently clamping them.
 
 ## 10. Web/API behavior
 
@@ -290,7 +296,8 @@ The Web UI must display:
 - active runtime values;
 - whether restart is required;
 - `NEW_POSITIONS_ONLY` notice;
-- calculated AutoLot preview for representative/actual stop distance;
+- calculated Trend AutoLot preview for representative/actual stop distance;
+- existing Sideway AutoLot preview unchanged;
 - fixed TP preview price when an entry reference is available;
 - no order-action button in the settings panel.
 
@@ -309,7 +316,7 @@ FIXED_TP_CLOSE_REPLAY
 FIXED_TP_CLOSE_BLOCKED
 ```
 
-AutoLot events should identify strategy, mode, target risk, raw lot, capped lot, final compatible lot, estimated risk USD/percent and block reason.
+Trend AutoLot events identify mode, target risk, raw lot, capped lot, final compatible lot, estimated risk USD/percent and block reason.
 
 Never log secret values.
 
@@ -317,7 +324,7 @@ Never log secret values.
 
 Fixed TP full-close uses the same execution ownership discipline as other mutating management actions.
 
-A deterministic idempotency key must be derived from the managed ticket/position identity and fixed-TP action, for example conceptually:
+A deterministic idempotency key must be derived from the managed ticket/position identity and fixed-TP action, conceptually:
 
 ```text
 phase7c-fixed-tp-{strategy}-{ticket}
@@ -331,27 +338,29 @@ Trend single-writer ownership and the shared execution lock remain mandatory and
 
 Implementation follows RED -> minimal fix -> GREEN -> full CI.
 
+### 13.1 Trend AutoLot
+
 Required regression coverage:
 
-### AutoLot
-
 - v1 settings migrate without changing current production behavior.
-- Trend FIXED remains bit-for-bit equivalent in sizing semantics.
+- Trend FIXED remains equivalent in sizing semantics.
 - Trend AUTO_RISK calculates from `min(balance,equity)`.
-- AutoLot rounds down and never exceeds target risk/cap.
+- Trend AutoLot rounds down and never exceeds target risk/cap.
 - exact one-third compatible lots only.
 - below-compatible-minimum blocks instead of forcing a lot.
 - stale/mismatched risk snapshots fail closed.
-- Sideway current AutoLot behavior remains green.
+- Sideway current AutoLot regressions remain green with no capital-base semantic change.
 
-### Fixed TP
+### 13.2 Fixed TP
+
+Required regression coverage:
 
 - disabled mode produces no behavioral mutation.
 - separate Trend and Sideway distances.
 - BUY triggers from bid; SELL triggers from ask.
-- fixed TP below +10 closes full position before partial if reached first.
+- fixed TP below +6 may close full position before BE if reached first.
+- fixed TP between +6 and +10 preserves BE then closes full position before partial.
 - fixed TP above +10 allows existing one-third partial, then closes all remaining volume at target.
-- +6 BE behavior remains unchanged.
 - Trend structural trailing remains unchanged until fixed TP closes the position.
 - Sideway TP2/range management remains unchanged until whichever exit closes first.
 - Daily Recovery broker TP is not overwritten.
@@ -360,7 +369,7 @@ Required regression coverage:
 - duplicate polling/retry performs one idempotent close mutation.
 - execution-lock contention fails closed.
 
-### Integration
+### 13.3 Integration
 
 - API build.
 - Web build.
@@ -371,13 +380,32 @@ Required regression coverage:
 - existing singleton ownership regression.
 - existing structural SL monotonicity and partial-management regressions.
 
+### 13.4 Implementation decomposition
+
+Treat the two capabilities as separate implementation scopes and separate PRs to minimize trading-risk coupling:
+
+1. `PHASE7C_FIXED_TP_ADDITIVE_FULL_CLOSE`
+   - settings migration/controls required by fixed TP;
+   - Trend + Sideway managed-state snapshots;
+   - executor-owned idempotent full-close trigger;
+   - Web/API controls and observability;
+   - no AutoLot production change in this PR.
+
+2. `PHASE7C_TREND_AUTO_RISK`
+   - Trend `FIXED | AUTO_RISK` mode;
+   - conservative `min(balance,equity)` sizing for Trend AUTO_RISK;
+   - canonical compatibility/freshness guards;
+   - Sideway AutoLot behavior remains unchanged.
+
+Each scope must independently complete RED -> minimal fix -> GREEN -> full CI -> PR -> merge before any production deployment decision.
+
 ## 14. Deployment contract
 
 Development and CI are source-only.
 
 No LIVE deploy until:
 
-- implementation PR is merged;
+- the relevant implementation PR is merged;
 - all required CI is green;
 - current runtime has zero XAUUSD positions/pending orders;
 - operator explicitly approves deployment;
@@ -386,11 +414,11 @@ No LIVE deploy until:
 
 ## 15. Acceptance criteria
 
-The change is complete when all of the following are true:
+The complete feature set is accepted when all of the following are true:
 
 1. Current production behavior is unchanged with migrated/default settings.
 2. Trend can independently select FIXED or AUTO_RISK sizing.
-3. Sideway existing AutoLot behavior remains canonical and unchanged in semantics.
+3. Sideway existing AutoLot behavior remains unchanged in capital-base semantics and canonical in its existing execution path.
 4. Trend and Sideway each have independently operator-entered fixed TP enable/distance settings.
 5. Fixed TP closes 100% of the remaining position when its target is reached.
 6. Fixed TP does not overwrite native Sideway/Daily Recovery broker TP behavior.
