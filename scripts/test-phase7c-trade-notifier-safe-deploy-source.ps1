@@ -47,11 +47,17 @@ foreach ($pidFile in @('supervisor.pid', 'trend.pid', 'sideway.pid', 'telegram-m
 Assert-True ($source.Contains('active-lot-settings.json')) 'Deploy script must inspect armed state from active executor settings.'
 Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY_ARMED_BEFORE')) 'Deploy script must expose pre-deploy armed state.'
 Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY_ARMED_UNCHANGED=PASS')) 'Deploy script must prove armed state is unchanged.'
-Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY_SUPERVISOR_PID_UNCHANGED=PASS')) 'Deploy script must prove supervisor PID is unchanged.'
-Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY_TREND_PID_UNCHANGED=PASS')) 'Deploy script must prove trend PID is unchanged.'
-Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY_SIDEWAY_PID_UNCHANGED=PASS')) 'Deploy script must prove sideway PID is unchanged.'
-Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY_TELEGRAM_MODE_PID_UNCHANGED=PASS')) 'Deploy script must prove Telegram mode PID is unchanged.'
-Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY_REGIME_NOTIFIER_PID_UNCHANGED=PASS')) 'Deploy script must prove regime notifier PID is unchanged.'
+Assert-True ($source.Contains('function Assert-InvariantPid')) 'Deploy script must centralize invariant PID verification.'
+Assert-True ($source.Contains('Write-Host "$Marker=PASS"')) 'Invariant PID guard must emit an explicit PASS marker only after equality/aliveness checks.'
+foreach ($marker in @(
+  'PHASE7C_TRADE_NOTIFIER_DEPLOY_SUPERVISOR_PID_UNCHANGED',
+  'PHASE7C_TRADE_NOTIFIER_DEPLOY_TREND_PID_UNCHANGED',
+  'PHASE7C_TRADE_NOTIFIER_DEPLOY_SIDEWAY_PID_UNCHANGED',
+  'PHASE7C_TRADE_NOTIFIER_DEPLOY_TELEGRAM_MODE_PID_UNCHANGED',
+  'PHASE7C_TRADE_NOTIFIER_DEPLOY_REGIME_NOTIFIER_PID_UNCHANGED'
+)) {
+  Assert-True ($source.Contains("-Marker `"$marker`"")) "Deploy script must prove invariant with marker $marker."
+}
 Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY_OLD_TRADE_NOTIFIER_PID')) 'Deploy script must expose old trade notifier PID.'
 Assert-True ($source.Contains('PHASE7C_TRADE_NOTIFIER_DEPLOY_NEW_TRADE_NOTIFIER_PID')) 'Deploy script must prove a new trade notifier PID is running.'
 
