@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+// RED contract: activation preflight diagnostics must not masquerade as active AUTO status.
 const sourcePath = resolve(
   process.cwd(),
   "apps/web/src/ui/Phase7CExecutionAuthorizationCard.tsx",
