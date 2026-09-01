@@ -41,6 +41,82 @@ function close(server) {
   });
 }
 
+function recoveryCloseEvent(ticket, eventTimestamp) {
+  return {
+    type: "MANAGED_POSITION_CLOSED",
+    timestamp: eventTimestamp,
+    ticket,
+    side: "SELL",
+    dailyMode: "RECOVERY_TP",
+    dailyNetPnlAtEntry: -95.88,
+    recoveryTargetNetPnl: 1,
+    recoveryTpDistance: 7.85,
+    recoveryTakeProfit: 4343.23,
+    lastKnownState: {
+      entry: 4351.08,
+      stopLoss: 4351.08,
+      initialVolume: 0.12,
+      expectedRemainingVolume: 0.12,
+      recoveryTakeProfit: 4343.23,
+    },
+  };
+}
+
+async function runRecoveryCloseScenario({ ticket, eventTimestamp, server }) {
+  const address = await listen(server);
+  assert.ok(address && typeof address === "object");
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "phase7c-recovery-close-daily-sync-"));
+  const journalPath = path.join(tempDir, "trend-events.jsonl");
+  const statePath = path.join(tempDir, "telegram-state.json");
+  const sinkPath = path.join(tempDir, "dry-run-notifications.jsonl");
+
+  fs.writeFileSync(
+    journalPath,
+    `${JSON.stringify(recoveryCloseEvent(ticket, eventTimestamp))}\n`,
+    "utf8",
+  );
+
+  let result;
+  try {
+    result = await runNotifier({
+      ...process.env,
+      ZIQ_TELEGRAM_BOT_TOKEN: "synthetic-token-not-used",
+      ZIQ_TELEGRAM_CHAT_ID: "synthetic-chat-not-used",
+      ZIQ_TELEGRAM_JOURNAL_PATH: journalPath,
+      ZIQ_TELEGRAM_STATE_PATH: statePath,
+      ZIQ_TELEGRAM_SYMBOL: "XAUUSD",
+      ZIQ_PHASE7C_ACCOUNT_MODE: "LIVE",
+      ZIQ_TELEGRAM_INTERVAL_MS: "1000",
+      ZIQ_TELEGRAM_REPLAY_EXISTING: "true",
+      ZIQ_TELEGRAM_SEND_STARTUP: "false",
+      ZIQ_TELEGRAM_ONCE: "true",
+      ZIQ_TELEGRAM_DRY_RUN: "true",
+      ZIQ_TELEGRAM_DRY_RUN_SINK: sinkPath,
+      ZIQ_TELEGRAM_MONITOR_API_URL: `http://127.0.0.1:${address.port}`,
+    });
+  } finally {
+    await close(server);
+  }
+
+  assert.equal(
+    result.code,
+    0,
+    `notifier must exit cleanly\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+  );
+  assert.ok(fs.existsSync(sinkPath), "dry-run notification sink must exist");
+
+  const notifications = fs
+    .readFileSync(sinkPath, "utf8")
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+
+  assert.equal(notifications.length, 1, "Recovery close must emit exactly one notification");
+  return String(notifications[0].text ?? "");
+}
+
 test("Recovery close refreshes canonical deal before reading Daily P/L", async () => {
   const ticket = "RECOVERY-CLOSE-SYNC-1";
   const eventTimestamp = "2026-09-02T00:08:00.000Z";
@@ -110,75 +186,7 @@ test("Recovery close refreshes canonical deal before reading Daily P/L", async (
     res.end(JSON.stringify({ error: "not found" }));
   });
 
-  const address = await listen(server);
-  assert.ok(address && typeof address === "object");
-
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "phase7c-recovery-close-daily-sync-"));
-  const journalPath = path.join(tempDir, "trend-events.jsonl");
-  const statePath = path.join(tempDir, "telegram-state.json");
-  const sinkPath = path.join(tempDir, "dry-run-notifications.jsonl");
-
-  fs.writeFileSync(
-    journalPath,
-    `${JSON.stringify({
-      type: "MANAGED_POSITION_CLOSED",
-      timestamp: eventTimestamp,
-      ticket,
-      side: "SELL",
-      dailyMode: "RECOVERY_TP",
-      dailyNetPnlAtEntry: -95.88,
-      recoveryTargetNetPnl: 1,
-      recoveryTpDistance: 7.85,
-      recoveryTakeProfit: 4343.23,
-      lastKnownState: {
-        entry: 4351.08,
-        stopLoss: 4351.08,
-        initialVolume: 0.12,
-        expectedRemainingVolume: 0.12,
-        recoveryTakeProfit: 4343.23,
-      },
-    })}\n`,
-    "utf8",
-  );
-
-  let result;
-  try {
-    result = await runNotifier({
-      ...process.env,
-      ZIQ_TELEGRAM_BOT_TOKEN: "synthetic-token-not-used",
-      ZIQ_TELEGRAM_CHAT_ID: "synthetic-chat-not-used",
-      ZIQ_TELEGRAM_JOURNAL_PATH: journalPath,
-      ZIQ_TELEGRAM_STATE_PATH: statePath,
-      ZIQ_TELEGRAM_SYMBOL: "XAUUSD",
-      ZIQ_PHASE7C_ACCOUNT_MODE: "LIVE",
-      ZIQ_TELEGRAM_INTERVAL_MS: "1000",
-      ZIQ_TELEGRAM_REPLAY_EXISTING: "true",
-      ZIQ_TELEGRAM_SEND_STARTUP: "false",
-      ZIQ_TELEGRAM_ONCE: "true",
-      ZIQ_TELEGRAM_DRY_RUN: "true",
-      ZIQ_TELEGRAM_DRY_RUN_SINK: sinkPath,
-      ZIQ_TELEGRAM_MONITOR_API_URL: `http://127.0.0.1:${address.port}`,
-    });
-  } finally {
-    await close(server);
-  }
-
-  assert.equal(
-    result.code,
-    0,
-    `notifier must exit cleanly\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
-  );
-  assert.ok(fs.existsSync(sinkPath), "dry-run notification sink must exist");
-
-  const notifications = fs
-    .readFileSync(sinkPath, "utf8")
-    .trim()
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
-
-  assert.equal(notifications.length, 1, "Recovery close must emit exactly one notification");
-  const text = String(notifications[0].text ?? "");
+  const text = await runRecoveryCloseScenario({ ticket, eventTimestamp, server });
 
   assert.ok(
     requestOrder.indexOf("canonical") >= 0,
@@ -190,5 +198,67 @@ test("Recovery close refreshes canonical deal before reading Daily P/L", async (
   );
   assert.match(text, /P&L lệnh:<\/b> <code>\+\$71\.40<\/code>/);
   assert.match(text, /Daily P\/L sau đóng:<\/b> <code>-\$24\.48<\/code>/);
+  assert.doesNotMatch(text, /Daily P\/L sau đóng:<\/b> <code>-\$95\.88<\/code>/);
+});
+
+test("Recovery close does not confirm stale Daily P/L while canonical close deal is still missing", async () => {
+  const ticket = "RECOVERY-CLOSE-PENDING-1";
+  const eventTimestamp = "2026-09-02T00:10:00.000Z";
+  const eventAt = Date.parse(eventTimestamp);
+
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    res.setHeader("content-type", "application/json");
+
+    if (url.pathname === "/api/v1/mt5/performance") {
+      res.end(JSON.stringify({
+        trades: [
+          {
+            id: `LIVE:${ticket}`,
+            ownership: "SYSTEM",
+            side: "SELL",
+            entry: 4351.08,
+            exit: 4345.09,
+            netPnl: 71.4,
+            closedAt: eventAt,
+          },
+        ],
+      }));
+      return;
+    }
+
+    if (url.pathname === "/api/v1/phase7c-canonical-ledger/position-realized") {
+      res.end(JSON.stringify({
+        source: "CANONICAL_MT5_DEAL_LEDGER",
+        readOnly: true,
+        symbol: "XAUUSD",
+        positionId: ticket,
+        dealCount: 0,
+        realizedNetPnl: 0,
+        deals: [],
+      }));
+      return;
+    }
+
+    if (url.pathname === "/api/v1/phase7c/daily-recovery") {
+      res.end(JSON.stringify({
+        source: "MT5_LIVE_READ_ONLY",
+        readOnly: true,
+        symbol: "XAUUSD",
+        dealCount: 3,
+        dailyNetPnl: -95.88,
+        dailyMode: "RECOVERY_TP",
+      }));
+      return;
+    }
+
+    res.statusCode = 404;
+    res.end(JSON.stringify({ error: "not found" }));
+  });
+
+  const text = await runRecoveryCloseScenario({ ticket, eventTimestamp, server });
+
+  assert.match(text, /P&L lệnh:<\/b> <code>đang đồng bộ MT5 deal canonical<\/code>/i);
+  assert.match(text, /Daily P\/L sau đóng:<\/b> <code>đang đồng bộ MT5 deal canonical<\/code>/i);
   assert.doesNotMatch(text, /Daily P\/L sau đóng:<\/b> <code>-\$95\.88<\/code>/);
 });
