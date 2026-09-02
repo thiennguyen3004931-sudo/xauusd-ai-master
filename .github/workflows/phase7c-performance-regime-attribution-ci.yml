@@ -1,0 +1,30 @@
+name: Phase7C Performance Regime Attribution CI
+
+on:
+  pull_request:
+    paths:
+      - 'apps/api/src/services/mt5-performance.service.ts'
+      - 'apps/api/src/services/mt5-performance.regime-attribution.test.ts'
+      - 'apps/api/src/services/phase7c-performance-regime-attribution.service.ts'
+      - '.github/workflows/phase7c-performance-regime-attribution-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  performance-regime-attribution:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build workspace
+        run: pnpm build
+      - name: Run performance regime attribution contract tests
+        run: pnpm --dir apps/api exec tsx src/services/mt5-performance.regime-attribution.test.ts
