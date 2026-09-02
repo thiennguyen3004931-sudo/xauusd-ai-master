@@ -3,7 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { oneThirdPartialVolume } from "./phase7c-sideway-logic.mjs";
+import {
+  buildSidewayPlan,
+  oneThirdPartialVolume,
+} from "./phase7c-sideway-logic.mjs";
 import {
   stopIsAtLeastAsTight,
   stopStrictlyTightens,
@@ -83,10 +86,110 @@ assert.match(
   "RED_TARGET: Trend trailing candidate must strictly tighten the durable structural baseline.",
 );
 
+// New canonical contract: every structural SL must sit exactly 1.0 price unit
+// outside the previously-derived structural stop before the 6-10 policy is evaluated.
+const bufferedSidewayBuy = buildSidewayPlan({
+  side: "BUY",
+  bid: 2307,
+  ask: 2307.1,
+  range: {
+    demand: { low: 2300, high: 2302 },
+    supply: { low: 2320, high: 2322 },
+  },
+  atr: 1,
+  point: 0.01,
+  stopsLevelTicks: 0,
+  digits: 2,
+});
+assert.equal(bufferedSidewayBuy.accepted, true);
+assert.equal(
+  bufferedSidewayBuy.structuralStopLoss,
+  2298.75,
+  "RED_TARGET: Sideway BUY structural SL must be 1.0 below the existing derived structural stop 2299.75.",
+);
+assert.equal(bufferedSidewayBuy.stopLoss, 2298.75);
+assert.equal(bufferedSidewayBuy.stopDistance, 8.35);
+
+const bufferedSidewaySell = buildSidewayPlan({
+  side: "SELL",
+  bid: 2314.9,
+  ask: 2315,
+  range: {
+    demand: { low: 2300, high: 2302 },
+    supply: { low: 2320, high: 2322 },
+  },
+  atr: 1,
+  point: 0.01,
+  stopsLevelTicks: 0,
+  digits: 2,
+});
+assert.equal(bufferedSidewaySell.accepted, true);
+assert.equal(
+  bufferedSidewaySell.structuralStopLoss,
+  2323.25,
+  "RED_TARGET: Sideway SELL structural SL must be 1.0 above the existing derived structural stop 2322.25.",
+);
+assert.equal(bufferedSidewaySell.stopLoss, 2323.25);
+assert.equal(bufferedSidewaySell.stopDistance, 8.35);
+
+const buyWasNinePointFiveBeforeBuffer = buildSidewayPlan({
+  side: "BUY",
+  bid: 2309.15,
+  ask: 2309.25,
+  range: {
+    demand: { low: 2300, high: 2302 },
+    supply: { low: 2325, high: 2327 },
+  },
+  atr: 1,
+  point: 0.01,
+  stopsLevelTicks: 0,
+  digits: 2,
+});
+assert.equal(
+  buyWasNinePointFiveBeforeBuffer.reason,
+  "WAIT_PULLBACK_STOP_GT_10",
+  "RED_TARGET: BUY 9.5 structural distance must become 10.5 after the 1.0 buffer and wait for pullback.",
+);
+assert.equal(buyWasNinePointFiveBeforeBuffer.structuralStopDistance, 10.5);
+
+const sellWasNinePointFiveBeforeBuffer = buildSidewayPlan({
+  side: "SELL",
+  bid: 2312.75,
+  ask: 2312.85,
+  range: {
+    demand: { low: 2295, high: 2297 },
+    supply: { low: 2320, high: 2322 },
+  },
+  atr: 1,
+  point: 0.01,
+  stopsLevelTicks: 0,
+  digits: 2,
+});
+assert.equal(
+  sellWasNinePointFiveBeforeBuffer.reason,
+  "WAIT_PULLBACK_STOP_GT_10",
+  "RED_TARGET: SELL 9.5 structural distance must become 10.5 after the 1.0 buffer and wait for pullback.",
+);
+assert.equal(sellWasNinePointFiveBeforeBuffer.structuralStopDistance, 10.5);
+
+// Trend initial decisions and trailing must use the same 1.0 structural buffer.
+assert.match(
+  trendSource,
+  /structuralStopWithBuffer\(signal\.side,\s*signal\.patternExtreme\)/,
+  "RED_TARGET: Trend initial structural stop must apply the canonical 1.0 buffer before decision/submit.",
+);
+assert.match(
+  trendSource,
+  /structuralStopWithBuffer\(managed\.side,\s*structure\)/,
+  "RED_TARGET: Trend structural trailing must keep 1.0 price beyond confirmed structure.",
+);
+
 console.log("STRUCTURAL_SL_MONOTONICITY_CONTRACT=PASS");
 console.log("BUY_SL_ONLY_INCREASES=PASS");
 console.log("SELL_SL_ONLY_DECREASES=PASS");
 console.log("DURABLE_STRUCTURAL_SL_FLOOR=PASS");
 console.log("SIDEWAY_PLUS6_BE_MONOTONIC=PASS");
 console.log("SIDEWAY_PLUS10_EXACT_ONE_THIRD=PASS");
+console.log("STRUCTURAL_SL_EXTRA_BUFFER_1_PRICE=PASS");
+console.log("STRUCTURAL_SL_BUFFER_APPLIED_BEFORE_6_TO_10_GATE=PASS");
 console.log("TREND_STRUCTURAL_TRAILING_ONLY_TIGHTENS=PASS");
