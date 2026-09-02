@@ -75,7 +75,7 @@ test("BUY sideway plan widens a close structural stop to the project minimum 6 a
   assert.equal(plan.accepted, true);
   assert.equal(plan.stopDistance, 6);
   assert.equal(plan.stopLoss, 2386.3);
-  assert.equal(plan.structuralStopDistance, 3.3);
+  assert.equal(plan.structuralStopDistance, 4.3);
   assert.equal(plan.stopPolicy, "WIDENED_TO_MIN_6");
   assert.equal(plan.tp1Kind, "FIXED_PLUS_10");
   assert.equal(plan.tp1, 2402.3);
@@ -98,14 +98,14 @@ test("SELL sideway plan applies the same 6 minimum and fixed +10 partial symmetr
   assert.equal(plan.accepted, true);
   assert.equal(plan.stopDistance, 6);
   assert.equal(plan.stopLoss, 2413.8);
-  assert.equal(plan.structuralStopDistance, 3.2);
+  assert.equal(plan.structuralStopDistance, 4.2);
   assert.equal(plan.stopPolicy, "WIDENED_TO_MIN_6");
   assert.equal(plan.tp1Kind, "FIXED_PLUS_10");
   assert.equal(plan.tp1, 2397.8);
   assert.equal(plan.takeProfit, 2392);
 });
 
-test("sideway plan keeps a structural stop unchanged when it is already between 6 and 10", () => {
+test("sideway plan adds the canonical 1-price buffer when structure remains between 6 and 10", () => {
   const structuralRange = {
     demand: { low: 2385, high: 2392 },
     supply: { low: 2410, high: 2412 },
@@ -122,13 +122,13 @@ test("sideway plan keeps a structural stop unchanged when it is already between 
     digits: 2,
   });
   assert.equal(plan.accepted, true);
-  assert.equal(plan.stopDistance, 8.3);
-  assert.equal(plan.stopLoss, 2384);
-  assert.equal(plan.structuralStopDistance, 8.3);
+  assert.equal(plan.stopDistance, 9.3);
+  assert.equal(plan.stopLoss, 2383);
+  assert.equal(plan.structuralStopDistance, 9.3);
   assert.equal(plan.stopPolicy, "STRUCTURAL_6_TO_10");
 });
 
-test("sideway plan fails closed and waits for a later pullback when structural stop exceeds 10", () => {
+test("sideway plan fails closed and waits for a later pullback when buffered structural stop exceeds 10", () => {
   const wideRange = {
     demand: { low: 2378, high: 2392 },
     supply: { low: 2410, high: 2412 },
