@@ -1334,10 +1334,64 @@ async function bridgeRequest(method, pathname, body = undefined) {
 
 async function jsonRequest(url, init, timeoutMs, label) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const method = String(init?.method ?? "GET").toUpperCase();
+  let pathname = "<invalid-url>";
   try {
-    const response = await fetch(url, { ...init, signal: controller.signal, cache: "no-store" });
-    const text = await response.text();
+    pathname = new URL(url).pathname || "/";
+  } catch {
+    // Never echo an invalid raw URL because it can contain credentials/query secrets.
+  }
+
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  const requestTransportError = (error) => {
+    const errorObject = error instanceof Error ? error : null;
+    if (timedOut || errorObject?.name === "AbortError") {
+      return new Error(
+        `${label} ${method} ${pathname} | timeout=${timeoutMs}ms`,
+        errorObject ? { cause: errorObject } : undefined,
+      );
+    }
+
+    const rawCauseCode =
+      errorObject?.cause &&
+      typeof errorObject.cause === "object" &&
+      "code" in errorObject.cause &&
+      typeof errorObject.cause.code === "string"
+        ? errorObject.cause.code.trim()
+        : "";
+    const causeCode = /^[A-Z0-9_:-]{1,64}$/.test(rawCauseCode)
+      ? rawCauseCode
+      : "";
+    const transport = errorObject?.message === "fetch failed"
+      ? "fetch failed"
+      : errorObject?.name || "request failed";
+    const message = `${label} ${method} ${pathname} | transport=${transport}${causeCode ? ` | cause=${causeCode}` : ""}`;
+    return new Error(
+      message,
+      errorObject ? { cause: errorObject } : undefined,
+    );
+  };
+
+  try {
+    let response;
+    try {
+      response = await fetch(url, { ...init, signal: controller.signal, cache: "no-store" });
+    } catch (error) {
+      throw requestTransportError(error);
+    }
+
+    let text;
+    try {
+      text = await response.text();
+    } catch (error) {
+      throw requestTransportError(error);
+    }
+
     if (!response.ok) throw new Error(`${label} ${response.status}: ${text}`);
     return text ? JSON.parse(text) : {};
   } finally {
