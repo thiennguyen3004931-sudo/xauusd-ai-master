@@ -2,16 +2,17 @@ import { acquireExecutionLock } from "./phase7c-execution-lock.mjs";
 import { resolveSidewayPermission } from "./phase7c-sideway-logic.mjs";
 import {
   evaluatePhase7CAccountHealth,
-  resolvePhase7CAccountRuntime,
+  installPhase7CAccountOrderFetchGuard,
 } from "./phase7c-account-runtime-guard.mjs";
 
+const accountRuntime = installPhase7CAccountOrderFetchGuard({ label: "SIDEWAY" });
 const nativeFetch = globalThis.fetch.bind(globalThis);
-const accountRuntime = resolvePhase7CAccountRuntime();
 const controlApiBase = (process.env.ZIQ_PHASE7C_CONTROL_API_URL?.trim() || "http://127.0.0.1:3711").replace(/\/$/, "");
 const symbol = (process.env.ZIQ_PHASE7C_SIDEWAY_SYMBOL || process.env.ZIQ_DEMO_SYMBOL || "XAUUSD").trim().toUpperCase();
 
 console.log("PHASE7C_SIDEWAY_EXECUTION_LOCK=ENABLED");
 console.log(`PHASE7C_SIDEWAY_LOCK_ACCOUNT_MODE=${accountRuntime.accountMode}`);
+console.log("PHASE7C_SIDEWAY_ACCOUNT_AND_CANONICAL_GATE=UNDER_EXECUTION_LOCK");
 
 globalThis.fetch = async function phase7CSidewayLockedFetch(input, init = undefined) {
   const request = toRequestInfo(input, init);
@@ -48,6 +49,10 @@ globalThis.fetch = async function phase7CSidewayLockedFetch(input, init = undefi
       return blockedResponse("POSITION_PRESENT_UNDER_LOCK", `Open ${symbol} positions=${positions.length}`);
     }
 
+    // `nativeFetch` is the account-order guard installed before this lock wrapper.
+    // It performs the canonical Daily Recovery recheck and only then reaches the
+    // raw broker transport, so the canonical final gate executes while this
+    // execution lock is still held.
     return await nativeFetch(input, init);
   } catch (error) {
     const message = errorMessage(error);
