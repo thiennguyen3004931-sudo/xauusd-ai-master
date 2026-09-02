@@ -117,6 +117,7 @@ export function transformPhase7CTrendM5TrailingSource(input) {
         saveState();
         journal("M5_STRUCTURAL_SL_TIGHTEN", {
           ticket: managed.ticket,
+          previousStopLoss: position.stopLoss,
           stopLoss: m5Trail.stopLoss,
           structurePrice: m5Trail.structurePrice,
           pivotM5CloseTime: m5Trail.pivotCloseTime,
@@ -214,6 +215,7 @@ export function transformPhase7CSidewayM5TrailingSource(input) {
             saveState();
             journal("SIDEWAY_M5_STRUCTURAL_SL_TIGHTEN", {
               ticket: managed.ticket,
+              previousStopLoss: position.stopLoss,
               stopLoss: m5Trail.stopLoss,
               structurePrice: m5Trail.structurePrice,
               pivotM5CloseTime: m5Trail.pivotCloseTime,

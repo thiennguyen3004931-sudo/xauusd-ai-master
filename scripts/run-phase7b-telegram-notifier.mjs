@@ -113,6 +113,8 @@ const interestingEvents = new Set([
   "PLUS10_PARTIAL_ONE_THIRD",
   "PLUS10_PARTIAL_REJECTED",
   "STRUCTURAL_SL_TIGHTEN",
+  "M5_STRUCTURAL_SL_TIGHTEN",
+  "SIDEWAY_M5_STRUCTURAL_SL_TIGHTEN",
   "STRUCTURAL_SL_REJECTED",
   "FVG_HOLD_CONFIRMED",
   "HOLD_POSITION",
@@ -143,6 +145,7 @@ const sidewayLifecycleEvents = new Set([
   "PLUS6_SL_REJECTED",
   "PLUS10_PARTIAL_ONE_THIRD",
   "PLUS10_PARTIAL_REJECTED",
+  "SIDEWAY_M5_STRUCTURAL_SL_TIGHTEN",
 
   // Legacy Sideway journal compatibility only. Current executor emits the
   // canonical +6/+10 event names above.
@@ -417,7 +420,19 @@ async function pollJournalFeed(feed) {
 
       if (!html) continue;
 
-      await sendHtml(html, route);
+      await sendHtml(
+        html,
+        route,
+        {
+          includePhase:
+            !isHoldEvent(event) &&
+            ![
+              "STRUCTURAL_SL_TIGHTEN",
+              "M5_STRUCTURAL_SL_TIGHTEN",
+              "SIDEWAY_M5_STRUCTURAL_SL_TIGHTEN",
+            ].includes(type),
+        },
+      );
 
       if (route === "control") {
         markSystemAlert(event);
@@ -1089,43 +1104,55 @@ async function formatEvent(event, enrichment) {
 
     if (!reason) return null;
 
-    return compactTradeCard(
-      "🧩",
-      side,
-      "HOLD CONFIRMED",
-      [
-        ...lifecycleContextLines(event, enrichment),
-        `🧾 <b>${esc(reason)}</b>`,
-      ],
-    );
+    const ticket = String(
+      event.ticket ??
+      event.position?.ticket ??
+      "",
+    ).trim();
+
+    if (!ticket) return null;
+
+    const sideMarker = side === "BUY" ? "🟢" : "🔴";
+
+    return [
+      `🧩 ${sideMarker} <b>${esc(side)} · HOLD</b>`,
+      `🎫 <b>Ticket:</b> <code>${esc(ticket)}</code>`,
+      `🧾 <b>${esc(reason)}</b>`,
+    ].join("\n");
   }
 
-  if (type === "STRUCTURAL_SL_TIGHTEN") {
+  if (
+    [
+      "STRUCTURAL_SL_TIGHTEN",
+      "M5_STRUCTURAL_SL_TIGHTEN",
+      "SIDEWAY_M5_STRUCTURAL_SL_TIGHTEN",
+    ].includes(type)
+  ) {
     const side =
       currentSide(
         event,
         enrichment,
       );
 
-    const m = enrichment.metrics;
+    const ticket = String(
+      event.ticket ??
+      event.position?.ticket ??
+      "",
+    ).trim();
+    const previousStopLoss = firstPositiveNumber(event.previousStopLoss);
+    const newStopLoss = firstPositiveNumber(event.stopLoss, enrichment.metrics?.stopLoss);
 
-    return compactTradeCard(
-      "🔒",
-      side,
-      "TRAIL SL",
-      [
-        ...lifecycleContextLines(event, enrichment),
-        `🛡 <b>SL mới:</b> <code>${fmtPrice(
-          m.stopLoss,
-        )}</code> · khóa <code>${fmtSignedPrice(
-          m.slPriceMove,
-        )} giá</code> · <code>${fmtMoney(
-          m.lockedPnlUsd,
-          true,
-        )}</code>`,
-        compactStats(m),
-      ],
-    );
+    if (!ticket || previousStopLoss === null || newStopLoss === null) return null;
+
+    const isM5 = type !== "STRUCTURAL_SL_TIGHTEN";
+    const sideMarker = side === "BUY" ? "🟢" : "🔴";
+
+    return [
+      `🛡 ${sideMarker} <b>${esc(side)} · ${isM5 ? "SL → STRUCTURE M5" : "SL → STRUCTURE"}</b>`,
+      `🎫 <b>Ticket:</b> <code>${esc(ticket)}</code>`,
+      `🛡 <b>SL:</b> <code>${fmtPrice(previousStopLoss)} → ${fmtPrice(newStopLoss)}</code>`,
+      `🧾 <b>${isM5 ? "Dời StopLoss theo cấu trúc M5 đã xác nhận." : "Dời StopLoss theo cấu trúc đã xác nhận."}</b>`,
+    ].join("\n");
   }
 
   if (type === "FVG_ADDON_SIGNAL_SHADOW") {
@@ -2401,7 +2428,11 @@ function line(icon, label, raw) {
   return `${icon} <b>${esc(label)}:</b> <code>${esc(value(raw))}</code>`;
 }
 
-async function sendHtml(text, route = "trade") {
+async function sendHtml(
+  text,
+  route = "trade",
+  { includePhase = true } = {},
+) {
   const isControl = route === "control";
 
   const targetToken = isControl
@@ -2416,9 +2447,11 @@ async function sendHtml(text, route = "trade") {
     ? controlMessageThreadId
     : tradeMessageThreadId;
 
-  const phaseTaggedText = String(text).includes(phaseBanner)
-    ? String(text)
-    : `${String(text)}\n<code>${phaseBanner}</code>`;
+  const phaseTaggedText =
+    !includePhase ||
+    String(text).includes(phaseBanner)
+      ? String(text)
+      : `${String(text)}\n<code>${phaseBanner}</code>`;
 
   const highContrastText = phaseTaggedText
     .replaceAll("<code>", "<b>")

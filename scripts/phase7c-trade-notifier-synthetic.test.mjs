@@ -302,7 +302,7 @@ function runLifecycle(accountMode) {
 
   const expectedFragments = [
     "FILLED",
-    "HOLD CONFIRMED",
+    "HOLD",
     "+6 → BE",
     "CHỐT 1/3",
     "CHỐT LỆNH",
@@ -311,10 +311,14 @@ function runLifecycle(accountMode) {
   for (let index = 0; index < expectedFragments.length; index += 1) {
     assert.equal(notifications[index].route, "trade", `notification ${index + 1} must use the trade route`);
     assert.match(notifications[index].text, new RegExp(expectedFragments[index].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-    assert.ok(
-      notifications[index].text.includes(`PHASE 7C · ${accountMode}`),
-      `notification ${index + 1} must display PHASE 7C · ${accountMode}`,
-    );
+    if (index === 1) {
+      assert.doesNotMatch(notifications[index].text, /PHASE 7C ·/);
+    } else {
+      assert.ok(
+        notifications[index].text.includes(`PHASE 7C · ${accountMode}`),
+        `notification ${index + 1} must display PHASE 7C · ${accountMode}`,
+      );
+    }
   }
 
   return notifications;
@@ -379,11 +383,14 @@ test("Recovery Telegram skips zero placeholders for Entry, SL, TP, and Lot", () 
   assert.equal(notifications.length, 2, "Recovery entry + HOLD must emit exactly two notifications");
 
   const hold = notifications[1].text;
-  assert.match(hold, /HOLD CONFIRMED/);
-  assert.match(hold, /4435\.50/);
-  assert.match(hold, /4443\.50/);
-  assert.match(hold, /4425\.01/);
-  assert.match(hold, /0\.03 lot/);
+  assert.match(hold, /SELL · HOLD/);
+  assert.match(hold, /RECOVERY-ZERO-1/);
+  assert.match(hold, /Recovery TP đang hoạt động/);
+  assert.doesNotMatch(hold, /PHASE 7C ·/);
+  assert.doesNotMatch(hold, /Entry:/);
+  assert.doesNotMatch(hold, /SL:/);
+  assert.doesNotMatch(hold, /TP:/);
+  assert.doesNotMatch(hold, /Lot:/);
   assert.doesNotMatch(hold, /Entry:<\/b> <code>0\.00<\/code>/);
   assert.doesNotMatch(hold, /SL:<\/b> <code>0\.00<\/code>/);
   assert.doesNotMatch(hold, /TP:<\/b> <code>0\.00<\/code>/);
