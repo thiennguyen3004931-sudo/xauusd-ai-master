@@ -1,0 +1,118 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+import {
+  evaluateM5StructuralTrail,
+  latestConfirmedM5Structure,
+} from "./phase7c-m5-structural-trailing.mjs";
+import {
+  transformPhase7CSidewayM5TrailingSource,
+  transformPhase7CTrendM5TrailingSource,
+} from "./phase7c-m5-structural-trailing-source-adapter.mjs";
+
+const bars = [
+  { closeTime: 1_000, low: 106, high: 112 },
+  { closeTime: 2_000, low: 105, high: 111 },
+  { closeTime: 3_000, low: 107, high: 113 },
+  { closeTime: 4_000, low: 108, high: 114 },
+  { closeTime: 5_000, low: 109, high: 115 },
+];
+
+assert.equal(
+  latestConfirmedM5Structure({
+    side: "BUY",
+    bars,
+    afterTimestamp: 0,
+    atOrBefore: 2_000,
+  }),
+  null,
+  "A swing must not be usable until the right-side M5 candle has closed.",
+);
+assert.deepEqual(
+  latestConfirmedM5Structure({
+    side: "BUY",
+    bars,
+    afterTimestamp: 0,
+    atOrBefore: 3_000,
+  }),
+  { price: 105, confirmedAt: 3_000, pivotCloseTime: 2_000 },
+  "BUY trailing must use the latest confirmed M5 swing low.",
+);
+
+const buyTrail = evaluateM5StructuralTrail({
+  side: "BUY",
+  bars,
+  afterTimestamp: 0,
+  atOrBefore: 5_000,
+  currentStop: 100,
+  lastStructuralStop: 100,
+  bid: 112,
+  ask: 112.2,
+  digits: 2,
+  point: 0.01,
+  stopsLevelTicks: 10,
+  freezeLevelTicks: 5,
+});
+assert.equal(buyTrail.allowed, true);
+assert.equal(buyTrail.stopLoss, 104, "BUY must trail 1.0 below the confirmed M5 swing low.");
+assert.equal(buyTrail.structurePrice, 105);
+
+const neverLoosen = evaluateM5StructuralTrail({
+  side: "BUY",
+  bars,
+  afterTimestamp: 0,
+  atOrBefore: 5_000,
+  currentStop: 104.5,
+  lastStructuralStop: 104.5,
+  bid: 112,
+  ask: 112.2,
+  digits: 2,
+  point: 0.01,
+  stopsLevelTicks: 10,
+  freezeLevelTicks: 5,
+});
+assert.equal(neverLoosen.allowed, false);
+assert.equal(neverLoosen.reason, "NOT_STRICTLY_TIGHTER");
+
+const sellBars = [
+  { closeTime: 1_000, low: 98, high: 104 },
+  { closeTime: 2_000, low: 97, high: 105 },
+  { closeTime: 3_000, low: 96, high: 103 },
+];
+const sellTrail = evaluateM5StructuralTrail({
+  side: "SELL",
+  bars: sellBars,
+  afterTimestamp: 0,
+  atOrBefore: 3_000,
+  currentStop: 110,
+  lastStructuralStop: 110,
+  bid: 98.8,
+  ask: 99,
+  digits: 2,
+  point: 0.01,
+  stopsLevelTicks: 10,
+  freezeLevelTicks: 5,
+});
+assert.equal(sellTrail.allowed, true);
+assert.equal(sellTrail.stopLoss, 106, "SELL must trail 1.0 above the confirmed M5 swing high.");
+
+const trendSource = fs.readFileSync(new URL("./run-phase7b-demo-controller.ts", import.meta.url), "utf8");
+const transformedTrend = transformPhase7CTrendM5TrailingSource(trendSource);
+assert.match(transformedTrend, /PHASE7B_DEMO_RUNNER_SL=M5_CONFIRMED_STRUCTURE_TRAILING/);
+assert.match(transformedTrend, /PHASE7B_DEMO_POST_PLUS10_SL=M5_CONFIRMED_SWING_STRUCTURE_PLUS_1_BUFFER_ONLY_TIGHTEN/);
+assert.match(transformedTrend, /evaluateM5StructuralTrail/);
+assert.match(transformedTrend, /m5CloseTime/);
+assert.doesNotMatch(transformedTrend, /const structure = latestConfirmedStructureStop\(managed\.side, m15/);
+
+const sidewaySource = fs.readFileSync(new URL("./run-phase7c-sideway-controller.mjs", import.meta.url), "utf8");
+const transformedSideway = transformPhase7CSidewayM5TrailingSource(sidewaySource);
+assert.match(transformedSideway, /PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_M5_CONFIRMED_STRUCTURE_TRAILING/);
+assert.match(transformedSideway, /SIDEWAY_M5_STRUCTURAL_SL_TIGHTEN/);
+assert.match(transformedSideway, /managed\.partialApplied/);
+assert.match(transformedSideway, /evaluateM5StructuralTrail/);
+
+const recoveryIndex = transformedSideway.indexOf('if (managed.dailyMode === "RECOVERY_TP")');
+const trailingIndex = transformedSideway.indexOf("SIDEWAY_M5_STRUCTURAL_SL_TIGHTEN");
+assert.ok(recoveryIndex >= 0 && trailingIndex > recoveryIndex, "Sideway Recovery must return before native M5 trailing.");
+
+console.log("PHASE7C_M5_STRUCTURAL_TRAILING_CONTRACT=PASS");
