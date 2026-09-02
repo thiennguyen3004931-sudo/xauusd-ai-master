@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { resolvePhase7CAccountRuntime } from "./phase7c-account-runtime-guard.mjs";
 import { transformPhase7CSidewaySource } from "./phase7c-live-source-adapters.mjs";
 import { transformPhase7CSidewayCanonicalDailyRecoverySource } from "./phase7c-canonical-daily-recovery-source-adapter.mjs";
+import { transformPhase7CSidewayM5StructuralTrailingSource } from "./phase7c-m5-structural-trailing-source-adapter.mjs";
 
 const runtime = resolvePhase7CAccountRuntime();
 const mode = runtime.accountMode;
@@ -10,13 +11,15 @@ const source = fs.readFileSync(sourceUrl, "utf8");
 const accountAdapted = mode === "LIVE"
   ? transformPhase7CSidewaySource(source)
   : source;
-const output = transformPhase7CSidewayCanonicalDailyRecoverySource(accountAdapted);
+const canonicalAdapted = transformPhase7CSidewayCanonicalDailyRecoverySource(accountAdapted);
+const output = transformPhase7CSidewayM5StructuralTrailingSource(canonicalAdapted);
 const runtimeUrl = new URL(`./.phase7c-sideway-runtime-${process.pid}.mjs`, import.meta.url);
 fs.writeFileSync(runtimeUrl, `${output}\n//# sourceURL=${sourceUrl.href}\n`, "utf8");
 
 console.log(`PHASE7C_SIDEWAY_ACCOUNT_MODE=${mode}`);
 console.log("PHASE7C_SIDEWAY_ACCOUNT_ORDER_GATE=INSTALLED_BY_LOCK_WRAPPER");
 console.log(`PHASE7C_SIDEWAY_CANONICAL_DAILY_RECOVERY_ADAPTER=APPLIED|MODE=${mode}`);
+console.log(`PHASE7C_SIDEWAY_M5_STRUCTURAL_TRAILING_ADAPTER=APPLIED|MODE=${mode}`);
 if (mode === "LIVE") console.log("PHASE7C_SIDEWAY_LIVE_ADAPTER=APPLIED");
 try {
   await import(`${runtimeUrl.href}?pid=${process.pid}`);
