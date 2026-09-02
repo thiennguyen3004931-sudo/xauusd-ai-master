@@ -6,6 +6,7 @@ on:
       - 'scripts/phase7c-managed-volume-reconcile.mjs'
       - 'scripts/phase7c-managed-volume-reconcile.test.mjs'
       - 'scripts/phase7c-live-source-adapters.mjs'
+      - 'scripts/phase7c-live-source-adapters-crlf.test.mjs'
       - 'scripts/run-phase7b-demo-controller.ts'
       - 'scripts/run-phase7c-sideway-controller.mjs'
       - '.github/workflows/phase7c-managed-volume-reconcile-ci.yml'
@@ -14,6 +15,7 @@ on:
       - 'scripts/phase7c-managed-volume-reconcile.mjs'
       - 'scripts/phase7c-managed-volume-reconcile.test.mjs'
       - 'scripts/phase7c-live-source-adapters.mjs'
+      - 'scripts/phase7c-live-source-adapters-crlf.test.mjs'
       - 'scripts/run-phase7b-demo-controller.ts'
       - 'scripts/run-phase7c-sideway-controller.mjs'
       - '.github/workflows/phase7c-managed-volume-reconcile-ci.yml'
@@ -31,3 +33,5 @@ jobs:
           node-version: '22'
       - name: Run managed-volume reconciliation contract
         run: node --test scripts/phase7c-managed-volume-reconcile.test.mjs
+      - name: Run LIVE adapter CRLF contract
+        run: node --test scripts/phase7c-live-source-adapters-crlf.test.mjs
