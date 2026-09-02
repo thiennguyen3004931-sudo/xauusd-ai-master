@@ -497,6 +497,7 @@ async function buildEnrichment(event) {
 
   let closedTrade = null;
   let dailyRecoveryAfterClose = null;
+  let canonicalRealized = null;
 
   const isCloseEvent = [
     "EXIT_EXECUTED",
@@ -508,7 +509,13 @@ async function buildEnrichment(event) {
     closedTrade =
       await findClosedTradeWithRetry(event);
 
-    if (isRecoveryContext(event)) {
+    canonicalRealized =
+      await getCanonicalRealizedPositionWithRetry(event);
+
+    if (
+      isRecoveryContext(event) &&
+      Number(canonicalRealized?.dealCount) > 0
+    ) {
       const previewVolume =
         numberOrNull(
           state.trade?.initialVolume,
@@ -526,14 +533,9 @@ async function buildEnrichment(event) {
           previewVolume,
         );
     }
-  }
-
-  let canonicalRealized = null;
-
-  if (
+  } else if (
     type === "PLUS10_PARTIAL_ONE_THIRD" ||
-    type === "TP1_PARTIAL_FILLED" ||
-    isCloseEvent
+    type === "TP1_PARTIAL_FILLED"
   ) {
     canonicalRealized =
       await getCanonicalRealizedPositionWithRetry(event);
@@ -1198,15 +1200,22 @@ async function formatEvent(event, enrichment) {
       const daily =
         enrichment.dailyRecoveryAfterClose;
 
+      const canonicalCloseSynchronized =
+        canonicalDealCount !== null &&
+        canonicalDealCount > 0;
+
       const dailyPnl =
-        numberOrNull(
-          daily?.dailyNetPnl,
-        );
+        canonicalCloseSynchronized
+          ? numberOrNull(
+              daily?.dailyNetPnl,
+            )
+          : null;
 
       const completed =
-        dailyPnl !== null
+        canonicalCloseSynchronized &&
+        (dailyPnl !== null
           ? dailyPnl >= 0
-          : daily?.dailyMode === "NORMAL";
+          : daily?.dailyMode === "NORMAL");
 
       return compactTradeCard(
         completed
@@ -1224,12 +1233,14 @@ async function formatEvent(event, enrichment) {
                 true,
               )}</code>`
             : "💵 <b>P&L lệnh:</b> <code>đang đồng bộ MT5 deal canonical</code>",
-          dailyPnl === null
-            ? "📅 <b>Daily P/L sau đóng:</b> <code>chưa đọc được</code>"
-            : `📅 <b>Daily P/L sau đóng:</b> <code>${fmtMoney(
-                dailyPnl,
-                true,
-              )}</code>`,
+          !canonicalCloseSynchronized
+            ? "📅 <b>Daily P/L sau đóng:</b> <code>đang đồng bộ MT5 deal canonical</code>"
+            : dailyPnl === null
+              ? "📅 <b>Daily P/L sau đóng:</b> <code>chưa đọc được</code>"
+              : `📅 <b>Daily P/L sau đóng:</b> <code>${fmtMoney(
+                  dailyPnl,
+                  true,
+                )}</code>`,
           closed
             ? `🎯 <b>Exit TB:</b> <code>${fmtPrice(
                 closed.exit,

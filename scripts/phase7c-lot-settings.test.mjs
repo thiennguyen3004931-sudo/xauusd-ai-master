@@ -19,6 +19,7 @@ test("lot settings default safely and require an armed matching executor", () =>
   try {
     const settingsPath = path.join(root, "settings.json");
     const activePath = path.join(root, "active.json");
+    const supervisorPidPath = path.join(root, "supervisor.pid");
     const service = new Phase7CLotSettingsService(settingsPath, activePath);
 
     const initial = service.get();
@@ -56,6 +57,7 @@ test("lot settings default safely and require an armed matching executor", () =>
       supervisorPid: process.pid,
       appliedAt: new Date().toISOString(),
     }));
+    writeFileSync(supervisorPidPath, `${process.pid}\n`, "utf8");
 
     const active = service.get();
     assert.equal(active.activeAlive, true);
@@ -67,6 +69,55 @@ test("lot settings default safely and require an armed matching executor", () =>
     assert.equal(active.restartRequired, false);
     assert.equal(active.safety.existingPositionMutation, false);
     assert.equal(active.safety.recoveryLotEscalation, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("stale active lot record cannot claim alive without canonical supervisor ownership", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "phase7c-active-supervisor-identity-"));
+  try {
+    const settingsPath = path.join(root, "settings.json");
+    const activePath = path.join(root, "active.json");
+    const supervisorPidPath = path.join(root, "supervisor.pid");
+    const service = new Phase7CLotSettingsService(settingsPath, activePath);
+
+    writeFileSync(activePath, JSON.stringify({
+      version: 2,
+      accountMode: "DEMO",
+      trendFixedLot: 0.03,
+      sidewayRiskPercent: 0.25,
+      sidewayMaxLot: 0.03,
+      trendFixedTpEnabled: false,
+      trendFixedTpDistance: 0,
+      sidewayFixedTpEnabled: false,
+      sidewayFixedTpDistance: 0,
+      armed: true,
+      supervisorPid: process.pid,
+      appliedAt: new Date().toISOString(),
+    }), "utf8");
+
+    const stale = service.get();
+    assert.equal(
+      stale.activeAlive,
+      false,
+      "a live unrelated PID must not make stale active-lot metadata authoritative when supervisor.pid is absent",
+    );
+    assert.equal(stale.restartRequired, true);
+
+    writeFileSync(supervisorPidPath, `${process.pid + 1}\n`, "utf8");
+    const mismatched = service.get();
+    assert.equal(
+      mismatched.activeAlive,
+      false,
+      "a mismatched canonical supervisor.pid must fail closed",
+    );
+    assert.equal(mismatched.restartRequired, true);
+
+    writeFileSync(supervisorPidPath, `${process.pid}\n`, "utf8");
+    const owned = service.get();
+    assert.equal(owned.activeAlive, true);
+    assert.equal(owned.restartRequired, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

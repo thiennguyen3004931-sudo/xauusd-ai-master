@@ -1,4 +1,5 @@
 name: Phase7C Trade Notifier CI
+# Includes Recovery close canonical-before-Daily-P/L synchronization regression.
 
 on:
   push:
@@ -11,6 +12,7 @@ on:
       - scripts/test-phase7c-trade-notifier-source.ps1
       - scripts/test-phase7c-trade-notifier-wrapper.ps1
       - scripts/phase7c-trade-notifier-synthetic.test.mjs
+      - scripts/phase7c-recovery-close-daily-sync.test.mjs
       - scripts/phase7c-sideway-production-telegram-sample.test.mjs
       - scripts/send-phase7c-sideway-production-telegram-sample.mjs
       - .github/workflows/phase7c-trade-notifier-ci.yml
@@ -22,6 +24,7 @@ on:
       - scripts/test-phase7c-trade-notifier-source.ps1
       - scripts/test-phase7c-trade-notifier-wrapper.ps1
       - scripts/phase7c-trade-notifier-synthetic.test.mjs
+      - scripts/phase7c-recovery-close-daily-sync.test.mjs
       - scripts/phase7c-sideway-production-telegram-sample.test.mjs
       - scripts/send-phase7c-sideway-production-telegram-sample.mjs
       - .github/workflows/phase7c-trade-notifier-ci.yml
@@ -56,6 +59,9 @@ jobs:
 
       - name: Synthetic ENTRY-HOLD-BE-partial-EXIT lifecycle
         run: node --test ./scripts/phase7c-trade-notifier-synthetic.test.mjs
+
+      - name: Recovery close Daily P/L canonical synchronization regression
+        run: node --test ./scripts/phase7c-recovery-close-daily-sync.test.mjs
 
       - name: Production-format Sideway Telegram sample harness
         run: node --test ./scripts/phase7c-sideway-production-telegram-sample.test.mjs
