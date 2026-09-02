@@ -12,6 +12,10 @@ import {
   transformPhase7CTrendM5StructuralTrailingSource,
   transformPhase7CSidewayM5StructuralTrailingSource,
 } from "./phase7c-m5-structural-trailing-source-adapter.mjs";
+import {
+  transformPhase7CTrendLegacySource,
+  transformPhase7CSidewaySource,
+} from "./phase7c-live-source-adapters.mjs";
 
 function bar(closeTime, { open, high, low, close }) {
   return { closeTime, open, high, low, close };
@@ -218,6 +222,21 @@ assert.ok(
   "Sideway Recovery TP guard must remain before native M5 trailing",
 );
 
+const liveTrendRuntimeSource = transformPhase7CTrendM5StructuralTrailingSource(
+  transformPhase7CTrendCanonicalDailyRecoverySource(
+    transformPhase7CTrendLegacySource(rawTrendSource),
+  ),
+);
+const liveSidewayRuntimeSource = transformPhase7CSidewayM5StructuralTrailingSource(
+  transformPhase7CSidewayCanonicalDailyRecoverySource(
+    transformPhase7CSidewaySource(rawSidewaySource),
+  ),
+);
+assert.match(liveTrendRuntimeSource, /\/api\/v1\/phase7c\/daily-recovery/, "LIVE Trend must preserve canonical Daily Recovery after M5 adaptation");
+assert.match(liveTrendRuntimeSource, /M5_CONFIRMED_HIGHER_LOW_LOWER_HIGH_PLUS_1_BUFFER_ONLY_TIGHTEN/, "LIVE Trend must compose M5 structural trailing after LIVE + canonical adapters");
+assert.match(liveSidewayRuntimeSource, /\/api\/v1\/phase7c\/daily-recovery/, "LIVE Sideway must preserve canonical Daily Recovery after M5 adaptation");
+assert.match(liveSidewayRuntimeSource, /M5_CONFIRMED_HIGHER_LOW_LOWER_HIGH_PLUS_1_BUFFER_ONLY_TIGHTEN/, "LIVE Sideway must compose M5 structural trailing after LIVE + canonical adapters");
+
 assert.throws(
   () => transformPhase7CTrendM5StructuralTrailingSource("console.log('unrelated trend source');"),
   /marker no longer matches/,
@@ -241,3 +260,4 @@ console.log("PHASE7C_M5_STRUCTURAL_TRAILING_SELL=CONFIRMED_LOWER_HIGH_PLUS_1");
 console.log("PHASE7C_M5_STRUCTURAL_TRAILING_MONOTONIC=PASS");
 console.log("PHASE7C_M5_STRUCTURAL_TRAILING_INTRABAR=FORBIDDEN");
 console.log("PHASE7C_M5_STRUCTURAL_TRAILING_RECOVERY_TP=UNCHANGED");
+console.log("PHASE7C_M5_STRUCTURAL_TRAILING_LIVE_COMPOSITION=PASS");
