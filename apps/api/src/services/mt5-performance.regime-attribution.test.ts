@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import * as performanceService from "./mt5-performance.service";
 
@@ -44,6 +47,7 @@ type EnrichedTrade = Trade & {
 };
 
 type Enrich = (trades: readonly Trade[], auditRows: readonly AuditRow[], maxDeltaMs?: number) => EnrichedTrade[];
+type LoadFromDirectory = (root: string) => Promise<AuditRow[]>;
 
 function subject(): Enrich {
   const candidate = (performanceService as unknown as Record<string, unknown>).enrichPerformanceTradesWithRegimeAttribution;
@@ -53,6 +57,16 @@ function subject(): Enrich {
     "mt5-performance.service must export enrichPerformanceTradesWithRegimeAttribution",
   );
   return candidate as Enrich;
+}
+
+function loaderSubject(): LoadFromDirectory {
+  const candidate = (performanceService as unknown as Record<string, unknown>).loadPhase7CPerformanceRegimeAuditFromDirectory;
+  assert.equal(
+    typeof candidate,
+    "function",
+    "mt5-performance.service must export loadPhase7CPerformanceRegimeAuditFromDirectory",
+  );
+  return candidate as LoadFromDirectory;
 }
 
 function trade(overrides: Partial<Trade> = {}): Trade {
@@ -188,4 +202,41 @@ test("regime enrichment is accounting-invariant", () => {
     enriched.map(({ id, netPnl, entry, exit, volume }) => ({ id, netPnl, entry, exit, volume })),
     trades.map(({ id, netPnl, entry, exit, volume }) => ({ id, netPnl, entry, exit, volume })),
   );
+});
+
+test("audit reader keeps only authoritative Trend and Sideway entry rows and skips malformed lines", async () => {
+  const load = loaderSubject();
+  const root = mkdtempSync(join(tmpdir(), "phase7c-performance-regime-"));
+
+  try {
+    writeFileSync(
+      join(root, "trend-decisions.jsonl"),
+      [
+        JSON.stringify(trendAudit()),
+        JSON.stringify(trendAudit({ event: "ENTRY_SUBMIT" })),
+        "{not-json",
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    writeFileSync(
+      join(root, "sideway-decisions.jsonl"),
+      [
+        JSON.stringify(sidewayAudit()),
+        JSON.stringify(sidewayAudit({ event: "HOLD_POSITION" })),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const rows = await load(root);
+    assert.equal(rows.length, 2);
+    assert.deepEqual(
+      rows.map((row) => `${row.strategy}:${row.event}`),
+      [
+        "TREND:ENTRY_FINAL_PERMISSION_GRANTED",
+        "SIDEWAY:ENTRY_SUBMIT",
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
