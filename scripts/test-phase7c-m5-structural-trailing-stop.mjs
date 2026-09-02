@@ -4,6 +4,14 @@ import {
   findLatestConfirmedM5Structure,
   planM5StructuralTrailingStop,
 } from "./phase7c-m5-structural-trailing-stop.mjs";
+import {
+  transformPhase7CTrendCanonicalDailyRecoverySource,
+  transformPhase7CSidewayCanonicalDailyRecoverySource,
+} from "./phase7c-canonical-daily-recovery-source-adapter.mjs";
+import {
+  transformPhase7CTrendM5StructuralTrailingSource,
+  transformPhase7CSidewayM5StructuralTrailingSource,
+} from "./phase7c-m5-structural-trailing-source-adapter.mjs";
 
 function bar(closeTime, { open, high, low, close }) {
   return { closeTime, open, high, low, close };
@@ -180,14 +188,51 @@ const SELL_LH_BARS = [
   assert.equal(decision.reason, "BROKER_GAP_BLOCK");
 }
 
-const trendSource = fs.readFileSync(new URL("./run-phase7b-demo-controller.ts", import.meta.url), "utf8");
-const sidewaySource = fs.readFileSync(new URL("./run-phase7c-sideway-controller.mjs", import.meta.url), "utf8");
+const rawTrendSource = fs.readFileSync(new URL("./run-phase7b-demo-controller.ts", import.meta.url), "utf8");
+const rawSidewaySource = fs.readFileSync(new URL("./run-phase7c-sideway-controller.mjs", import.meta.url), "utf8");
+const trendCanonicalSource = transformPhase7CTrendCanonicalDailyRecoverySource(rawTrendSource);
+const sidewayCanonicalSource = transformPhase7CSidewayCanonicalDailyRecoverySource(rawSidewaySource);
+const trendRuntimeSource = transformPhase7CTrendM5StructuralTrailingSource(trendCanonicalSource);
+const sidewayRuntimeSource = transformPhase7CSidewayM5StructuralTrailingSource(sidewayCanonicalSource);
 
-assert.match(trendSource, /managePosition\(managedPosition, quote, spec, m15, m5\)/, "Trend management must receive M5 candles");
-assert.match(trendSource, /M5_CONFIRMED_HIGHER_LOW_LOWER_HIGH_PLUS_1_BUFFER_ONLY_TIGHTEN/, "Trend runtime contract must advertise M5 structural trailing");
-assert.doesNotMatch(trendSource, /PHASE7B_DEMO_RUNNER_SL=M15_CONFIRMED_STRUCTURE_TRAILING/, "Trend must no longer advertise M15 runner trailing");
-assert.match(sidewaySource, /M5_CONFIRMED_HIGHER_LOW_LOWER_HIGH_PLUS_1_BUFFER_ONLY_TIGHTEN/, "Sideway runtime contract must advertise M5 structural trailing");
-assert.doesNotMatch(sidewaySource, /PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_NO_TRAILING/, "Sideway must no longer advertise NO_TRAILING");
+assert.match(trendRuntimeSource, /managePosition\(managedPosition, quote, spec, m15, m5\)/, "Trend management must receive M5 candles after source adaptation");
+assert.match(trendRuntimeSource, /M5_CONFIRMED_HIGHER_LOW_LOWER_HIGH_PLUS_1_BUFFER_ONLY_TIGHTEN/, "Trend runtime contract must advertise M5 structural trailing");
+assert.doesNotMatch(trendRuntimeSource, /PHASE7B_DEMO_RUNNER_SL=M15_CONFIRMED_STRUCTURE_TRAILING/, "Trend transformed runtime must not advertise M15 runner trailing");
+assert.match(trendRuntimeSource, /planM5StructuralTrailingStop\(\{/, "Trend transformed runtime must execute the shared M5 planner");
+assert.match(trendRuntimeSource, /afterTimestamp: Number\(managed\.partialActivatedAt \?\? 0\)/, "Trend must ignore M5 structure formed before partial activation");
+assert.ok(
+  trendRuntimeSource.indexOf('managed.dailyMode === "RECOVERY_TP"') < trendRuntimeSource.indexOf("planM5StructuralTrailingStop({"),
+  "Trend Recovery TP guard must remain before native M5 trailing",
+);
+
+assert.match(sidewayRuntimeSource, /M5_CONFIRMED_HIGHER_LOW_LOWER_HIGH_PLUS_1_BUFFER_ONLY_TIGHTEN/, "Sideway runtime contract must advertise M5 structural trailing");
+assert.doesNotMatch(sidewayRuntimeSource, /PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_NO_TRAILING/, "Sideway transformed runtime must not advertise NO_TRAILING");
+assert.match(sidewayRuntimeSource, /partialActivatedAt: null/, "Sideway managed state must persist M5 trailing activation");
+assert.match(sidewayRuntimeSource, /lastStructuralStop:/, "Sideway managed state must persist monotonic trailing baseline");
+assert.match(sidewayRuntimeSource, /structureAttempt: 0/, "Sideway managed state must persist trailing attempts");
+assert.match(sidewayRuntimeSource, /timeframe=M5&count=\$\{m5CandleCount\}/, "Sideway management must fetch M5 candles only for trailing");
+assert.match(sidewayRuntimeSource, /planM5StructuralTrailingStop\(\{/, "Sideway transformed runtime must execute the shared M5 planner");
+assert.match(sidewayRuntimeSource, /afterTimestamp: Number\(managed\.partialActivatedAt \?\? 0\)/, "Sideway must ignore M5 structure formed before partial activation");
+assert.ok(
+  sidewayRuntimeSource.indexOf('managed.dailyMode === "RECOVERY_TP"') < sidewayRuntimeSource.indexOf("planM5StructuralTrailingStop({"),
+  "Sideway Recovery TP guard must remain before native M5 trailing",
+);
+
+assert.throws(
+  () => transformPhase7CTrendM5StructuralTrailingSource("console.log('unrelated trend source');"),
+  /marker no longer matches/,
+  "Trend source adaptation must fail closed when expected management markers drift",
+);
+assert.throws(
+  () => transformPhase7CSidewayM5StructuralTrailingSource("console.log('unrelated sideway source');"),
+  /marker no longer matches/,
+  "Sideway source adaptation must fail closed when expected management markers drift",
+);
+
+const trendAccountWrapper = fs.readFileSync(new URL("./run-phase7c-trend-account-mode.mjs", import.meta.url), "utf8");
+const sidewayAccountWrapper = fs.readFileSync(new URL("./run-phase7c-sideway-account-mode.mjs", import.meta.url), "utf8");
+assert.match(trendAccountWrapper, /transformPhase7CTrendM5StructuralTrailingSource/, "Trend account runtime must apply the M5 structural trailing adapter");
+assert.match(sidewayAccountWrapper, /transformPhase7CSidewayM5StructuralTrailingSource/, "Sideway account runtime must apply the M5 structural trailing adapter");
 
 console.log("PHASE7C_M5_STRUCTURAL_TRAILING_STOP_CONTRACT=PASS");
 console.log("PHASE7C_M5_STRUCTURAL_TRAILING_ACTIVATION=POST_PLUS10_PARTIAL_ONLY");
@@ -195,3 +240,4 @@ console.log("PHASE7C_M5_STRUCTURAL_TRAILING_BUY=CONFIRMED_HIGHER_LOW_MINUS_1");
 console.log("PHASE7C_M5_STRUCTURAL_TRAILING_SELL=CONFIRMED_LOWER_HIGH_PLUS_1");
 console.log("PHASE7C_M5_STRUCTURAL_TRAILING_MONOTONIC=PASS");
 console.log("PHASE7C_M5_STRUCTURAL_TRAILING_INTRABAR=FORBIDDEN");
+console.log("PHASE7C_M5_STRUCTURAL_TRAILING_RECOVERY_TP=UNCHANGED");
