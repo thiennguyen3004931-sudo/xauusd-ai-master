@@ -150,17 +150,20 @@ function Stop-OrphanNodeProcess([string]$ScriptName, [string]$Label) {
   }
 }
 
-# Stop helper launchers as complete process trees so node.exe children cannot
-# survive a supervisor/activation restart and compete for Telegram getUpdates.
-Stop-PidFile (Join-Path $RuntimeDir "telegram-mode.pid") "TELEGRAM_MODE"
-Stop-PidFile (Join-Path $RuntimeDir "regime-notifier.pid") "REGIME_NOTIFIER"
-
-# Stop order-capable children before the supervisor.
-Stop-PidFile (Join-Path $RuntimeDir "trend.pid") "TREND"
-Stop-PidFile (Join-Path $RuntimeDir "sideway.pid") "SIDEWAY"
+# Stop the watchdog owner first. Otherwise it can recreate a managed child
+# while this stopper is still cleaning that child's PID file/process tree.
 Stop-PidFile (Join-Path $RuntimeDir "supervisor.pid") "SUPERVISOR"
 
+# The supervisor tree kill normally removes all descendants. These idempotent
+# child checks clean up anything that survived or detached before shutdown.
+Stop-PidFile (Join-Path $RuntimeDir "trade-notifier.pid") "TRADE_NOTIFIER"
+Stop-PidFile (Join-Path $RuntimeDir "telegram-mode.pid") "TELEGRAM_MODE"
+Stop-PidFile (Join-Path $RuntimeDir "regime-notifier.pid") "REGIME_NOTIFIER"
+Stop-PidFile (Join-Path $RuntimeDir "trend.pid") "TREND"
+Stop-PidFile (Join-Path $RuntimeDir "sideway.pid") "SIDEWAY"
+
 # Clean up Node children left by older versions that only killed the launcher PID.
+Stop-OrphanNodeProcess "run-phase7b-telegram-notifier.mjs" "TRADE_NOTIFIER"
 Stop-OrphanNodeProcess "run-phase7c-telegram-mode-controller.mjs" "TELEGRAM_MODE"
 Stop-OrphanNodeProcess "run-phase7c-regime-notifier.mjs" "REGIME_NOTIFIER"
 Stop-OrphanNodeProcess "run-phase7c-trend-controller.mjs" "TREND"
