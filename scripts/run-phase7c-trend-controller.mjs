@@ -4,11 +4,17 @@ import ts from "typescript";
 import { acquireExecutionLock } from "./phase7c-execution-lock.mjs";
 import { acquireRuntimeSingleton } from "./phase7c-runtime-singleton-lock.mjs";
 import { evaluateAutoTrendEntryModeGate } from "./phase7c-trend-mode-gate.mjs";
+import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
+import { recordTrendEntryAttributionBestEffort } from "./phase7c-trend-entry-attribution.mjs";
 
 const nativeFetch = globalThis.fetch.bind(globalThis);
 const controlApiBase = (process.env.ZIQ_PHASE7C_CONTROL_API_URL?.trim() || "http://127.0.0.1:3711").replace(/\/$/, "");
 const regimeSymbol = process.env.ZIQ_PHASE7C_REGIME_SYMBOL?.trim().toUpperCase() || process.env.ZIQ_DEMO_SYMBOL?.trim().toUpperCase() || "XAUUSD";
 const regimeCandleCount = clampInt(process.env.ZIQ_PHASE7C_REGIME_CANDLE_COUNT, 320, 220, 1000);
+const trendFinalPermissionAudit = createPhase7CDecisionAudit({
+  strategy: "TREND",
+  symbol: regimeSymbol,
+});
 const trendRuntimeArmed = /^(1|true|yes|on)$/i.test(
   process.env.ZIQ_DEMO_ARMED ?? "false",
 );
@@ -106,6 +112,12 @@ globalThis.fetch = async function phase7CTrendGate(input, init = undefined) {
         detail: `Open ${regimeSymbol} positions=${positions.length}`,
       });
     }
+
+    recordTrendEntryAttributionBestEffort({
+      audit: trendFinalPermissionAudit,
+      decision,
+      requestBody: request.body,
+    });
 
     console.log(
       `PHASE7C_TREND_ENTRY_ALLOWED=MODE_${decision.activeMode}|RECOMMENDED_${decision.recommendedMode ?? "N/A"}|REASON_${decision.reason}`,
@@ -514,6 +526,7 @@ function toRequestInfo(input, init) {
     method: String(init?.method ?? requestMethod ?? "GET").toUpperCase(),
     url: rawUrl,
     headers: new Headers(init?.headers ?? (isRequest ? input.headers : undefined)),
+    body: typeof init?.body === "string" ? init.body : null,
   };
 }
 

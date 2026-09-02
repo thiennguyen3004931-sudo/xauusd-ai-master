@@ -4,6 +4,7 @@ import path from "node:path";
 
 const STAGE_BY_EVENT = new Map([
   ["ENTRY_SUBMIT", "SUBMITTED"],
+  ["ENTRY_FINAL_PERMISSION_GRANTED", "READY"],
   ["ENTRY_SHADOW_READY", "READY"],
   ["ENTRY_PENDING_DURABLE", "SUBMITTED"],
   ["ENTRY_FILLED", "FILLED"],
