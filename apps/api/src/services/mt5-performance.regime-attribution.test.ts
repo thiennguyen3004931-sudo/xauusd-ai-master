@@ -46,8 +46,30 @@ type EnrichedTrade = Trade & {
   regimeSource: string | null;
 };
 
+type PerformanceBucket = {
+  key: string;
+  label: string;
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  breakeven: number;
+  netPnl: number;
+  grossProfit: number;
+  grossLoss: number;
+  winRatePercent: number;
+  profitFactor: number | null;
+  expectancy: number;
+  averageWin: number;
+  averageLoss: number;
+  maxConsecutiveLosses: number;
+};
+
 type Enrich = (trades: readonly Trade[], auditRows: readonly AuditRow[], maxDeltaMs?: number) => EnrichedTrade[];
 type LoadFromDirectory = (root: string) => Promise<AuditRow[]>;
+type BuildRegimeBreakdowns = (trades: readonly EnrichedTrade[]) => {
+  regime: PerformanceBucket[];
+  strategyRegime: PerformanceBucket[];
+};
 
 function subject(): Enrich {
   const candidate = (performanceService as unknown as Record<string, unknown>).enrichPerformanceTradesWithRegimeAttribution;
@@ -69,6 +91,16 @@ function loaderSubject(): LoadFromDirectory {
   return candidate as LoadFromDirectory;
 }
 
+function breakdownSubject(): BuildRegimeBreakdowns {
+  const candidate = (performanceService as unknown as Record<string, unknown>).buildPerformanceRegimeBreakdowns;
+  assert.equal(
+    typeof candidate,
+    "function",
+    "mt5-performance.service must export buildPerformanceRegimeBreakdowns",
+  );
+  return candidate as BuildRegimeBreakdowns;
+}
+
 function trade(overrides: Partial<Trade> = {}): Trade {
   return {
     id: "mt5-1001",
@@ -87,6 +119,17 @@ function trade(overrides: Partial<Trade> = {}): Trade {
     brokerHour: 9,
     weekday: "Thứ 4",
     exitReason: "UNKNOWN",
+    ...overrides,
+  };
+}
+
+function enrichedTrade(overrides: Partial<EnrichedTrade> = {}): EnrichedTrade {
+  return {
+    ...trade(),
+    regime: "BREAKOUT",
+    regimeConfidence: 87,
+    regimeAttribution: "MATCHED",
+    regimeSource: "TREND:ENTRY_FINAL_PERMISSION_GRANTED",
     ...overrides,
   };
 }
@@ -239,4 +282,68 @@ test("audit reader keeps only authoritative Trend and Sideway entry rows and ski
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("regime breakdowns use system-owned trades only and expose decision-grade metrics", () => {
+  const build = breakdownSubject();
+  const rows: EnrichedTrade[] = [
+    enrichedTrade({ id: "trend-win", netPnl: 120, closedAt: 2_000_000 }),
+    enrichedTrade({ id: "trend-loss", side: "SELL", netPnl: -30, closedAt: 2_100_000 }),
+    enrichedTrade({
+      id: "sideway-unmatched",
+      strategy: "SIDEWAY",
+      side: "SELL",
+      volume: 0.06,
+      netPnl: 20,
+      closedAt: 2_200_000,
+      regime: null,
+      regimeConfidence: null,
+      regimeAttribution: "UNMATCHED",
+      regimeSource: null,
+    }),
+    enrichedTrade({
+      id: "manual",
+      ownership: "OTHER",
+      strategy: "OTHER",
+      netPnl: 999,
+      closedAt: 2_300_000,
+      regime: null,
+      regimeConfidence: null,
+      regimeAttribution: "UNMATCHED",
+      regimeSource: null,
+    }),
+  ];
+
+  const breakdown = build(rows);
+  const breakout = breakdown.regime.find((row) => row.key === "BREAKOUT");
+  assert.ok(breakout);
+  assert.deepEqual(
+    {
+      totalTrades: breakout.totalTrades,
+      wins: breakout.wins,
+      losses: breakout.losses,
+      netPnl: breakout.netPnl,
+      profitFactor: breakout.profitFactor,
+      expectancy: breakout.expectancy,
+      averageWin: breakout.averageWin,
+      averageLoss: breakout.averageLoss,
+      maxConsecutiveLosses: breakout.maxConsecutiveLosses,
+    },
+    {
+      totalTrades: 2,
+      wins: 1,
+      losses: 1,
+      netPnl: 90,
+      profitFactor: 4,
+      expectancy: 45,
+      averageWin: 120,
+      averageLoss: 30,
+      maxConsecutiveLosses: 1,
+    },
+  );
+
+  assert.equal(breakdown.regime.find((row) => row.key === "UNMATCHED")?.totalTrades, 1);
+  assert.equal(breakdown.strategyRegime.find((row) => row.key === "TREND × BREAKOUT")?.totalTrades, 2);
+  assert.equal(breakdown.strategyRegime.find((row) => row.key === "SIDEWAY × UNMATCHED")?.totalTrades, 1);
+  assert.equal(breakdown.strategyRegime.some((row) => row.key.includes("OTHER")), false);
 });
