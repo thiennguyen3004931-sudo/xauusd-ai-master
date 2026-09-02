@@ -19,6 +19,7 @@ import {
 import {
   stopIsAtLeastAsTight,
   stopStrictlyTightens,
+  structuralStopWithBuffer,
   tightestKnownStop,
 } from "./phase7c-stop-monotonicity.mjs";
 import {
@@ -313,13 +314,13 @@ console.log(`PHASE7B_DEMO_ENGULF_BODY_TOLERANCE_PRICE=${ENGULF_BODY_TOLERANCE_PR
 console.log("PHASE7B_DEMO_FVG_ENTRY_GATE=OFF");
 console.log("PHASE7B_DEMO_FVG_ROLE=HOLD_CONFIRMATION_PLUS_ADDON_SHADOW");
 console.log("PHASE7B_DEMO_FVG_ADDON_EXECUTION=SHADOW_ONLY_NO_ORDER");
-console.log("PHASE7B_DEMO_INITIAL_SL=STRUCTURE_DERIVED_MIN_6_MAX_10");
+console.log("PHASE7B_DEMO_INITIAL_SL=STRUCTURE_DERIVED_PLUS_1_BUFFER_MIN_6_MAX_10");
 console.log("PHASE7B_DEMO_STRUCTURAL_SL_GT_10=WAIT_PULLBACK_NEXT_M15_WINDOW");
 console.log(`PHASE7B_DEMO_PULLBACK_WAIT_MINUTES=${pullbackWaitMinutes}`);
 console.log("PHASE7B_DEMO_PULLBACK_INVALIDATE=STRUCTURE_BREAK_OR_M15_ST_FLIP_OR_M5_ST_FLIP_OR_EXPIRY");
 console.log("PHASE7B_DEMO_PLUS6=SL_TO_ENTRY");
 console.log("PHASE7B_DEMO_PLUS10=PARTIAL_ONE_THIRD");
-console.log("PHASE7B_DEMO_POST_PLUS10_SL=M15_CONFIRMED_SWING_STRUCTURE_ONLY_TIGHTEN");
+console.log("PHASE7B_DEMO_POST_PLUS10_SL=M15_CONFIRMED_SWING_STRUCTURE_PLUS_1_BUFFER_ONLY_TIGHTEN");
 console.log("PHASE7B_DEMO_REVERSAL_EXIT=OPPOSING_M15_FVG_PLUS_REJECTION_CLOSE_AFTER_PLUS10");
 console.log(`PHASE7B_DEMO_FIXED_TP=${trendFixedTpEnabled ? `ON|DISTANCE=${trendFixedTpDistance}` : "OFF"}`);
 console.log("PHASE7B_DEMO_DAILY_RECOVERY=REALIZED_NET_PNL_ALL_BOT_MAGICS");
@@ -401,18 +402,19 @@ async function previewLatestSignal(): Promise<void> {
     return;
   }
   const marketEntry = signal.side === "BUY" ? quote.ask : quote.bid;
+  const structuralStopPrice = structuralStopWithBuffer(signal.side, signal.patternExtreme);
   const decision = pullbackEntryService.decideInitial({
     signalId: signal.id,
     side: signal.side,
     pattern: signal.pattern,
     signalTimestamp: signal.signalTimestamp,
     referenceEntryPrice: marketEntry,
-    structuralStopPrice: signal.patternExtreme,
+    structuralStopPrice,
     maxStopDistancePrice: MAX_INITIAL_SL_PRICE,
     waitMinutes: pullbackWaitMinutes,
   });
   const fvgConfirmed = hasRelevantFvg(m15, m15.length - 1, signal.side, 12);
-  console.log(`PHASE7B_DEMO_LATEST_SIGNAL=${signal.side}|PATTERN=${signal.pattern}|ENTRY=${marketEntry}|STRUCTURAL_STOP=${signal.patternExtreme}|SL_DISTANCE=${decision.structuralStopDistance}|ENTRY_STATE=${decision.state}|FVG_CONFIRM=${fvgConfirmed ? "YES" : "NO"}`);
+  console.log(`PHASE7B_DEMO_LATEST_SIGNAL=${signal.side}|PATTERN=${signal.pattern}|ENTRY=${marketEntry}|RAW_STRUCTURAL_STOP=${signal.patternExtreme}|STRUCTURAL_STOP=${structuralStopPrice}|SL_DISTANCE=${decision.structuralStopDistance}|ENTRY_STATE=${decision.state}|FVG_CONFIRM=${fvgConfirmed ? "YES" : "NO"}`);
 }
 
 async function cycle(): Promise<void> {
@@ -720,12 +722,14 @@ async function cycle(): Promise<void> {
   }
 
   const marketEntry = signal.side === "BUY" ? quote.ask : quote.bid;
-  const structuralStopDistance = structuralDistance(signal.side, marketEntry, signal.patternExtreme);
+  const structuralStopPrice = structuralStopWithBuffer(signal.side, signal.patternExtreme);
+  const structuralStopDistance = structuralDistance(signal.side, marketEntry, structuralStopPrice);
   if (!(structuralStopDistance > 0)) {
     journal("ENTRY_SETUP_INVALIDATED_BEFORE_DECISION", {
       signalId: signal.id,
       marketEntry,
-      structuralStopPrice: signal.patternExtreme,
+      rawStructuralStopPrice: signal.patternExtreme,
+      structuralStopPrice,
     });
     return;
   }
@@ -736,7 +740,7 @@ async function cycle(): Promise<void> {
     pattern: signal.pattern,
     signalTimestamp: signal.signalTimestamp,
     referenceEntryPrice: marketEntry,
-    structuralStopPrice: signal.patternExtreme,
+    structuralStopPrice,
     maxStopDistancePrice: MAX_INITIAL_SL_PRICE,
     waitMinutes: pullbackWaitMinutes,
   });
@@ -751,7 +755,8 @@ async function cycle(): Promise<void> {
       pattern: signal.pattern,
       signalEntry: signal.entry,
       marketEntry,
-      structuralStopPrice: signal.patternExtreme,
+      rawStructuralStopPrice: signal.patternExtreme,
+      structuralStopPrice,
       structuralStopDistance,
       expiresAt: decision.pending!.expiresAt,
     });
@@ -764,10 +769,15 @@ async function cycle(): Promise<void> {
     pattern: signal.pattern,
     signalEntry: signal.entry,
     marketEntry,
-    structuralStopPrice: signal.patternExtreme,
+    rawStructuralStopPrice: signal.patternExtreme,
+    structuralStopPrice,
     structuralStopDistance,
   });
-  await submitTrendEntry(signal, marketEntry, quote, spec, m15, "ENTRY_IMMEDIATE", health.accountBalance);
+  const bufferedSignal: RuntimeEntrySignal = {
+    ...signal,
+    patternExtreme: structuralStopPrice,
+  };
+  await submitTrendEntry(bufferedSignal, marketEntry, quote, spec, m15, "ENTRY_IMMEDIATE", health.accountBalance);
 }
 
 async function submitTrendEntry(
@@ -1191,9 +1201,10 @@ function latestSignal(
   const m5Direction = m5Supertrend.direction[m5SignalIndex] ?? null;
 
   const entry = current.close;
+  const structuralStopPrice = structuralStopWithBuffer(trigger.side, trigger.patternExtreme);
   const structuralStopDistance = trigger.side === "BUY"
-    ? entry - trigger.patternExtreme
-    : trigger.patternExtreme - entry;
+    ? entry - structuralStopPrice
+    : structuralStopPrice - entry;
   const fvgConfirmed = hasRelevantFvg(m15, index, trigger.side, 12);
 
   const entryConditions = strategy.valid && strategy.state
@@ -1689,7 +1700,10 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
   if (managed.partialApplied) {
     const structure = latestConfirmedStructureStop(managed.side, m15, managed.signalTimestamp, latest.closeTime);
     if (structure !== null) {
-      const candidate = roundPrice(structure, spec.digits);
+      const candidate = roundPrice(
+        structuralStopWithBuffer(managed.side, structure),
+        spec.digits,
+      );
       const structuralBaseline = tightestKnownStop(
         managed.side,
         Number(position.stopLoss),

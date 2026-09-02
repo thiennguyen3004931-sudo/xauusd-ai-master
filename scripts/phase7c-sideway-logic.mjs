@@ -1,3 +1,5 @@
+import { structuralStopWithBuffer } from "./phase7c-stop-monotonicity.mjs";
+
 const MIN_INITIAL_STOP_DISTANCE = 6;
 const MAX_INITIAL_STOP_DISTANCE = 10;
 
@@ -119,16 +121,22 @@ export function buildSidewayPlan({ side, bid, ask, range, atr, point, stopsLevel
   const entry = side === "BUY" ? ask : bid;
   const brokerGap = Math.max(0, Number(stopsLevelTicks) || 0) * point;
   const buffer = Math.max(atr * 0.25, brokerGap, point * 20);
-  const structuralStopLoss = side === "BUY" ? demandLow - buffer : supplyHigh + buffer;
+  const existingStructuralStopLoss = side === "BUY"
+    ? demandLow - buffer
+    : supplyHigh + buffer;
+  const structuralStopLoss = structuralStopWithBuffer(
+    side,
+    existingStructuralStopLoss,
+  );
   const structuralStopDistance = Math.abs(entry - structuralStopLoss);
   if (!(structuralStopDistance > 0)) {
     return { accepted: false, reason: "STOP_DISTANCE_INVALID", structuralStopDistance };
   }
 
-  // Project-wide initial stop policy: keep the broker-protected initial SL in
-  // the 6-10 price-unit window. If the structural stop is closer than 6, widen
-  // safely to 6. If structure requires more than 10, fail closed and wait for
-  // a later pullback/confirmation rather than entering with an oversized stop.
+  // Project-wide initial stop policy: first keep the stop 1.0 price unit outside
+  // the previously-derived structural stop, then evaluate the canonical 6-10
+  // price-unit window. If the buffered structure requires more than 10, fail
+  // closed and wait for a later pullback/confirmation.
   if (structuralStopDistance > MAX_INITIAL_STOP_DISTANCE + 1e-9) {
     return {
       accepted: false,

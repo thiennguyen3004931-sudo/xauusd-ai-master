@@ -122,7 +122,7 @@ const widenedPlan = buildSidewayPlan({
   bid: 99.9,
   ask: 100,
   range: {
-    demand: { low: 95, high: 97 },
+    demand: { low: 96, high: 97 },
     supply: { low: 120, high: 122 },
   },
   atr: 1,
