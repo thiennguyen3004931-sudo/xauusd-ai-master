@@ -1,0 +1,53 @@
+name: Phase7C Performance Regime Attribution Apply
+
+on:
+  push:
+    branches:
+      - fix/performance-strategy-regime-attribution
+    paths:
+      - 'scripts/apply-performance-regime-attribution.mjs'
+      - '.github/workflows/phase7c-performance-regime-attribution-apply.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/performance-strategy-regime-attribution
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Apply exact performance attribution patch
+        run: node scripts/apply-performance-regime-attribution.mjs
+      - name: Build workspace
+        run: pnpm build
+      - name: Run performance regime attribution contracts
+        run: pnpm --dir apps/api exec tsx src/services/mt5-performance.regime-attribution.test.ts
+      - name: Run canonical ledger startup regression
+        run: pnpm --dir apps/api exec tsx src/services/phase7c-canonical-deal-ledger.startup.test.ts
+      - name: Diff hygiene
+        run: git diff --check
+      - name: Commit verified production patch
+        shell: bash
+        run: |
+          if git diff --quiet -- apps/api/src/services/mt5-performance.service.ts; then
+            echo 'Expected mt5-performance.service.ts to change.' >&2
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/api/src/services/mt5-performance.service.ts
+          git commit -m 'feat: attribute performance by strategy regime'
+          git push origin HEAD:fix/performance-strategy-regime-attribution
