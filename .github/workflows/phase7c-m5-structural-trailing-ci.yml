@@ -5,9 +5,13 @@ on:
     paths:
       - "scripts/phase7c-m5-structural-trailing.mjs"
       - "scripts/phase7c-m5-structural-trailing-source-adapter.mjs"
+      - "scripts/phase7c-stop-monotonicity.mjs"
       - "scripts/run-phase7c-trend-account-mode.mjs"
       - "scripts/run-phase7c-sideway-account-mode.mjs"
       - "scripts/test-phase7c-m5-structural-trailing-contract.mjs"
+      - "scripts/test-phase7c-stop-monotonicity.mjs"
+      - "scripts/test-phase7c-canonical-daily-recovery-executors-contract.mjs"
+      - "scripts/test-phase7c-live-arm-source.ps1"
       - ".github/workflows/phase7c-m5-structural-trailing-ci.yml"
   push:
     branches:
@@ -15,9 +19,13 @@ on:
     paths:
       - "scripts/phase7c-m5-structural-trailing.mjs"
       - "scripts/phase7c-m5-structural-trailing-source-adapter.mjs"
+      - "scripts/phase7c-stop-monotonicity.mjs"
       - "scripts/run-phase7c-trend-account-mode.mjs"
       - "scripts/run-phase7c-sideway-account-mode.mjs"
       - "scripts/test-phase7c-m5-structural-trailing-contract.mjs"
+      - "scripts/test-phase7c-stop-monotonicity.mjs"
+      - "scripts/test-phase7c-canonical-daily-recovery-executors-contract.mjs"
+      - "scripts/test-phase7c-live-arm-source.ps1"
       - ".github/workflows/phase7c-m5-structural-trailing-ci.yml"
 
 permissions:
@@ -43,6 +51,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: LIVE account source safety
+      - name: LIVE ARM source safety
         shell: pwsh
-        run: .\scripts\test-phase7c-live-account-source.ps1
+        run: .\scripts\test-phase7c-live-arm-source.ps1
