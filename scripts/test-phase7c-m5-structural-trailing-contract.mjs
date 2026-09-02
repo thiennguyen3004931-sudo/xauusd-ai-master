@@ -115,4 +115,20 @@ const recoveryIndex = transformedSideway.indexOf('if (managed.dailyMode === "REC
 const trailingIndex = transformedSideway.indexOf("SIDEWAY_M5_STRUCTURAL_SL_TIGHTEN");
 assert.ok(recoveryIndex >= 0 && trailingIndex > recoveryIndex, "Sideway Recovery must return before native M5 trailing.");
 
+const trendAccountModeSource = fs.readFileSync(new URL("./run-phase7c-trend-account-mode.mjs", import.meta.url), "utf8");
+const trendCanonicalIndex = trendAccountModeSource.indexOf("transformPhase7CTrendCanonicalDailyRecoverySource(accountAdapted)");
+const trendM5Index = trendAccountModeSource.indexOf("transformPhase7CTrendM5TrailingSource(canonicalOutput)");
+assert.ok(
+  trendCanonicalIndex >= 0 && trendM5Index > trendCanonicalIndex,
+  "Trend account-mode runtime must apply canonical Daily Recovery before M5 trailing.",
+);
+
+const sidewayAccountModeSource = fs.readFileSync(new URL("./run-phase7c-sideway-account-mode.mjs", import.meta.url), "utf8");
+const sidewayCanonicalIndex = sidewayAccountModeSource.indexOf("transformPhase7CSidewayCanonicalDailyRecoverySource(accountAdapted)");
+const sidewayM5Index = sidewayAccountModeSource.indexOf("transformPhase7CSidewayM5TrailingSource(canonicalOutput)");
+assert.ok(
+  sidewayCanonicalIndex >= 0 && sidewayM5Index > sidewayCanonicalIndex,
+  "Sideway account-mode runtime must apply canonical Daily Recovery before M5 trailing.",
+);
+
 console.log("PHASE7C_M5_STRUCTURAL_TRAILING_CONTRACT=PASS");
