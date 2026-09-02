@@ -232,9 +232,11 @@ const liveSidewayRuntimeSource = transformPhase7CSidewayM5StructuralTrailingSour
     transformPhase7CSidewaySource(rawSidewaySource),
   ),
 );
-assert.match(liveTrendRuntimeSource, /\/api\/v1\/phase7c\/daily-recovery/, "LIVE Trend must preserve canonical Daily Recovery after M5 adaptation");
+assert.match(liveTrendRuntimeSource, /fetchPhase7CCanonicalDailyRecoveryPlan/, "LIVE Trend must preserve canonical Daily Recovery planning after M5 adaptation");
+assert.match(liveTrendRuntimeSource, /registerPhase7CCanonicalDailyRecoverySubmission/, "LIVE Trend must preserve canonical Daily Recovery final SEND gate after M5 adaptation");
 assert.match(liveTrendRuntimeSource, /M5_CONFIRMED_HIGHER_LOW_LOWER_HIGH_PLUS_1_BUFFER_ONLY_TIGHTEN/, "LIVE Trend must compose M5 structural trailing after LIVE + canonical adapters");
-assert.match(liveSidewayRuntimeSource, /\/api\/v1\/phase7c\/daily-recovery/, "LIVE Sideway must preserve canonical Daily Recovery after M5 adaptation");
+assert.match(liveSidewayRuntimeSource, /fetchPhase7CCanonicalDailyRecoveryPlan/, "LIVE Sideway must preserve canonical Daily Recovery planning after M5 adaptation");
+assert.match(liveSidewayRuntimeSource, /registerPhase7CCanonicalDailyRecoverySubmission/, "LIVE Sideway must preserve canonical Daily Recovery final SEND gate after M5 adaptation");
 assert.match(liveSidewayRuntimeSource, /M5_CONFIRMED_HIGHER_LOW_LOWER_HIGH_PLUS_1_BUFFER_ONLY_TIGHTEN/, "LIVE Sideway must compose M5 structural trailing after LIVE + canonical adapters");
 
 assert.throws(
