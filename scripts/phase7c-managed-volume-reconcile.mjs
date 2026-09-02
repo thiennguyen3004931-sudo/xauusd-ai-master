@@ -59,6 +59,17 @@ export function reconcileManagedVolume(managed, position, spec, partialActivatio
   }
 
   const tolerance = volumeTolerance(step);
+  if (actualVolume > expectedVolume + tolerance) {
+    return {
+      accepted: false,
+      reason: "MANAGED_VOLUME_INCREASE",
+      managed: next,
+      events,
+      expectedVolume,
+      actualVolume,
+    };
+  }
+
   if (
     actualVolume < minVolume - tolerance ||
     expectedVolume < minVolume - tolerance ||
@@ -74,17 +85,6 @@ export function reconcileManagedVolume(managed, position, spec, partialActivatio
       managed: next,
       events,
       initialVolume,
-      expectedVolume,
-      actualVolume,
-    };
-  }
-
-  if (actualVolume > expectedVolume + tolerance) {
-    return {
-      accepted: false,
-      reason: "MANAGED_VOLUME_INCREASE",
-      managed: next,
-      events,
       expectedVolume,
       actualVolume,
     };
