@@ -288,11 +288,14 @@ async function cycle() {
       journal("MANAGED_POSITION_RECONCILIATION_BLOCK", {
         ticket: managedPosition.ticket,
         reason: reconciliation.reason,
-        managed: reconciliation.managed,
-        events: reconciliation.events,
+        expectedVolume: reconciliation.expectedVolume ?? state.managed.expectedRemainingVolume,
+        actualVolume: reconciliation.actualVolume ?? managedPosition.volume,
+        expectedSide: state.managed.side === "BUY" ? "LONG" : "SHORT",
+        actualSide: managedPosition.side,
       });
       return;
     }
+
     if (reconciliation.events.length > 0) {
       state.managed = reconciliation.managed;
       saveState();
