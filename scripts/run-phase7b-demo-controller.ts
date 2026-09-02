@@ -248,7 +248,7 @@ const bridgeEnvPath = process.env.ZIQ_BRIDGE_ENV ?? path.resolve("packages/mt5-b
 const ENGULF_BODY_TOLERANCE_PRICE = 0.1;
 const MIN_INITIAL_SL_PRICE = 6;
 const MAX_INITIAL_SL_PRICE = 10;
-const pullbackWaitMinutes = Math.max(1, Number(process.env.ZIQ_PHASE7B_PULLBACK_WAIT_MINUTES ?? "15"));
+const pullbackWaitMinutes = 15;
 const pullbackEntryService = new Phase7BPullbackEntryService();
 const DAILY_RECOVERY_MIN_TP_DISTANCE = 6;
 const DAILY_RECOVERY_MAX_TP_DISTANCE = 10;
@@ -575,9 +575,14 @@ async function cycle(): Promise<void> {
 
   if (state.pendingPullback) {
     const pending = state.pendingPullback;
-    if (latestM5.closeTime <= state.lastEvaluatedM5Close) return;
-    state.lastEvaluatedM5Close = latestM5.closeTime;
-    saveState();
+    const pullbackCycleTimestamp = Number(quote.timestamp);
+    if (!Number.isFinite(pullbackCycleTimestamp)) {
+      journal("QUOTE_TIMESTAMP_INVALID", {
+        signalId: pending.signalId,
+        quoteTimestamp: quote.timestamp,
+      });
+      return;
+    }
 
     const m15Index = latestClosedIndex(m15, latestM5.closeTime);
     const m15Direction = m15Index >= 0
@@ -616,6 +621,39 @@ async function cycle(): Promise<void> {
         })
       : null;
 
+    const evaluation = pullbackEntryService.evaluatePullback({
+      pending,
+      timestamp: pullbackCycleTimestamp,
+      candidateEntryPrice: marketEntry,
+      barLow: latestM5.low,
+      barHigh: latestM5.high,
+      setupStillValid: structuralStopDistance > 0,
+      m15SupertrendAligned: m15Direction === pending.side,
+      m5SupertrendAligned: m5Direction === pending.side,
+    });
+
+    journal(evaluation.state, {
+      signalId: pending.signalId,
+      side: pending.side,
+      pattern: pending.pattern,
+      structuralStopPrice: pending.structuralStopPrice,
+      structuralStopDistanceAtSignal: pending.structuralStopDistanceAtSignal,
+      structuralStopDistanceNow: evaluation.structuralStopDistance,
+      marketEntry,
+      m15Direction,
+      m5Direction,
+      m5CloseTime: latestM5.closeTime,
+      pullbackCycleTimestamp,
+      expiresAt: pending.expiresAt,
+    });
+
+    if (evaluation.state === "PULLBACK_STILL_TOO_WIDE") return;
+    if (evaluation.state !== "PULLBACK_ENTRY") {
+      state.pendingPullback = null;
+      saveState();
+      return;
+    }
+
     if (!entryConditions || !entryConditions.allEnabledPassed) {
       journal("ENTRY_STRATEGY_CONDITION_BLOCK", {
         signalId: pending.signalId,
@@ -636,40 +674,6 @@ async function cycle(): Promise<void> {
       pattern: pending.pattern,
       entryConditions,
     });
-
-    const conditionAllows = (id: string) =>
-      entryConditions.conditions.find((row) => row.id === id)?.status !== "FAIL";
-    const evaluation = pullbackEntryService.evaluatePullback({
-      pending,
-      timestamp: latestM5.closeTime,
-      candidateEntryPrice: marketEntry,
-      barLow: latestM5.low,
-      barHigh: latestM5.high,
-      setupStillValid: conditionAllows("validTrendStructure"),
-      m15SupertrendAligned: conditionAllows("supertrendM15"),
-      m5SupertrendAligned: conditionAllows("supertrendM5"),
-    });
-
-    journal(evaluation.state, {
-      signalId: pending.signalId,
-      side: pending.side,
-      pattern: pending.pattern,
-      structuralStopPrice: pending.structuralStopPrice,
-      structuralStopDistanceAtSignal: pending.structuralStopDistanceAtSignal,
-      structuralStopDistanceNow: evaluation.structuralStopDistance,
-      marketEntry,
-      m15Direction,
-      m5Direction,
-      m5CloseTime: latestM5.closeTime,
-      expiresAt: pending.expiresAt,
-    });
-
-    if (evaluation.state === "PULLBACK_STILL_TOO_WIDE") return;
-    if (evaluation.state !== "PULLBACK_ENTRY") {
-      state.pendingPullback = null;
-      saveState();
-      return;
-    }
 
     const signal: RuntimeEntrySignal = {
       id: pending.signalId,

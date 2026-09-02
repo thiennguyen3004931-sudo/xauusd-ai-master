@@ -119,6 +119,22 @@ describe("Phase7BPullbackEntryService", () => {
     expect(result.state).toBe("PULLBACK_M5_ST_INVALIDATED");
   });
 
+  it("expires exactly at the configured waiting boundary", () => {
+    const initial = buyInitial(14);
+    const result = service.evaluatePullback({
+      pending: initial.pending!,
+      timestamp: initial.pending!.expiresAt,
+      candidateEntryPrice: 3_309,
+      barLow: 3_305,
+      barHigh: 3_311,
+      setupStillValid: true,
+      m15SupertrendAligned: true,
+      m5SupertrendAligned: true,
+    });
+
+    expect(result.state).toBe("PULLBACK_EXPIRED");
+  });
+
   it("expires after the configured waiting window", () => {
     const initial = buyInitial(14);
     const result = service.evaluatePullback({
