@@ -2,49 +2,40 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Reduce XAUUSD AI MASTER to one canonical production truth (`main`) by safely archiving the current Git ref state, closing stale PR scopes, removing stale remote branches, and fixing runtime-artifact Git hygiene without mutating LIVE trading runtime.
+**Goal:** Reduce XAUUSD AI MASTER to one canonical production truth (`main`) by archiving all current refs, closing stale PR scopes, deleting stale remote branches, and fixing runtime-artifact Git hygiene without mutating LIVE trading runtime.
 
-**Architecture:** Treat repository cleanup as a governance operation with a hard archive gate before destructive ref deletion. The local Windows host creates and verifies a full Git bundle and branch/SHA manifest; GitHub PRs are then closed, stale branches are deleted, and a small source-only cleanup PR carries the manifest/spec/plan plus the canonical `.gitignore` rule. Workflow deletion is explicitly deferred to a separate audit plan.
+**Architecture:** Destructive cleanup is gated by a verified external Git bundle plus a committed branch/SHA manifest. Stale PRs are closed without merge, stale remote refs are deleted from the manifest rather than branch-name guesses, and one source-only consolidation PR carries the audit trail plus `.gitignore` correction. Workflow consolidation and `main` protection/ruleset hardening are deliberately deferred to a second plan because required status checks must be mapped before branch protection is changed.
 
-**Tech Stack:** Git, GitHub, PowerShell, GitHub Actions metadata, Markdown.
+**Tech Stack:** Git, GitHub, PowerShell, Markdown.
 
 **Spec:** `docs/superpowers/specs/2026-09-02-repository-consolidation-design.md`
 
 ## Global Constraints
 
-- Canonical repository: `thiennguyen3004931-sudo/xauusd-ai-master`.
-- Canonical production branch at cleanup start: `main`.
-- Canonical production SHA at cleanup start: `69ed572fc0232fae228534d5cf7f73e0b2b282db`.
-- Do not rewrite `main` history.
-- Create and verify an external full Git bundle before any remote branch deletion.
-- Record pre-cleanup branch name -> SHA inventory before deletion.
-- Close stale/superseded pre-cleanup PRs; do not merge them.
-- Do not delete GitHub Actions workflows in this plan.
-- Canonical `.gitignore` must ignore `/scripts/.phase7c-sideway-runtime-*.mjs`.
-- `ORDER_MUTATION=NONE`.
-- `LIVE_TEST_ORDER=NONE`.
-- `MODE_CHANGE=NONE`.
-- `ARM_CHANGE=NONE`.
-- `BRIDGE_RESTART=NONE`.
-- `EXECUTOR_RESTART=NONE`.
-- `WEB_API_RESTART=NONE`.
-- `RUNTIME_DEPLOYMENT=NONE`.
+- Canonical repo: `thiennguyen3004931-sudo/xauusd-ai-master`.
+- Canonical branch at cleanup start: `main`.
+- Canonical SHA at cleanup start: `69ed572fc0232fae228534d5cf7f73e0b2b282db`.
+- Never rewrite `main` history.
+- No remote branch deletion until archive bundle verification and branch manifest verification both PASS.
+- Close stale PRs without merge.
+- Do not delete workflows in this plan.
+- Defer `main` protection/ruleset mutation to the workflow/governance plan after required CI checks are canonicalized.
+- Add `/scripts/.phase7c-sideway-runtime-*.mjs` to repository `.gitignore`.
+- `ORDER_MUTATION=NONE`, `LIVE_TEST_ORDER=NONE`, `MODE_CHANGE=NONE`, `ARM_CHANGE=NONE`, `BRIDGE_RESTART=NONE`, `EXECUTOR_RESTART=NONE`, `WEB_API_RESTART=NONE`, `RUNTIME_DEPLOYMENT=NONE`.
 
 ---
 
-### Task 1: Create and verify the pre-cleanup Git archive
+### Task 1: Create and verify the pre-cleanup archive
 
 **Files:**
-- Create externally: `F:\Project\XAUUSD_AI_MASTER\archive\xauusd-ai-master-pre-cleanup-20260902.bundle`
-- Create locally for later commit: `docs/repository-cleanup/pre-cleanup-branches-20260902.tsv`
+- External: `F:\Project\XAUUSD_AI_MASTER\archive\xauusd-ai-master-pre-cleanup-20260902.bundle`
+- Create: `docs/repository-cleanup/pre-cleanup-branches-20260902.tsv`
 
 **Interfaces:**
-- Consumes: local clone `F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master` and remote `origin`.
-- Produces: a verified full-ref Git bundle and deterministic branch/SHA manifest used as the deletion gate.
+- Consumes: local clone and `origin`.
+- Produces: verified full-ref archive and exact deletion inventory.
 
-- [ ] **Step 1: Verify local canonical checkout and fetch all refs**
-
-Run in PowerShell:
+- [ ] **Step 1: Lock the local checkout to the approved production SHA**
 
 ```powershell
 cd F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master
@@ -52,171 +43,142 @@ $expected = '69ed572fc0232fae228534d5cf7f73e0b2b282db'
 git switch main
 git fetch origin --prune --tags
 $actual = (git rev-parse HEAD).Trim()
-if ($actual -ne $expected) { throw "STOP: expected main=$expected actual=$actual" }
+if ($actual -ne $expected) { throw "STOP: expected=$expected actual=$actual" }
 ```
 
-Expected: `HEAD` remains exactly `69ed572fc0232fae228534d5cf7f73e0b2b282db` before cleanup-source commits are merged.
+Expected: exact SHA match.
 
-- [ ] **Step 2: Create archive directory and full Git bundle**
+- [ ] **Step 2: Create and verify the full bundle**
 
 ```powershell
 $archiveDir = 'F:\Project\XAUUSD_AI_MASTER\archive'
 New-Item -ItemType Directory -Force -Path $archiveDir | Out-Null
 $bundle = Join-Path $archiveDir 'xauusd-ai-master-pre-cleanup-20260902.bundle'
 git bundle create $bundle --all
-if ($LASTEXITCODE -ne 0) { throw 'STOP: git bundle create failed' }
-```
-
-Expected: bundle file exists outside the repository.
-
-- [ ] **Step 3: Verify bundle integrity**
-
-```powershell
+if ($LASTEXITCODE -ne 0) { throw 'STOP: bundle create failed' }
 git bundle verify $bundle
-if ($LASTEXITCODE -ne 0) { throw 'STOP: git bundle verify failed' }
+if ($LASTEXITCODE -ne 0) { throw 'STOP: bundle verify failed' }
 ```
 
-Expected: Git reports the bundle is okay and lists contained refs/prerequisites.
+Expected: bundle verification PASS.
 
-- [ ] **Step 4: Generate branch/SHA manifest from remote heads**
+- [ ] **Step 3: Generate the remote branch/SHA manifest**
 
 ```powershell
 $manifestDir = 'docs\repository-cleanup'
 New-Item -ItemType Directory -Force -Path $manifestDir | Out-Null
 $manifest = Join-Path $manifestDir 'pre-cleanup-branches-20260902.tsv'
-@('branch`tsha') | Set-Content -LiteralPath $manifest -Encoding utf8
-git ls-remote --heads origin |
-  ForEach-Object {
-    $parts = $_ -split '\s+'
-    $sha = $parts[0]
-    $branch = $parts[1] -replace '^refs/heads/',''
-    "$branch`t$sha"
-  } |
-  Sort-Object |
-  Add-Content -LiteralPath $manifest -Encoding utf8
+@("branch`tsha") | Set-Content -LiteralPath $manifest -Encoding utf8
+git ls-remote --heads origin | ForEach-Object {
+  $p = $_ -split '\s+'
+  "$($p[1] -replace '^refs/heads/','')`t$($p[0])"
+} | Sort-Object | Add-Content -LiteralPath $manifest -Encoding utf8
 ```
 
-Expected: one header plus one row per current remote branch.
+Expected: one row for every remote head.
 
-- [ ] **Step 5: Verify archive and manifest gates before any deletion**
+- [ ] **Step 4: Enforce the archive gate**
 
 ```powershell
-$bundleOk = Test-Path -LiteralPath $bundle -PathType Leaf
-$manifestRows = @(Get-Content -LiteralPath $manifest | Select-Object -Skip 1)
-$mainRow = $manifestRows | Where-Object { $_ -eq "main`t$expected" }
-if (-not $bundleOk) { throw 'STOP: archive bundle missing' }
-if ($manifestRows.Count -lt 200) { throw "STOP: branch manifest unexpectedly small: $($manifestRows.Count)" }
-if (-not $mainRow) { throw 'STOP: canonical main SHA missing from manifest' }
-Write-Host "ARCHIVE_GATE=PASS"
-Write-Host "MANIFEST_BRANCH_COUNT=$($manifestRows.Count)"
+$rows = @(Get-Content -LiteralPath $manifest | Select-Object -Skip 1)
+if (-not (Test-Path $bundle -PathType Leaf)) { throw 'STOP: bundle missing' }
+if ($rows.Count -lt 200) { throw "STOP: suspicious branch count=$($rows.Count)" }
+if (-not ($rows -contains "main`t$expected")) { throw 'STOP: canonical main missing from manifest' }
+Write-Host 'ARCHIVE_GATE=PASS'
+Write-Host "MANIFEST_BRANCH_COUNT=$($rows.Count)"
 ```
 
-Expected: `ARCHIVE_GATE=PASS`; no remote deletion is permitted before this marker.
+Expected: `ARCHIVE_GATE=PASS`. No deletion may occur before this marker.
 
 ---
 
-### Task 2: Close all stale pre-cleanup pull requests
+### Task 2: Close the nine stale pre-cleanup PRs
 
-**Files:**
-- No production files modified.
+**Files:** none.
 
 **Interfaces:**
-- Consumes: verified archive gate from Task 1 and the nine open PRs identified in the approved design.
-- Produces: zero stale pre-cleanup PRs presented as active scopes.
+- Consumes: Task 1 archive gate.
+- Produces: no stale PR presented as an active scope.
 
-- [ ] **Step 1: Re-read the open PR set and require exact expected IDs**
+- [ ] **Step 1: Re-read open PRs and require the known pre-cleanup set**
 
-Expected pre-cleanup PR numbers:
+Known stale PRs: `1, 2, 3, 94, 98, 121, 178, 217, 225`.
 
-```text
-1,2,3,94,98,121,178,217,225
-```
+Abort if a newly created unknown PR is present; classify it before continuing.
 
-Abort if a new unknown open PR exists; classify it before continuing.
-
-- [ ] **Step 2: Add the standard consolidation note to each stale PR**
-
-Use this exact note:
+- [ ] **Step 2: Add this exact note to each stale PR**
 
 ```text
 Repository consolidation: this PR is a historical/superseded scope and is no longer an active production source. Canonical production work continues from current main. The PR is being closed without merge; commit/PR history remains available for audit and recovery.
 ```
 
-- [ ] **Step 3: Close PRs #1, #2, #3, #94, #98, #121, #178, #217, and #225 without merge**
+- [ ] **Step 3: Close all nine PRs without merge**
 
-Expected: each PR becomes `state=closed`, `merged=false`.
+Expected per PR: `state=closed`, `merged=false`.
 
-- [ ] **Step 4: Verify no pre-cleanup PR remains open**
+- [ ] **Step 4: Verify stale pre-cleanup open PR count is zero**
 
-Expected: search result contains no open PR whose `created_at` predates this cleanup and whose scope has not been explicitly re-approved.
+Expected: `STALE_PRE_CLEANUP_PRS=0`.
 
 ---
 
-### Task 3: Make runtime artifact ignore behavior canonical
+### Task 3: Canonicalize Sideway runtime-artifact ignore behavior
 
 **Files:**
 - Modify: `.gitignore`
-- Test: Git ignore behavior through `git check-ignore`.
 
 **Interfaces:**
-- Consumes: current Sideway wrapper behavior that creates `scripts/.phase7c-sideway-runtime-<PID>.mjs`.
-- Produces: repository-level ignore coverage so runtime-generated Sideway files cannot dirty guarded deployment worktrees.
+- Consumes: Sideway wrapper runtime naming convention.
+- Produces: generated `.phase7c-sideway-runtime-<PID>.mjs` files no longer dirty Git worktrees.
 
-- [ ] **Step 1: Write the failing ignore check against the pre-change tree**
-
-Run:
+- [ ] **Step 1: Prove RED on the original tree**
 
 ```powershell
 git check-ignore -q scripts/.phase7c-sideway-runtime-12345.mjs
-if ($LASTEXITCODE -eq 0) { throw 'RED NOT PROVEN: pattern already ignored' }
+if ($LASTEXITCODE -eq 0) { throw 'RED NOT PROVEN: file is already ignored' }
 Write-Host 'RUNTIME_ARTIFACT_IGNORE_RED=PASS'
 ```
 
-Expected on the original `main@69ed572f...`: the file is not ignored, proving the current gap.
-
-- [ ] **Step 2: Add the exact canonical ignore rule**
-
-Add this line under the Phase7B/Phase7C runtime-artifact block in `.gitignore`:
+- [ ] **Step 2: Add the exact rule under the Phase7B/Phase7C runtime-artifact block**
 
 ```gitignore
 /scripts/.phase7c-sideway-runtime-*.mjs
 ```
 
-Do not remove the existing `/scripts/.phase7c-sideway-live-runtime-*.mjs` rule.
+Keep the existing `/scripts/.phase7c-sideway-live-runtime-*.mjs` line.
 
-- [ ] **Step 3: Verify the new rule is GREEN**
+- [ ] **Step 3: Prove GREEN**
 
 ```powershell
 git check-ignore -v scripts/.phase7c-sideway-runtime-12345.mjs
-if ($LASTEXITCODE -ne 0) { throw 'STOP: runtime artifact still not ignored' }
+if ($LASTEXITCODE -ne 0) { throw 'STOP: runtime artifact not ignored' }
 Write-Host 'RUNTIME_ARTIFACT_IGNORE_GREEN=PASS'
 ```
 
-Expected: output points to the newly added `.gitignore` line.
-
-- [ ] **Step 4: Verify tracked source remains otherwise unchanged**
-
-```powershell
-git diff -- .gitignore docs/superpowers docs/repository-cleanup
-```
-
-Expected: only approved cleanup documentation, manifest, and `.gitignore` changes.
-
 ---
 
-### Task 4: Commit the audit trail before branch deletion
+### Task 4: Commit the permanent cleanup audit trail
 
 **Files:**
-- Include: `docs/superpowers/specs/2026-09-02-repository-consolidation-design.md`
-- Include: `docs/superpowers/plans/2026-09-02-repository-consolidation.md`
-- Include: `docs/repository-cleanup/pre-cleanup-branches-20260902.tsv`
-- Include: `.gitignore`
+- `.gitignore`
+- `docs/superpowers/specs/2026-09-02-repository-consolidation-design.md`
+- `docs/superpowers/plans/2026-09-02-repository-consolidation.md`
+- `docs/repository-cleanup/pre-cleanup-branches-20260902.tsv`
 
 **Interfaces:**
-- Consumes: verified bundle, branch manifest, and `.gitignore` GREEN check.
-- Produces: one cleanup-source branch that contains the permanent audit trail before stale refs disappear.
+- Consumes: verified archive, manifest, and `.gitignore` GREEN.
+- Produces: one reviewable source-only cleanup branch.
 
-- [ ] **Step 1: Verify no trading/runtime files are in the diff**
+- [ ] **Step 1: Use one exact execution branch**
+
+```powershell
+$cleanupBranch = 'chore/repo-consolidation-final-20260902-v9'
+git switch -C $cleanupBranch origin/$cleanupBranch
+```
+
+Expected: this is the only cleanup branch intentionally kept through PR merge; every other cleanup-attempt branch is a deletion candidate.
+
+- [ ] **Step 2: Verify diff path allowlist**
 
 ```powershell
 $allowed = @(
@@ -227,175 +189,138 @@ $allowed = @(
 )
 $changed = @(git status --porcelain | ForEach-Object { $_.Substring(3) })
 $unexpected = @($changed | Where-Object { $_ -notin $allowed })
-if ($unexpected.Count -ne 0) { throw "STOP: unexpected cleanup diff: $($unexpected -join ', ')" }
+if ($unexpected.Count) { throw "STOP: unexpected paths=$($unexpected -join ',')" }
 ```
 
-Expected: no unexpected paths.
-
-- [ ] **Step 2: Commit cleanup audit trail on the active consolidation branch**
+- [ ] **Step 3: Commit and push**
 
 ```powershell
 git add .gitignore docs/superpowers/specs/2026-09-02-repository-consolidation-design.md docs/superpowers/plans/2026-09-02-repository-consolidation.md docs/repository-cleanup/pre-cleanup-branches-20260902.tsv
-git commit -m "chore: consolidate repository governance artifacts"
+git commit -m 'chore: consolidate repository governance artifacts'
+git push -u origin $cleanupBranch
 ```
 
-Expected: one source-only commit; no runtime deployment.
-
-- [ ] **Step 3: Push the consolidation branch**
-
-```powershell
-git push -u origin HEAD
-```
-
-Expected: remote consolidation branch points to the exact local commit.
+Expected: source-only commit; runtime untouched.
 
 ---
 
-### Task 5: Delete stale remote branches using the manifest as the deletion source
+### Task 5: Delete stale remote branches from the manifest
 
 **Files:**
 - Read: `docs/repository-cleanup/pre-cleanup-branches-20260902.tsv`
-- External backup must already be verified: `F:\Project\XAUUSD_AI_MASTER\archive\xauusd-ai-master-pre-cleanup-20260902.bundle`
 
 **Interfaces:**
-- Consumes: archive gate, closed stale PRs, and committed manifest.
-- Produces: remote namespace reduced to `main` plus the one active consolidation branch until its PR is merged.
+- Consumes: Task 1 archive gate and Task 2 closed PRs.
+- Produces: remote namespace reduced to `main` plus the active cleanup branch.
 
-- [ ] **Step 1: Build deletion candidates from the manifest, never from ad-hoc branch-name guesses**
+- [ ] **Step 1: Build candidates only from the manifest**
 
 ```powershell
-$manifest = 'docs\repository-cleanup\pre-cleanup-branches-20260902.tsv'
-$activeCleanup = (git branch --show-current).Trim()
-$rows = Import-Csv -LiteralPath $manifest -Delimiter "`t"
-$keep = @('main', $activeCleanup)
-$delete = @($rows.branch | Where-Object { $_ -notin $keep })
-if ($delete.Count -lt 200) { throw "STOP: deletion candidate count unexpectedly small: $($delete.Count)" }
+$cleanupBranch = 'chore/repo-consolidation-final-20260902-v9'
+$rows = Import-Csv 'docs\repository-cleanup\pre-cleanup-branches-20260902.tsv' -Delimiter "`t"
+$delete = @($rows.branch | Where-Object { $_ -notin @('main',$cleanupBranch) })
+if ($delete.Count -lt 200) { throw "STOP: suspicious delete count=$($delete.Count)" }
 Write-Host "DELETE_CANDIDATE_COUNT=$($delete.Count)"
 ```
 
-Expected: all pre-cleanup branches except `main` and the currently active cleanup branch are candidates, including historical `red`, `impl`, review, feature, fix, test, codex, phase, sprint, temporary, and obsolete cleanup-attempt branches.
-
-- [ ] **Step 2: Dry-run print the exact deletion list**
+- [ ] **Step 2: Dry-run the exact list and assert `main` is absent**
 
 ```powershell
+if ($delete -contains 'main') { throw 'STOP: main entered delete set' }
 $delete | Sort-Object | ForEach-Object { Write-Host "DELETE_REMOTE_BRANCH=$_" }
 ```
 
-Expected: `main` is absent; the active cleanup branch is absent.
-
-- [ ] **Step 3: Delete each stale remote branch and fail on any unexpected Git error**
+- [ ] **Step 3: Delete every stale remote ref**
 
 ```powershell
 foreach ($branch in $delete) {
   git push origin --delete $branch
-  if ($LASTEXITCODE -ne 0) { throw "STOP: failed deleting remote branch $branch" }
+  if ($LASTEXITCODE -ne 0) { throw "STOP: delete failed for $branch" }
 }
 ```
 
-Expected: each requested stale remote ref is removed; commit history remains in the external bundle and GitHub PR/commit history where referenced.
-
-- [ ] **Step 4: Verify remote branch namespace after deletion**
+- [ ] **Step 4: Verify only `main` and the active cleanup branch remain**
 
 ```powershell
 git fetch origin --prune
-$remaining = @(git ls-remote --heads origin | ForEach-Object { ($_ -split '\s+')[1] -replace '^refs/heads/','' })
-$unexpected = @($remaining | Where-Object { $_ -notin @('main', $activeCleanup) })
-if ($unexpected.Count -ne 0) { throw "STOP: unexpected remote branches remain: $($unexpected -join ', ')" }
-Write-Host "REMOTE_BRANCH_CLEANUP=PASS"
+$remaining = @(git ls-remote --heads origin | ForEach-Object { (($_ -split '\s+')[1]) -replace '^refs/heads/','' })
+$unexpected = @($remaining | Where-Object { $_ -notin @('main',$cleanupBranch) })
+if ($unexpected.Count) { throw "STOP: branches remain=$($unexpected -join ',')" }
+Write-Host 'REMOTE_BRANCH_CLEANUP=PASS'
 ```
-
-Expected: only `main` and the active consolidation branch remain.
 
 ---
 
-### Task 6: Open, verify, and merge the consolidation PR
+### Task 6: Merge the source-only consolidation PR
 
-**Files:**
-- `.gitignore`
-- cleanup design/plan/manifest docs only.
+**Files:** only the four allowlisted paths from Task 4.
 
 **Interfaces:**
-- Consumes: cleaned branch namespace and source-only consolidation branch.
-- Produces: permanent audit trail and runtime-artifact ignore rule on `main`.
+- Consumes: cleaned remote namespace and active cleanup branch.
+- Produces: permanent audit trail plus canonical runtime-artifact ignore rule on `main`.
 
-- [ ] **Step 1: Open a PR from the active cleanup branch to `main`**
+- [ ] **Step 1: Open PR `chore: consolidate XAUUSD repository governance` from `chore/repo-consolidation-final-20260902-v9` to `main`**
 
-PR title:
-
-```text
-chore: consolidate XAUUSD repository governance
-```
-
-PR body must state:
+PR body:
 
 ```text
-Source-only repository hygiene. Adds the approved consolidation design/plan, pre-cleanup branch/SHA manifest, and the canonical ignore rule for Sideway runtime artifacts. All stale pre-cleanup PRs were closed and stale remote branches were deleted only after a verified external Git bundle was created. No trading/runtime mutation is part of this PR.
+Source-only repository hygiene. Adds the approved consolidation design/plan, pre-cleanup branch/SHA manifest, and the canonical ignore rule for Sideway runtime artifacts. Stale pre-cleanup PRs were closed and stale remote branches were deleted only after a verified external Git bundle was created. No trading/runtime mutation is part of this PR.
 ```
 
-- [ ] **Step 2: Require the PR head to be mergeable and CI to be GREEN**
+- [ ] **Step 2: Require exact-head mergeability and fresh CI GREEN**
 
-Expected: no failed required workflows caused by the cleanup diff. Do not waive existing regression failures.
+Expected: no waived regression failures.
 
-- [ ] **Step 3: Squash merge the cleanup PR**
+- [ ] **Step 3: Squash merge**
 
-Expected: `main` advances by one source-only cleanup commit; previously deployed runtime remains unchanged because `RUNTIME_DEPLOYMENT=NONE`.
+Expected: `main` advances by one source-only cleanup commit; deployed runtime remains unchanged because `RUNTIME_DEPLOYMENT=NONE`.
 
-- [ ] **Step 4: Delete the now-merged active consolidation branch**
-
-Run locally after switching to `main`:
+- [ ] **Step 4: Delete the final cleanup branch**
 
 ```powershell
 git switch main
 git pull --ff-only
-$cleanupBranch = '<the branch used by this execution>'
-git push origin --delete $cleanupBranch
-git branch -D $cleanupBranch
+git push origin --delete chore/repo-consolidation-final-20260902-v9
+git branch -D chore/repo-consolidation-final-20260902-v9
 ```
 
-Replace `<the branch used by this execution>` with the exact branch printed by `git branch --show-current` before the PR was opened; do not infer it later.
-
-Expected: remote branch namespace now contains only `main`.
+Expected: no cleanup branch remains remotely.
 
 ---
 
-### Task 7: Final verification and handoff to the separate workflow-audit plan
+### Task 7: Final verification and workflow/governance handoff
 
-**Files:**
-- Read-only verification of repository metadata and cleanup artifacts.
+**Files:** read-only verification.
 
 **Interfaces:**
-- Consumes: merged consolidation PR and deleted cleanup branch.
-- Produces: canonical clean repository state ready for the second workflow-only audit.
+- Consumes: merged cleanup PR.
+- Produces: main-only branch namespace and an explicit handoff to workflow/ruleset cleanup.
 
-- [ ] **Step 1: Verify only `main` remains remotely**
+- [ ] **Step 1: Verify remote heads are exactly `main`**
 
 ```powershell
-$remaining = @(git ls-remote --heads origin | ForEach-Object { ($_ -split '\s+')[1] -replace '^refs/heads/','' })
-if ($remaining.Count -ne 1 -or $remaining[0] -ne 'main') { throw "STOP: final remote branch set is not main-only: $($remaining -join ', ')" }
+$remaining = @(git ls-remote --heads origin | ForEach-Object { (($_ -split '\s+')[1]) -replace '^refs/heads/','' })
+if ($remaining.Count -ne 1 -or $remaining[0] -ne 'main') { throw "STOP: final branches=$($remaining -join ',')" }
 Write-Host 'REMOTE_BRANCH_FINAL=MAIN_ONLY'
 ```
 
-- [ ] **Step 2: Verify stale PR count is zero**
-
-Expected: no pre-cleanup PR remains open.
-
-- [ ] **Step 3: Verify the external archive still validates after cleanup**
+- [ ] **Step 2: Verify bundle still validates**
 
 ```powershell
 git bundle verify 'F:\Project\XAUUSD_AI_MASTER\archive\xauusd-ai-master-pre-cleanup-20260902.bundle'
-if ($LASTEXITCODE -ne 0) { throw 'STOP: post-cleanup archive verification failed' }
+if ($LASTEXITCODE -ne 0) { throw 'STOP: archive verification failed' }
 Write-Host 'POST_CLEANUP_ARCHIVE_VERIFY=PASS'
 ```
 
-- [ ] **Step 4: Verify repository-level runtime artifact ignore rule**
+- [ ] **Step 3: Verify canonical ignore rule**
 
 ```powershell
 git check-ignore -q scripts/.phase7c-sideway-runtime-99999.mjs
-if ($LASTEXITCODE -ne 0) { throw 'STOP: canonical runtime artifact ignore rule missing' }
+if ($LASTEXITCODE -ne 0) { throw 'STOP: canonical runtime artifact ignore missing' }
 Write-Host 'RUNTIME_ARTIFACT_IGNORE_FINAL=PASS'
 ```
 
-- [ ] **Step 5: Record final safety state**
+- [ ] **Step 4: Verify stale PR count is zero and record safety state**
 
 Expected checkpoint:
 
@@ -406,7 +331,8 @@ REMOTE_BRANCH_FINAL=MAIN_ONLY
 STALE_PRE_CLEANUP_PRS=0
 ARCHIVE_BUNDLE=VERIFIED
 BRANCH_MANIFEST=PRESERVED_ON_MAIN
-WORKFLOW_AUDIT=DEFERRED_TO_SEPARATE_PLAN
+WORKFLOW_DELETION=DEFERRED
+MAIN_PROTECTION_RULESET=DEFERRED_UNTIL_REQUIRED_CI_MAP_IS_CANONICAL
 ORDER_MUTATION=NONE
 LIVE_TEST_ORDER=NONE
 MODE_CHANGE=NONE
@@ -417,4 +343,4 @@ WEB_API_RESTART=NONE
 RUNTIME_DEPLOYMENT=NONE
 ```
 
-The next plan audits `.github/workflows` by contract coverage and removes only redundant/obsolete workflows after retained regressions are proven GREEN.
+The next plan maps `.github/workflows` to live contracts, removes only redundant/obsolete workflows, proves retained regression coverage GREEN, and then enables an appropriate `main` protection/ruleset against the retained required checks.
