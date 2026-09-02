@@ -12,6 +12,9 @@ on:
       - 'scripts/run-phase7c-trend-controller.mjs'
       - 'scripts/phase7c-trend-mode-gate.mjs'
       - 'scripts/phase7c-trend-mode-gate.test.mjs'
+      - 'scripts/phase7c-trend-entry-attribution.mjs'
+      - 'scripts/phase7c-trend-entry-attribution.test.mjs'
+      - 'scripts/phase7c-decision-audit.mjs'
       - 'scripts/phase7c-trend-entry-block.mjs'
       - 'scripts/phase7c-trend-entry-block-classification.test.mjs'
       - 'scripts/phase7c-decision-monitor.test.mjs'
@@ -26,6 +29,9 @@ on:
       - 'scripts/run-phase7c-trend-controller.mjs'
       - 'scripts/phase7c-trend-mode-gate.mjs'
       - 'scripts/phase7c-trend-mode-gate.test.mjs'
+      - 'scripts/phase7c-trend-entry-attribution.mjs'
+      - 'scripts/phase7c-trend-entry-attribution.test.mjs'
+      - 'scripts/phase7c-decision-audit.mjs'
       - 'scripts/phase7c-trend-entry-block.mjs'
       - 'scripts/phase7c-trend-entry-block-classification.test.mjs'
       - 'scripts/phase7c-decision-monitor.test.mjs'
@@ -56,6 +62,8 @@ jobs:
         run: pnpm --dir apps/api exec tsx ../../scripts/phase7c-decision-monitor.test.mjs
       - name: Run Trend AUTO reversal gate tests
         run: node --test scripts/phase7c-trend-mode-gate.test.mjs
+      - name: Run Trend entry regime attribution tests
+        run: node --test scripts/phase7c-trend-entry-attribution.test.mjs
       - name: Run Trend expected mode-block classification regression
         run: node --test scripts/phase7c-trend-entry-block-classification.test.mjs
       - name: Parse Trend controller gate
