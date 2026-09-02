@@ -1,3 +1,5 @@
+import { verifyPhase7CCanonicalDailyRecoverySubmission } from "./phase7c-canonical-daily-recovery-executor.mjs";
+
 const ACCOUNT_MODES = new Set(["DEMO", "LIVE"]);
 
 export function truthyPhase7C(value) {
@@ -109,6 +111,7 @@ function requestInfo(input, init) {
     method: String(init?.method ?? requestMethod ?? "GET").toUpperCase(),
     url: rawUrl,
     headers: new Headers(init?.headers ?? (isRequest ? input.headers : undefined)),
+    body: typeof init?.body === "string" ? init.body : null,
   };
 }
 
@@ -175,6 +178,29 @@ export function installPhase7CAccountOrderFetchGuard({
         console.warn(`PHASE7C_${label}_ACCOUNT_ENTRY_BLOCKED=${result.reason}|MODE=${runtime.accountMode}`);
         return blockedAccountResponse(runtime, result);
       }
+
+      try {
+        const canonical = await verifyPhase7CCanonicalDailyRecoverySubmission({
+          strategy: label,
+          requestBody: request.body,
+          fetchImpl: nativeFetch,
+          env,
+        });
+        console.log(
+          `PHASE7C_${label}_CANONICAL_DAILY_RECOVERY_FINAL_GATE=PASS|DAILY_MODE=${canonical.canonicalDailyMode}|DAILY_NET_PNL=${canonical.dailyNetPnl}`,
+        );
+      } catch (error) {
+        const canonicalResult = {
+          allowed: false,
+          reason: "CANONICAL_DAILY_RECOVERY_FINAL_GATE_FAIL_CLOSED",
+          detail: error instanceof Error ? error.message : String(error),
+        };
+        console.error(
+          `PHASE7C_${label}_ACCOUNT_ENTRY_BLOCKED=${canonicalResult.reason}|DETAIL=${canonicalResult.detail}`,
+        );
+        return blockedAccountResponse(runtime, canonicalResult);
+      }
+
       console.log(`PHASE7C_${label}_ACCOUNT_ENTRY_GATE=PASS|MODE=${runtime.accountMode}`);
       return nativeFetch(input, init);
     } catch (error) {
