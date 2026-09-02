@@ -45,19 +45,26 @@ function normalizeCanonicalView(view, { strategy, volume }) {
 
   const preview = view.preview;
   if (!preview || typeof preview !== "object") throw new Error("Canonical Daily Recovery preview is unavailable.");
-  const actualVolume = finiteNumber(preview.actualVolume, "preview.actualVolume");
+  const actualVolume = finiteNumber(preview.volume, "preview.volume");
   if (Math.abs(actualVolume - volume) > 1e-9) {
     throw new Error(`Canonical Daily Recovery volume mismatch: requested=${volume};actual=${actualVolume}.`);
   }
 
-  const tpDistance = finiteNumber(preview.tpDistance, "preview.tpDistance");
-  const rawTpDistance = finiteNumber(preview.rawTpDistance, "preview.rawTpDistance");
   const requiredUsd = finiteNumber(preview.requiredUsd, "preview.requiredUsd");
-  if (dailyMode === "RECOVERY_TP" && !(tpDistance > 0)) {
-    throw new Error("Canonical Daily Recovery recovery TP distance is invalid.");
-  }
-  if (dailyMode === "NORMAL" && (tpDistance !== 0 || rawTpDistance !== 0 || requiredUsd !== 0)) {
-    throw new Error("Canonical Daily Recovery positive/flat day returned non-zero recovery preview.");
+  let rawTpDistance;
+  let tpDistance;
+  if (dailyMode === "RECOVERY_TP") {
+    rawTpDistance = finiteNumber(preview.rawTpDistance, "preview.rawTpDistance");
+    tpDistance = finiteNumber(preview.tpDistance, "preview.tpDistance");
+    if (!(requiredUsd > 0) || !(rawTpDistance > 0) || !(tpDistance > 0)) {
+      throw new Error("Canonical Daily Recovery recovery preview is invalid.");
+    }
+  } else {
+    if (preview.rawTpDistance !== null || preview.tpDistance !== null || requiredUsd !== 0) {
+      throw new Error("Canonical Daily Recovery positive/flat day returned a recovery preview.");
+    }
+    rawTpDistance = 0;
+    tpDistance = 0;
   }
 
   const targetNetPnl = finiteNumber(view?.strategy?.targetNetUsd, "strategy.targetNetUsd");
