@@ -1,0 +1,42 @@
+name: Phase7C M5 Structural Trailing Stop CI
+
+on:
+  push:
+    branches:
+      - feat/phase7c-m5-structural-trailing-stop
+    paths:
+      - "scripts/phase7c-m5-structural-trailing-stop.mjs"
+      - "scripts/phase7c-stop-monotonicity.mjs"
+      - "scripts/run-phase7b-demo-controller.ts"
+      - "scripts/run-phase7c-sideway-controller.mjs"
+      - "scripts/test-phase7c-m5-structural-trailing-stop.mjs"
+      - ".github/workflows/phase7c-m5-structural-trailing-stop-ci.yml"
+  pull_request:
+    paths:
+      - "scripts/phase7c-m5-structural-trailing-stop.mjs"
+      - "scripts/phase7c-stop-monotonicity.mjs"
+      - "scripts/run-phase7b-demo-controller.ts"
+      - "scripts/run-phase7c-sideway-controller.mjs"
+      - "scripts/test-phase7c-m5-structural-trailing-stop.mjs"
+      - ".github/workflows/phase7c-m5-structural-trailing-stop-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  m5-structural-trailing-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: M5 structural trailing stop contract
+        run: node scripts/test-phase7c-m5-structural-trailing-stop.mjs
+      - name: Parse JavaScript helpers and Sideway controller
+        run: |
+          node --check scripts/phase7c-m5-structural-trailing-stop.mjs
+          node --check scripts/run-phase7c-sideway-controller.mjs
