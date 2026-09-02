@@ -68,7 +68,7 @@ export class Phase7BPullbackEntryService {
     if (!input.m5SupertrendAligned) {
       return this.terminal("PULLBACK_M5_ST_INVALIDATED", structuralStopDistance, pending.structuralStopPrice);
     }
-    if (input.timestamp > pending.expiresAt) {
+    if (input.timestamp >= pending.expiresAt) {
       return this.terminal("PULLBACK_EXPIRED", structuralStopDistance, pending.structuralStopPrice);
     }
     if (!(structuralStopDistance > 0)) {
