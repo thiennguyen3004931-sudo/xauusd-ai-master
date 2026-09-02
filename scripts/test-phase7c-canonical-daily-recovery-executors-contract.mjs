@@ -6,12 +6,18 @@ import {
   transformPhase7CSidewayCanonicalDailyRecoverySource,
   transformPhase7CTrendCanonicalDailyRecoverySource,
 } from "./phase7c-canonical-daily-recovery-source-adapter.mjs";
+import {
+  fetchPhase7CCanonicalDailyRecoveryPlan,
+  registerPhase7CCanonicalDailyRecoverySubmission,
+  verifyPhase7CCanonicalDailyRecoverySubmission,
+} from "./phase7c-canonical-daily-recovery-executor.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), "utf8");
 
 const trendAccountMode = read("scripts/run-phase7c-trend-account-mode.mjs");
 const sidewayAccountMode = read("scripts/run-phase7c-sideway-account-mode.mjs");
+const sidewayLocked = read("scripts/run-phase7c-sideway-locked.mjs");
 const accountGuard = read("scripts/phase7c-account-runtime-guard.mjs");
 const canonicalExecutor = read("scripts/phase7c-canonical-daily-recovery-executor.mjs");
 const trendLegacy = read("scripts/run-phase7b-demo-controller.ts");
@@ -24,6 +30,15 @@ assert.ok(
 assert.ok(
   sidewayAccountMode.includes("transformPhase7CSidewayCanonicalDailyRecoverySource"),
   "Sideway DEMO and LIVE runtime must canonicalize Daily Recovery planning before execution.",
+);
+assert.ok(
+  sidewayLocked.includes("installPhase7CAccountOrderFetchGuard") &&
+    sidewayLocked.indexOf("installPhase7CAccountOrderFetchGuard") < sidewayLocked.indexOf("const nativeFetch = globalThis.fetch.bind(globalThis)"),
+  "Sideway account/canonical order guard must be installed before the execution-lock wrapper captures nativeFetch.",
+);
+assert.ok(
+  sidewayLocked.includes("PHASE7C_SIDEWAY_ACCOUNT_AND_CANONICAL_GATE=UNDER_EXECUTION_LOCK"),
+  "Sideway must document that final account/canonical verification is under the shared execution lock.",
 );
 
 const transformedTrend = transformPhase7CTrendCanonicalDailyRecoverySource(trendLegacy);
@@ -69,6 +84,107 @@ assert.ok(
 assert.ok(
   accountGuard.includes("CANONICAL_DAILY_RECOVERY_FINAL_GATE_FAIL_CLOSED"),
   "Canonical Daily Recovery unavailable/malformed/mismatched at final gate must return a fail-closed block.",
+);
+
+function jsonResponse(payload, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    async text() { return JSON.stringify(payload); },
+  };
+}
+
+function canonicalView({ dailyNetPnl, volume = 0.03, dayStartTime = 1_725_216_000_000 } = {}) {
+  const recovery = dailyNetPnl < 0;
+  return {
+    source: "MT5_LIVE_READ_ONLY",
+    readOnly: true,
+    symbol: "XAUUSD",
+    dayStartTime,
+    historyEndTime: dayStartTime + 60_000,
+    dealCount: 2,
+    dailyNetPnl,
+    dailyMode: recovery ? "RECOVERY_TP" : "NORMAL",
+    nextEntryManagement: recovery ? "FULL_POSITION_ADAPTIVE_TP_6_TO_10" : "REGIME_NATIVE",
+    preview: {
+      volume,
+      cashPerPriceUnitPerLot: 100,
+      requiredUsd: recovery ? Math.abs(dailyNetPnl) + 1 : 0,
+      rawTpDistance: recovery ? 7 : null,
+      tpDistance: recovery ? 7 : null,
+      canRecoverInOneTrade: true,
+    },
+    strategy: {
+      trendMagicNumber: 270715,
+      sidewayMagicNumber: 270714,
+      configuredMagicNumbers: [270715, 270714],
+      targetNetUsd: 1,
+      minTpDistance: 6,
+      maxTpDistance: 10,
+      lotEscalation: false,
+      forcedEntry: false,
+      forceRegime: false,
+      newPositionsOnly: true,
+    },
+  };
+}
+
+const positivePlan = await fetchPhase7CCanonicalDailyRecoveryPlan({
+  strategy: "TREND",
+  symbol: "XAUUSD",
+  volume: 0.03,
+  fetchImpl: async () => jsonResponse(canonicalView({ dailyNetPnl: 12.5 })),
+});
+assert.equal(positivePlan.mode, "TREND");
+assert.equal(positivePlan.canonicalDailyMode, "NORMAL");
+assert.equal(positivePlan.dailyNetPnl, 12.5);
+assert.equal(positivePlan.tpDistance, 0);
+
+const negativePlan = await fetchPhase7CCanonicalDailyRecoveryPlan({
+  strategy: "SIDEWAY",
+  symbol: "XAUUSD",
+  volume: 0.03,
+  fetchImpl: async () => jsonResponse(canonicalView({ dailyNetPnl: -20 })),
+});
+assert.equal(negativePlan.mode, "RECOVERY_TP");
+assert.equal(negativePlan.canonicalDailyMode, "RECOVERY_TP");
+assert.equal(negativePlan.tpDistance, 7);
+
+registerPhase7CCanonicalDailyRecoverySubmission({
+  strategy: "TREND",
+  clientOrderId: "positive-day-order",
+  volume: 0.03,
+  plan: positivePlan,
+});
+await verifyPhase7CCanonicalDailyRecoverySubmission({
+  strategy: "TREND",
+  requestBody: JSON.stringify({ clientOrderId: "positive-day-order", symbol: "XAUUSD", volume: 0.03 }),
+  fetchImpl: async () => jsonResponse(canonicalView({ dailyNetPnl: 12.5 })),
+});
+
+registerPhase7CCanonicalDailyRecoverySubmission({
+  strategy: "SIDEWAY",
+  clientOrderId: "pnl-flipped-before-send",
+  volume: 0.03,
+  plan: negativePlan,
+});
+await assert.rejects(
+  verifyPhase7CCanonicalDailyRecoverySubmission({
+    strategy: "SIDEWAY",
+    requestBody: JSON.stringify({ clientOrderId: "pnl-flipped-before-send", symbol: "XAUUSD", volume: 0.03 }),
+    fetchImpl: async () => jsonResponse(canonicalView({ dailyNetPnl: 3 })),
+  }),
+  /changed before SEND/,
+);
+
+await assert.rejects(
+  fetchPhase7CCanonicalDailyRecoveryPlan({
+    strategy: "TREND",
+    symbol: "XAUUSD",
+    volume: 0.03,
+    fetchImpl: async () => jsonResponse({ error: "unavailable" }, 503),
+  }),
+  /HTTP 503/,
 );
 
 console.log("PHASE7C_CANONICAL_DAILY_RECOVERY_EXECUTORS_CONTRACT=PASS");
