@@ -2,6 +2,16 @@ import type { Mt5BridgeDeal } from "@xauusd/mt5-broker";
 import { getMt5Telemetry } from "./mt5.service";
 import { getPhase7CCanonicalDeals } from "./phase7c-canonical-deal-ledger.service";
 import { resolvePhase7CDailyRecoveryMagicNumbers } from "./phase7c-daily-recovery-view.service";
+import {
+  enrichPerformanceTradesWithRegimeAttribution,
+  loadPhase7CPerformanceRegimeAudit,
+  loadPhase7CPerformanceRegimeAuditFromDirectory,
+} from "./phase7c-performance-regime-attribution.service";
+
+export {
+  enrichPerformanceTradesWithRegimeAttribution,
+  loadPhase7CPerformanceRegimeAuditFromDirectory,
+} from "./phase7c-performance-regime-attribution.service";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const PERFORMANCE_CARRY_IN_DAYS = 365;
@@ -42,15 +52,28 @@ export interface Mt5PerformanceTrade {
   brokerHour: number;
   weekday: string;
   exitReason: "UNKNOWN";
+  regime: string | null;
+  regimeConfidence: number | null;
+  regimeAttribution: "MATCHED" | "UNMATCHED";
+  regimeSource: string | null;
 }
 
 export interface Mt5PerformanceBucket {
   key: string;
   label: string;
   totalTrades: number;
+  wins: number;
+  losses: number;
+  breakeven: number;
   netPnl: number;
+  grossProfit: number;
+  grossLoss: number;
   winRatePercent: number;
   profitFactor: number | null;
+  expectancy: number;
+  averageWin: number;
+  averageLoss: number;
+  maxConsecutiveLosses: number;
 }
 
 export interface Mt5PerformanceRecommendation {
@@ -99,6 +122,8 @@ export interface Mt5PerformanceSnapshot {
     weekday: Mt5PerformanceBucket[];
     hour: Mt5PerformanceBucket[];
     ownership: Mt5PerformanceBucket[];
+    regime: Mt5PerformanceBucket[];
+    strategyRegime: Mt5PerformanceBucket[];
   };
   recommendations: Mt5PerformanceRecommendation[];
   notes: string[];
@@ -217,6 +242,10 @@ function reconstructTrades(deals: readonly Mt5BridgeDeal[], trendMagic: number, 
         brokerHour: hour,
         weekday: WEEKDAYS[day] ?? String(day),
         exitReason: "UNKNOWN",
+        regime: null,
+        regimeConfidence: null,
+        regimeAttribution: "UNMATCHED",
+        regimeSource: null,
       });
       active = null;
     };
@@ -320,6 +349,27 @@ function buildEquityCurve(trades: readonly Mt5PerformanceTrade[], startingBalanc
     });
 }
 
+function performanceBucket(key: string, rows: readonly Mt5PerformanceTrade[]): Mt5PerformanceBucket {
+  const metrics = calculateMetrics(rows);
+  return {
+    key,
+    label: key,
+    totalTrades: metrics.totalTrades,
+    wins: metrics.wins,
+    losses: metrics.losses,
+    breakeven: metrics.breakeven,
+    netPnl: metrics.netPnl,
+    grossProfit: metrics.grossProfit,
+    grossLoss: metrics.grossLoss,
+    winRatePercent: metrics.winRatePercent,
+    profitFactor: metrics.profitFactor,
+    expectancy: metrics.expectancy,
+    averageWin: metrics.averageWin,
+    averageLoss: metrics.averageLoss,
+    maxConsecutiveLosses: metrics.maxConsecutiveLosses,
+  };
+}
+
 function bucket(trades: readonly Mt5PerformanceTrade[], keyOf: (trade: Mt5PerformanceTrade) => string): Mt5PerformanceBucket[] {
   const groups = new Map<string, Mt5PerformanceTrade[]>();
   for (const trade of trades) {
@@ -329,11 +379,22 @@ function bucket(trades: readonly Mt5PerformanceTrade[], keyOf: (trade: Mt5Perfor
     groups.set(key, group);
   }
   return [...groups.entries()]
-    .map(([key, rows]) => {
-      const metrics = calculateMetrics(rows);
-      return { key, label: key, totalTrades: metrics.totalTrades, netPnl: metrics.netPnl, winRatePercent: metrics.winRatePercent, profitFactor: metrics.profitFactor };
-    })
+    .map(([key, rows]) => performanceBucket(key, rows))
     .sort((a, b) => b.totalTrades - a.totalTrades || a.label.localeCompare(b.label));
+}
+
+function regimeKey(trade: Mt5PerformanceTrade): string {
+  return trade.regimeAttribution === "MATCHED" && trade.regime ? trade.regime : "UNMATCHED";
+}
+
+export function buildPerformanceRegimeBreakdowns(trades: readonly Mt5PerformanceTrade[]) {
+  const systemTrades = trades.filter((trade) =>
+    trade.ownership === "SYSTEM" && (trade.strategy === "TREND" || trade.strategy === "SIDEWAY")
+  );
+  return {
+    regime: bucket(systemTrades, regimeKey),
+    strategyRegime: bucket(systemTrades, (trade) => `${trade.strategy} × ${regimeKey(trade)}`),
+  };
 }
 
 function recommendations(systemTrades: readonly Mt5PerformanceTrade[], accountMode: "DEMO" | "LIVE"): Mt5PerformanceRecommendation[] {
@@ -400,8 +461,10 @@ export async function getMt5PerformanceSnapshot(days = 90, symbol = "XAUUSD"): P
   if (!Number.isInteger(sidewayMagic) || sidewayMagic <= 0) throw new Error("Configured Sideway magic is invalid.");
   if (trendMagic === sidewayMagic) throw new Error("Trend and Sideway magic numbers must be distinct.");
 
-  const trades = reconstructTrades(deals, trendMagic, sidewayMagic)
+  const reconstructedTrades = reconstructTrades(deals, trendMagic, sidewayMagic)
     .filter((trade) => trade.closedAt >= fromMs && trade.closedAt < brokerNow);
+  const regimeAudit = await loadPhase7CPerformanceRegimeAudit(account.accountMode);
+  const trades = enrichPerformanceTradesWithRegimeAttribution(reconstructedTrades, regimeAudit);
   const currentBalance = telemetry.health.accountBalance;
   const accountWindowPnl = trades.reduce((sum, trade) => sum + trade.netPnl, 0);
   const startingBalance = typeof currentBalance === "number" && Number.isFinite(currentBalance) && currentBalance > 0
@@ -409,6 +472,7 @@ export async function getMt5PerformanceSnapshot(days = 90, symbol = "XAUUSD"): P
     : 10_000;
   const systemTrades = trades.filter((trade) => trade.ownership === "SYSTEM");
   const systemMetrics = calculateMetrics(systemTrades);
+  const regimeBreakdowns = buildPerformanceRegimeBreakdowns(systemTrades);
 
   return {
     source: "MT5_ACCOUNT_READ_ONLY",
@@ -442,21 +506,24 @@ export async function getMt5PerformanceSnapshot(days = 90, symbol = "XAUUSD"): P
     },
     trades: trades.slice(0, 250),
     breakdown: {
-      strategy: (["TREND", "SIDEWAY"] as const).map((strategy) => {
-        const metrics = calculateMetrics(systemTrades.filter((trade) => trade.strategy === strategy));
-        return { key: strategy, label: strategy, totalTrades: metrics.totalTrades, netPnl: metrics.netPnl, winRatePercent: metrics.winRatePercent, profitFactor: metrics.profitFactor };
-      }),
+      strategy: (["TREND", "SIDEWAY"] as const).map((strategy) =>
+        performanceBucket(strategy, systemTrades.filter((trade) => trade.strategy === strategy))
+      ),
       side: bucket(trades, (trade) => trade.side),
       session: bucket(trades, (trade) => trade.session),
       weekday: bucket(trades, (trade) => trade.weekday),
       hour: bucket(trades, (trade) => `${String(trade.brokerHour).padStart(2, "0")}:00`),
       ownership: bucket(trades, (trade) => trade.ownership),
+      regime: regimeBreakdowns.regime,
+      strategyRegime: regimeBreakdowns.strategyRegime,
     },
     recommendations: recommendations(systemTrades, account.accountMode),
     notes: [
       `Đang đọc lịch sử tài khoản ${account.accountMode} hiện tại theo chế độ read-only.`,
       "Account-wide metrics có thể gồm lệnh manual/external/validation.",
       `SYSTEM ownership dùng Trend magic ${trendMagic} và Sideway magic ${sidewayMagic}.`,
+      "Regime chỉ được gán từ authoritative entry audit; không có hoặc mơ hồ thì giữ UNMATCHED.",
+      "Không backfill regime lịch sử bằng suy đoán; Strategy×Regime chỉ dùng system-owned trades.",
       "Trang hiệu suất không đổi strategy, không gửi order và không mutate position.",
     ],
   };
