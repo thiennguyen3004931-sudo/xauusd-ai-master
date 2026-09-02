@@ -186,7 +186,7 @@ function assertCanonicalContext(text, {
   assert.match(text, new RegExp(`Lot[^\\n]*(?:${lot})`, "i"));
 }
 
-test("Trend lifecycle cards share canonical trade context and actual MT5 fill wins over signal entry", async () => {
+test("Trend lifecycle keeps full context for lifecycle cards while HOLD and M5 structure stay compact", async () => {
   const partialTimestamp = "2026-08-29T06:17:00.000Z";
   const events = [
     {
@@ -228,12 +228,14 @@ test("Trend lifecycle cards share canonical trade context and actual MT5 fill wi
       remainingVolume: 0.06,
     },
     {
-      type: "STRUCTURAL_SL_TIGHTEN",
+      type: "M5_STRUCTURAL_SL_TIGHTEN",
       timestamp: "2026-08-29T06:30:00.000Z",
       ticket: "TREND-LIFE-1",
       side: "BUY",
-      favorable: 12,
+      previousStopLoss: 2311.25,
       stopLoss: 2315.25,
+      structurePrice: 2316.25,
+      m5CloseTime: Date.parse("2026-08-29T06:30:00.000Z"),
     },
   ];
 
@@ -260,17 +262,34 @@ test("Trend lifecycle cards share canonical trade context and actual MT5 fill wi
   assert.equal(notifications.length, 5);
   for (const notification of notifications) {
     assert.equal(notification.route, "trade");
-    assertCanonicalContext(notification.text, {
+  }
+
+  for (const index of [0, 2, 3]) {
+    assertCanonicalContext(notifications[index].text, {
       regime: "TREND",
       ticket: "TREND-LIFE-1",
       entry: "2311.25",
       tp: "RUNNER M15",
-      lot: notification.text.includes("CHỐT 1/3") ? "0.06" : "0.09|0.06",
+      lot: notifications[index].text.includes("CHỐT 1/3") ? "0.06" : "0.09|0.06",
     });
   }
 
+  const hold = notifications[1].text;
+  assert.match(hold, /BUY · HOLD/);
+  assert.match(hold, /TREND-LIFE-1/);
+  assert.match(hold, new RegExp(HOLD_TREND.reason));
+  assert.doesNotMatch(hold, /PHASE 7C ·/);
+  assert.doesNotMatch(hold, /Regime:|Entry:|SL:|TP:|Lot:/);
+
+  const structure = notifications[4].text;
+  assert.match(structure, /BUY · SL → STRUCTURE M5/);
+  assert.match(structure, /TREND-LIFE-1/);
+  assert.match(structure, /2311\.25 → 2315\.25/);
+  assert.match(structure, /Dời StopLoss theo cấu trúc M5 đã xác nhận/);
+  assert.doesNotMatch(structure, /PHASE 7C ·/);
+  assert.doesNotMatch(structure, /Regime:|Entry:|TP:|Lot:/);
+
   assert.doesNotMatch(notifications[0].text, /2300(?:\.00)?/);
-  assert.match(notifications[1].text, new RegExp(HOLD_TREND.reason));
   assert.match(notifications[3].text, /Realized P&L[^\n]*\+\$4\.21/i);
   assert.doesNotMatch(notifications[3].text, /≈/);
   assert.doesNotMatch(notifications[3].text, /đang chờ MT5 deal/i);
