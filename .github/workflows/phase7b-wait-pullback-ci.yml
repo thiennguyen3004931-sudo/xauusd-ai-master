@@ -4,6 +4,19 @@ on:
   push:
     branches:
       - phase7b-wait-pullback-runtime
+      - fix/trend-intrabar-next-m15-pullback
+    paths:
+      - "packages/risk-engine/**"
+      - "scripts/run-phase7b-demo-controller.ts"
+      - "scripts/run-phase7b-wait-pullback-shadow.ts"
+      - "scripts/run-phase7b-wait-pullback-shadow-local.ps1"
+      - "scripts/upgrade-phase7b-wait-pullback-demo-local.ps1"
+      - "scripts/activate-phase7b-wait-pullback-demo-local.ps1"
+      - "scripts/summarize-phase7b-wait-pullback-journal-local.mjs"
+      - "scripts/apply-phase7b-wait-pullback-demo-controller-hook.mjs"
+      - "scripts/templates/phase7b-wait-pullback-entry-subsystem.ts.txt"
+      - "scripts/apply-trend-intrabar-pullback-temp.mjs"
+      - ".github/workflows/phase7b-wait-pullback-ci.yml"
   pull_request:
     paths:
       - "packages/risk-engine/**"
@@ -17,6 +30,9 @@ on:
       - "scripts/templates/phase7b-wait-pullback-entry-subsystem.ts.txt"
       - ".github/workflows/phase7b-wait-pullback-ci.yml"
 
+permissions:
+  contents: write
+
 jobs:
   risk-engine:
     runs-on: ubuntu-latest
@@ -24,6 +40,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -39,6 +57,16 @@ jobs:
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Apply Trend intrabar patch on feature push
+        if: github.event_name == 'push' && github.ref == 'refs/heads/fix/trend-intrabar-next-m15-pullback'
+        shell: bash
+        run: |
+          git merge-base --is-ancestor 1a15acee4b97602449bea38489fc1742273aa327 HEAD
+          node --check scripts/apply-trend-intrabar-pullback-temp.mjs
+          node scripts/apply-trend-intrabar-pullback-temp.mjs
+          git diff --check
+          git diff -- scripts/run-phase7b-demo-controller.ts packages/risk-engine/src/services/Phase7BPullbackEntryService.ts
 
       - name: Build risk-engine dependency graph
         run: pnpm --filter @xauusd/risk-engine... build
@@ -140,3 +168,16 @@ jobs:
           NODE
 
           rm -f .phase7b-controller-ci.ts .phase7b-controller-ci.ts.phase7b-wait-pullback.bak
+
+      - name: Commit tested Trend intrabar production patch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/fix/trend-intrabar-next-m15-pullback'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/run-phase7b-demo-controller.ts packages/risk-engine/src/services/Phase7BPullbackEntryService.ts
+          git diff --cached --check
+          git diff --cached --quiet && { echo "No production diff to commit"; exit 1; }
+          git commit -m "fix: evaluate Trend pullback intrabar until M15 expiry"
+          git push origin HEAD:fix/trend-intrabar-next-m15-pullback
+          echo "PATCH_COMMIT=$(git rev-parse HEAD)"
