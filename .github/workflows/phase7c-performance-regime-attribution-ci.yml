@@ -28,3 +28,7 @@ jobs:
         run: pnpm build
       - name: Run performance regime attribution contract tests
         run: pnpm --dir apps/api exec tsx src/services/mt5-performance.regime-attribution.test.ts
+      - name: Run canonical ledger startup regression
+        run: pnpm --dir apps/api exec tsx src/services/phase7c-canonical-deal-ledger.startup.test.ts
+      - name: Diff hygiene
+        run: git diff --check origin/main...HEAD
