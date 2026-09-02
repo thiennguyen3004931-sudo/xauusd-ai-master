@@ -17,6 +17,11 @@ function pendingPullbackBlock(): string {
 }
 
 describe("Phase7B Trend controller pending pullback contract", () => {
+  it("uses exactly the immediately following M15 candle as the pullback window", () => {
+    expect(controllerSource).toContain("const pullbackWaitMinutes = 15;");
+    expect(controllerSource).not.toContain("ZIQ_PHASE7B_PULLBACK_WAIT_MINUTES");
+  });
+
   it("re-evaluates an active pending pullback without waiting for a new closed M5 bar", () => {
     const block = pendingPullbackBlock();
 
