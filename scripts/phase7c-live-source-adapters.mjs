@@ -4,10 +4,15 @@ function requireMarker(source, marker, label) {
   }
 }
 
+function normalizeSourceLineEndings(source) {
+  return source.replace(/\r\n?/g, "\n");
+}
+
 const managedVolumeImport =
   'import { reconcileManagedVolume, remainingManagedPartialVolume } from "./phase7c-managed-volume-reconcile.mjs";\n';
 
 function transformTrendManagedVolume(source) {
+  source = normalizeSourceLineEndings(source);
   const mismatchMarker = `    if (Math.abs(managedPosition.volume - state.managed.expectedRemainingVolume) > spec.volumeStep / 2 + 1e-9) {
       journal("MANAGED_POSITION_VOLUME_MISMATCH", {
         ticket: managedPosition.ticket,
@@ -54,6 +59,7 @@ function transformTrendManagedVolume(source) {
 }
 
 function transformSidewayManagedVolume(source) {
+  source = normalizeSourceLineEndings(source);
   const reconciliationMarker =
     "    const reconciliation = reconcileManagedBrokerState(state.managed, managedPosition, spec);";
   const partialMarker = `    const closeVolume = oneThirdPartialVolume(
