@@ -35,17 +35,17 @@
 - Consumes: existing `Phase7BPullbackEntryService` and `scripts/run-phase7b-demo-controller.ts`.
 - Produces: regression contracts for exact expiry and intrabar controller wiring.
 
-- [ ] **Step 1: Write failing exact-boundary expiry test**
+- [x] **Step 1: Write failing exact-boundary expiry test**
 
 Assert `timestamp === pending.expiresAt` returns `PULLBACK_EXPIRED`.
 
-- [ ] **Step 2: Write failing controller contract tests**
+- [x] **Step 2: Write failing controller contract tests**
 
-Assert the pending block has no `latestM5.closeTime <= lastEvaluatedM5Close` early return, uses `quote.timestamp` for pullback lifecycle timing, and evaluates pullback lifecycle before generic strategy-condition entry gating.
+Assert the pending block has no `latestM5.closeTime <= lastEvaluatedM5Close` early return, uses `quote.timestamp` for pullback lifecycle timing, evaluates pullback lifecycle before generic strategy-condition entry gating, and fixes the wait window to exactly 15 minutes.
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
-Run via PR GitHub Actions because the execution container cannot resolve GitHub/package network dependencies. Expected: new tests fail against the current implementation.
+PR GitHub Actions reproduced the expected failures before production changes: exact-boundary expiry, fresh-M5 gate, lifecycle ordering, and configurable wait-window contract.
 
 ### Task 2: Minimal production fix
 
@@ -57,25 +57,25 @@ Run via PR GitHub Actions because the execution container cannot resolve GitHub/
 - Consumes: existing `Phase7BPendingPullback`, live quote, closed M15/M5 data, strategy-entry condition snapshot.
 - Produces: exact-boundary expiry and intrabar pending evaluation.
 
-- [ ] **Step 1: Make expiry boundary inclusive**
+- [x] **Step 1: Make expiry boundary inclusive**
 
 Change the service expiry comparison from `timestamp > expiresAt` to `timestamp >= expiresAt` without altering earlier structure/Supertrend invalidation precedence.
 
-- [ ] **Step 2: Remove the fresh-M5 gate from pending evaluation**
+- [x] **Step 2: Remove the fresh-M5 gate from pending evaluation**
 
 Do not mutate closed-bar signal-discovery behavior. Only the active pending branch becomes cycle-driven.
 
-- [ ] **Step 3: Use broker quote time for pending lifecycle**
+- [x] **Step 3: Use broker quote time for pending lifecycle**
 
 Validate `Number(quote.timestamp)` and pass it to `evaluatePullback` instead of `latestM5.closeTime`.
 
-- [ ] **Step 4: Evaluate terminal lifecycle before optional entry gating**
+- [x] **Step 4: Evaluate terminal lifecycle before optional entry gating**
 
 Run pullback evaluation after computing condition statuses but before `allEnabledPassed` entry gating. Clear pending on expiry/structure/Supertrend invalidation; keep waiting when distance is still wide or optional enabled entry conditions are not yet satisfied.
 
 - [ ] **Step 5: Verify GREEN**
 
-Run targeted Risk Engine tests and all affected GitHub Actions workflows.
+Targeted apply-run build/typecheck/tests/controller compatibility are GREEN. Require fresh PR workflows on the cleaned final head before marking this complete.
 
 ### Task 3: Review and finish branch
 
@@ -83,11 +83,11 @@ Run targeted Risk Engine tests and all affected GitHub Actions workflows.
 - Review only; no runtime/deploy mutation.
 
 **Interfaces:**
-- Consumes: GREEN feature branch.
+- Consumes: GREEN feature branch synced with `main@51f9b6e18591c857cbc8a572d8849de2bf0fd000`.
 - Produces: reviewed PR and squash merge only after fresh CI is GREEN.
 
-- [ ] **Step 1: Inspect branch diff against exact base `9c4f7d41df536ed59b1270f302e1a602676e2920`**
+- [ ] **Step 1: Inspect branch diff against exact synced base `51f9b6e18591c857cbc8a572d8849de2bf0fd000`**
 - [ ] **Step 2: Confirm no unrelated runtime/deploy/order changes**
-- [ ] **Step 3: Open non-draft PR**
+- [ ] **Step 3: Mark PR #212 non-draft after review**
 - [ ] **Step 4: Require fresh PR CI GREEN**
 - [ ] **Step 5: Squash merge and report exact new `main` SHA**
