@@ -28,6 +28,7 @@ if (-not (Test-Path -LiteralPath $TaskOwnershipLibrary)) {
 $ExpectedAccountMode = ConvertTo-Phase7CAccountMode $ExpectedAccountMode
 $ExpectedBrokerMode = if ($ExpectedAccountMode -eq "LIVE") { "real" } else { "demo" }
 $expectedMigrationRunnerSha256 = ""
+$trustedMigrationRunnerSha256 = ""
 if ($AllowOwnedTaskProvenanceMigration) {
   if ($ExpectedAccountMode -ne "LIVE") {
     throw "Owned task provenance migration verification is LIVE-only."
@@ -102,11 +103,25 @@ if ($null -ne $task) {
     Get-Phase7CExecutorTaskRunnerPath `
       -ProjectRoot $ProjectRoot
 
+  if ($AllowOwnedTaskProvenanceMigration) {
+    $trustedMigrationRunnerSha256 = Get-Phase7CTrustedGitFileSha256 `
+      -ProjectRoot $ProjectRoot `
+      -Path $expectedRunnerPath
+    if (-not [string]::Equals(
+      $expectedMigrationRunnerSha256,
+      $trustedMigrationRunnerSha256,
+      [System.StringComparison]::Ordinal
+    )) {
+      throw "Owned task provenance migration ExpectedRunnerSha256 does not match accepted Git HEAD bytes."
+    }
+    Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_MIGRATION_TRUSTED_GIT_SHA=PASS"
+  }
+
   $ownership = if ($AllowOwnedTaskProvenanceMigration) {
     Test-Phase7CExecutorTaskActionOwnership `
       -Actions $task.Actions `
       -ExpectedRunnerPath $expectedRunnerPath `
-      -ExpectedRunnerSha256 $expectedMigrationRunnerSha256
+      -ExpectedRunnerSha256 $trustedMigrationRunnerSha256
   } else {
     Test-Phase7CExecutorTaskActionOwnership `
       -Actions $task.Actions `
