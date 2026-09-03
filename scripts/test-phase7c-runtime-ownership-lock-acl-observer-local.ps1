@@ -8,6 +8,7 @@ foreach ($required in @($ProbeLibrary, $GuardLibrary)) {
     throw "Required production source missing: $required"
   }
 }
+. $ProbeLibrary
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
@@ -141,9 +142,27 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-. $ProbeLibrary
-$snapshot = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $WorkDir -HeartbeatMaxAgeMs 5000
-$json = $snapshot | ConvertTo-Json -Depth 5
+
+$payload = $null
+try {
+  . $ProbeLibrary
+  $snapshot = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $WorkDir -HeartbeatMaxAgeMs 5000
+  $payload = [ordered]@{
+    success = $true
+    snapshot = $snapshot
+  }
+} catch {
+  $payload = [ordered]@{
+    success = $false
+    errorType = $_.Exception.GetType().FullName
+    message = [string]$_.Exception.Message
+    fullyQualifiedErrorId = [string]$_.FullyQualifiedErrorId
+    category = [string]$_.CategoryInfo.Category
+    scriptStackTrace = [string]$_.ScriptStackTrace
+  }
+}
+
+$json = $payload | ConvertTo-Json -Depth 8
 [System.IO.File]::WriteAllText($OutputPath, $json, [System.Text.UTF8Encoding]::new($false))
 '@
 [System.IO.File]::WriteAllText($observerScript, $observerSource, [System.Text.UTF8Encoding]::new($false))
@@ -171,6 +190,17 @@ try {
     throw "SYSTEM broker owner is not alive. PID=$ownerPid"
   }
 
+  # Establish the exact healthy baseline before switching to the restricted
+  # observer. This proves the fixture has a live/fresh/PID-matched broker and
+  # a real HELD startup lock rather than merely synthesizing JSON fields.
+  $baseline = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $tempRoot -HeartbeatMaxAgeMs 5000
+  if (-not [bool]$baseline.brokerProcessAlive) { throw 'Fixture baseline broker process is not alive.' }
+  if (-not [bool]$baseline.brokerHeartbeatFresh) { throw 'Fixture baseline heartbeat is not fresh.' }
+  if (-not [bool]$baseline.brokerStatusPidMatch) { throw 'Fixture baseline broker PID does not match.' }
+  if ([string]$baseline.startupRunnerLockState -ne 'HELD') {
+    throw "Fixture baseline startup lock is not HELD. state=$($baseline.startupRunnerLockState)"
+  }
+
   $observerArguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -ProbeLibrary "{1}" -WorkDir "{2}" -OutputPath "{3}"' -f $observerScript, $probeCopy, $tempRoot, $observerOutputPath
   $observerAction = New-ScheduledTaskAction -Execute $powerShellExe -Argument $observerArguments
   $observerTrigger = New-ScheduledTaskTrigger -Once -At ([DateTime]::Now.AddMinutes(5))
@@ -186,21 +216,44 @@ try {
     if ([string]$task.State -eq 'Ready') {
       $info = Get-ScheduledTaskInfo -TaskName $observerTaskName -ErrorAction Stop
       if ([int]$info.LastTaskResult -ne 0 -and [int]$info.LastTaskResult -ne 267009) {
-        throw "NETWORK SERVICE observer failed. LastTaskResult=$($info.LastTaskResult)"
+        throw "NETWORK SERVICE observer failed before writing diagnostics. LastTaskResult=$($info.LastTaskResult)"
       }
     }
-    if ([DateTime]::UtcNow -ge $observerDeadline) { throw 'Timed out waiting for NETWORK SERVICE ownership snapshot.' }
+    if ([DateTime]::UtcNow -ge $observerDeadline) { throw 'Timed out waiting for NETWORK SERVICE ownership diagnostics.' }
     Start-Sleep -Milliseconds 50
   }
 
-  $snapshot = Get-Content -LiteralPath $observerOutputPath -Raw | ConvertFrom-Json
+  $observerResult = Get-Content -LiteralPath $observerOutputPath -Raw | ConvertFrom-Json
+  if (-not [bool]$observerResult.success) {
+    $permissionDenied = ([string]$observerResult.errorType -eq 'System.UnauthorizedAccessException') -or ([string]$observerResult.category -eq 'PermissionDenied')
+    if (-not $permissionDenied) {
+      throw "ACL observer fixture failed for a non-permission reason. type=$($observerResult.errorType) category=$($observerResult.category) message=$($observerResult.message)"
+    }
+
+    # Access denial is not the production tuple under investigation. It means
+    # the restricted observer failed closed before it could classify the lock
+    # as physically MISSING, so this ACL mechanism does not reproduce the exact
+    # generation-mismatch detector state.
+    Write-Host 'PHASE7C_RUNTIME_OWNERSHIP_ACL_OBSERVER_TEST=PASS'
+    Write-Host 'ACL_FALSE_MISSING_HYPOTHESIS=REJECTED'
+    Write-Host 'ACL_OBSERVER_OUTCOME=ACCESS_DENIED_NOT_MISSING'
+    Write-Host "ACL_OBSERVER_ERROR_TYPE=$($observerResult.errorType)"
+    Write-Host "ACL_OBSERVER_ERROR_CATEGORY=$($observerResult.category)"
+    Write-Host "BASELINE_BROKER_PROCESS_ALIVE=$($baseline.brokerProcessAlive)"
+    Write-Host "BASELINE_BROKER_HEARTBEAT_FRESH=$($baseline.brokerHeartbeatFresh)"
+    Write-Host "BASELINE_BROKER_STATUS_PID_MATCH=$($baseline.brokerStatusPidMatch)"
+    Write-Host "BASELINE_STARTUP_RUNNER_LOCK_STATE=$($baseline.startupRunnerLockState)"
+    return
+  }
+
+  $snapshot = $observerResult.snapshot
   if (-not [bool]$snapshot.brokerProcessAlive) { throw 'Expected broker process to remain alive during ACL observation.' }
   if (-not [bool]$snapshot.brokerHeartbeatFresh) { throw 'Expected broker heartbeat to remain fresh during ACL observation.' }
   if (-not [bool]$snapshot.brokerStatusPidMatch) { throw 'Expected broker status/heartbeat PID to match during ACL observation.' }
 
-  # Safety expectation: lack of observer permission must never be classified as
-  # physical absence of the canonical startup lock. Current production source
-  # is expected to fail here if Test-Path collapses access denial into MISSING.
+  # This is the only outcome that reproduces the incident detector tuple: the
+  # observer returned a normal snapshot while the real SYSTEM lock owner was
+  # alive, yet classified that held lock as MISSING/non-HELD.
   if ([string]$snapshot.startupRunnerLockState -eq 'MISSING') {
     throw "RED: observer access denial was misclassified as MISSING while SYSTEM broker remained alive/fresh/PID-matched. exactGate=$($snapshot.exactGenerationMismatchGate)"
   }
@@ -209,6 +262,8 @@ try {
   }
 
   Write-Host 'PHASE7C_RUNTIME_OWNERSHIP_ACL_OBSERVER_TEST=PASS'
+  Write-Host 'ACL_FALSE_MISSING_HYPOTHESIS=REJECTED'
+  Write-Host "ACL_OBSERVER_OUTCOME=SNAPSHOT_$($snapshot.startupRunnerLockState)"
   Write-Host "BROKER_PROCESS_ALIVE=$($snapshot.brokerProcessAlive)"
   Write-Host "BROKER_HEARTBEAT_FRESH=$($snapshot.brokerHeartbeatFresh)"
   Write-Host "BROKER_STATUS_PID_MATCH=$($snapshot.brokerStatusPidMatch)"
