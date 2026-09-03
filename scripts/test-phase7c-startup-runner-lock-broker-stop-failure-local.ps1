@@ -59,6 +59,36 @@ function Wait-Result([string]$ResultsDir, [string]$RequestId, [int]$TimeoutSecon
   return (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json)
 }
 
+function Wait-BrokerStatusConvergence(
+  [string]$Path,
+  [string]$RequestId,
+  [string]$ExpectedState,
+  [string]$ExpectedResult,
+  [int]$TimeoutSeconds = 10
+) {
+  $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+  $lastState = '<missing>'
+  $lastRequestId = '<missing>'
+  $lastResult = '<missing>'
+  while ([DateTime]::UtcNow -lt $deadline) {
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+      try {
+        $status = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $lastState = [string]$status.state
+        $lastRequestId = [string]$status.lastHandledRequestId
+        $lastResult = [string]$status.lastResult
+        if ($lastRequestId -eq $RequestId -and $lastState -eq $ExpectedState -and $lastResult -eq $ExpectedResult) {
+          return $status
+        }
+      } catch {
+        $lastState = '<unreadable>'
+      }
+    }
+    Start-Sleep -Milliseconds 25
+  }
+  throw "Timed out waiting for broker status convergence. request=$RequestId expectedState=$ExpectedState expectedResult=$ExpectedResult lastRequest=$lastRequestId lastState=$lastState lastResult=$lastResult"
+}
+
 $token = [Guid]::NewGuid().ToString('N')
 $tempProject = Join-Path $env:ProgramData "phase7c-full-broker-lock-$token"
 $tempScripts = Join-Path $tempProject 'scripts'
@@ -232,7 +262,9 @@ try {
     throw "Fixture STOP failure differs from production incident. message=$($stopResult.message)"
   }
 
-  $status = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+  # Result creation precedes the final Set-BrokerState('BLOCKED') write. Wait for
+  # the status record of this exact request to converge instead of racing it.
+  $status = Wait-BrokerStatusConvergence -Path $statusPath -RequestId $stopId -ExpectedState 'BLOCKED' -ExpectedResult 'FAILED' -TimeoutSeconds 10
   if ([string]$status.state -ne 'BLOCKED' -or [string]$status.desiredExecutorState -ne 'RUNNING') {
     throw "Post-failure broker state does not match incident. state=$($status.state) desired=$($status.desiredExecutorState)"
   }
