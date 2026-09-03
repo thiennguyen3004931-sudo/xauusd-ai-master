@@ -48,6 +48,24 @@ Assert-True ($text.Contains('READY_STABLE_RESET')) "helper must reset stability 
 Assert-True ($text.Contains('LIFECYCLE_RECOVERY=SKIPPED_ALREADY_STABLE')) "helper must skip executor recovery when lifecycle is already stable"
 Assert-True ($text.Contains('LIFECYCLE_RECOVERY=PERFORMED')) "helper must recover lifecycle only when stable readiness is absent"
 
+# PR #238 provenance enforcement must be reconciled by this deploy helper.
+Assert-True ($text.Contains('lib\phase7c-scheduled-task-ownership.ps1')) "helper must load the canonical Scheduled Task ownership library"
+Assert-True ($text.Contains('register-phase7c-executor-task-local.ps1')) "helper must reuse the canonical Scheduled Task installer for repair"
+Assert-True ($text.Contains('Get-Phase7CTrustedGitFileSha256')) "helper must derive the trusted runner hash from accepted Git bytes"
+Assert-True ($text.Contains('Test-Phase7CExecutorTaskActionOwnership')) "helper must inspect task action ownership before mutation"
+Assert-True ($text.Contains('ExpectedRunnerSha256')) "helper must verify the task action against the expected runner SHA256"
+Assert-True ($text.Contains('TASK_PROVENANCE=CANONICAL_HASH_GUARD')) "helper must report canonical hash-guard provenance"
+Assert-True ($text.Contains('TASK_PROVENANCE_REPAIR=SKIPPED_ALREADY_CANONICAL')) "helper must skip broker-task restart when provenance is already canonical"
+Assert-True ($text.Contains('TASK_PROVENANCE_REPAIR=PERFORMED')) "helper must report successful owned task provenance repair"
+Assert-True ($text.Contains('TASK_PROVENANCE_REPAIR=BLOCKED_UNPROVEN_OWNERSHIP')) "helper must fail closed for foreign or unproven task ownership"
+Assert-True ($text.Contains('Stop-ScheduledTask')) "helper must explicitly stop the owned SYSTEM task before repair"
+Assert-True ($text.Contains('-Repair')) "helper must invoke the canonical installer in repair mode"
+$taskStopIndex = $text.IndexOf('Stop-ScheduledTask', [System.StringComparison]::Ordinal)
+$taskRepairIndex = $text.IndexOf('-Repair', [System.StringComparison]::Ordinal)
+Assert-True ($taskStopIndex -gt $stopIndex) "Scheduled Task stop must occur only after lifecycle STOP"
+Assert-True ($taskRepairIndex -gt $taskStopIndex) "task repair must occur only after the owned SYSTEM task is stopped"
+Assert-True ($startIndex -gt $taskRepairIndex) "lifecycle START must occur only after provenance repair when repair is needed"
+
 # Bridge identity and broker-flat invariants must hold throughout.
 Assert-True ($text.Contains('bridge session changed')) "helper must fail if Bridge session changes"
 Assert-True ($text.Contains('BRIDGE_SESSION_UNCHANGED=PASS')) "helper must report unchanged Bridge session"
