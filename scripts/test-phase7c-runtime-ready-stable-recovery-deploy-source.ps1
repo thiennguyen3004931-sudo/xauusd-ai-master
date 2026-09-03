@@ -66,6 +66,15 @@ Assert-True ($taskStopIndex -gt $stopIndex) "Scheduled Task stop must occur only
 Assert-True ($taskRepairIndex -gt $taskStopIndex) "task repair must occur only after the owned SYSTEM task is stopped"
 Assert-True ($startIndex -gt $taskRepairIndex) "lifecycle START must occur only after provenance repair when repair is needed"
 
+# Repair prerequisites must be proven before any runtime mutation to avoid preventable fail-closed downtime.
+Assert-True ($text.Contains('api-user-sid.txt')) "helper must use the canonical recorded API user SID"
+Assert-True ($text.Contains('Get-Phase7CRecordedApiUserSid')) "helper must validate the recorded API SID before repair"
+Assert-True ($text.Contains('-ApiUserSid $apiUserSid')) "helper must pass the validated API SID explicitly to the canonical installer"
+$apiSidResolveIndex = $text.IndexOf('$apiUserSid = Get-Phase7CRecordedApiUserSid', [System.StringComparison]::Ordinal)
+$mutationGateIndex = $text.IndexOf('$mutationStarted = $false', [System.StringComparison]::Ordinal)
+Assert-True ($apiSidResolveIndex -ge 0) "helper must resolve the API SID before mutation"
+Assert-True ($mutationGateIndex -gt $apiSidResolveIndex) "API SID validation must occur before the recovery mutation gate"
+
 # Bridge identity and broker-flat invariants must hold throughout.
 Assert-True ($text.Contains('bridge session changed')) "helper must fail if Bridge session changes"
 Assert-True ($text.Contains('BRIDGE_SESSION_UNCHANGED=PASS')) "helper must report unchanged Bridge session"
