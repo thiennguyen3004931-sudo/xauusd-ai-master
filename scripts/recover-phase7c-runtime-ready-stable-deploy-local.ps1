@@ -417,6 +417,10 @@ Assert-FlatBroker -Stage "PREFLIGHT"
 Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_MODE=PAUSE"
 Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_ARM=DISARMED"
 
+$mutationStarted = $false
+try {
+  $mutationStarted = $true
+
 # A previous repair attempt can leave an already-canonical task stranded in
 # Queued/STOPPED state solely because the old task definition blocked battery
 # starts. Repair that exact outage before Web/API deploy so the ordinary strict
@@ -515,10 +519,6 @@ if ($taskBatterySettingsRepairRequired) {
     $taskRepairRequired = $taskProvenanceRepairRequired
   }
 }
-
-$mutationStarted = $false
-try {
-  $mutationStarted = $true
 
   # Load the exact accepted Web/API source before any executor or SYSTEM task stop.
   # When an owned legacy/stale-hash task has already passed provenance, principal,
