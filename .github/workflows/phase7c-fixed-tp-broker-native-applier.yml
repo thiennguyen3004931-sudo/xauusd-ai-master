@@ -1,0 +1,297 @@
+name: Phase7C Fixed TP Broker Native Applier
+
+on:
+  push:
+    branches:
+      - feat/phase7c-fixed-tp-broker-native
+    paths:
+      - .github/workflows/phase7c-fixed-tp-broker-native-applier.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.head_commit.message == 'chore: stage broker-native Fixed TP applier'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/phase7c-fixed-tp-broker-native
+          fetch-depth: 0
+      - name: Apply exact source changes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one match, got {count}\nOLD={old[:300]!r}")
+              p.write_text(text.replace(old, new, 1), encoding="utf-8", newline="")
+
+          trend = "scripts/run-phase7b-demo-controller.ts"
+          sideway = "scripts/run-phase7c-sideway-controller.mjs"
+
+          replace_once(
+              trend,
+              '''  const fixedTpSnapshot = buildFixedTpSnapshot({
+            enabled: trendFixedTpEnabled,
+            distance: trendFixedTpDistance,
+            side: signal.side,
+            entry: marketEntry,
+          });
+
+          const pendingEntry: PendingTrendEntry = {''',
+              '''  const fixedTpSnapshot = buildFixedTpSnapshot({
+            enabled: trendFixedTpEnabled,
+            distance: trendFixedTpDistance,
+            side: signal.side,
+            entry: marketEntry,
+          });
+          const brokerTakeProfit = dailyRecovery.mode === "RECOVERY_TP"
+            ? takeProfit
+            : fixedTpSnapshot.enabled && fixedTpSnapshot.targetPrice !== null
+              ? fixedTpSnapshot.targetPrice
+              : takeProfit;
+
+          const pendingEntry: PendingTrendEntry = {''',
+          )
+
+          replace_once(
+              trend,
+              '''    requestedPrice: marketEntry,
+            stopLoss,
+            takeProfit,
+            deviationPoints,''',
+              '''    requestedPrice: marketEntry,
+            stopLoss,
+            takeProfit: brokerTakeProfit,
+            deviationPoints,''',
+          )
+
+          replace_once(
+              trend,
+              '''  const filledFixedTpSnapshot = buildFixedTpSnapshot({
+            enabled: pendingEntry.fixedTpEnabled,
+            distance: pendingEntry.fixedTpDistance,
+            side: pendingEntry.side,
+            entry: opened.entry,
+          });
+
+          state.managed = {''',
+              '''  const filledFixedTpSnapshot = buildFixedTpSnapshot({
+            enabled: pendingEntry.fixedTpEnabled,
+            distance: pendingEntry.fixedTpDistance,
+            side: pendingEntry.side,
+            entry: opened.entry,
+          });
+
+          if (dailyRecovery.mode !== "RECOVERY_TP") {
+            await reconcileFixedTpBrokerTakeProfit({
+              ticket: opened.ticket,
+              enabled: filledFixedTpSnapshot.enabled,
+              targetPrice: filledFixedTpSnapshot.targetPrice,
+              currentTakeProfit: opened.takeProfit,
+              strategy: "TREND",
+            });
+          }
+
+          state.managed = {''',
+          )
+
+          replace_once(
+              trend,
+              '''    state.managed = managedFromPending(
+              pending,
+              candidate,
+            );
+
+            state.pendingEntry = null;''',
+              '''    state.managed = managedFromPending(
+              pending,
+              candidate,
+            );
+
+            if (pending.dailyMode !== "RECOVERY_TP") {
+              await reconcileFixedTpBrokerTakeProfit({
+                ticket: candidate.ticket,
+                enabled: state.managed.fixedTpEnabled,
+                targetPrice: state.managed.fixedTpPrice,
+                currentTakeProfit: candidate.takeProfit,
+                strategy: "TREND",
+              });
+            }
+
+            state.pendingEntry = null;''',
+          )
+
+          replace_once(
+              trend,
+              '''async function managePosition(position: Position, quote: Quote, spec: SymbolSpec, m15: Phase7Bar[]): Promise<void> {''',
+              '''async function reconcileFixedTpBrokerTakeProfit(input: {
+            ticket: string;
+            enabled: boolean;
+            targetPrice: number | null;
+            currentTakeProfit: number;
+            strategy: "TREND";
+          }): Promise<void> {
+            if (!input.enabled || !Number.isFinite(Number(input.targetPrice)) || Number(input.targetPrice) <= 0) return;
+            const ticket = String(input.ticket);
+            const targetPrice = Number(input.targetPrice);
+            const currentTakeProfit = Number(input.currentTakeProfit);
+            if (Number.isFinite(currentTakeProfit) && Math.abs(currentTakeProfit - targetPrice) <= 1e-9) {
+              journal("FIXED_TP_BROKER_ALREADY_ALIGNED", { ticket, strategy: input.strategy, takeProfit: targetPrice });
+              return;
+            }
+            const commandId = `phase7c-fixed-tp-broker-trend-${ticket}`;
+            const payload = {
+              takeProfit: targetPrice,
+              commandId,
+            };
+            journal("FIXED_TP_BROKER_RECONCILE_ATTEMPT", {
+              ticket,
+              strategy: input.strategy,
+              currentTakeProfit: Number.isFinite(currentTakeProfit) ? currentTakeProfit : null,
+              targetPrice,
+              commandId,
+            });
+            const response = await patch<CommandResponse>(
+              `/v1/positions/${encodeURIComponent(ticket)}`,
+              payload,
+            );
+            if (!response.success) {
+              journal("FIXED_TP_BROKER_RECONCILE_REJECTED", { ticket, strategy: input.strategy, targetPrice, commandId, response });
+              return;
+            }
+            journal("FIXED_TP_BROKER_RECONCILED", { ticket, strategy: input.strategy, targetPrice, commandId, response });
+          }
+
+          async function managePosition(position: Position, quote: Quote, spec: SymbolSpec, m15: Phase7Bar[]): Promise<void> {''',
+          )
+
+          replace_once(
+              sideway,
+              '''  const fixedTpSnapshot = buildFixedTpSnapshot({
+            enabled: sidewayFixedTpEnabled,
+            distance: sidewayFixedTpDistance,
+            side,
+            entry: Number(finalPlan.entry),
+          });
+          journal("FIXED_TP_CONFIG_SNAPSHOT", {''',
+              '''  const fixedTpSnapshot = buildFixedTpSnapshot({
+            enabled: sidewayFixedTpEnabled,
+            distance: sidewayFixedTpDistance,
+            side,
+            entry: Number(finalPlan.entry),
+          });
+          const brokerTakeProfit = dailyRecovery.mode === "RECOVERY_TP"
+            ? executionPlan.takeProfit
+            : fixedTpSnapshot.enabled && fixedTpSnapshot.targetPrice !== null
+              ? fixedTpSnapshot.targetPrice
+              : executionPlan.takeProfit;
+          journal("FIXED_TP_CONFIG_SNAPSHOT", {''',
+          )
+
+          replace_once(
+              sideway,
+              '''    requestedPrice: executionPlan.entry,
+            stopLoss: executionPlan.stopLoss,
+            takeProfit: executionPlan.takeProfit,
+            deviationPoints,''',
+              '''    requestedPrice: executionPlan.entry,
+            stopLoss: executionPlan.stopLoss,
+            takeProfit: brokerTakeProfit,
+            deviationPoints,''',
+          )
+
+          replace_once(
+              sideway,
+              '''  state.managed = buildManagedState(opened, state.pendingEntry, brokerClockOffsetMs);
+          state.pendingEntry = null;''',
+              '''  state.managed = buildManagedState(opened, state.pendingEntry, brokerClockOffsetMs);
+          if (state.managed.dailyMode !== "RECOVERY_TP") {
+            await reconcileFixedTpBrokerTakeProfit({
+              ticket: state.managed.ticket,
+              enabled: state.managed.fixedTpEnabled,
+              targetPrice: state.managed.fixedTpPrice,
+              currentTakeProfit: Number(opened.takeProfit),
+              strategy: "SIDEWAY",
+            });
+          }
+          state.pendingEntry = null;''',
+          )
+
+          replace_once(
+              sideway,
+              '''      state.managed = buildManagedState(recovery.position, pending, brokerClockOffsetMs);
+              state.pendingEntry = null;''',
+              '''      state.managed = buildManagedState(recovery.position, pending, brokerClockOffsetMs);
+              if (state.managed.dailyMode !== "RECOVERY_TP") {
+                await reconcileFixedTpBrokerTakeProfit({
+                  ticket: state.managed.ticket,
+                  enabled: state.managed.fixedTpEnabled,
+                  targetPrice: state.managed.fixedTpPrice,
+                  currentTakeProfit: Number(recovery.position.takeProfit),
+                  strategy: "SIDEWAY",
+                });
+              }
+              state.pendingEntry = null;''',
+          )
+
+          replace_once(
+              sideway,
+              '''async function closeFixedTpIfTriggered(position, quote) {''',
+              '''async function reconcileFixedTpBrokerTakeProfit(input) {
+            if (!input?.enabled || !Number.isFinite(Number(input.targetPrice)) || Number(input.targetPrice) <= 0) return;
+            const ticket = String(input.ticket);
+            const targetPrice = Number(input.targetPrice);
+            const currentTakeProfit = Number(input.currentTakeProfit);
+            if (Number.isFinite(currentTakeProfit) && Math.abs(currentTakeProfit - targetPrice) <= 1e-9) {
+              journal("FIXED_TP_BROKER_ALREADY_ALIGNED", { ticket, strategy: input.strategy, takeProfit: targetPrice });
+              return;
+            }
+            const commandId = `phase7c-fixed-tp-broker-sideway-${ticket}`;
+            const payload = {
+              takeProfit: targetPrice,
+              commandId,
+            };
+            journal("FIXED_TP_BROKER_RECONCILE_ATTEMPT", {
+              ticket,
+              strategy: input.strategy,
+              currentTakeProfit: Number.isFinite(currentTakeProfit) ? currentTakeProfit : null,
+              targetPrice,
+              commandId,
+            });
+            const response = await bridgeRequest(
+              "PATCH",
+              `/v1/positions/${encodeURIComponent(ticket)}`,
+              payload,
+            );
+            if (!response.success) {
+              journal("FIXED_TP_BROKER_RECONCILE_REJECTED", { ticket, strategy: input.strategy, targetPrice, commandId, response });
+              return;
+            }
+            journal("FIXED_TP_BROKER_RECONCILED", { ticket, strategy: input.strategy, targetPrice, commandId, response });
+          }
+
+          async function closeFixedTpIfTriggered(position, quote) {''',
+          )
+
+      - name: Verify patched source syntax
+        shell: bash
+        run: |
+          node --check scripts/run-phase7c-sideway-controller.mjs
+          pnpm exec tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck scripts/run-phase7b-demo-controller.ts || true
+          git diff --check
+      - name: Commit exact source changes
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/run-phase7b-demo-controller.ts scripts/run-phase7c-sideway-controller.mjs
+          git diff --cached --check
+          git commit -m "feat: attach Fixed TP to broker positions"
+          git push origin HEAD:feat/phase7c-fixed-tp-broker-native
