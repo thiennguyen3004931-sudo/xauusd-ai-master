@@ -21,7 +21,6 @@ on:
   push:
     branches:
       - main
-      - fix/phase7c-battery-stopped-lifecycle-preweb-repair
     paths:
       - "scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1"
       - "scripts/test-phase7c-runtime-ready-stable-recovery-deploy-source.ps1"
@@ -36,10 +35,9 @@ on:
       - "scripts/lib/phase7c-runtime-ownership-probe.ps1"
       - "scripts/lib/phase7c-scheduled-task-ownership.ps1"
       - ".github/workflows/phase7c-runtime-ready-stable-recovery-deploy-ci.yml"
-      - "dev-apply-phase7c-battery-stopped-lifecycle-preweb-repair.ps1"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   source-contract:
@@ -48,10 +46,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Apply exact bounded development patch
-        if: github.event_name == 'push' && github.ref_name == 'fix/phase7c-battery-stopped-lifecycle-preweb-repair'
-        shell: pwsh
-        run: .\dev-apply-phase7c-battery-stopped-lifecycle-preweb-repair.ps1
       - name: Stable-ready recovery deploy contract with PowerShell 7
         shell: pwsh
         run: .\scripts\test-phase7c-runtime-ready-stable-recovery-deploy-source.ps1
@@ -82,20 +76,6 @@ jobs:
       - name: Battery stopped-lifecycle pre-Web repair contract with Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-battery-stopped-lifecycle-preweb-repair-source.ps1
-      - name: Commit exact bounded development patch
-        if: github.event_name == 'push' && github.ref_name == 'fix/phase7c-battery-stopped-lifecycle-preweb-repair'
-        shell: pwsh
-        run: |
-          git diff --exit-code -- scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host 'DEV_PATCH_COMMIT=SKIPPED_ALREADY_COMMITTED'
-            exit 0
-          }
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1
-          git commit -m 'fix: repair battery task before stopped-lifecycle web deploy'
-          git push origin HEAD:fix/phase7c-battery-stopped-lifecycle-preweb-repair
 
   safety-regression:
     runs-on: windows-latest
