@@ -74,11 +74,20 @@ test("legacy persisted Trend state restores Fixed TP disabled", () => {
     "RED_TARGET: persisted managed state must pass through the legacy-safe Fixed TP normalizer.");
 });
 
-test("Daily Recovery broker takeProfit remains independent from Fixed TP snapshot", () => {
-  assert.match(trendSource, /recoveryTakeProfit\s*:\s*takeProfit/,
-    "Daily Recovery state must keep its existing recoveryTakeProfit source.");
-  assert.doesNotMatch(trendSource, /takeProfit\s*:\s*[^,\n]*fixedTp/i,
-    "Fixed TP must never overwrite the broker/native takeProfit payload.");
+test("Trend sends Fixed TP to MT5 on initial non-Recovery order and preserves canonical Recovery TP precedence", () => {
+  const submitFlow = block("const fixedTpSnapshot = buildFixedTpSnapshot({", "if (!order.accepted) {");
+  assert.match(submitFlow, /const\s+brokerTakeProfit\s*=\s*dailyRecovery\.mode\s*===\s*["']RECOVERY_TP["'][\s\S]*?takeProfit[\s\S]*?fixedTpSnapshot\.enabled[\s\S]*?fixedTpSnapshot\.targetPrice[\s\S]*?takeProfit/,
+    "RED_TARGET: non-Recovery Trend orders with Fixed TP enabled must send the Fixed TP target to MT5 while Recovery keeps canonical Recovery TP.");
+  assert.match(submitFlow, /takeProfit\s*:\s*brokerTakeProfit/,
+    "RED_TARGET: Trend initial /v1/orders payload must use brokerTakeProfit.");
 });
 
-// GREEN rerun marker: production snapshot implementation must satisfy this unchanged contract.
+test("Trend verifies actual fill and reconciles broker Fixed TP from actual entry", () => {
+  const fillFlow = block("const filledFixedTpSnapshot = buildFixedTpSnapshot({", "state.managed = {");
+  assert.match(fillFlow, /await\s+reconcileFixedTpBrokerTakeProfit\s*\(/,
+    "RED_TARGET: Trend must reconcile broker TP after actual fill when Fixed TP is enabled.");
+  assert.match(trendSource, /async function reconcileFixedTpBrokerTakeProfit\([\s\S]*?takeProfit\s*:\s*targetPrice[\s\S]*?\/v1\/positions\/\$\{encodeURIComponent\(ticket\)\}/,
+    "RED_TARGET: Trend Fixed TP reconcile must PATCH the managed MT5 position with actual-entry-derived targetPrice.");
+});
+
+// GREEN rerun marker: production snapshot implementation must satisfy this contract.

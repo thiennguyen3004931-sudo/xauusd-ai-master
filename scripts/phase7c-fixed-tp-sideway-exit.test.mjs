@@ -101,7 +101,7 @@ test("Sideway management preserves time/regime, +6/+10, Daily Recovery and TP2 p
   assert.ok(fixedCalls[1] > partialIndex,
     "RED_TARGET: normal Fixed TP must run after the existing +10 one-third partial so later targets preserve native partial first.");
   assert.ok(fixedCalls[1] < tp2Index,
-    "RED_TARGET: after native +10 management, a reached Fixed TP returns before the existing TP2 fallback; broker TP2 itself remains untouched.");
+    "RED_TARGET: after native +10 management, a reached Fixed TP returns before the existing TP2 fallback.");
 });
 
 test("existing Sideway native close paths and command identity stay untouched", () => {
@@ -110,6 +110,10 @@ test("existing Sideway native close paths and command identity stay untouched", 
     "existing native Sideway full-close attempt tracking must remain unchanged.");
   assert.match(closeAll, /commandId\s*:\s*`p7c-sideway-exit-\$\{managed\.ticket\}-\$\{managed\.exitAttempt\}`/,
     "existing TP2/range/time/regime close identity must not be rewritten by Fixed TP.");
-  assert.match(sidewaySource, /takeProfit\s*:\s*executionPlan\.takeProfit/,
-    "broker TP2/Daily Recovery takeProfit payload must remain authoritative and unmodified.");
+  assert.match(sidewaySource, /tp2\s*:\s*executionPlan\.takeProfit/,
+    "existing durable Sideway TP2 metadata must remain unchanged by broker-native Fixed TP.");
+  assert.match(sidewaySource, /const\s+brokerTakeProfit\s*=\s*dailyRecovery\.mode\s*===\s*["']RECOVERY_TP["'][\s\S]*?executionPlan\.takeProfit[\s\S]*?fixedTpSnapshot\.enabled[\s\S]*?fixedTpSnapshot\.targetPrice[\s\S]*?executionPlan\.takeProfit/,
+    "Daily Recovery must keep broker TP precedence while non-Recovery Fixed TP may become the broker-native takeProfit.");
+  assert.match(sidewaySource, /takeProfit\s*:\s*brokerTakeProfit/,
+    "initial Sideway broker order must use the canonical brokerTakeProfit selector.");
 });
