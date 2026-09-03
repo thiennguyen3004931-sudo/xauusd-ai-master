@@ -10,6 +10,7 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $ConfigPath = Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.json"
 $AccountLibrary = Join-Path $PSScriptRoot "lib\phase7c-account-mode.ps1"
 $OwnershipLibrary = Join-Path $PSScriptRoot "lib\phase7c-scheduled-task-ownership.ps1"
+$RuntimeOwnershipLibrary = Join-Path $PSScriptRoot "lib\phase7c-runtime-ownership-probe.ps1"
 $WebApiDeploy = Join-Path $PSScriptRoot "deploy-phase7c-web-ui-local.ps1"
 $TaskInstaller = Join-Path $PSScriptRoot "register-phase7c-executor-task-local.ps1"
 $TaskName = "XAUUSD-Phase7C-Executors"
@@ -24,7 +25,7 @@ if ($ExpectedCommit -notmatch '^[0-9a-fA-F]{40}$') {
 if ($TimeoutSeconds -lt 30 -or $TimeoutSeconds -gt 600) {
   throw "TimeoutSeconds must be between 30 and 600."
 }
-foreach ($required in @($ConfigPath, $AccountLibrary, $OwnershipLibrary, $WebApiDeploy, $TaskInstaller)) {
+foreach ($required in @($ConfigPath, $AccountLibrary, $OwnershipLibrary, $RuntimeOwnershipLibrary, $WebApiDeploy, $TaskInstaller)) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
     throw "Runtime-ready stable recovery deploy required file not found: $required"
   }
@@ -32,6 +33,7 @@ foreach ($required in @($ConfigPath, $AccountLibrary, $OwnershipLibrary, $WebApi
 
 . $AccountLibrary
 . $OwnershipLibrary
+. $RuntimeOwnershipLibrary
 $ExpectedCommit = $ExpectedCommit.ToLowerInvariant()
 $gitExe = (Get-Command git -ErrorAction Stop).Source
 
@@ -403,9 +405,24 @@ try {
   $mutationStarted = $true
 
   # Load the exact accepted Web/API source before any executor or SYSTEM task stop.
+  # When an owned legacy/stale-hash task has already passed provenance, principal,
+  # API SID, PAUSE/DISARMED, Bridge-session and flat-broker preflight, allow the
+  # strict account verifier to exempt only the startup-runner lock until repair.
+  $webApiDeployArgs = @()
+  if ($taskProvenanceRepairRequired) {
+    $webApiDeployArgs += @(
+      '-AllowOwnedTaskProvenanceMigration',
+      '-ExpectedRunnerSha256', $trustedRunnerSha256
+    )
+    Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_WEB_API_MIGRATION_WINDOW=ENABLED_OWNED_REPAIR_REQUIRED"
+  } else {
+    Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_WEB_API_MIGRATION_WINDOW=DISABLED_CANONICAL_TASK"
+  }
+
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy `
     -WorkDir $WorkDir `
-    -ExpectedCommit $ExpectedCommit
+    -ExpectedCommit $ExpectedCommit `
+    @webApiDeployArgs
   if ($LASTEXITCODE -ne 0) {
     throw "Canonical Web/API deploy failed with exit code $LASTEXITCODE."
   }
@@ -493,6 +510,13 @@ try {
       if (-not (Test-Phase7CBrokerHeartbeatFresh)) {
         throw "Scheduled Task provenance repair did not return a fresh lifecycle broker heartbeat."
       }
+
+      $postRepairLockPath = Join-Path $WorkDir "phase7c-executors\startup-runner.lock"
+      $postRepairLockState = Get-Phase7CReadOnlyLockState -Path $postRepairLockPath
+      if ($postRepairLockState -ne 'HELD') {
+        throw "Scheduled Task provenance repair did not restore the startup-runner singleton lock. state=$postRepairLockState"
+      }
+      Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_POST_REPAIR_STARTUP_RUNNER_LOCK=HELD"
 
       Assert-PauseDisarmed -Stage "POST_TASK_REPAIR"
       Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "POST_TASK_REPAIR"

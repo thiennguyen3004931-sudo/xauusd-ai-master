@@ -5,7 +5,9 @@ param(
   [string]$ControlApiUrl = "http://127.0.0.1:3711",
   [string]$EnvFile = "",
   [string]$TelegramEnvFile = ".env.phase7b-telegram",
-  [switch]$RequireTelegram
+  [switch]$RequireTelegram,
+  [switch]$AllowOwnedTaskProvenanceMigration,
+  [string]$ExpectedRunnerSha256 = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,6 +27,19 @@ if (-not (Test-Path -LiteralPath $TaskOwnershipLibrary)) {
 . $TaskOwnershipLibrary
 $ExpectedAccountMode = ConvertTo-Phase7CAccountMode $ExpectedAccountMode
 $ExpectedBrokerMode = if ($ExpectedAccountMode -eq "LIVE") { "real" } else { "demo" }
+$expectedMigrationRunnerSha256 = ""
+$trustedMigrationRunnerSha256 = ""
+if ($AllowOwnedTaskProvenanceMigration) {
+  if ($ExpectedAccountMode -ne "LIVE") {
+    throw "Owned task provenance migration verification is LIVE-only."
+  }
+  if ([string]::IsNullOrWhiteSpace($ExpectedRunnerSha256)) {
+    throw "Owned task provenance migration verification requires ExpectedRunnerSha256."
+  }
+  $expectedMigrationRunnerSha256 = Normalize-Phase7CRunnerSha256 -Sha256 $ExpectedRunnerSha256
+} elseif (-not [string]::IsNullOrWhiteSpace($ExpectedRunnerSha256)) {
+  throw "ExpectedRunnerSha256 is only valid with AllowOwnedTaskProvenanceMigration."
+}
 
 if (-not [System.IO.Path]::IsPathRooted($WorkDir)) { $WorkDir = Join-Path $ProjectRoot $WorkDir }
 if (-not (Test-Path $WorkDir)) { throw "WorkDir not found: $WorkDir" }
@@ -54,9 +69,17 @@ $EnvFile = $envInfo.envFile
 Write-Host "PHASE7C_ACCOUNT_VERIFY_EXPECTED_MODE=$ExpectedAccountMode"
 Write-Host "PHASE7C_ACCOUNT_VERIFY_STATE=PASS"
 
+function Test-Phase7CSystemTaskPrincipal($Principal) {
+  if ($null -eq $Principal) { return $false }
+  $user = ([string]$Principal.UserId).Trim()
+  $systemUser = $user -in @('SYSTEM', 'NT AUTHORITY\SYSTEM', 'S-1-5-18')
+  return $systemUser -and ([string]$Principal.LogonType) -eq 'ServiceAccount' -and ([string]$Principal.RunLevel) -eq 'Highest'
+}
+
 $task = $null
 $taskTopologyVerified = $false
 $taskLookupClassification = "FOUND"
+$migrationWindowAllowed = $false
 
 try {
   $task = Get-ScheduledTask `
@@ -80,10 +103,30 @@ if ($null -ne $task) {
     Get-Phase7CExecutorTaskRunnerPath `
       -ProjectRoot $ProjectRoot
 
-  $ownership = `
+  if ($AllowOwnedTaskProvenanceMigration) {
+    $trustedMigrationRunnerSha256 = Get-Phase7CTrustedGitFileSha256 `
+      -ProjectRoot $ProjectRoot `
+      -Path $expectedRunnerPath
+    if (-not [string]::Equals(
+      $expectedMigrationRunnerSha256,
+      $trustedMigrationRunnerSha256,
+      [System.StringComparison]::Ordinal
+    )) {
+      throw "Owned task provenance migration ExpectedRunnerSha256 does not match accepted Git HEAD bytes."
+    }
+    Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_MIGRATION_TRUSTED_GIT_SHA=PASS"
+  }
+
+  $ownership = if ($AllowOwnedTaskProvenanceMigration) {
+    Test-Phase7CExecutorTaskActionOwnership `
+      -Actions $task.Actions `
+      -ExpectedRunnerPath $expectedRunnerPath `
+      -ExpectedRunnerSha256 $trustedMigrationRunnerSha256
+  } else {
     Test-Phase7CExecutorTaskActionOwnership `
       -Actions $task.Actions `
       -ExpectedRunnerPath $expectedRunnerPath
+  }
 
   Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_STATE=$($task.State)"
   Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_OWNED=$($ownership.owned)"
@@ -91,6 +134,16 @@ if ($null -ne $task) {
 
   if (-not [bool]$ownership.owned) {
     throw "Executor Scheduled Task ownership verification failed. Reason=$($ownership.reason)"
+  }
+
+  if ($AllowOwnedTaskProvenanceMigration) {
+    $migrationPrincipalValid = Test-Phase7CSystemTaskPrincipal $task.Principal
+    $migrationWindowAllowed = [bool]$ownership.owned -and `
+      [bool]$ownership.repairRequired -and `
+      -not [bool]$ownership.canonical -and `
+      $migrationPrincipalValid
+    Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_MIGRATION_PRINCIPAL_VALID=$migrationPrincipalValid"
+    Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_MIGRATION_REPAIR_REQUIRED=$($ownership.repairRequired)"
   }
 
   if ([string]$task.State -ne "Running") {
@@ -104,6 +157,10 @@ if ($null -ne $task) {
 else {
   Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_STATE=MISSING"
   Write-Host "PHASE7C_ACCOUNT_VERIFY_TASK_OWNED=False"
+}
+
+if ($AllowOwnedTaskProvenanceMigration -and -not $migrationWindowAllowed) {
+  throw "Owned task provenance migration verification failed closed: task must be owned, repair-required, non-canonical, and SYSTEM + ServiceAccount + Highest."
 }
 
 if (-not (Test-Path $TaskConfigPath)) { throw "Executor task config not found: $TaskConfigPath" }
@@ -210,7 +267,12 @@ try {
 } catch [System.IO.IOException] { $lockHeld = $true }
 finally { if ($null -ne $probe) { $probe.Dispose() } }
 Write-Host "PHASE7C_ACCOUNT_VERIFY_STARTUP_RUNNER_LOCK_HELD=$lockHeld"
-if (-not $lockHeld) { throw "SYSTEM lifecycle broker singleton lock is not held." }
+if (-not $lockHeld -and $migrationWindowAllowed) {
+  Write-Host "PHASE7C_ACCOUNT_VERIFY_STARTUP_RUNNER_LOCK_MIGRATION_WINDOW=ALLOWED_OWNED_REPAIR_REQUIRED"
+}
+if (-not $lockHeld -and -not $migrationWindowAllowed) {
+  throw "SYSTEM lifecycle broker singleton lock is not held."
+}
 
 $runnerProcess = Get-CimInstance `
   Win32_Process `

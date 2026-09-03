@@ -7,13 +7,25 @@ on:
     paths:
       - "scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1"
       - "scripts/test-phase7c-runtime-ready-stable-recovery-deploy-source.ps1"
+      - "scripts/test-phase7c-recovery-migration-verifier-window-source.ps1"
+      - "scripts/deploy-phase7c-web-ui-local.ps1"
+      - "scripts/deploy-phase7c-mt5-dashboard-local.ps1"
+      - "scripts/verify-phase7c-account-runtime-local.ps1"
+      - "scripts/lib/phase7c-runtime-ownership-probe.ps1"
+      - "scripts/lib/phase7c-scheduled-task-ownership.ps1"
       - ".github/workflows/phase7c-runtime-ready-stable-recovery-deploy-ci.yml"
   push:
     branches:
-      - fix/phase7c-runtime-ready-stable-recovery-deploy
+      - main
     paths:
       - "scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1"
       - "scripts/test-phase7c-runtime-ready-stable-recovery-deploy-source.ps1"
+      - "scripts/test-phase7c-recovery-migration-verifier-window-source.ps1"
+      - "scripts/deploy-phase7c-web-ui-local.ps1"
+      - "scripts/deploy-phase7c-mt5-dashboard-local.ps1"
+      - "scripts/verify-phase7c-account-runtime-local.ps1"
+      - "scripts/lib/phase7c-runtime-ownership-probe.ps1"
+      - "scripts/lib/phase7c-scheduled-task-ownership.ps1"
       - ".github/workflows/phase7c-runtime-ready-stable-recovery-deploy-ci.yml"
 
 permissions:
@@ -32,6 +44,12 @@ jobs:
       - name: Stable-ready recovery deploy contract with Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-runtime-ready-stable-recovery-deploy-source.ps1
+      - name: Recovery migration verifier window contract with PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-recovery-migration-verifier-window-source.ps1
+      - name: Recovery migration verifier window contract with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-recovery-migration-verifier-window-source.ps1
 
   safety-regression:
     runs-on: windows-latest
