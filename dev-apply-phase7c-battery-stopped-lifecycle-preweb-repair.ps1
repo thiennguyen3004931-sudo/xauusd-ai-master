@@ -137,7 +137,7 @@ $newStop = @'
     if (-not $brokerProcessStopped) {
       throw "Previous lifecycle broker process remained alive after battery Scheduled Task stop. pid=$brokerPidBeforeBatteryRepair"
     }
-    Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_BROKER_PROCESS_STOP=PASS|PREVIOUS_PID=$brokerPidBeforeBatteryRepair"
+    Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_PREVIOUS_BROKER_EXIT=PASS|PREVIOUS_PID=$brokerPidBeforeBatteryRepair"
 
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $TaskInstaller `
 '@
