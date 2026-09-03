@@ -77,15 +77,45 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function assertBrokerHeartbeat(): BrokerHeartbeat {
-  const heartbeatPath = path.join(brokerRoot(), "state", "heartbeat.json");
-  const heartbeat = readJson<BrokerHeartbeat>(heartbeatPath);
-  const updatedAt = Number(heartbeat?.updatedAt ?? 0);
-  const ageMs = updatedAt > 0 ? Math.max(0, Date.now() - updatedAt) : Number.POSITIVE_INFINITY;
-  if (!heartbeat || heartbeat.version !== 1 || !Number.isInteger(heartbeat.brokerPid) || ageMs > HEARTBEAT_STALE_MS) {
-    throw new Error("Lifecycle broker SYSTEM chưa READY hoặc heartbeat đã stale; Bot giữ PAUSE.");
+function isPidAlive(pid: number | null | undefined): boolean {
+  if (!Number.isInteger(pid) || (pid ?? 0) <= 0) return false;
+  try {
+    process.kill(pid as number, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException)?.code === "EPERM";
   }
-  return heartbeat;
+}
+
+function brokerOwnershipReady(
+  heartbeat: BrokerHeartbeat | null,
+  status: BrokerStatus | null,
+  heartbeatAgeMs: number | null,
+): boolean {
+  return Boolean(
+    heartbeat?.version === 1 &&
+    status?.version === 1 &&
+    Number.isInteger(heartbeat?.brokerPid) &&
+    (heartbeat?.brokerPid ?? 0) > 0 &&
+    Number.isInteger(status?.brokerPid) &&
+    status?.brokerPid === heartbeat?.brokerPid &&
+    heartbeatAgeMs !== null &&
+    heartbeatAgeMs >= 0 &&
+    heartbeatAgeMs <= HEARTBEAT_STALE_MS &&
+    isPidAlive(heartbeat?.brokerPid),
+  );
+}
+
+function assertBrokerHeartbeat(): BrokerHeartbeat {
+  const root = brokerRoot();
+  const heartbeat = readJson<BrokerHeartbeat>(path.join(root, "state", "heartbeat.json"));
+  const status = readJson<BrokerStatus>(path.join(root, "state", "status.json"));
+  const updatedAt = Number(heartbeat?.updatedAt ?? 0);
+  const heartbeatAgeMs = updatedAt > 0 ? Date.now() - updatedAt : null;
+  if (!brokerOwnershipReady(heartbeat, status, heartbeatAgeMs)) {
+    throw new Error("Lifecycle broker SYSTEM chưa READY hoặc ownership/heartbeat không hợp lệ; Bot giữ PAUSE.");
+  }
+  return heartbeat as BrokerHeartbeat;
 }
 
 function publishRequestAtomic(request: {
@@ -128,13 +158,8 @@ export function getPhase7CLifecycleBrokerClientStatus() {
   const heartbeat = readJson<BrokerHeartbeat>(path.join(root, "state", "heartbeat.json"));
   const status = readJson<BrokerStatus>(path.join(root, "state", "status.json"));
   const updatedAt = Number(heartbeat?.updatedAt ?? 0);
-  const heartbeatAgeMs = updatedAt > 0 ? Math.max(0, Date.now() - updatedAt) : null;
-  const ready = Boolean(
-    heartbeat?.version === 1 &&
-    Number.isInteger(heartbeat?.brokerPid) &&
-    heartbeatAgeMs !== null &&
-    heartbeatAgeMs <= HEARTBEAT_STALE_MS,
-  );
+  const heartbeatAgeMs = updatedAt > 0 ? Date.now() - updatedAt : null;
+  const ready = brokerOwnershipReady(heartbeat, status, heartbeatAgeMs);
   return { ready, heartbeatAgeMs, heartbeat, status };
 }
 
