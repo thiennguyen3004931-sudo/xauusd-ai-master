@@ -335,6 +335,18 @@ function Get-Phase7CExecutorTaskDrift {
     if ([string]$settings.MultipleInstances -ne 'IgnoreNew') { $drift.Add('MULTIPLE_INSTANCES') }
     if ([int]$settings.RestartCount -ne 0) { $drift.Add('RESTART_COUNT') }
     if ([string]$settings.ExecutionTimeLimit -ne 'PT0S') { $drift.Add('EXECUTION_TIME_LIMIT') }
+
+    $disallowStartIfOnBatteries = $true
+    if ($null -ne $settings.PSObject.Properties['DisallowStartIfOnBatteries']) {
+      $disallowStartIfOnBatteries = [bool]$settings.DisallowStartIfOnBatteries
+    }
+    if ($disallowStartIfOnBatteries) { $drift.Add('DISALLOW_START_IF_ON_BATTERIES') }
+
+    $stopIfGoingOnBatteries = $true
+    if ($null -ne $settings.PSObject.Properties['StopIfGoingOnBatteries']) {
+      $stopIfGoingOnBatteries = [bool]$settings.StopIfGoingOnBatteries
+    }
+    if ($stopIfGoingOnBatteries) { $drift.Add('STOP_IF_GOING_ON_BATTERIES') }
   }
 
   if ($null -eq $Task.Principal -or [string]$Task.Principal.RunLevel -ne 'Highest') {
