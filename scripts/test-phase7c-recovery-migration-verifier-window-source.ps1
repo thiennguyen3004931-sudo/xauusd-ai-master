@@ -145,8 +145,10 @@ Assert-Contains $recovery 'ExpectedRunnerSha256[\s\S]*\$trustedRunnerSha256' `
 Assert-Order $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_API_SID_PREFLIGHT=PASS' '$webApiDeployArgs' `
   'API SID/principal provenance preflight must complete before recovery can build migration-window deploy arguments.'
 
-# The temporary exemption ends at task repair. Before lifecycle restart/final
-# PASS, the recovered runner lock must be proven HELD again.
+# The temporary exemption ends at task repair. Before the ordinary provenance
+# lifecycle restart/final PASS, the recovered runner lock must be proven HELD.
+# Battery-stranded recovery has a separate earlier START, so bind this assertion
+# to the last START occurrence, which is the normal/provenance recovery path.
 Assert-Contains $recovery 'phase7c-runtime-ownership-probe\.ps1' `
   'Recovery must load the canonical runtime ownership probe for post-repair lock proof.'
 Assert-Contains $recovery 'Get-Phase7CReadOnlyLockState\s+-Path' `
@@ -155,7 +157,14 @@ Assert-Contains $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_POST_REPAIR_STA
   'Recovery must emit a post-repair startup-runner lock HELD marker.'
 Assert-Contains $recovery 'if \(\$postRepairLockState -ne ["'']HELD["'']\)[\s\S]*throw' `
   'Recovery must fail closed when repaired task does not hold the startup-runner lock.'
-Assert-Order $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_POST_REPAIR_STARTUP_RUNNER_LOCK=HELD' 'Invoke-ApiPost "/api/v1/phase7c/lifecycle/start"' `
-  'Post-repair runner lock must be HELD before lifecycle start.'
+$postRepairLockIndex = $recovery.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_POST_REPAIR_STARTUP_RUNNER_LOCK=HELD', [System.StringComparison]::Ordinal)
+$startMatches = [regex]::Matches($recovery, [regex]::Escape('Invoke-ApiPost "/api/v1/phase7c/lifecycle/start"'))
+if ($postRepairLockIndex -lt 0 -or $startMatches.Count -lt 1) {
+  throw 'Post-repair lock or lifecycle START source marker is missing.'
+}
+$ordinaryStartIndex = $startMatches[$startMatches.Count - 1].Index
+if ($ordinaryStartIndex -le $postRepairLockIndex) {
+  throw 'Post-repair runner lock must be HELD before ordinary/provenance lifecycle start.'
+}
 
 Write-Host 'PHASE7C_RECOVERY_MIGRATION_VERIFIER_WINDOW_SOURCE=PASS'

@@ -335,6 +335,18 @@ function Get-Phase7CExecutorTaskDrift {
     if ([string]$settings.MultipleInstances -ne 'IgnoreNew') { $drift.Add('MULTIPLE_INSTANCES') }
     if ([int]$settings.RestartCount -ne 0) { $drift.Add('RESTART_COUNT') }
     if ([string]$settings.ExecutionTimeLimit -ne 'PT0S') { $drift.Add('EXECUTION_TIME_LIMIT') }
+
+    $disallowStartIfOnBatteries = $true
+    if ($null -ne $settings.PSObject.Properties['DisallowStartIfOnBatteries']) {
+      $disallowStartIfOnBatteries = [bool]$settings.DisallowStartIfOnBatteries
+    }
+    if ($disallowStartIfOnBatteries) { $drift.Add('DISALLOW_START_IF_ON_BATTERIES') }
+
+    $stopIfGoingOnBatteries = $true
+    if ($null -ne $settings.PSObject.Properties['StopIfGoingOnBatteries']) {
+      $stopIfGoingOnBatteries = [bool]$settings.StopIfGoingOnBatteries
+    }
+    if ($stopIfGoingOnBatteries) { $drift.Add('STOP_IF_GOING_ON_BATTERIES') }
   }
 
   if ($null -eq $Task.Principal -or [string]$Task.Principal.RunLevel -ne 'Highest') {
@@ -342,6 +354,27 @@ function Get-Phase7CExecutorTaskDrift {
   }
 
   return @($drift)
+}
+
+function Test-Phase7CBatteryOnlyTaskDrift {
+  param([string[]]$Drift = @())
+
+  $items = @(
+    $Drift |
+      ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } |
+      Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+      Sort-Object -Unique
+  )
+  if ($items.Count -eq 0) { return $false }
+
+  $allowed = @(
+    'DISALLOW_START_IF_ON_BATTERIES',
+    'STOP_IF_GOING_ON_BATTERIES'
+  )
+  foreach ($item in $items) {
+    if ($allowed -notcontains $item) { return $false }
+  }
+  return $true
 }
 
 function Get-Phase7CScheduledTaskErrorClassification {
