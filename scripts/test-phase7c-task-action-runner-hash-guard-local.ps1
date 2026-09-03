@@ -113,3 +113,8 @@ $ErrorActionPreference = 'Stop'
   }
   try { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue } catch { }
 }
+
+# The test intentionally executes `git diff --quiet` against a dirty fixture,
+# which leaves Windows PowerShell's process-level LASTEXITCODE at 1 even though
+# that failure is the expected assertion path. All assertions above have passed.
+exit 0
