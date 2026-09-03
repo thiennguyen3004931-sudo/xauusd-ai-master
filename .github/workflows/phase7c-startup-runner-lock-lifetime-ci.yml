@@ -9,6 +9,7 @@ on:
       - "scripts/lib/phase7c-scheduled-task-ownership.ps1"
       - "scripts/lib/phase7c-runtime-ownership-probe.ps1"
       - "scripts/run-phase7c-executor-task-runner-local.ps1"
+      - "scripts/register-phase7c-executor-task-local.ps1"
       - "scripts/stop-phase7c-executors-local.ps1"
       - "scripts/test-phase7c-startup-runner-lock-lifetime-local.ps1"
       - "scripts/test-phase7c-startup-runner-lock-persistent-loop-local.ps1"
@@ -17,6 +18,7 @@ on:
       - "scripts/test-phase7c-runtime-ownership-generation-mismatch-local.ps1"
       - "scripts/test-phase7c-runtime-ownership-lock-acl-observer-local.ps1"
       - "scripts/test-phase7c-task-action-runner-hash-guard-local.ps1"
+      - "scripts/test-phase7c-task-installer-runner-hash-guard-local.ps1"
       - "scripts/test-phase7c-runtime-provenance-stale-runner-local.ps1"
       - ".github/workflows/phase7c-startup-runner-lock-lifetime-ci.yml"
   pull_request:
@@ -27,6 +29,7 @@ on:
       - "scripts/lib/phase7c-scheduled-task-ownership.ps1"
       - "scripts/lib/phase7c-runtime-ownership-probe.ps1"
       - "scripts/run-phase7c-executor-task-runner-local.ps1"
+      - "scripts/register-phase7c-executor-task-local.ps1"
       - "scripts/stop-phase7c-executors-local.ps1"
       - "scripts/test-phase7c-startup-runner-lock-lifetime-local.ps1"
       - "scripts/test-phase7c-startup-runner-lock-persistent-loop-local.ps1"
@@ -35,6 +38,7 @@ on:
       - "scripts/test-phase7c-runtime-ownership-generation-mismatch-local.ps1"
       - "scripts/test-phase7c-runtime-ownership-lock-acl-observer-local.ps1"
       - "scripts/test-phase7c-task-action-runner-hash-guard-local.ps1"
+      - "scripts/test-phase7c-task-installer-runner-hash-guard-local.ps1"
       - "scripts/test-phase7c-runtime-provenance-stale-runner-local.ps1"
       - ".github/workflows/phase7c-startup-runner-lock-lifetime-ci.yml"
 
@@ -68,6 +72,9 @@ jobs:
       - name: Task action runner hash guard - Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-task-action-runner-hash-guard-local.ps1
+      - name: Task installer runner hash guard - Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-task-installer-runner-hash-guard-local.ps1
       - name: Runtime stale runner provenance - Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-runtime-provenance-stale-runner-local.ps1
