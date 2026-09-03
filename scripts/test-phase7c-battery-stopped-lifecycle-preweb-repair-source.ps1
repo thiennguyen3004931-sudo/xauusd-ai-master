@@ -65,7 +65,7 @@ Assert-Contains $recovery '-not\s+\[bool\]\$lifecycleBeforeBatteryRepair\.runnin
   'Battery pre-Web repair must require lifecycle running=false.'
 Assert-Contains $recovery '-not\s+\(Test-Phase7CLifecycleHasAliveProcess\s+-State\s+\$lifecycleBeforeBatteryRepair\)' `
   'Battery pre-Web repair must require zero alive lifecycle executor processes.'
-Assert-Contains $recovery '\$batteryPreWebRepairEligible\s*=\s*[\s\S]*\$batteryStrandedOutageEligible\s+-or\s+\$batteryHealthyBrokerStoppedLifecycleEligible' `
+Assert-Contains $recovery '\$batteryPreWebRepairEligible\s*=\s*[\s\S]*?\$batteryStrandedOutageEligible\s*(?:\x60)?\s*-or\s*(?:\x60)?\s*\$batteryHealthyBrokerStoppedLifecycleEligible' `
   'Battery pre-Web repair must allow only the proven stranded tuple or the proven healthy-broker/stopped-lifecycle tuple.'
 
 # Unlike the original stranded case, this LIVE state has an active broker.
