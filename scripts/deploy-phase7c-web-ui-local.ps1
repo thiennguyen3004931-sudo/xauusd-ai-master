@@ -4,6 +4,8 @@ param(
   [int]$ApiPort = 3711,
   [int]$WebPort = 5717,
   [int]$StartupTimeoutSeconds = 90,
+  [switch]$AllowOwnedTaskProvenanceMigration,
+  [string]$ExpectedRunnerSha256 = "",
   [Parameter(Mandatory = $true)]
   [ValidateNotNullOrEmpty()]
   [string]$ExpectedCommit
@@ -16,6 +18,14 @@ $LifecycleBrokerRunner = Join-Path $PSScriptRoot "run-phase7c-executor-task-runn
 $LifecycleBrokerGuardLibrary = Join-Path $PSScriptRoot "lib\phase7c-startup-runner-guard.ps1"
 $LifecycleBrokerAccountLibrary = Join-Path $PSScriptRoot "lib\phase7c-account-mode.ps1"
 $LifecycleBrokerLibrary = Join-Path $PSScriptRoot "lib\phase7c-lifecycle-broker.ps1"
+
+if ($AllowOwnedTaskProvenanceMigration) {
+  if ($ExpectedRunnerSha256 -notmatch '^[0-9a-fA-F]{64}$') {
+    throw "Owned task provenance migration Web deploy requires an exact 64-character ExpectedRunnerSha256."
+  }
+} elseif (-not [string]::IsNullOrWhiteSpace($ExpectedRunnerSha256)) {
+  throw "ExpectedRunnerSha256 is only valid with AllowOwnedTaskProvenanceMigration."
+}
 
 foreach ($required in @(
   $DashboardDeploy,
@@ -140,13 +150,22 @@ try {
   }
   Write-Host "PHASE7C_WEB_UI_DEPLOY_BUILD=PASS"
 
+  $dashboardDeployArgs = @()
+  if ($AllowOwnedTaskProvenanceMigration) {
+    $dashboardDeployArgs += @(
+      '-AllowOwnedTaskProvenanceMigration',
+      '-ExpectedRunnerSha256', $ExpectedRunnerSha256
+    )
+  }
+
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $DashboardDeploy `
     -WorkDir $WorkDir `
     -WebTask $WebTask `
     -ApiPort $ApiPort `
     -WebPort $WebPort `
     -StartupTimeoutSeconds $StartupTimeoutSeconds `
-    -SkipPanelInstall
+    -SkipPanelInstall `
+    @dashboardDeployArgs
   if ($LASTEXITCODE -ne 0) {
     throw "Safe Phase7C web runtime restart failed with exit code $LASTEXITCODE."
   }

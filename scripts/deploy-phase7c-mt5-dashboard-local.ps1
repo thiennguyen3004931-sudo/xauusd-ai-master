@@ -4,7 +4,9 @@ param(
   [int]$ApiPort = 3711,
   [int]$WebPort = 5717,
   [int]$StartupTimeoutSeconds = 90,
-  [switch]$SkipPanelInstall
+  [switch]$SkipPanelInstall,
+  [switch]$AllowOwnedTaskProvenanceMigration,
+  [string]$ExpectedRunnerSha256 = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,6 +25,13 @@ if ($WebPort -lt 1024 -or $WebPort -gt 65535) { throw "WebPort is invalid." }
 if ($ApiPort -eq $WebPort) { throw "ApiPort and WebPort must be different." }
 if ($StartupTimeoutSeconds -lt 30 -or $StartupTimeoutSeconds -gt 300) {
   throw "StartupTimeoutSeconds must be between 30 and 300."
+}
+if ($AllowOwnedTaskProvenanceMigration) {
+  if ($ExpectedRunnerSha256 -notmatch '^[0-9a-fA-F]{64}$') {
+    throw "Owned task provenance migration dashboard deploy requires an exact 64-character ExpectedRunnerSha256."
+  }
+} elseif (-not [string]::IsNullOrWhiteSpace($ExpectedRunnerSha256)) {
+  throw "ExpectedRunnerSha256 is only valid with AllowOwnedTaskProvenanceMigration."
 }
 
 $ApiBase = "http://127.0.0.1:$ApiPort"
@@ -331,10 +340,19 @@ if (-not $SkipPanelInstall) {
 # Telegram, executors, bridge, switch account mode, or mutate LIVE arm state.
 [void](Wait-TelegramRecoveryAfterApiRestart -TimeoutSeconds 45)
 
+$accountVerifierArgs = @()
+if ($AllowOwnedTaskProvenanceMigration) {
+  $accountVerifierArgs += @(
+    '-AllowOwnedTaskProvenanceMigration',
+    '-ExpectedRunnerSha256', $ExpectedRunnerSha256
+  )
+}
+
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $AccountVerifier `
   -WorkDir $WorkDir `
   -ExpectedAccountMode $expectedAccountMode `
-  -RequireTelegram
+  -RequireTelegram `
+  @accountVerifierArgs
 if ($LASTEXITCODE -ne 0) {
   throw "Phase7C strict $expectedAccountMode account verifier failed after dashboard deploy."
 }

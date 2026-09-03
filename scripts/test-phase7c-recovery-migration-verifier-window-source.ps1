@@ -71,14 +71,18 @@ foreach ($source in @($webDeploy, $dashboardDeploy)) {
   Assert-Contains $source '\[string\]\$ExpectedRunnerSha256' `
     'Web/dashboard deploy must propagate the exact trusted runner SHA256.'
 }
-Assert-Contains $webDeploy '-AllowOwnedTaskProvenanceMigration:\$AllowOwnedTaskProvenanceMigration' `
-  'Web deploy must forward the migration switch explicitly to dashboard deploy.'
-Assert-Contains $webDeploy '-ExpectedRunnerSha256\s+\$ExpectedRunnerSha256' `
-  'Web deploy must forward expected runner SHA256 to dashboard deploy.'
-Assert-Contains $dashboardDeploy '-AllowOwnedTaskProvenanceMigration:\$AllowOwnedTaskProvenanceMigration' `
-  'Dashboard deploy must forward the migration switch explicitly to strict account verifier.'
-Assert-Contains $dashboardDeploy '-ExpectedRunnerSha256\s+\$ExpectedRunnerSha256' `
-  'Dashboard deploy must forward expected runner SHA256 to strict account verifier.'
+Assert-Contains $webDeploy '\$dashboardDeployArgs\s*=\s*@\(' `
+  'Web deploy must build explicit migration-only dashboard arguments.'
+Assert-Contains $webDeploy '\$dashboardDeployArgs\s*\+=\s*@\([\s\S]*AllowOwnedTaskProvenanceMigration[\s\S]*ExpectedRunnerSha256' `
+  'Web deploy must forward migration switch + expected runner SHA256 only through explicit dashboard arguments.'
+Assert-Contains $webDeploy '@dashboardDeployArgs' `
+  'Web deploy must splat the explicit migration-only arguments into dashboard deploy.'
+Assert-Contains $dashboardDeploy '\$accountVerifierArgs\s*=\s*@\(' `
+  'Dashboard deploy must build explicit migration-only verifier arguments.'
+Assert-Contains $dashboardDeploy '\$accountVerifierArgs\s*\+=\s*@\([\s\S]*AllowOwnedTaskProvenanceMigration[\s\S]*ExpectedRunnerSha256' `
+  'Dashboard deploy must forward migration switch + expected runner SHA256 only through explicit verifier arguments.'
+Assert-Contains $dashboardDeploy '@accountVerifierArgs' `
+  'Dashboard deploy must splat the explicit migration-only arguments into strict account verifier.'
 
 # Recovery may open the migration window only after it has already classified
 # the task as owned + repair-required and validated the API SID/principal.
