@@ -60,9 +60,13 @@ function New-Phase7CCanonicalTrigger {
 }
 
 function New-Phase7CCanonicalSettings {
-  # Demand start is allowed by default. ScheduledTasks exposes only the inverse
-  # -DisallowDemandStart switch on supported Windows versions.
+  # The lifecycle broker is a long-lived safety/control service. It must be able
+  # to start and remain alive while the Windows host is running on battery.
+  # Demand start remains allowed by default; ScheduledTasks exposes only the
+  # inverse -DisallowDemandStart switch on supported Windows versions.
   return New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
     -StartWhenAvailable `
     -MultipleInstances IgnoreNew `
     -ExecutionTimeLimit ([TimeSpan]::Zero)
