@@ -42,6 +42,7 @@ data/execution-state.sqlite3*
 /phase7c-sideway-live-forward/
 /scripts/.phase7c-trend-legacy-runtime-*.mjs
 /scripts/.phase7c-sideway-live-runtime-*.mjs
+/scripts/.phase7c-sideway-runtime-*.mjs
 
 # ============================================================
 # XAUUSD AI MASTER - LOCAL DATA / BACKUPS / REPLAY OUTPUT
