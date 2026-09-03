@@ -35,7 +35,7 @@ Assert-True ($text.Contains('requires zero pending XAUUSD orders')) "helper must
 # PR #236 is API code: deploy Web/API first so the new lifecycle readiness code is loaded.
 Assert-True ($text.Contains('deploy-phase7c-web-ui-local.ps1')) "helper must reuse canonical Web/API deploy helper"
 $deployIndex = $text.IndexOf('& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy', [System.StringComparison]::Ordinal)
-$stableProbeIndex = $text.IndexOf('Wait-LifecycleReadyStable', [System.StringComparison]::Ordinal)
+$stableProbeIndex = $text.IndexOf('$stableBeforeRecovery = Wait-LifecycleReadyStable', [System.StringComparison]::Ordinal)
 $stopIndex = $text.IndexOf('"/api/v1/phase7c/lifecycle/stop"', [System.StringComparison]::Ordinal)
 $startIndex = $text.IndexOf('"/api/v1/phase7c/lifecycle/start"', [System.StringComparison]::Ordinal)
 Assert-True ($deployIndex -ge 0) "helper must invoke canonical Web/API deploy"
