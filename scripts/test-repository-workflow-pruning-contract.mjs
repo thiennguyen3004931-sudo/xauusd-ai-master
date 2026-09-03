@@ -20,6 +20,10 @@ const retiredWorkflows = [
   "phase7c-live-arm-guard-ci.yml",
   "phase7c-live-risk-profile-ci.yml",
   "phase7c-dual-account-mode-ci.yml",
+  "phase7c-startup-runner-guard-ci.yml",
+  "phase7c-web-account-switch-ci.yml",
+  "phase7c-web-live-start-guard-ci.yml",
+  "phase7c-web-mt5-sync-demo-e2e-ci.yml",
 ];
 
 function stripYamlScalar(value) {
