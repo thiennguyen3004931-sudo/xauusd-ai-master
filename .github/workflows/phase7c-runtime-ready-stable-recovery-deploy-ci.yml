@@ -11,6 +11,7 @@ on:
   push:
     branches:
       - fix/phase7c-runtime-ready-stable-recovery-deploy
+      - fix/phase7c-runtime-provenance-recovery-deploy
     paths:
       - "scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1"
       - "scripts/test-phase7c-runtime-ready-stable-recovery-deploy-source.ps1"
