@@ -26,6 +26,7 @@ import {
 } from "./phase7c-lifecycle-broker.service";
 
 const START_TIMEOUT_MS = 50_000;
+const START_READY_STABLE_MS = 5_000;
 const STOP_VERIFY_TIMEOUT_MS = 10_000;
 const TELEGRAM_STALE_MS = 15_000;
 
@@ -214,9 +215,16 @@ export const assertPhase7CDemoReady = assertPhase7CSelectedAccountReady;
 
 async function waitForReady(timeoutMs = START_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
+  let readySince: number | null = null;
   while (Date.now() < deadline) {
     const status = getPhase7CLifecycleRuntimeStatus();
-    if (status.ready) return status;
+    const now = Date.now();
+    if (status.ready) {
+      readySince ??= now;
+      if (now - readySince >= START_READY_STABLE_MS) return status;
+    } else {
+      readySince = null;
+    }
     await sleep(500);
   }
   return null;
