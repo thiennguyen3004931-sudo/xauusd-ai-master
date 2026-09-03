@@ -10,6 +10,10 @@ const retiredWorkflows = [
   "phase7b-live-runtime-status-ci.yml",
   "phase7b-pattern-rule-v2-apply.yml",
   "phase7b-pattern-rule-v2-recovery-ci.yml",
+  "phase7c-demo-target-live-env-disabled-ci.yml",
+  "phase7c-switch-position-array-ci.yml",
+  "phase7c-stale-port-ownership-ci.yml",
+  "phase7c-scheduled-task-ownership-ci.yml",
 ];
 
 test("canonical PR gate remains present after workflow pruning", () => {
@@ -20,7 +24,7 @@ test("canonical PR gate remains present after workflow pruning", () => {
   );
 });
 
-test("proven-dead Phase7B workflows stay retired", () => {
+test("proven-dead workflows stay retired", () => {
   for (const workflow of retiredWorkflows) {
     assert.equal(
       fs.existsSync(path.join(workflowsDir, workflow)),
