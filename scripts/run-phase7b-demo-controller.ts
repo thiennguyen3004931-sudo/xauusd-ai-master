@@ -544,6 +544,16 @@ async function cycle(): Promise<void> {
       candidate,
     );
 
+    if (pending.dailyMode !== "RECOVERY_TP") {
+      await reconcileFixedTpBrokerTakeProfit({
+        ticket: candidate.ticket,
+        enabled: state.managed.fixedTpEnabled,
+        targetPrice: state.managed.fixedTpPrice,
+        currentTakeProfit: candidate.takeProfit,
+        strategy: "TREND",
+      });
+    }
+
     state.pendingEntry = null;
     saveState();
 
@@ -916,6 +926,11 @@ async function submitTrendEntry(
     side: signal.side,
     entry: marketEntry,
   });
+  const brokerTakeProfit = dailyRecovery.mode === "RECOVERY_TP"
+    ? takeProfit
+    : fixedTpSnapshot.enabled && fixedTpSnapshot.targetPrice !== null
+      ? fixedTpSnapshot.targetPrice
+      : takeProfit;
 
   const pendingEntry: PendingTrendEntry = {
     orderId,
@@ -963,7 +978,7 @@ async function submitTrendEntry(
     volume: fixedVolume,
     requestedPrice: marketEntry,
     stopLoss,
-    takeProfit,
+    takeProfit: brokerTakeProfit,
     deviationPoints,
     magicNumber,
     comment: entryState === "PULLBACK_ENTRY" ? "phase7b-demo-pb" : "phase7b-demo-im",
@@ -1035,6 +1050,16 @@ async function submitTrendEntry(
     side: pendingEntry.side,
     entry: opened.entry,
   });
+
+  if (dailyRecovery.mode !== "RECOVERY_TP") {
+    await reconcileFixedTpBrokerTakeProfit({
+      ticket: opened.ticket,
+      enabled: filledFixedTpSnapshot.enabled,
+      targetPrice: filledFixedTpSnapshot.targetPrice,
+      currentTakeProfit: opened.takeProfit,
+      strategy: "TREND",
+    });
+  }
 
   state.managed = {
     ticket: opened.ticket,
@@ -1562,6 +1587,44 @@ async function closeFixedTpIfTriggered(
   } finally {
     lock.release();
   }
+}
+
+async function reconcileFixedTpBrokerTakeProfit(input: {
+  ticket: string;
+  enabled: boolean;
+  targetPrice: number | null;
+  currentTakeProfit: number;
+  strategy: "TREND";
+}): Promise<void> {
+  if (!input.enabled || !Number.isFinite(Number(input.targetPrice)) || Number(input.targetPrice) <= 0) return;
+  const ticket = String(input.ticket);
+  const targetPrice = Number(input.targetPrice);
+  const currentTakeProfit = Number(input.currentTakeProfit);
+  if (Number.isFinite(currentTakeProfit) && Math.abs(currentTakeProfit - targetPrice) <= 1e-9) {
+    journal("FIXED_TP_BROKER_ALREADY_ALIGNED", { ticket, strategy: input.strategy, takeProfit: targetPrice });
+    return;
+  }
+  const commandId = `phase7c-fixed-tp-broker-trend-${ticket}`;
+  const payload = {
+    takeProfit: targetPrice,
+    commandId,
+  };
+  journal("FIXED_TP_BROKER_RECONCILE_ATTEMPT", {
+    ticket,
+    strategy: input.strategy,
+    currentTakeProfit: Number.isFinite(currentTakeProfit) ? currentTakeProfit : null,
+    targetPrice,
+    commandId,
+  });
+  const response = await patch<CommandResponse>(
+    `/v1/positions/${encodeURIComponent(ticket)}`,
+    payload,
+  );
+  if (!response.success) {
+    journal("FIXED_TP_BROKER_RECONCILE_REJECTED", { ticket, strategy: input.strategy, targetPrice, commandId, response });
+    return;
+  }
+  journal("FIXED_TP_BROKER_RECONCILED", { ticket, strategy: input.strategy, targetPrice, commandId, response });
 }
 
 async function managePosition(position: Position, quote: Quote, spec: SymbolSpec, m15: Phase7Bar[]): Promise<void> {

@@ -230,6 +230,15 @@ async function cycle() {
     const recovery = matchPendingEntryPosition(pending, positions, spec, Date.now(), brokerClockOffsetMs);
     if (recovery.matched && recovery.position) {
       state.managed = buildManagedState(recovery.position, pending, brokerClockOffsetMs);
+      if (state.managed.dailyMode !== "RECOVERY_TP") {
+        await reconcileFixedTpBrokerTakeProfit({
+          ticket: state.managed.ticket,
+          enabled: state.managed.fixedTpEnabled,
+          targetPrice: state.managed.fixedTpPrice,
+          currentTakeProfit: Number(recovery.position.takeProfit),
+          strategy: "SIDEWAY",
+        });
+      }
       state.pendingEntry = null;
       saveState();
       journal("PENDING_ENTRY_RECOVERED", {
@@ -646,6 +655,11 @@ async function cycle() {
     side,
     entry: Number(finalPlan.entry),
   });
+  const brokerTakeProfit = dailyRecovery.mode === "RECOVERY_TP"
+    ? executionPlan.takeProfit
+    : fixedTpSnapshot.enabled && fixedTpSnapshot.targetPrice !== null
+      ? fixedTpSnapshot.targetPrice
+      : executionPlan.takeProfit;
   journal("FIXED_TP_CONFIG_SNAPSHOT", {
     strategy: "SIDEWAY",
     orderId,
@@ -698,7 +712,7 @@ async function cycle() {
     volume,
     requestedPrice: executionPlan.entry,
     stopLoss: executionPlan.stopLoss,
-    takeProfit: executionPlan.takeProfit,
+    takeProfit: brokerTakeProfit,
     deviationPoints,
     magicNumber,
     comment: "phase7c-sideway",
@@ -724,6 +738,15 @@ async function cycle() {
   }
 
   state.managed = buildManagedState(opened, state.pendingEntry, brokerClockOffsetMs);
+  if (state.managed.dailyMode !== "RECOVERY_TP") {
+    await reconcileFixedTpBrokerTakeProfit({
+      ticket: state.managed.ticket,
+      enabled: state.managed.fixedTpEnabled,
+      targetPrice: state.managed.fixedTpPrice,
+      currentTakeProfit: Number(opened.takeProfit),
+      strategy: "SIDEWAY",
+    });
+  }
   state.pendingEntry = null;
   saveState();
   journal("ENTRY_FILLED", { orderId, position: opened, management: state.managed });
@@ -924,6 +947,39 @@ function buildManagedState(opened, pending, brokerClockOffsetMs = 0) {
     breakEvenAttempt: 0,
     exitAttempt: 0,
   };
+}
+
+async function reconcileFixedTpBrokerTakeProfit(input) {
+  if (!input?.enabled || !Number.isFinite(Number(input.targetPrice)) || Number(input.targetPrice) <= 0) return;
+  const ticket = String(input.ticket);
+  const targetPrice = Number(input.targetPrice);
+  const currentTakeProfit = Number(input.currentTakeProfit);
+  if (Number.isFinite(currentTakeProfit) && Math.abs(currentTakeProfit - targetPrice) <= 1e-9) {
+    journal("FIXED_TP_BROKER_ALREADY_ALIGNED", { ticket, strategy: input.strategy, takeProfit: targetPrice });
+    return;
+  }
+  const commandId = `phase7c-fixed-tp-broker-sideway-${ticket}`;
+  const payload = {
+    takeProfit: targetPrice,
+    commandId,
+  };
+  journal("FIXED_TP_BROKER_RECONCILE_ATTEMPT", {
+    ticket,
+    strategy: input.strategy,
+    currentTakeProfit: Number.isFinite(currentTakeProfit) ? currentTakeProfit : null,
+    targetPrice,
+    commandId,
+  });
+  const response = await bridgeRequest(
+    "PATCH",
+    `/v1/positions/${encodeURIComponent(ticket)}`,
+    payload,
+  );
+  if (!response.success) {
+    journal("FIXED_TP_BROKER_RECONCILE_REJECTED", { ticket, strategy: input.strategy, targetPrice, commandId, response });
+    return;
+  }
+  journal("FIXED_TP_BROKER_RECONCILED", { ticket, strategy: input.strategy, targetPrice, commandId, response });
 }
 
 async function closeFixedTpIfTriggered(position, quote) {
