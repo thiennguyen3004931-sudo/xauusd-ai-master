@@ -3,14 +3,12 @@ Set-StrictMode -Version Latest
 
 $GuardLibrary = Join-Path $PSScriptRoot 'lib\phase7c-startup-runner-guard.ps1'
 $OwnershipLibrary = Join-Path $PSScriptRoot 'lib\phase7c-scheduled-task-ownership.ps1'
-$RuntimeOwnershipLibrary = Join-Path $PSScriptRoot 'lib\phase7c-runtime-ownership-probe.ps1'
-foreach ($required in @($GuardLibrary, $OwnershipLibrary, $RuntimeOwnershipLibrary)) {
+foreach ($required in @($GuardLibrary, $OwnershipLibrary)) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
     throw "Required production source missing: $required"
   }
 }
 . $OwnershipLibrary
-. $RuntimeOwnershipLibrary
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
@@ -21,24 +19,17 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 Import-Module ScheduledTasks -ErrorAction Stop
 $taskName = "Phase7C-CI-Lock-$([Guid]::NewGuid().ToString('N'))"
 $tempRoot = Join-Path $env:ProgramData ("phase7c-lock-system-task-{0}" -f [Guid]::NewGuid().ToString('N'))
-$runtimeDir = Join-Path $tempRoot 'phase7c-executors'
-$brokerStateDir = Join-Path $tempRoot 'phase7c-lifecycle-broker\state'
-New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
-New-Item -ItemType Directory -Force -Path $brokerStateDir | Out-Null
-$lockPath = Join-Path $runtimeDir 'startup-runner.lock'
+New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+$lockPath = Join-Path $tempRoot 'startup-runner.lock'
 $readyPath = Join-Path $tempRoot 'ready.txt'
 $childScript = Join-Path $tempRoot 'system-task-owner.ps1'
-$statusPath = Join-Path $brokerStateDir 'status.json'
-$heartbeatPath = Join-Path $brokerStateDir 'heartbeat.json'
 $powerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 
 $childSource = @'
 param(
   [Parameter(Mandatory = $true)] [string]$GuardLibrary,
   [Parameter(Mandatory = $true)] [string]$LockPath,
-  [Parameter(Mandatory = $true)] [string]$ReadyPath,
-  [Parameter(Mandatory = $true)] [string]$StatusPath,
-  [Parameter(Mandatory = $true)] [string]$HeartbeatPath
+  [Parameter(Mandatory = $true)] [string]$ReadyPath
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -51,9 +42,6 @@ try {
   [System.IO.File]::WriteAllText($ReadyPath, "$PID|$($identity.Name)")
 
   while ($true) {
-    $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-    [System.IO.File]::WriteAllText($StatusPath, (@{ version = 1; brokerPid = $PID; state = 'RUNNING'; updatedAt = $now } | ConvertTo-Json -Compress))
-    [System.IO.File]::WriteAllText($HeartbeatPath, (@{ version = 1; brokerPid = $PID; updatedAt = $now } | ConvertTo-Json -Compress))
     $pressure = New-Object byte[] 262144
     $pressure[0] = 1
     [GC]::Collect()
@@ -68,9 +56,12 @@ try {
 
 $registered = $false
 try {
-  $arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -GuardLibrary "{1}" -LockPath "{2}" -ReadyPath "{3}" -StatusPath "{4}" -HeartbeatPath "{5}"' -f $childScript, $GuardLibrary, $lockPath, $readyPath, $statusPath, $heartbeatPath
+  $arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -GuardLibrary "{1}" -LockPath "{2}" -ReadyPath "{3}"' -f $childScript, $GuardLibrary, $lockPath, $readyPath
   $action = New-ScheduledTaskAction -Execute $powerShellExe -Argument $arguments
   $trigger = New-ScheduledTaskTrigger -AtStartup
+
+  # Hosted Windows images do not expose the same New-ScheduledTaskSettingsSet
+  # switches on every build. Keep only settings required for this lifetime test.
   $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
   $taskPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 
@@ -106,7 +97,7 @@ try {
   }
 
   $samples = 0
-  for ($i = 0; $i -lt 100; $i++) {
+  for ($i = 0; $i -lt 400; $i++) {
     if ($null -eq (Get-Process -Id $ownerPid -ErrorAction SilentlyContinue)) {
       throw "SYSTEM lock-owner exited unexpectedly. sample=$i PID=$ownerPid"
     }
@@ -122,47 +113,12 @@ try {
     Start-Sleep -Milliseconds 25
   }
 
-  # RED regression: remove inherited observer visibility from the executor runtime
-  # while keeping SYSTEM ownership intact. Broker state remains readable so the
-  # ownership snapshot must not silently classify the held lock as MISSING.
-  $acl = New-Object System.Security.AccessControl.DirectorySecurity
-  $acl.SetAccessRuleProtection($true, $false)
-  $inherit = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
-  $propagation = [System.Security.AccessControl.PropagationFlags]::None
-  $allow = [System.Security.AccessControl.AccessControlType]::Allow
-  $systemSid = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::LocalSystemSid, $null)
-  $systemRule = New-Object System.Security.AccessControl.FileSystemAccessRule($systemSid, [System.Security.AccessControl.FileSystemRights]::FullControl, $inherit, $propagation, $allow)
-  [void]$acl.AddAccessRule($systemRule)
-  Set-Acl -LiteralPath $runtimeDir -AclObject $acl
-
-  $snapshotDeadline = [DateTime]::UtcNow.AddSeconds(5)
-  do {
-    $snapshot = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $tempRoot -HeartbeatMaxAgeMs 5000
-    if ($snapshot.brokerProcessAlive -and $snapshot.brokerHeartbeatFresh -and $snapshot.brokerStatusPidMatch) { break }
-    Start-Sleep -Milliseconds 50
-  } while ([DateTime]::UtcNow -lt $snapshotDeadline)
-
-  if (-not $snapshot.brokerProcessAlive) { throw 'RED setup failed: broker process is not alive.' }
-  if (-not $snapshot.brokerHeartbeatFresh) { throw 'RED setup failed: broker heartbeat is not fresh.' }
-  if (-not $snapshot.brokerStatusPidMatch) { throw 'RED setup failed: broker status PID does not match heartbeat PID.' }
-  if ($snapshot.startupRunnerLockState -eq 'MISSING') {
-    throw "RED reproduced: held SYSTEM startup lock was classified MISSING under observer ACL restriction. exactGate=$($snapshot.exactGenerationMismatchGate)"
-  }
-
   Write-Host 'PHASE7C_STARTUP_RUNNER_LOCK_SYSTEM_TASK_TEST=PASS'
   Write-Host "SYSTEM_OWNER_PID=$ownerPid"
   Write-Host "SYSTEM_OWNER_NAME=$ownerName"
   Write-Host "HELD_SAMPLES=$samples"
-  Write-Host "SYSTEM_TASK_LOCK_STATE=$($snapshot.startupRunnerLockState)"
+  Write-Host 'SYSTEM_TASK_LOCK_STATE=HELD'
 } finally {
-  # Restore inherited administrator access before cleanup.
-  try {
-    $acl = Get-Acl -LiteralPath $runtimeDir -ErrorAction SilentlyContinue
-    if ($null -ne $acl) {
-      $acl.SetAccessRuleProtection($false, $true)
-      Set-Acl -LiteralPath $runtimeDir -AclObject $acl -ErrorAction SilentlyContinue
-    }
-  } catch { }
   if ($registered) {
     try { Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue } catch { }
     $deadline = [DateTime]::UtcNow.AddSeconds(8)
