@@ -121,13 +121,14 @@ New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 try {
   $child = Join-Path $tempRoot "child.ps1"
   $out = Join-Path $tempRoot "out.txt"
-  @'
-param(
-  [switch]$AllowOwnedTaskProvenanceMigration,
-  [string]$ExpectedRunnerSha256 = ""
-)
-[System.IO.File]::WriteAllText($env:PHASE7C_SPLAT_OUT, "$([bool]$AllowOwnedTaskProvenanceMigration)|$ExpectedRunnerSha256")
-'@ | Set-Content -LiteralPath $child -Encoding UTF8
+  $childLines = @(
+    'param(',
+    '  [switch]$AllowOwnedTaskProvenanceMigration,',
+    '  [string]$ExpectedRunnerSha256 = ""',
+    ')',
+    '[System.IO.File]::WriteAllText($env:PHASE7C_SPLAT_OUT, "$([bool]$AllowOwnedTaskProvenanceMigration)|$ExpectedRunnerSha256")'
+  )
+  $childLines | Set-Content -LiteralPath $child -Encoding UTF8
   $expectedSplatHash = ('A' * 64)
   $nativeArgs = @('-AllowOwnedTaskProvenanceMigration', '-ExpectedRunnerSha256', $expectedSplatHash)
   $env:PHASE7C_SPLAT_OUT = $out
