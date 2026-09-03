@@ -10,8 +10,10 @@ function Get-Phase7CReadOnlyLockState {
   $handle = $null
   try {
     # Diagnostic probe only: request read access and exclusive sharing so the
-    # production runner's open FileStream remains the source of truth.
-    $handle = New-Object System.IO.FileStream(
+    # production runner's open FileStream remains the source of truth. Use
+    # File.Open so Windows PowerShell preserves the native sharing-violation
+    # HRESULT used by the canonical startup-runner ownership helper.
+    $handle = [System.IO.File]::Open(
       $Path,
       [System.IO.FileMode]::Open,
       [System.IO.FileAccess]::Read,
