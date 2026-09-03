@@ -9,7 +9,11 @@ Set-StrictMode -Version Latest
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $ConfigPath = Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.json"
 $AccountLibrary = Join-Path $PSScriptRoot "lib\phase7c-account-mode.ps1"
+$OwnershipLibrary = Join-Path $PSScriptRoot "lib\phase7c-scheduled-task-ownership.ps1"
 $WebApiDeploy = Join-Path $PSScriptRoot "deploy-phase7c-web-ui-local.ps1"
+$TaskInstaller = Join-Path $PSScriptRoot "register-phase7c-executor-task-local.ps1"
+$TaskName = "XAUUSD-Phase7C-Executors"
+$BrokerHeartbeat = Join-Path $ProjectRoot ".runtime\phase7c-lifecycle-broker\state\heartbeat.json"
 $ReadyStableMs = 5000
 
 if ($ExpectedCommit -notmatch '^[0-9a-fA-F]{40}$') {
@@ -18,13 +22,14 @@ if ($ExpectedCommit -notmatch '^[0-9a-fA-F]{40}$') {
 if ($TimeoutSeconds -lt 30 -or $TimeoutSeconds -gt 600) {
   throw "TimeoutSeconds must be between 30 and 600."
 }
-foreach ($required in @($ConfigPath, $AccountLibrary, $WebApiDeploy)) {
+foreach ($required in @($ConfigPath, $AccountLibrary, $OwnershipLibrary, $WebApiDeploy, $TaskInstaller)) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
     throw "Runtime-ready stable recovery deploy required file not found: $required"
   }
 }
 
 . $AccountLibrary
+. $OwnershipLibrary
 $ExpectedCommit = $ExpectedCommit.ToLowerInvariant()
 $gitExe = (Get-Command git -ErrorAction Stop).Source
 
@@ -160,6 +165,48 @@ function Wait-LifecycleStopped {
   throw "Lifecycle did not stop within $TimeoutSeconds seconds."
 }
 
+function Assert-LifecycleExecutorsStopped([string]$Stage) {
+  $state = Invoke-ApiGet "/api/v1/phase7c/lifecycle"
+  if ([bool]$state.running) {
+    throw "$Stage requires lifecycle running=false before Scheduled Task repair."
+  }
+  if ($null -eq $state.processes) {
+    throw "$Stage lifecycle process status is unavailable."
+  }
+  $alive = @()
+  foreach ($property in @($state.processes.PSObject.Properties)) {
+    if ($null -ne $property.Value -and [bool]$property.Value.alive) {
+      $alive += [string]$property.Name
+    }
+  }
+  if ($alive.Count -ne 0) {
+    throw "$Stage requires every executor process stopped before Scheduled Task repair. alive=$($alive -join ',')"
+  }
+  Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_${Stage}_EXECUTORS_STOPPED=PASS"
+}
+
+function Test-Phase7CSystemTaskPrincipal($Principal) {
+  if ($null -eq $Principal) { return $false }
+  $user = ([string]$Principal.UserId).Trim()
+  $systemUser = $user -in @('SYSTEM', 'NT AUTHORITY\SYSTEM', 'S-1-5-18')
+  return $systemUser -and ([string]$Principal.LogonType) -eq 'ServiceAccount' -and ([string]$Principal.RunLevel) -eq 'Highest'
+}
+
+function Test-Phase7CBrokerHeartbeatFresh {
+  if (-not (Test-Path -LiteralPath $BrokerHeartbeat -PathType Leaf)) { return $false }
+  try {
+    $heartbeat = Get-Content -LiteralPath $BrokerHeartbeat -Raw | ConvertFrom-Json
+    if ([int]$heartbeat.version -ne 1) { return $false }
+    $brokerPid = [int]$heartbeat.brokerPid
+    if ($brokerPid -le 0 -or $null -eq (Get-Process -Id $brokerPid -ErrorAction SilentlyContinue)) { return $false }
+    $updatedAt = [long]$heartbeat.updatedAt
+    $age = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $updatedAt
+    return $age -ge 0 -and $age -le 5000
+  } catch {
+    return $false
+  }
+}
+
 function Wait-LifecycleReadyStable([int]$ProbeTimeoutSeconds) {
   Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_READY_STABLE_MS=5000"
   $deadline = (Get-Date).AddSeconds($ProbeTimeoutSeconds)
@@ -220,6 +267,48 @@ try {
 Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GIT_GUARD=PASS"
 Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_EXPECTED_COMMIT=$ExpectedCommit"
 
+Import-Module ScheduledTasks -ErrorAction Stop
+$runnerPath = Get-Phase7CExecutorTaskRunnerPath -ProjectRoot $ProjectRoot
+$trustedRunnerSha256 = Get-Phase7CTrustedGitFileSha256 -ProjectRoot $ProjectRoot -Path $runnerPath
+Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_EXPECTED_RUNNER=$runnerPath"
+Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_EXPECTED_RUNNER_SHA256=$trustedRunnerSha256"
+
+$task = $null
+try {
+  $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+} catch {
+  $classification = Get-Phase7CScheduledTaskErrorClassification -Exception $_.Exception
+  Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVIDER=$classification"
+  Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE_REPAIR=BLOCKED_UNPROVEN_OWNERSHIP"
+  throw "Cannot prove canonical Scheduled Task ownership before recovery mutation. classification=$classification"
+}
+if ($null -eq $task) {
+  Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE_REPAIR=BLOCKED_UNPROVEN_OWNERSHIP"
+  throw "Canonical Scheduled Task '$TaskName' is missing; recovery deploy will not create it implicitly."
+}
+
+$taskOwnership = Test-Phase7CExecutorTaskActionOwnership `
+  -Actions $task.Actions `
+  -ExpectedRunnerPath $runnerPath `
+  -ExpectedRunnerSha256 $trustedRunnerSha256
+if (-not [bool]$taskOwnership.owned) {
+  Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE_REPAIR=BLOCKED_UNPROVEN_OWNERSHIP"
+  throw "Scheduled Task ownership cannot be proven; recovery mutation blocked. reason=$($taskOwnership.reason)"
+}
+if (-not (Test-Phase7CSystemTaskPrincipal $task.Principal)) {
+  Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE_REPAIR=BLOCKED_UNPROVEN_OWNERSHIP"
+  throw "Owned Scheduled Task is not SYSTEM + ServiceAccount + Highest; automatic principal replacement is blocked."
+}
+
+$taskProvenanceRepairRequired = [bool]$taskOwnership.repairRequired -or -not [bool]$taskOwnership.canonical
+if ($taskProvenanceRepairRequired) {
+  Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE=OWNED_REPAIR_REQUIRED"
+  Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE_REASON=$($taskOwnership.reason)"
+} else {
+  Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE=CANONICAL_HASH_GUARD"
+  Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE_REPAIR=SKIPPED_ALREADY_CANONICAL"
+}
+
 $config = Read-JsonFile -Path $ConfigPath -Label "Executor task config"
 if ([int]$config.version -ne 2) {
   throw "Runtime-ready stable recovery deploy requires executor task config version 2."
@@ -266,8 +355,7 @@ $mutationStarted = $false
 try {
   $mutationStarted = $true
 
-  # PR #236 changes API lifecycle readiness. Load that exact source first while
-  # preserving executor PIDs, bot mode, LIVE arm state and Bridge ownership.
+  # Load the exact accepted Web/API source before any executor or SYSTEM task stop.
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy `
     -WorkDir $WorkDir `
     -ExpectedCommit $ExpectedCommit
@@ -281,7 +369,7 @@ try {
   Assert-FlatBroker -Stage "POST_WEB_API_DEPLOY"
 
   $stableBeforeRecovery = Wait-LifecycleReadyStable -ProbeTimeoutSeconds 8
-  if ($stableBeforeRecovery) {
+  if ($stableBeforeRecovery -and -not $taskProvenanceRepairRequired) {
     Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_LIFECYCLE_RECOVERY=SKIPPED_ALREADY_STABLE"
   } else {
     Assert-PauseDisarmed -Stage "PRE_LIFECYCLE_RECOVERY"
@@ -295,6 +383,58 @@ try {
       Assert-PauseDisarmed -Stage "POST_STOP"
       Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "POST_STOP"
       Assert-FlatBroker -Stage "POST_STOP"
+    }
+
+    if ($taskProvenanceRepairRequired) {
+      Assert-LifecycleExecutorsStopped -Stage "PRE_TASK_REPAIR"
+      Assert-PauseDisarmed -Stage "PRE_TASK_REPAIR"
+      Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "PRE_TASK_REPAIR"
+      Assert-FlatBroker -Stage "PRE_TASK_REPAIR"
+
+      Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+      $taskStopDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min($TimeoutSeconds, 30))
+      $taskStopped = $false
+      do {
+        Start-Sleep -Milliseconds 250
+        $stoppedTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+        if ([string]$stoppedTask.State -ne 'Running') {
+          $taskStopped = $true
+          break
+        }
+      } while ([DateTime]::UtcNow -lt $taskStopDeadline)
+      if (-not $taskStopped) {
+        throw "Owned Scheduled Task did not stop before provenance repair."
+      }
+      Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_STOP=PASS"
+
+      & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $TaskInstaller `
+        -TaskName $TaskName `
+        -ProjectRoot $ProjectRoot `
+        -Repair
+      if ($LASTEXITCODE -ne 0) {
+        throw "Canonical Scheduled Task provenance repair failed with exit code $LASTEXITCODE."
+      }
+
+      $repairedTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+      $repairedOwnership = Test-Phase7CExecutorTaskActionOwnership `
+        -Actions $repairedTask.Actions `
+        -ExpectedRunnerPath $runnerPath `
+        -ExpectedRunnerSha256 $trustedRunnerSha256
+      if (-not [bool]$repairedOwnership.owned -or -not [bool]$repairedOwnership.canonical -or [bool]$repairedOwnership.repairRequired) {
+        throw "Scheduled Task provenance repair did not converge to the trusted hash guard. reason=$($repairedOwnership.reason)"
+      }
+      if (-not (Test-Phase7CSystemTaskPrincipal $repairedTask.Principal)) {
+        throw "Scheduled Task provenance repair did not preserve SYSTEM + ServiceAccount + Highest."
+      }
+      if (-not (Test-Phase7CBrokerHeartbeatFresh)) {
+        throw "Scheduled Task provenance repair did not return a fresh lifecycle broker heartbeat."
+      }
+
+      Assert-PauseDisarmed -Stage "POST_TASK_REPAIR"
+      Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "POST_TASK_REPAIR"
+      Assert-FlatBroker -Stage "POST_TASK_REPAIR"
+      Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE=CANONICAL_HASH_GUARD"
+      Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE_REPAIR=PERFORMED"
     }
 
     [void](Invoke-ApiPost "/api/v1/phase7c/lifecycle/start" @{})
