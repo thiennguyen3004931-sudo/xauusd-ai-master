@@ -66,6 +66,16 @@ Assert-True ($taskStopIndex -gt $stopIndex) "Scheduled Task stop must occur only
 Assert-True ($taskRepairIndex -gt $taskStopIndex) "task repair must occur only after the owned SYSTEM task is stopped"
 Assert-True ($startIndex -gt $taskRepairIndex) "lifecycle START must occur only after provenance repair when repair is needed"
 
+# Runtime teardown must include partial executors and the previous broker process, not only Task Scheduler state.
+Assert-True ($text.Contains('Test-Phase7CLifecycleHasAliveProcess')) "helper must detect partial executor runtimes"
+Assert-True ($text.Contains('$currentLifecycleNeedsStop = [bool]$currentLifecycle.running -or (Test-Phase7CLifecycleHasAliveProcess -State $currentLifecycle)')) "helper must STOP when any executor process remains alive"
+Assert-True ($text.Contains('if (-not [bool]$state.running -and -not (Test-Phase7CLifecycleHasAliveProcess -State $state)) { return }')) "lifecycle stop wait must require every executor process dead"
+Assert-True ($text.Contains('Get-Phase7CBrokerPidFromHeartbeat')) "helper must capture the previous broker PID before stopping the task"
+Assert-True ($text.Contains('BROKER_PROCESS_STOP=PASS')) "helper must prove the previous broker process exited before repair"
+$brokerProcessStopIndex = $text.IndexOf('BROKER_PROCESS_STOP=PASS', [System.StringComparison]::Ordinal)
+Assert-True ($brokerProcessStopIndex -gt $taskStopIndex) "broker process exit proof must occur after Scheduled Task stop"
+Assert-True ($taskRepairIndex -gt $brokerProcessStopIndex) "task repair must occur only after the previous broker process is dead"
+
 # Repair prerequisites must be proven before any runtime mutation to avoid preventable fail-closed downtime.
 Assert-True ($text.Contains('api-user-sid.txt')) "helper must use the canonical recorded API user SID"
 Assert-True ($text.Contains('Get-Phase7CRecordedApiUserSid')) "helper must validate the recorded API SID before repair"
