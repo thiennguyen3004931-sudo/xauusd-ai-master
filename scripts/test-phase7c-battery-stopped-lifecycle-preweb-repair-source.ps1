@@ -55,8 +55,12 @@ Assert-Contains $recovery '\[bool\]\$runtimeGenerationBeforeBatteryRepair\.broke
   'Healthy-broker battery pre-Web repair must require broker process alive.'
 Assert-Contains $recovery '\[bool\]\$runtimeGenerationBeforeBatteryRepair\.brokerHeartbeatFresh' `
   'Healthy-broker battery pre-Web repair must require fresh broker heartbeat.'
-Assert-Contains $recovery 'startupRunnerLockState\s+-eq\s+[''\"]HELD[''\"]' `
-  'Healthy-broker battery pre-Web repair must require startup-runner lock HELD.'
+Assert-Contains $recovery '\$lockStateBeforeBatteryRepair\s*=\s*\[string\]\$runtimeGenerationBeforeBatteryRepair\.startupRunnerLockState' `
+  'Battery pre-Web repair must bind the observed startup-runner lock state exactly once.'
+Assert-Contains $recovery '\$lockHeldBeforeBatteryRepair\s*=\s*\$lockStateBeforeBatteryRepair\s+-eq\s+[''\"]HELD[''\"]' `
+  'Healthy-broker battery pre-Web repair must derive an explicit HELD lock proof.'
+Assert-Contains $recovery '\$batteryHealthyBrokerStoppedLifecycleEligible\s*=[\s\S]*\$lockHeldBeforeBatteryRepair\s+-and[\s\S]*\$batteryLifecycleStoppedNoExecutors' `
+  'Healthy-broker battery tuple must consume the explicit HELD lock proof.'
 Assert-Contains $recovery '-not\s+\[bool\]\$lifecycleBeforeBatteryRepair\.running' `
   'Battery pre-Web repair must require lifecycle running=false.'
 Assert-Contains $recovery '-not\s+\(Test-Phase7CLifecycleHasAliveProcess\s+-State\s+\$lifecycleBeforeBatteryRepair\)' `
