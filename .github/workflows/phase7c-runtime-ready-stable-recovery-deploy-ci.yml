@@ -22,6 +22,7 @@ on:
       - "scripts/test-phase7c-runtime-ready-stable-recovery-deploy-source.ps1"
       - "scripts/test-phase7c-recovery-migration-verifier-window-source.ps1"
       - "scripts/dev-apply-phase7c-recovery-migration-verifier-window.ps1"
+      - "scripts/dev-harden-phase7c-recovery-migration-verifier-window.ps1"
       - "scripts/deploy-phase7c-web-ui-local.ps1"
       - "scripts/deploy-phase7c-mt5-dashboard-local.ps1"
       - "scripts/verify-phase7c-account-runtime-local.ps1"
@@ -42,6 +43,9 @@ jobs:
       - name: Apply bounded migration verifier patch in checkout
         shell: pwsh
         run: .\scripts\dev-apply-phase7c-recovery-migration-verifier-window.ps1
+      - name: Harden migration verifier trusted Git binding in checkout
+        shell: pwsh
+        run: .\scripts\dev-harden-phase7c-recovery-migration-verifier-window.ps1
       - name: Stable-ready recovery deploy contract with PowerShell 7
         shell: pwsh
         run: .\scripts\test-phase7c-runtime-ready-stable-recovery-deploy-source.ps1
@@ -67,7 +71,7 @@ jobs:
             scripts/verify-phase7c-account-runtime-local.ps1 `
             scripts/test-phase7c-recovery-migration-verifier-window-source.ps1
           if (-not (git diff --cached --quiet)) {
-            git commit -m "fix: allow verified task migration during recovery deploy"
+            git commit -m "fix: bind recovery migration verifier to trusted Git runner"
             git push origin "HEAD:${{ github.ref_name }}"
           } else {
             Write-Host "PHASE7C_DEV_PATCH_COMMIT=SKIPPED_NO_DIFF"
@@ -82,6 +86,9 @@ jobs:
       - name: Apply bounded migration verifier patch in checkout
         shell: pwsh
         run: .\scripts\dev-apply-phase7c-recovery-migration-verifier-window.ps1
+      - name: Harden migration verifier trusted Git binding in checkout
+        shell: pwsh
+        run: .\scripts\dev-harden-phase7c-recovery-migration-verifier-window.ps1
       - name: Canonical Web/API safe deploy contract
         shell: pwsh
         run: .\scripts\test-phase7c-web-ui-safe-deploy-source.ps1
