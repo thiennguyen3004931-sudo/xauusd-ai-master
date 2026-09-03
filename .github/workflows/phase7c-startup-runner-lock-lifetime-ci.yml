@@ -16,6 +16,7 @@ on:
       - "scripts/test-phase7c-startup-runner-lock-broker-stop-failure-local.ps1"
       - "scripts/test-phase7c-runtime-ownership-generation-mismatch-local.ps1"
       - "scripts/test-phase7c-runtime-ownership-lock-acl-observer-local.ps1"
+      - "scripts/test-phase7c-task-action-runner-hash-guard-local.ps1"
       - "scripts/test-phase7c-runtime-provenance-stale-runner-local.ps1"
       - ".github/workflows/phase7c-startup-runner-lock-lifetime-ci.yml"
   pull_request:
@@ -33,6 +34,7 @@ on:
       - "scripts/test-phase7c-startup-runner-lock-broker-stop-failure-local.ps1"
       - "scripts/test-phase7c-runtime-ownership-generation-mismatch-local.ps1"
       - "scripts/test-phase7c-runtime-ownership-lock-acl-observer-local.ps1"
+      - "scripts/test-phase7c-task-action-runner-hash-guard-local.ps1"
       - "scripts/test-phase7c-runtime-provenance-stale-runner-local.ps1"
       - ".github/workflows/phase7c-startup-runner-lock-lifetime-ci.yml"
 
@@ -63,6 +65,9 @@ jobs:
       - name: Runtime ownership ACL observer - Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-runtime-ownership-lock-acl-observer-local.ps1
+      - name: Task action runner hash guard - Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-task-action-runner-hash-guard-local.ps1
       - name: Runtime stale runner provenance - Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-runtime-provenance-stale-runner-local.ps1
