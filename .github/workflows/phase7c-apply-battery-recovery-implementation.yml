@@ -1,0 +1,110 @@
+name: Phase7C Apply Battery Recovery Implementation
+
+on:
+  push:
+    branches:
+      - fix/phase7c-broker-task-battery-start
+    paths:
+      - ".github/phase7c-apply-battery-recovery.marker"
+
+permissions:
+  contents: write
+
+jobs:
+  guarded-patch:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/phase7c-broker-task-battery-start
+          fetch-depth: 0
+      - name: Apply exact guarded source patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one source match, actual={count}")
+              p.write_text(text.replace(old, new, 1), encoding="utf-8", newline="\n")
+              print(f"PATCH={label}|PASS")
+
+          ownership_path = "scripts/lib/phase7c-scheduled-task-ownership.ps1"
+          replace_once(
+              ownership_path,
+              """  return @($drift)\n}\n\nfunction Get-Phase7CScheduledTaskErrorClassification {""",
+              """  return @($drift)\n}\n\nfunction Test-Phase7CBatteryOnlyTaskDrift {\n  param([string[]]$Drift = @())\n\n  $items = @(\n    $Drift |\n      ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } |\n      Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |\n      Sort-Object -Unique\n  )\n  if ($items.Count -eq 0) { return $false }\n\n  $allowed = @(\n    'DISALLOW_START_IF_ON_BATTERIES',\n    'STOP_IF_GOING_ON_BATTERIES'\n  )\n  foreach ($item in $items) {\n    if ($allowed -notcontains $item) { return $false }\n  }\n  return $true\n}\n\nfunction Get-Phase7CScheduledTaskErrorClassification {""",
+              "ownership-battery-only-classifier",
+          )
+
+          recovery_path = "scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1"
+          replace_once(
+              recovery_path,
+              """$taskProvenanceRepairRequired = [bool]$taskOwnership.repairRequired -or -not [bool]$taskOwnership.canonical\n$apiUserSid = \"\"\nif ($taskProvenanceRepairRequired) {\n  Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE=OWNED_REPAIR_REQUIRED\"\n  Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE_REASON=$($taskOwnership.reason)\"\n  $apiUserSid = Get-Phase7CRecordedApiUserSid\n  Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_API_SID_PREFLIGHT=PASS\"\n} else {\n  Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE=CANONICAL_HASH_GUARD\"\n  Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE_REPAIR=SKIPPED_ALREADY_CANONICAL\"\n}\n""",
+              """$taskDefinitionDrift = @(Get-Phase7CExecutorTaskDrift -Task $task)\n$taskProvenanceRepairRequired = [bool]$taskOwnership.repairRequired -or -not [bool]$taskOwnership.canonical\n$taskBatterySettingsRepairRequired = $false\nif (-not $taskProvenanceRepairRequired -and $taskDefinitionDrift.Count -gt 0) {\n  if (Test-Phase7CBatteryOnlyTaskDrift -Drift $taskDefinitionDrift) {\n    $taskBatterySettingsRepairRequired = $true\n    Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_DEFINITION_REPAIR=BATTERY_SETTINGS_REQUIRED\"\n    Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_DEFINITION_DRIFT=$($taskDefinitionDrift -join ',')\"\n  } else {\n    throw \"Owned canonical Scheduled Task has unsupported definition drift; automatic recovery repair is blocked. drift=$($taskDefinitionDrift -join ',')\"\n  }\n}\n$taskRepairRequired = $taskProvenanceRepairRequired -or $taskBatterySettingsRepairRequired\n\n$apiUserSid = \"\"\nif ($taskRepairRequired) {\n  if ($taskProvenanceRepairRequired) {\n    Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE=OWNED_REPAIR_REQUIRED\"\n    Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE_REASON=$($taskOwnership.reason)\"\n  } else {\n    Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE=CANONICAL_HASH_GUARD\"\n  }\n  $apiUserSid = Get-Phase7CRecordedApiUserSid\n  Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_API_SID_PREFLIGHT=PASS\"\n} else {\n  Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE=CANONICAL_HASH_GUARD\"\n  Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE_REPAIR=SKIPPED_ALREADY_CANONICAL\"\n}\n""",
+              "recovery-task-repair-classification",
+          )
+
+          replace_once(
+              recovery_path,
+              """Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_MODE=PAUSE\"\nWrite-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_ARM=DISARMED\"\n\n$mutationStarted = $false\n""",
+              """Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_MODE=PAUSE\"\nWrite-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_ARM=DISARMED\"\n\n# A previous repair attempt can leave an already-canonical task stranded in\n# Queued/STOPPED state solely because the old task definition blocked battery\n# starts. Repair that exact outage before Web/API deploy so the ordinary strict\n# verifier remains unchanged and never needs a broker/executor outage bypass.\nif ($taskBatterySettingsRepairRequired) {\n  $runtimeGenerationBeforeBatteryRepair = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $WorkDir\n  $lifecycleBeforeBatteryRepair = Invoke-ApiGet \"/api/v1/phase7c/lifecycle\"\n  $taskBeforeBatteryRepair = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop\n  $lockAbsentBeforeBatteryRepair = [string]$runtimeGenerationBeforeBatteryRepair.startupRunnerLockState -in @('MISSING', 'RELEASED')\n  $batteryRuntimeUnavailable = `\n    [string]$taskBeforeBatteryRepair.State -ne 'Running' -or `\n    -not [bool]$runtimeGenerationBeforeBatteryRepair.brokerProcessAlive -or `\n    -not [bool]$runtimeGenerationBeforeBatteryRepair.brokerHeartbeatFresh -or `\n    $lockAbsentBeforeBatteryRepair\n\n  $batteryPreWebRepairEligible = `\n    [string]$taskBeforeBatteryRepair.State -ne 'Running' -and `\n    [string]$runtimeGenerationBeforeBatteryRepair.statusReadState -eq 'OK' -and `\n    [string]$runtimeGenerationBeforeBatteryRepair.heartbeatReadState -eq 'OK' -and `\n    [bool]$runtimeGenerationBeforeBatteryRepair.brokerStatusPidMatch -and `\n    -not [bool]$runtimeGenerationBeforeBatteryRepair.brokerProcessAlive -and `\n    -not [bool]$runtimeGenerationBeforeBatteryRepair.brokerHeartbeatFresh -and `\n    $lockAbsentBeforeBatteryRepair -and `\n    -not [bool]$lifecycleBeforeBatteryRepair.running -and `\n    -not (Test-Phase7CLifecycleHasAliveProcess -State $lifecycleBeforeBatteryRepair)\n\n  if ($batteryRuntimeUnavailable -and -not $batteryPreWebRepairEligible) {\n    throw \"Battery-settings task drift is paired with an unproven runtime outage; pre-Web repair blocked. taskState=$($taskBeforeBatteryRepair.State) brokerAlive=$($runtimeGenerationBeforeBatteryRepair.brokerProcessAlive) heartbeatFresh=$($runtimeGenerationBeforeBatteryRepair.brokerHeartbeatFresh) lock=$($runtimeGenerationBeforeBatteryRepair.startupRunnerLockState)\"\n  }\n\n  if ($batteryPreWebRepairEligible) {\n    Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_REPAIR=ELIGIBLE\"\n    Assert-LifecycleExecutorsStopped -Stage \"BATTERY_PRE_WEB_REPAIR\"\n    Assert-PauseDisarmed -Stage \"BATTERY_PRE_WEB_REPAIR\"\n    Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage \"BATTERY_PRE_WEB_REPAIR\"\n    Assert-FlatBroker -Stage \"BATTERY_PRE_WEB_REPAIR\"\n\n    Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop\n    $taskStopDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min($TimeoutSeconds, 30))\n    $taskQuiesced = $false\n    do {\n      Start-Sleep -Milliseconds 250\n      $taskAfterStop = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop\n      if ([string]$taskAfterStop.State -notin @('Running', 'Queued')) {\n        $taskQuiesced = $true\n        break\n      }\n    } while ([DateTime]::UtcNow -lt $taskStopDeadline)\n    if (-not $taskQuiesced) {\n      throw \"Battery-stranded Scheduled Task did not quiesce before canonical settings repair. state=$($taskAfterStop.State)\"\n    }\n\n    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $TaskInstaller `\n      -TaskName $TaskName `\n      -ProjectRoot $ProjectRoot `\n      -Repair `\n      -ApiUserSid $apiUserSid\n    if ($LASTEXITCODE -ne 0) {\n      throw \"Canonical Scheduled Task battery settings repair failed with exit code $LASTEXITCODE.\"\n    }\n\n    $repairedBatteryTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop\n    $repairedBatteryOwnership = Test-Phase7CExecutorTaskActionOwnership `\n      -Actions $repairedBatteryTask.Actions `\n      -ExpectedRunnerPath $runnerPath `\n      -ExpectedRunnerSha256 $trustedRunnerSha256\n    $repairedBatteryDrift = @(Get-Phase7CExecutorTaskDrift -Task $repairedBatteryTask)\n    if (-not [bool]$repairedBatteryOwnership.owned -or -not [bool]$repairedBatteryOwnership.canonical -or [bool]$repairedBatteryOwnership.repairRequired -or $repairedBatteryDrift.Count -ne 0) {\n      throw \"Battery settings repair did not converge to the canonical trusted task definition. ownership=$($repairedBatteryOwnership.reason) drift=$($repairedBatteryDrift -join ',')\"\n    }\n    if (-not (Test-Phase7CSystemTaskPrincipal $repairedBatteryTask.Principal)) {\n      throw \"Battery settings repair did not preserve SYSTEM + ServiceAccount + Highest.\"\n    }\n    if (-not (Test-Phase7CBrokerHeartbeatFresh)) {\n      throw \"Battery settings repair did not return a fresh lifecycle broker heartbeat.\"\n    }\n\n    $batteryPostRepairLockPath = Join-Path $WorkDir \"phase7c-executors\\startup-runner.lock\"\n    $batteryPostRepairLockState = Get-Phase7CReadOnlyLockState -Path $batteryPostRepairLockPath\n    if ($batteryPostRepairLockState -ne 'HELD') {\n      throw \"Battery settings repair did not restore the startup-runner singleton lock. state=$batteryPostRepairLockState\"\n    }\n    Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_TASK_REPAIR=PASS\"\n    Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_STARTUP_RUNNER_LOCK=HELD\"\n\n    [void](Invoke-ApiPost \"/api/v1/phase7c/lifecycle/start\" @{})\n    if (-not (Wait-LifecycleReadyStable -ProbeTimeoutSeconds ([Math]::Min($TimeoutSeconds, 30)))) {\n      throw \"Lifecycle did not return to stable READY after battery settings pre-Web repair.\"\n    }\n    Assert-PauseDisarmed -Stage \"BATTERY_POST_REPAIR\"\n    Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage \"BATTERY_POST_REPAIR\"\n    Assert-FlatBroker -Stage \"BATTERY_POST_REPAIR\"\n    Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_LIFECYCLE_READY=PASS\"\n\n    $taskBatterySettingsRepairRequired = $false\n    $taskRepairRequired = $taskProvenanceRepairRequired\n  }\n}\n\n$mutationStarted = $false\n""",
+              "recovery-battery-pre-web-repair",
+          )
+
+          replace_once(
+              recovery_path,
+              """  if ($stableBeforeRecovery -and -not $taskProvenanceRepairRequired) {""",
+              """  if ($stableBeforeRecovery -and -not $taskRepairRequired) {""",
+              "recovery-stable-skip-overall-repair",
+          )
+
+          replace_once(
+              recovery_path,
+              """    if ($taskProvenanceRepairRequired) {\n      Assert-LifecycleExecutorsStopped -Stage \"PRE_TASK_REPAIR\"""",
+              """    if ($taskRepairRequired) {\n      Assert-LifecycleExecutorsStopped -Stage \"PRE_TASK_REPAIR\"""",
+              "recovery-controlled-repair-overall-gate",
+          )
+
+          replace_once(
+              recovery_path,
+              """      if (-not [bool]$repairedOwnership.owned -or -not [bool]$repairedOwnership.canonical -or [bool]$repairedOwnership.repairRequired) {\n        throw \"Scheduled Task provenance repair did not converge to the trusted hash guard. reason=$($repairedOwnership.reason)\"\n      }\n      if (-not (Test-Phase7CSystemTaskPrincipal $repairedTask.Principal)) {""",
+              """      $repairedDefinitionDrift = @(Get-Phase7CExecutorTaskDrift -Task $repairedTask)\n      if (-not [bool]$repairedOwnership.owned -or -not [bool]$repairedOwnership.canonical -or [bool]$repairedOwnership.repairRequired -or $repairedDefinitionDrift.Count -ne 0) {\n        throw \"Scheduled Task repair did not converge to the canonical trusted definition. ownership=$($repairedOwnership.reason) drift=$($repairedDefinitionDrift -join ',')\"\n      }\n      if (-not (Test-Phase7CSystemTaskPrincipal $repairedTask.Principal)) {""",
+              "recovery-post-repair-definition-drift-proof",
+          )
+
+          replace_once(
+              recovery_path,
+              """      Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE=CANONICAL_HASH_GUARD\"\n      Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE_REPAIR=PERFORMED\"\n""",
+              """      Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE=CANONICAL_HASH_GUARD\"\n      if ($taskProvenanceRepairRequired) {\n        Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE_REPAIR=PERFORMED\"\n      } else {\n        Write-Host \"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_DEFINITION_REPAIR=PERFORMED_BATTERY_SETTINGS\"\n      }\n""",
+              "recovery-repair-result-marker",
+          )
+
+      - name: Verify only intended source files changed
+        shell: pwsh
+        run: |
+          $changed = @(git diff --name-only)
+          $expected = @(
+            'scripts/lib/phase7c-scheduled-task-ownership.ps1',
+            'scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1'
+          )
+          if (@($changed | Where-Object { $expected -notcontains $_ }).Count -ne 0) {
+            throw "Unexpected files changed by guarded patch: $($changed -join ',')"
+          }
+          foreach ($path in $expected) {
+            if ($changed -notcontains $path) { throw "Expected patched file missing from diff: $path" }
+          }
+          Write-Host "PHASE7C_GUARDED_PATCH_FILE_SCOPE=PASS"
+      - name: Commit guarded implementation
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/lib/phase7c-scheduled-task-ownership.ps1 scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1
+          git commit -m "fix: recover Phase7C battery-stranded task before Web deploy"
+          git push origin HEAD:fix/phase7c-broker-task-battery-start
