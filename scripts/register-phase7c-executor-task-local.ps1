@@ -50,8 +50,8 @@ function Assert-Phase7CAdministrator {
   Write-Host 'PHASE7C_TASK_ADMIN=PASS'
 }
 
-function New-Phase7CCanonicalAction([string]$RunnerPath) {
-  $arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $RunnerPath
+function New-Phase7CCanonicalAction([string]$RunnerPath, [string]$RunnerSha256) {
+  $arguments = New-Phase7CExecutorTaskGuardArguments -RunnerPath $RunnerPath -RunnerSha256 $RunnerSha256
   return New-ScheduledTaskAction -Execute $PowerShellExe -Argument $arguments
 }
 
@@ -172,13 +172,18 @@ function Start-AndVerifyPhase7CBroker {
 
 Assert-Phase7CAdministrator
 Import-Module ScheduledTasks -ErrorAction Stop
+
+# Prove runner source provenance before any ACL or Scheduled Task mutation. The
+# task action pins this exact accepted worktree byte hash and rechecks it at run time.
+$runnerPath = Get-Phase7CExecutorTaskRunnerPath -ProjectRoot $ProjectRoot
+if (-not (Test-Path -LiteralPath $runnerPath -PathType Leaf)) { throw "Executor task runner not found: $runnerPath" }
+$trustedRunnerSha256 = Get-Phase7CTrustedGitFileSha256 -ProjectRoot $ProjectRoot -Path $runnerPath
+Write-Host "PHASE7C_TASK_EXPECTED_RUNNER=$runnerPath"
+Write-Host "PHASE7C_TASK_EXPECTED_RUNNER_SHA256=$trustedRunnerSha256"
+Write-Host "PHASE7C_TASK_EXPECTED_POWERSHELL=$PowerShellExe"
+
 $resolvedApiSid = Resolve-Phase7CApiUserSid -RequestedSid $ApiUserSid
 Set-Phase7CLifecycleBrokerAcl -ApiSid $resolvedApiSid
-
-$runnerPath = Get-Phase7CExecutorTaskRunnerPath -ProjectRoot $ProjectRoot
-if (-not (Test-Path -LiteralPath $runnerPath)) { throw "Executor task runner not found: $runnerPath" }
-Write-Host "PHASE7C_TASK_EXPECTED_RUNNER=$runnerPath"
-Write-Host "PHASE7C_TASK_EXPECTED_POWERSHELL=$PowerShellExe"
 
 $task = $null
 try {
@@ -210,7 +215,7 @@ if ($null -eq $task) {
     throw 'The canonical lifecycle broker task must run as SYSTEM with ServiceAccount logon semantics.'
   }
 
-  $action = New-Phase7CCanonicalAction -RunnerPath $runnerPath
+  $action = New-Phase7CCanonicalAction -RunnerPath $runnerPath -RunnerSha256 $trustedRunnerSha256
   $trigger = New-Phase7CCanonicalTrigger
   $settings = New-Phase7CCanonicalSettings
   $principal = New-ScheduledTaskPrincipal `
@@ -233,20 +238,28 @@ if ($null -eq $task) {
   }
 
   $created = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-  if ([string]$created.Actions[0].Execute -ne $PowerShellExe) {
-    throw 'Scheduled Task creation did not persist the canonical absolute PowerShell executable.'
+  $createdOwnership = Test-Phase7CExecutorTaskActionOwnership `
+    -Actions $created.Actions `
+    -ExpectedRunnerPath $runnerPath `
+    -ExpectedRunnerSha256 $trustedRunnerSha256
+  if (-not $createdOwnership.owned -or -not $createdOwnership.canonical -or $createdOwnership.repairRequired) {
+    throw "Scheduled Task creation did not persist the canonical trusted runner guard. ownership=$($createdOwnership.reason)"
   }
   if (-not (Test-Phase7CSystemPrincipal $created.Principal)) {
     throw 'Scheduled Task creation did not persist SYSTEM + ServiceAccount + Highest.'
   }
   Write-Host 'PHASE7C_TASK_OWNERSHIP=OWNED'
+  Write-Host 'PHASE7C_TASK_ACTION_PROVENANCE=CANONICAL_HASH_GUARD'
   Write-Host 'PHASE7C_TASK_CREATE=PASS'
   Start-AndVerifyPhase7CBroker
   Write-Host 'PHASE7C_TASK_STATUS=PASS'
   exit 0
 }
 
-$ownership = Test-Phase7CExecutorTaskActionOwnership -Actions $task.Actions -ExpectedRunnerPath $runnerPath
+$ownership = Test-Phase7CExecutorTaskActionOwnership `
+  -Actions $task.Actions `
+  -ExpectedRunnerPath $runnerPath `
+  -ExpectedRunnerSha256 $trustedRunnerSha256
 Write-Host "PHASE7C_TASK_OWNERSHIP=$($ownership.reason)"
 if (-not $ownership.owned) {
   Write-Host 'PHASE7C_TASK_MUTATION=BLOCKED'
@@ -259,13 +272,21 @@ if (-not (Test-Phase7CSystemPrincipal $task.Principal)) {
 
 $drift = @(Get-Phase7CExecutorTaskDrift -Task $task)
 if ([string]$task.Actions[0].Execute -ne $PowerShellExe) { $drift += 'ACTION_EXECUTABLE' }
+if ([bool]$ownership.repairRequired -or -not [bool]$ownership.canonical) {
+  $drift += ("ACTION_PROVENANCE:{0}" -f [string]$ownership.reason)
+}
 Write-Host "PHASE7C_TASK_DRIFT=$(if ($drift.Count -eq 0) { 'NONE' } else { $drift -join ',' })"
 Write-Host "PHASE7C_TASK_PRINCIPAL_USER=$($task.Principal.UserId)"
 Write-Host "PHASE7C_TASK_PRINCIPAL_RUN_LEVEL=$($task.Principal.RunLevel)"
 Write-Host "PHASE7C_TASK_PRINCIPAL_LOGON_TYPE=$($task.Principal.LogonType)"
 
 if ($drift.Count -eq 0) {
+  if (-not $ownership.canonical -or $ownership.repairRequired) {
+    Write-Host 'PHASE7C_TASK_ACTION_PROVENANCE=VERIFY_FAILED'
+    throw 'Task drift evaluation reached start with a non-canonical runner provenance action.'
+  }
   Write-Host 'PHASE7C_TASK_MUTATION=NOT_REQUIRED'
+  Write-Host 'PHASE7C_TASK_ACTION_PROVENANCE=CANONICAL_HASH_GUARD'
   Start-AndVerifyPhase7CBroker
   Write-Host 'PHASE7C_TASK_STATUS=PASS'
   exit 0
@@ -277,14 +298,14 @@ if ($drift -contains 'PRINCIPAL_RUN_LEVEL') {
 }
 if (-not $Repair) {
   Write-Host 'PHASE7C_TASK_MUTATION=REPAIR_REQUIRED'
-  throw 'Owned task has canonical-definition drift. Re-run with -Repair after confirming PAUSE and zero XAUUSD positions.'
+  throw 'Owned task has canonical-definition or runner-provenance drift. Re-run with -Repair after confirming PAUSE and zero XAUUSD positions.'
 }
 if ([string]$task.State -eq 'Running') {
   Write-Host 'PHASE7C_TASK_RUNTIME_MIGRATION=BLOCKED_RUNNING'
   throw 'Stop the existing executor runtime safely before repairing the SYSTEM task definition; installer will not terminate a running task implicitly.'
 }
 
-$action = New-Phase7CCanonicalAction -RunnerPath $runnerPath
+$action = New-Phase7CCanonicalAction -RunnerPath $runnerPath -RunnerSha256 $trustedRunnerSha256
 $trigger = New-Phase7CCanonicalTrigger
 $settings = New-Phase7CCanonicalSettings
 try {
@@ -302,14 +323,21 @@ try {
 }
 
 $verified = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-$verifiedOwnership = Test-Phase7CExecutorTaskActionOwnership -Actions $verified.Actions -ExpectedRunnerPath $runnerPath
+$verifiedOwnership = Test-Phase7CExecutorTaskActionOwnership `
+  -Actions $verified.Actions `
+  -ExpectedRunnerPath $runnerPath `
+  -ExpectedRunnerSha256 $trustedRunnerSha256
 $verifiedDrift = @(Get-Phase7CExecutorTaskDrift -Task $verified)
 if ([string]$verified.Actions[0].Execute -ne $PowerShellExe) { $verifiedDrift += 'ACTION_EXECUTABLE' }
-if (-not $verifiedOwnership.owned -or $verifiedDrift.Count -ne 0 -or -not (Test-Phase7CSystemPrincipal $verified.Principal)) {
+if ([bool]$verifiedOwnership.repairRequired -or -not [bool]$verifiedOwnership.canonical) {
+  $verifiedDrift += ("ACTION_PROVENANCE:{0}" -f [string]$verifiedOwnership.reason)
+}
+if (-not $verifiedOwnership.owned -or -not $verifiedOwnership.canonical -or $verifiedOwnership.repairRequired -or $verifiedDrift.Count -ne 0 -or -not (Test-Phase7CSystemPrincipal $verified.Principal)) {
   Write-Host 'PHASE7C_TASK_REPAIR=VERIFY_FAILED'
-  throw "Scheduled Task repair did not converge to the canonical SYSTEM-owned definition. ownership=$($verifiedOwnership.reason) drift=$($verifiedDrift -join ',')"
+  throw "Scheduled Task repair did not converge to the canonical SYSTEM-owned trusted runner definition. ownership=$($verifiedOwnership.reason) drift=$($verifiedDrift -join ',')"
 }
 
 Write-Host 'PHASE7C_TASK_REPAIR=PASS'
+Write-Host 'PHASE7C_TASK_ACTION_PROVENANCE=CANONICAL_HASH_GUARD'
 Start-AndVerifyPhase7CBroker
 Write-Host 'PHASE7C_TASK_STATUS=PASS'
