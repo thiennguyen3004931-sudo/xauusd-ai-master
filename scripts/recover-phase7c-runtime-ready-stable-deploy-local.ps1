@@ -171,13 +171,26 @@ function Assert-PauseDisarmed([string]$Stage) {
   }
 }
 
+function Test-Phase7CLifecycleHasAliveProcess {
+  param([Parameter(Mandatory = $true)] $State)
+
+  if ($null -eq $State) { return $true }
+  if ($null -eq $State.processes) { return $true }
+  foreach ($property in @($State.processes.PSObject.Properties)) {
+    if ($null -ne $property.Value -and [bool]$property.Value.alive) {
+      return $true
+    }
+  }
+  return $false
+}
+
 function Wait-LifecycleStopped {
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while ((Get-Date) -lt $deadline) {
     Start-Sleep -Milliseconds 500
     try {
       $state = Invoke-ApiGet "/api/v1/phase7c/lifecycle"
-      if (-not [bool]$state.running) { return }
+      if (-not [bool]$state.running -and -not (Test-Phase7CLifecycleHasAliveProcess -State $state)) { return }
     } catch {}
   }
   throw "Lifecycle did not stop within $TimeoutSeconds seconds."
@@ -208,6 +221,19 @@ function Test-Phase7CSystemTaskPrincipal($Principal) {
   $user = ([string]$Principal.UserId).Trim()
   $systemUser = $user -in @('SYSTEM', 'NT AUTHORITY\SYSTEM', 'S-1-5-18')
   return $systemUser -and ([string]$Principal.LogonType) -eq 'ServiceAccount' -and ([string]$Principal.RunLevel) -eq 'Highest'
+}
+
+function Get-Phase7CBrokerPidFromHeartbeat {
+  if (-not (Test-Path -LiteralPath $BrokerHeartbeat -PathType Leaf)) { return 0 }
+  try {
+    $heartbeat = Get-Content -LiteralPath $BrokerHeartbeat -Raw | ConvertFrom-Json
+    if ([int]$heartbeat.version -ne 1) { return 0 }
+    $brokerPid = [int]$heartbeat.brokerPid
+    if ($brokerPid -le 0) { return 0 }
+    return $brokerPid
+  } catch {
+    return 0
+  }
 }
 
 function Test-Phase7CBrokerHeartbeatFresh {
@@ -398,7 +424,8 @@ try {
     Assert-FlatBroker -Stage "PRE_LIFECYCLE_RECOVERY"
 
     $currentLifecycle = Invoke-ApiGet "/api/v1/phase7c/lifecycle"
-    if ([bool]$currentLifecycle.running) {
+    $currentLifecycleNeedsStop = [bool]$currentLifecycle.running -or (Test-Phase7CLifecycleHasAliveProcess -State $currentLifecycle)
+    if ($currentLifecycleNeedsStop) {
       [void](Invoke-ApiPost "/api/v1/phase7c/lifecycle/stop" @{})
       Wait-LifecycleStopped
       Assert-PauseDisarmed -Stage "POST_STOP"
@@ -412,6 +439,7 @@ try {
       Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "PRE_TASK_REPAIR"
       Assert-FlatBroker -Stage "PRE_TASK_REPAIR"
 
+      $brokerPidBeforeTaskStop = Get-Phase7CBrokerPidFromHeartbeat
       Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
       $taskStopDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min($TimeoutSeconds, 30))
       $taskStopped = $false
@@ -427,6 +455,20 @@ try {
         throw "Owned Scheduled Task did not stop before provenance repair."
       }
       Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_STOP=PASS"
+
+      $brokerProcessStopped = $brokerPidBeforeTaskStop -le 0
+      $brokerStopDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min($TimeoutSeconds, 30))
+      while (-not $brokerProcessStopped -and [DateTime]::UtcNow -lt $brokerStopDeadline) {
+        if ($null -eq (Get-Process -Id $brokerPidBeforeTaskStop -ErrorAction SilentlyContinue)) {
+          $brokerProcessStopped = $true
+          break
+        }
+        Start-Sleep -Milliseconds 250
+      }
+      if (-not $brokerProcessStopped) {
+        throw "Previous lifecycle broker process remained alive after Scheduled Task stop. pid=$brokerPidBeforeTaskStop"
+      }
+      Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BROKER_PROCESS_STOP=PASS|PREVIOUS_PID=$brokerPidBeforeTaskStop"
 
       & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $TaskInstaller `
         -TaskName $TaskName `
