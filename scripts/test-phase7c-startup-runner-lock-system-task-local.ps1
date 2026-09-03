@@ -59,7 +59,10 @@ try {
   $arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -GuardLibrary "{1}" -LockPath "{2}" -ReadyPath "{3}"' -f $childScript, $GuardLibrary, $lockPath, $readyPath
   $action = New-ScheduledTaskAction -Execute $powerShellExe -Argument $arguments
   $trigger = New-ScheduledTaskTrigger -AtStartup
-  $settings = New-ScheduledTaskSettingsSet -AllowDemandStart -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
+
+  # Hosted Windows images do not expose the same New-ScheduledTaskSettingsSet
+  # switches on every build. Keep only settings required for this lifetime test.
+  $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
   $taskPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 
   Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $taskPrincipal -ErrorAction Stop | Out-Null
