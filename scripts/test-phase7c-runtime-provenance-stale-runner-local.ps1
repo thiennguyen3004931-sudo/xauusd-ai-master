@@ -80,8 +80,8 @@ while ($true) {
 '@
 [System.IO.File]::WriteAllText($staleRunner, $staleSource, [System.Text.UTF8Encoding]::new($false))
 
-$canonicalHash = (Get-FileHash -LiteralPath $CanonicalRunner -Algorithm SHA256).Hash
-$staleHash = (Get-FileHash -LiteralPath $staleRunner -Algorithm SHA256).Hash
+$canonicalHash = (Get-FileHash -LiteralPath $CanonicalRunner -Algorithm SHA256).Hash.ToUpperInvariant()
+$staleHash = (Get-FileHash -LiteralPath $staleRunner -Algorithm SHA256).Hash.ToUpperInvariant()
 if ($canonicalHash -eq $staleHash) {
   throw 'Fixture setup invalid: stale runner hash unexpectedly matches canonical runner hash.'
 }
@@ -89,6 +89,9 @@ if ($canonicalHash -eq $staleHash) {
 $registered = $false
 $ownerPid = 0
 try {
+  # Persist the exact legacy/path-only action that previously reproduced the
+  # incident mechanism. The new ownership contract must keep it identifiable as
+  # ours for explicit repair, but it must never be canonical/start-eligible.
   $arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $staleRunner
   $action = New-ScheduledTaskAction -Execute $powerShellExe -Argument $arguments
   $trigger = New-ScheduledTaskTrigger -AtStartup
@@ -99,14 +102,34 @@ try {
   $registered = $true
 
   $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
-  $ownership = Test-Phase7CExecutorTaskActionOwnership -Actions $task.Actions -ExpectedRunnerPath $staleRunner
-  if (-not [bool]$ownership.owned) {
+  $ownership = Test-Phase7CExecutorTaskActionOwnership `
+    -Actions $task.Actions `
+    -ExpectedRunnerPath $staleRunner `
+    -ExpectedRunnerSha256 $canonicalHash
+
+  $startEligible = [bool]$ownership.owned -and [bool]$ownership.canonical -and (-not [bool]$ownership.repairRequired)
+  if ([bool]$ownership.owned -and (-not [bool]$ownership.canonical) -and [bool]$ownership.repairRequired -and [string]$ownership.reason -eq 'OWNED_LEGACY_ACTION_REPAIR_REQUIRED') {
     Write-Host 'PHASE7C_STALE_RUNNER_PROVENANCE_TEST=PASS'
-    Write-Host 'STALE_RUNNER_PROVENANCE_HYPOTHESIS=REJECTED'
-    Write-Host "TASK_ACTION_OWNERSHIP=$($ownership.reason)"
+    Write-Host 'STALE_RUNNER_PROVENANCE_GAP=BLOCKED_BY_ACTION_REPAIR_REQUIRED'
+    Write-Host 'TASK_ACTION_OWNED=TRUE'
+    Write-Host 'TASK_ACTION_CANONICAL=FALSE'
+    Write-Host 'TASK_ACTION_REPAIR_REQUIRED=TRUE'
+    Write-Host 'TASK_ACTION_START_ELIGIBLE=FALSE'
+    Write-Host "CANONICAL_RUNNER_SHA256=$canonicalHash"
+    Write-Host "STALE_RUNNER_SHA256=$staleHash"
     return
   }
 
+  if (-not [bool]$ownership.owned) {
+    throw "Legacy Phase7C action is no longer safely identifiable for explicit repair. reason=$($ownership.reason)"
+  }
+  if (-not $startEligible) {
+    throw "Legacy Phase7C action did not converge to the required repair classification. reason=$($ownership.reason) canonical=$($ownership.canonical) repairRequired=$($ownership.repairRequired)"
+  }
+
+  # If a regression ever makes the legacy action start-eligible again, continue
+  # through the historical fixture and require the exact detector tuple to show
+  # that the stale-source incident mechanism has reopened.
   Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
   $readyDeadline = [DateTime]::UtcNow.AddSeconds(15)
   while (-not (Test-Path -LiteralPath $readyPath -PathType Leaf)) {
@@ -146,6 +169,7 @@ try {
 
   $exactReproduction =
     [bool]$ownership.owned -and
+    $startEligible -and
     $canonicalHash -ne $staleHash -and
     [bool]$snapshot.brokerProcessAlive -and
     [bool]$snapshot.brokerHeartbeatFresh -and
@@ -154,11 +178,10 @@ try {
     [bool]$snapshot.exactGenerationMismatchGate
 
   if ($exactReproduction) {
-    throw 'RED_REPRODUCED: stale runner content at the canonical task-action path remained OWNED while producing alive+fresh+PID-match+startup-lock-MISSING exact generation mismatch.'
+    throw 'RED_REOPENED: stale runner path-only action became start-eligible again and reproduced alive+fresh+PID-match+startup-lock-MISSING exact generation mismatch.'
   }
 
-  Write-Host 'PHASE7C_STALE_RUNNER_PROVENANCE_TEST=PASS'
-  Write-Host 'STALE_RUNNER_PROVENANCE_HYPOTHESIS=REJECTED'
+  throw 'Legacy action became start-eligible without reproducing the expected historical detector tuple; provenance guard contract is unsafe or fixture behavior changed.'
 } finally {
   if ($registered) {
     try { Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue } catch { }
