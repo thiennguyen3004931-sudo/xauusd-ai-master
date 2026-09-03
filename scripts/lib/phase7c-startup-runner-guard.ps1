@@ -32,14 +32,6 @@ function Open-Phase7CStartupRunnerLock([string]$Path) {
     $stream.Write($bytes, 0, $bytes.Length)
     $stream.Flush($true)
     $stream.Position = 0
-
-    # The FileStream owns the OS-level singleton lock. Root it in process-wide
-    # AppDomain data so PowerShell scope/liveness optimization cannot make it
-    # collectible while the persistent SYSTEM lifecycle-broker process is alive.
-    # The runner still disposes the returned stream explicitly during shutdown.
-    $anchorPath = [System.IO.Path]::GetFullPath($Path).ToLowerInvariant()
-    $anchorKey = "XAUUSD.Phase7C.StartupRunnerLock:$anchorPath"
-    [AppDomain]::CurrentDomain.SetData($anchorKey, $stream)
     return $stream
   } catch {
     $stream.Dispose()
