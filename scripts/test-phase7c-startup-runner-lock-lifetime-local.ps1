@@ -4,8 +4,9 @@ Set-StrictMode -Version Latest
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $GuardLibrary = Join-Path $PSScriptRoot 'lib\phase7c-startup-runner-guard.ps1'
 $OwnershipLibrary = Join-Path $PSScriptRoot 'lib\phase7c-scheduled-task-ownership.ps1'
+$RunnerScript = Join-Path $PSScriptRoot 'run-phase7c-executor-task-runner-local.ps1'
 
-foreach ($required in @($GuardLibrary, $OwnershipLibrary)) {
+foreach ($required in @($GuardLibrary, $OwnershipLibrary, $RunnerScript)) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
     throw "Required production source missing: $required"
   }
@@ -17,6 +18,15 @@ function Assert-Equal($Actual, $Expected, [string]$Message) {
   if ($Actual -ne $Expected) {
     throw "$Message actual=$Actual expected=$Expected"
   }
+}
+
+# The persistent lifecycle-broker owns the FileStream for its full process lifetime.
+# An ordinary PowerShell variable is not a sufficient managed-liveness guarantee when
+# the stream is otherwise unused for long periods. Require the canonical .NET lifetime
+# primitive at the owner call site rather than weakening the external lock verifier.
+$runnerSource = Get-Content -LiteralPath $RunnerScript -Raw
+if ($runnerSource -notmatch '\[GC\]::KeepAlive\(\$runnerLock\)') {
+  throw 'Persistent lifecycle broker must explicitly keep startup-runner lock alive with [GC]::KeepAlive($runnerLock).'
 }
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("phase7c-lock-lifetime-{0}" -f [Guid]::NewGuid().ToString('N'))
@@ -40,14 +50,16 @@ try {
   $runnerLock = Open-Phase7CStartupRunnerLock -Path $LockPath
   [System.IO.File]::WriteAllText($ReadyPath, [string]$PID)
 
-  # Mirror a persistent broker process: keep doing work while forcing collection.
-  # The exclusive FileStream must remain owned for the whole process lifetime.
+  # Mirror the persistent broker ownership pattern while deliberately stressing GC.
+  # KeepAlive is intentionally at the end of each ownership interval.
   for ($i = 0; $i -lt 80; $i++) {
     [GC]::Collect()
     [GC]::WaitForPendingFinalizers()
     Start-Sleep -Milliseconds 100
+    [GC]::KeepAlive($runnerLock)
   }
 } finally {
+  [GC]::KeepAlive($runnerLock)
   if ($null -ne $runnerLock) { $runnerLock.Dispose() }
 }
 '@
