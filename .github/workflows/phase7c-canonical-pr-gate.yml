@@ -37,6 +37,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Canonical gate source contract
         run: node --test scripts/test-phase7c-canonical-pr-gate-contract.mjs
+      - name: Repository workflow pruning contract
+        run: node --test scripts/test-repository-workflow-pruning-contract.mjs
       - name: Build and test broker risk strategy foundations
         run: |
           pnpm --filter @xauusd/mt5-broker... build
