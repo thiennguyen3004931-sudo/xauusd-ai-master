@@ -48,6 +48,43 @@ Assert-True ($text.Contains('READY_STABLE_RESET')) "helper must reset stability 
 Assert-True ($text.Contains('LIFECYCLE_RECOVERY=SKIPPED_ALREADY_STABLE')) "helper must skip executor recovery when lifecycle is already stable"
 Assert-True ($text.Contains('LIFECYCLE_RECOVERY=PERFORMED')) "helper must recover lifecycle only when stable readiness is absent"
 
+# PR #238 provenance enforcement must be reconciled by this deploy helper.
+Assert-True ($text.Contains('lib\phase7c-scheduled-task-ownership.ps1')) "helper must load the canonical Scheduled Task ownership library"
+Assert-True ($text.Contains('register-phase7c-executor-task-local.ps1')) "helper must reuse the canonical Scheduled Task installer for repair"
+Assert-True ($text.Contains('Get-Phase7CTrustedGitFileSha256')) "helper must derive the trusted runner hash from accepted Git bytes"
+Assert-True ($text.Contains('Test-Phase7CExecutorTaskActionOwnership')) "helper must inspect task action ownership before mutation"
+Assert-True ($text.Contains('ExpectedRunnerSha256')) "helper must verify the task action against the expected runner SHA256"
+Assert-True ($text.Contains('TASK_PROVENANCE=CANONICAL_HASH_GUARD')) "helper must report canonical hash-guard provenance"
+Assert-True ($text.Contains('TASK_PROVENANCE_REPAIR=SKIPPED_ALREADY_CANONICAL')) "helper must skip broker-task restart when provenance is already canonical"
+Assert-True ($text.Contains('TASK_PROVENANCE_REPAIR=PERFORMED')) "helper must report successful owned task provenance repair"
+Assert-True ($text.Contains('TASK_PROVENANCE_REPAIR=BLOCKED_UNPROVEN_OWNERSHIP')) "helper must fail closed for foreign or unproven task ownership"
+Assert-True ($text.Contains('Stop-ScheduledTask')) "helper must explicitly stop the owned SYSTEM task before repair"
+Assert-True ($text.Contains('-Repair')) "helper must invoke the canonical installer in repair mode"
+$taskStopIndex = $text.IndexOf('Stop-ScheduledTask', [System.StringComparison]::Ordinal)
+$taskRepairIndex = $text.IndexOf('-Repair', [System.StringComparison]::Ordinal)
+Assert-True ($taskStopIndex -gt $stopIndex) "Scheduled Task stop must occur only after lifecycle STOP"
+Assert-True ($taskRepairIndex -gt $taskStopIndex) "task repair must occur only after the owned SYSTEM task is stopped"
+Assert-True ($startIndex -gt $taskRepairIndex) "lifecycle START must occur only after provenance repair when repair is needed"
+
+# Runtime teardown must include partial executors and the previous broker process, not only Task Scheduler state.
+Assert-True ($text.Contains('Test-Phase7CLifecycleHasAliveProcess')) "helper must detect partial executor runtimes"
+Assert-True ($text.Contains('$currentLifecycleNeedsStop = [bool]$currentLifecycle.running -or (Test-Phase7CLifecycleHasAliveProcess -State $currentLifecycle)')) "helper must STOP when any executor process remains alive"
+Assert-True ($text.Contains('if (-not [bool]$state.running -and -not (Test-Phase7CLifecycleHasAliveProcess -State $state)) { return }')) "lifecycle stop wait must require every executor process dead"
+Assert-True ($text.Contains('Get-Phase7CBrokerPidFromHeartbeat')) "helper must capture the previous broker PID before stopping the task"
+Assert-True ($text.Contains('BROKER_PROCESS_STOP=PASS')) "helper must prove the previous broker process exited before repair"
+$brokerProcessStopIndex = $text.IndexOf('BROKER_PROCESS_STOP=PASS', [System.StringComparison]::Ordinal)
+Assert-True ($brokerProcessStopIndex -gt $taskStopIndex) "broker process exit proof must occur after Scheduled Task stop"
+Assert-True ($taskRepairIndex -gt $brokerProcessStopIndex) "task repair must occur only after the previous broker process is dead"
+
+# Repair prerequisites must be proven before any runtime mutation to avoid preventable fail-closed downtime.
+Assert-True ($text.Contains('api-user-sid.txt')) "helper must use the canonical recorded API user SID"
+Assert-True ($text.Contains('Get-Phase7CRecordedApiUserSid')) "helper must validate the recorded API SID before repair"
+Assert-True ($text.Contains('-ApiUserSid $apiUserSid')) "helper must pass the validated API SID explicitly to the canonical installer"
+$apiSidResolveIndex = $text.IndexOf('$apiUserSid = Get-Phase7CRecordedApiUserSid', [System.StringComparison]::Ordinal)
+$mutationGateIndex = $text.IndexOf('$mutationStarted = $false', [System.StringComparison]::Ordinal)
+Assert-True ($apiSidResolveIndex -ge 0) "helper must resolve the API SID before mutation"
+Assert-True ($mutationGateIndex -gt $apiSidResolveIndex) "API SID validation must occur before the recovery mutation gate"
+
 # Bridge identity and broker-flat invariants must hold throughout.
 Assert-True ($text.Contains('bridge session changed')) "helper must fail if Bridge session changes"
 Assert-True ($text.Contains('BRIDGE_SESSION_UNCHANGED=PASS')) "helper must report unchanged Bridge session"
