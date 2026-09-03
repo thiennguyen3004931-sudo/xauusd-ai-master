@@ -60,8 +60,9 @@ function New-Phase7CCanonicalTrigger {
 }
 
 function New-Phase7CCanonicalSettings {
+  # Demand start is allowed by default. ScheduledTasks exposes only the inverse
+  # -DisallowDemandStart switch on supported Windows versions.
   return New-ScheduledTaskSettingsSet `
-    -AllowDemandStart `
     -StartWhenAvailable `
     -MultipleInstances IgnoreNew `
     -ExecutionTimeLimit ([TimeSpan]::Zero)
