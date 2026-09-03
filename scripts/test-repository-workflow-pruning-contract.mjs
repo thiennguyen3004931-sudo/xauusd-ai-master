@@ -14,6 +14,12 @@ const retiredWorkflows = [
   "phase7c-switch-position-array-ci.yml",
   "phase7c-stale-port-ownership-ci.yml",
   "phase7c-scheduled-task-ownership-ci.yml",
+  "phase7c-live-capability-ci.yml",
+  "phase7c-live-readonly-probe-ci.yml",
+  "phase7c-live-activation-preflight-ci.yml",
+  "phase7c-live-arm-guard-ci.yml",
+  "phase7c-live-risk-profile-ci.yml",
+  "phase7c-dual-account-mode-ci.yml",
 ];
 
 test("canonical PR gate remains present after workflow pruning", () => {
