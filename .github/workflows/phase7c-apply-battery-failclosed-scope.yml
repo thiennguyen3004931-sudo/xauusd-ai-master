@@ -1,0 +1,66 @@
+name: Phase7C Apply Battery Fail-Closed Scope
+
+on:
+  push:
+    branches:
+      - fix/phase7c-broker-task-battery-start
+    paths:
+      - ".github/phase7c-apply-battery-failclosed.marker"
+
+permissions:
+  contents: write
+
+jobs:
+  guarded-patch:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/phase7c-broker-task-battery-start
+          fetch-depth: 0
+      - name: Move battery mutation inside fail-closed try
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1')
+          text = p.read_text(encoding='utf-8')
+          replacements = [
+            (
+              'Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_MODE=PAUSE"\nWrite-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_ARM=DISARMED"\n\n# A previous repair attempt can leave an already-canonical task stranded in',
+              'Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_MODE=PAUSE"\nWrite-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_ARM=DISARMED"\n\n$mutationStarted = $false\ntry {\n  $mutationStarted = $true\n\n# A previous repair attempt can leave an already-canonical task stranded in',
+              'open-failclosed-before-battery-repair',
+            ),
+            (
+              '}\n\n$mutationStarted = $false\ntry {\n  $mutationStarted = $true\n\n  # Load the exact accepted Web/API source before any executor or SYSTEM task stop.',
+              '}\n\n  # Load the exact accepted Web/API source before any executor or SYSTEM task stop.',
+              'remove-late-duplicate-failclosed-open',
+            ),
+          ]
+          for old, new, label in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one source match, actual={count}')
+              text = text.replace(old, new, 1)
+              print(f'PATCH={label}|PASS')
+          p.write_text(text, encoding='utf-8', newline='\n')
+      - name: Verify syntax and scope
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile('scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1', [ref]$tokens, [ref]$errors)
+          if ($errors.Count -ne 0) { throw "Recovery syntax invalid: $($errors[0].Message)" }
+          $changed = @(git diff --name-only)
+          if ($changed.Count -ne 1 -or $changed[0] -ne 'scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1') {
+            throw "Unexpected patch scope: $($changed -join ',')"
+          }
+          Write-Host 'PHASE7C_BATTERY_FAILCLOSED_PATCH_SCOPE=PASS'
+      - name: Commit guarded fail-closed scope fix
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1
+          git commit -m "fix: keep battery pre-repair inside recovery fail-closed scope"
+          git push origin HEAD:fix/phase7c-broker-task-battery-start
