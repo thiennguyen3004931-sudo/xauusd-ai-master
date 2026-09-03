@@ -32,21 +32,46 @@ Assert-True ($text.Contains('requires configured LIVE account mode')) "helper mu
 Assert-True ($text.Contains('requires zero XAUUSD positions')) "helper must require zero XAUUSD positions"
 Assert-True ($text.Contains('requires zero pending XAUUSD orders')) "helper must require zero pending XAUUSD orders"
 
-# PR #236 is API code: deploy Web/API first so the new lifecycle readiness code is loaded.
+# Ordinary runtime-ready recovery still deploys Web/API before its stable probe and
+# STOP -> repair -> START sequence. A separately proven battery-stranded task may
+# be repaired and STARTed before Web deploy only because lifecycle is already STOPPED.
 Assert-True ($text.Contains('deploy-phase7c-web-ui-local.ps1')) "helper must reuse canonical Web/API deploy helper"
 $deployIndex = $text.IndexOf('& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy', [System.StringComparison]::Ordinal)
 $stableProbeIndex = $text.IndexOf('$stableBeforeRecovery = Wait-LifecycleReadyStable', [System.StringComparison]::Ordinal)
 $stopIndex = $text.IndexOf('"/api/v1/phase7c/lifecycle/stop"', [System.StringComparison]::Ordinal)
-$startIndex = $text.IndexOf('"/api/v1/phase7c/lifecycle/start"', [System.StringComparison]::Ordinal)
+$startLiteral = '"/api/v1/phase7c/lifecycle/start"'
+$startMatches = [regex]::Matches($text, [regex]::Escape($startLiteral))
+Assert-True ($startMatches.Count -ge 1) "helper must contain lifecycle START"
+$normalStartIndex = $startMatches[$startMatches.Count - 1].Index
 Assert-True ($deployIndex -ge 0) "helper must invoke canonical Web/API deploy"
 Assert-True ($stableProbeIndex -gt $deployIndex) "stable lifecycle probe must occur only after Web/API deploy"
-Assert-True ($stopIndex -gt $deployIndex) "lifecycle STOP must never occur before Web/API deploy"
-Assert-True ($startIndex -gt $stopIndex) "lifecycle START must occur only after STOP when recovery is needed"
+Assert-True ($stopIndex -gt $deployIndex) "ordinary lifecycle STOP must never occur before Web/API deploy"
+Assert-True ($normalStartIndex -gt $stopIndex) "ordinary lifecycle START must occur only after STOP when recovery is needed"
 Assert-True ($text.Contains('-ExpectedCommit $ExpectedCommit')) "Web/API deploy must use exact ExpectedCommit"
 Assert-True ($text.Contains('READY_STABLE_MS=5000')) "helper must require explicit 5 second continuous READY stability"
 Assert-True ($text.Contains('READY_STABLE_RESET')) "helper must reset stability window on any non-ready sample"
 Assert-True ($text.Contains('LIFECYCLE_RECOVERY=SKIPPED_ALREADY_STABLE')) "helper must skip executor recovery when lifecycle is already stable"
 Assert-True ($text.Contains('LIFECYCLE_RECOVERY=PERFORMED')) "helper must recover lifecycle only when stable readiness is absent"
+
+# Battery-stranded pre-Web repair is a bounded exception: task action is already
+# canonical/trusted, battery-only definition drift is proven, lifecycle is already
+# stopped, repair converges, broker lock is HELD, then lifecycle becomes READY.
+$batteryEligibleIndex = $text.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_REPAIR=ELIGIBLE', [System.StringComparison]::Ordinal)
+$batteryStoppedProofIndex = $text.IndexOf('Assert-LifecycleExecutorsStopped -Stage "BATTERY_PRE_WEB_REPAIR"', [System.StringComparison]::Ordinal)
+$batteryTaskRepairPassIndex = $text.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_TASK_REPAIR=PASS', [System.StringComparison]::Ordinal)
+$batteryLockHeldIndex = $text.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_STARTUP_RUNNER_LOCK=HELD', [System.StringComparison]::Ordinal)
+$batteryReadyIndex = $text.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_LIFECYCLE_READY=PASS', [System.StringComparison]::Ordinal)
+Assert-True ($batteryEligibleIndex -ge 0) "battery pre-Web repair must have an explicit eligibility audit marker"
+Assert-True ($batteryStoppedProofIndex -gt $batteryEligibleIndex) "battery pre-Web repair must prove executors stopped after eligibility"
+Assert-True ($batteryTaskRepairPassIndex -gt $batteryStoppedProofIndex) "battery task repair must occur only after stopped-lifecycle proof"
+Assert-True ($batteryLockHeldIndex -gt $batteryTaskRepairPassIndex) "battery repair must prove startup lock HELD after task repair"
+Assert-True ($batteryReadyIndex -gt $batteryLockHeldIndex) "battery pre-Web lifecycle READY must be proven after lock HELD"
+Assert-True ($batteryReadyIndex -lt $deployIndex) "battery-stranded recovery must restore strict runtime before Web/API deploy"
+if ($startMatches.Count -gt 1) {
+  $batteryStartIndex = $startMatches[0].Index
+  Assert-True ($batteryStartIndex -gt $batteryTaskRepairPassIndex) "battery lifecycle START must occur only after battery task repair"
+  Assert-True ($batteryStartIndex -lt $deployIndex) "battery pre-Web START must remain before strict Web/API deploy"
+}
 
 # PR #238 provenance enforcement must be reconciled by this deploy helper.
 Assert-True ($text.Contains('lib\phase7c-scheduled-task-ownership.ps1')) "helper must load the canonical Scheduled Task ownership library"
@@ -55,16 +80,20 @@ Assert-True ($text.Contains('Get-Phase7CTrustedGitFileSha256')) "helper must der
 Assert-True ($text.Contains('Test-Phase7CExecutorTaskActionOwnership')) "helper must inspect task action ownership before mutation"
 Assert-True ($text.Contains('ExpectedRunnerSha256')) "helper must verify the task action against the expected runner SHA256"
 Assert-True ($text.Contains('TASK_PROVENANCE=CANONICAL_HASH_GUARD')) "helper must report canonical hash-guard provenance"
-Assert-True ($text.Contains('TASK_PROVENANCE_REPAIR=SKIPPED_ALREADY_CANONICAL')) "helper must skip broker-task restart when provenance is already canonical"
+Assert-True ($text.Contains('TASK_PROVENANCE_REPAIR=SKIPPED_ALREADY_CANONICAL')) "helper must skip broker-task restart when provenance is already canonical and definition is drift-free"
 Assert-True ($text.Contains('TASK_PROVENANCE_REPAIR=PERFORMED')) "helper must report successful owned task provenance repair"
 Assert-True ($text.Contains('TASK_PROVENANCE_REPAIR=BLOCKED_UNPROVEN_OWNERSHIP')) "helper must fail closed for foreign or unproven task ownership"
 Assert-True ($text.Contains('Stop-ScheduledTask')) "helper must explicitly stop the owned SYSTEM task before repair"
 Assert-True ($text.Contains('-Repair')) "helper must invoke the canonical installer in repair mode"
-$taskStopIndex = $text.IndexOf('Stop-ScheduledTask', [System.StringComparison]::Ordinal)
-$taskRepairIndex = $text.IndexOf('-Repair', [System.StringComparison]::Ordinal)
-Assert-True ($taskStopIndex -gt $stopIndex) "Scheduled Task stop must occur only after lifecycle STOP"
-Assert-True ($taskRepairIndex -gt $taskStopIndex) "task repair must occur only after the owned SYSTEM task is stopped"
-Assert-True ($startIndex -gt $taskRepairIndex) "lifecycle START must occur only after provenance repair when repair is needed"
+$taskStopMatches = [regex]::Matches($text, [regex]::Escape('Stop-ScheduledTask'))
+$taskRepairMatches = [regex]::Matches($text, '(?m)^\s*-Repair\s+`?\s*$')
+Assert-True ($taskStopMatches.Count -ge 1) "helper must contain Scheduled Task stop"
+Assert-True ($taskRepairMatches.Count -ge 1) "helper must contain canonical task repair invocation"
+$normalTaskStopIndex = $taskStopMatches[$taskStopMatches.Count - 1].Index
+$normalTaskRepairIndex = $taskRepairMatches[$taskRepairMatches.Count - 1].Index
+Assert-True ($normalTaskStopIndex -gt $stopIndex) "ordinary Scheduled Task stop must occur only after lifecycle STOP"
+Assert-True ($normalTaskRepairIndex -gt $normalTaskStopIndex) "ordinary task repair must occur only after the owned SYSTEM task is stopped"
+Assert-True ($normalStartIndex -gt $normalTaskRepairIndex) "ordinary lifecycle START must occur only after task repair when repair is needed"
 
 # Runtime teardown must include partial executors and the previous broker process, not only Task Scheduler state.
 Assert-True ($text.Contains('Test-Phase7CLifecycleHasAliveProcess')) "helper must detect partial executor runtimes"
@@ -73,8 +102,8 @@ Assert-True ($text.Contains('if (-not [bool]$state.running -and -not (Test-Phase
 Assert-True ($text.Contains('Get-Phase7CBrokerPidFromHeartbeat')) "helper must capture the previous broker PID before stopping the task"
 Assert-True ($text.Contains('BROKER_PROCESS_STOP=PASS')) "helper must prove the previous broker process exited before repair"
 $brokerProcessStopIndex = $text.IndexOf('BROKER_PROCESS_STOP=PASS', [System.StringComparison]::Ordinal)
-Assert-True ($brokerProcessStopIndex -gt $taskStopIndex) "broker process exit proof must occur after Scheduled Task stop"
-Assert-True ($taskRepairIndex -gt $brokerProcessStopIndex) "task repair must occur only after the previous broker process is dead"
+Assert-True ($brokerProcessStopIndex -gt $normalTaskStopIndex) "broker process exit proof must occur after ordinary Scheduled Task stop"
+Assert-True ($normalTaskRepairIndex -gt $brokerProcessStopIndex) "ordinary task repair must occur only after the previous broker process is dead"
 
 # Repair prerequisites must be proven before any runtime mutation to avoid preventable fail-closed downtime.
 Assert-True ($text.Contains('api-user-sid.txt')) "helper must use the canonical recorded API user SID"
