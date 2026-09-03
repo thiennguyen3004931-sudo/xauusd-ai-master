@@ -356,6 +356,27 @@ function Get-Phase7CExecutorTaskDrift {
   return @($drift)
 }
 
+function Test-Phase7CBatteryOnlyTaskDrift {
+  param([string[]]$Drift = @())
+
+  $items = @(
+    $Drift |
+      ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } |
+      Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+      Sort-Object -Unique
+  )
+  if ($items.Count -eq 0) { return $false }
+
+  $allowed = @(
+    'DISALLOW_START_IF_ON_BATTERIES',
+    'STOP_IF_GOING_ON_BATTERIES'
+  )
+  foreach ($item in $items) {
+    if ($allowed -notcontains $item) { return $false }
+  }
+  return $true
+}
+
 function Get-Phase7CScheduledTaskErrorClassification {
   param([Parameter(Mandatory = $true)] [System.Exception]$Exception)
 
