@@ -65,9 +65,13 @@ test("Sideway production Telegram sample uses the real notifier for the complete
 
   assert.equal(notifications.length, 6, "real Sideway lifecycle sample must emit six production-format trade cards");
 
-  for (const notification of notifications) {
+  for (const [index, notification] of notifications.entries()) {
     assert.equal(notification.route, "trade");
-    assert.match(notification.text, /PHASE 7C · LIVE/);
+    if (index === 4) {
+      assert.doesNotMatch(notification.text, /PHASE 7C · LIVE/);
+    } else {
+      assert.match(notification.text, /PHASE 7C · LIVE/);
+    }
   }
 
   assert.match(notifications[0].text, /SIDEWAY PENDING/);
@@ -82,8 +86,14 @@ test("Sideway production Telegram sample uses the real notifier for the complete
   assert.match(notifications[3].text, /CHỐT 1\/3/);
   assert.match(notifications[3].text, /Đóng:/);
   assert.match(notifications[3].text, /P&L runner:/);
-  assert.match(notifications[4].text, /HOLD CONFIRMED/);
+  assert.match(notifications[4].text, /BUY · HOLD/);
+  assert.match(notifications[4].text, /SIDEWAY-PRODUCTION-SAMPLE-1/);
   assert.match(notifications[4].text, /GIỮ LỆNH: Biên sideway vẫn còn hiệu lực/);
+  assert.doesNotMatch(notifications[4].text, /Regime:/);
+  assert.doesNotMatch(notifications[4].text, /Entry:/);
+  assert.doesNotMatch(notifications[4].text, /SL:/);
+  assert.doesNotMatch(notifications[4].text, /TP:/);
+  assert.doesNotMatch(notifications[4].text, /Lot:/);
   assert.match(notifications[5].text, /CHỐT LỆNH/);
   assert.match(notifications[5].text, /P&L tổng:/);
   assert.match(notifications[5].text, /TP2|biên đối diện|OPPOSITE/i);
