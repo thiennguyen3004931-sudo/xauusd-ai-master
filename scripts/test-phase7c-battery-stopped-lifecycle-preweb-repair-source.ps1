@@ -69,11 +69,11 @@ Assert-Contains $recovery '\$batteryPreWebRepairEligible\s*=\s*[\s\S]*\$batteryS
 # is dead, and only then invoke the canonical installer -Repair.
 Assert-Contains $recovery '\$brokerPidBeforeBatteryRepair\s*=\s*Get-Phase7CBrokerPidFromHeartbeat' `
   'Battery pre-Web repair must capture the existing broker PID before stopping the task.'
-Assert-Contains $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_BROKER_PROCESS_STOP=PASS\|PREVIOUS_PID=' `
+Assert-Contains $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_PREVIOUS_BROKER_EXIT=PASS\|PREVIOUS_PID=' `
   'Battery pre-Web repair must emit proof that the previous broker process stopped.'
 Assert-Contains $recovery 'Get-Process\s+-Id\s+\$brokerPidBeforeBatteryRepair\s+-ErrorAction\s+SilentlyContinue' `
   'Battery pre-Web repair must verify the captured broker PID is no longer alive.'
-Assert-Order $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_BROKER_PROCESS_STOP=PASS' '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $TaskInstaller' `
+Assert-Order $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_PREVIOUS_BROKER_EXIT=PASS' '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $TaskInstaller' `
   'Previous broker PID death must be proven before the canonical task installer runs.'
 Assert-Order $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_LIFECYCLE_READY=PASS' '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy' `
   'Battery repair and stable lifecycle restore must finish before Web/API deploy.'
