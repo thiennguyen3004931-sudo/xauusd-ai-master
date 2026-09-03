@@ -50,9 +50,22 @@ function Assert-NotContains {
   if ($Text -match $Pattern) { throw $Message }
 }
 
-# One canonical classifier must define the exact settings drift that may use the
-# battery migration window. Recovery and verifier must reuse it rather than copy
-# an independently drifting allow-list.
+function Assert-Order {
+  param(
+    [Parameter(Mandatory = $true)] [string]$Text,
+    [Parameter(Mandatory = $true)] [string]$Before,
+    [Parameter(Mandatory = $true)] [string]$After,
+    [Parameter(Mandatory = $true)] [string]$Message
+  )
+  $beforeIndex = $Text.IndexOf($Before, [System.StringComparison]::Ordinal)
+  $afterIndex = $Text.IndexOf($After, [System.StringComparison]::Ordinal)
+  if ($beforeIndex -lt 0 -or $afterIndex -lt 0 -or $beforeIndex -ge $afterIndex) {
+    throw $Message
+  }
+}
+
+# One canonical classifier defines the only task-definition drift this recovery
+# extension may auto-repair. The classifier is shared with the task installer.
 Assert-Contains $ownershipSource 'function\s+Test-Phase7CBatteryOnlyTaskDrift' `
   'RED: canonical ownership helper must expose an exact battery-only task drift classifier.'
 Assert-Contains $ownershipSource 'DISALLOW_START_IF_ON_BATTERIES' `
@@ -76,8 +89,8 @@ if (Test-Phase7CBatteryOnlyTaskDrift -Drift @('DISALLOW_START_IF_ON_BATTERIES', 
   throw 'Battery-only classifier must reject mixed battery + unrelated task drift.'
 }
 
-# Recovery must elevate canonical-action battery settings drift into the same
-# controlled repair phase without weakening action provenance ownership.
+# Recovery must treat canonical trusted action + battery-only settings drift as
+# repair-required without reclassifying it as action-provenance drift.
 Assert-Contains $recovery 'Get-Phase7CExecutorTaskDrift\s+-Task\s+\$task' `
   'Recovery must inspect canonical task definition drift before deciding repair scope.'
 Assert-Contains $recovery 'Test-Phase7CBatteryOnlyTaskDrift\s+-Drift\s+\$taskDefinitionDrift' `
@@ -86,58 +99,53 @@ Assert-Contains $recovery '\$taskBatterySettingsRepairRequired\s*=' `
   'Recovery must track battery-settings repair separately from action provenance repair.'
 Assert-Contains $recovery '\$taskRepairRequired\s*=\s*\$taskProvenanceRepairRequired\s+-or\s+\$taskBatterySettingsRepairRequired' `
   'Recovery must enter controlled task repair for either trusted provenance drift or battery-only settings drift.'
+Assert-Contains $recovery 'unsupported definition drift' `
+  'Canonical action with non-battery task-definition drift must fail closed.'
+
+# If the old battery policy has already stranded the canonical task, recovery may
+# repair before Web/API deploy only after proving the exact controlled outage:
+# canonical trusted task/principal, lifecycle stopped, broker dead+stale, lock absent.
 Assert-Contains $recovery 'Get-Phase7CRuntimeGenerationSnapshot\s+-WorkDir\s+\$WorkDir' `
-  'Battery outage migration must prove runtime generation state read-only before opening its verifier window.'
-Assert-Contains $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_MIGRATION_WINDOW=ENABLED' `
-  'Recovery must emit an explicit audit marker only when the battery outage migration window is opened.'
-Assert-Contains $recovery 'AllowOwnedTaskBatterySettingsMigration' `
-  'Recovery must request a dedicated battery-settings migration window rather than reusing the provenance window.'
+  'Battery outage recovery must inspect canonical runtime generation read-only.'
+Assert-Contains $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_REPAIR=ELIGIBLE' `
+  'Recovery must emit an explicit audit marker only after proving the battery-stranded outage.'
+Assert-Contains $recovery '\$batteryPreWebRepairEligible\s*=' `
+  'Recovery must calculate an explicit battery pre-Web repair eligibility gate.'
+Assert-Contains $recovery 'brokerProcessAlive' `
+  'Battery pre-Web repair eligibility must require broker process absence.'
+Assert-Contains $recovery 'brokerHeartbeatFresh' `
+  'Battery pre-Web repair eligibility must require non-fresh broker heartbeat.'
+Assert-Contains $recovery 'startupRunnerLockState' `
+  'Battery pre-Web repair eligibility must require startup-runner lock absence/release.'
+Assert-Contains $recovery 'Test-Phase7CLifecycleHasAliveProcess' `
+  'Battery pre-Web repair eligibility must prove executor lifecycle is stopped.'
+
+# The pre-Web repair must use the canonical installer, verify convergence, then
+# restore lifecycle READY before the ordinary strict Web/API deploy. No verifier
+# exemption is introduced for the battery outage.
+Assert-Contains $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_TASK_REPAIR=PASS' `
+  'Recovery must emit a battery pre-Web task repair pass marker after installer convergence.'
+Assert-Contains $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_STARTUP_RUNNER_LOCK=HELD' `
+  'Recovery must prove startup-runner lock HELD after battery task repair.'
+Assert-Contains $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_LIFECYCLE_READY=PASS' `
+  'Recovery must restore lifecycle READY before Web/API deploy.'
+Assert-Order $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_TASK_REPAIR=PASS' '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy' `
+  'Battery task repair must complete before ordinary Web/API deploy.'
+Assert-Order $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_LIFECYCLE_READY=PASS' '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy' `
+  'Lifecycle must be READY again before ordinary Web/API deploy.'
 Assert-Contains $recovery 'if \(\$taskRepairRequired\)[\s\S]*-Repair' `
-  'Controlled repair block must execute for battery-only settings repair as well as provenance repair.'
+  'Normal controlled repair block must also accept battery-only settings repair when runtime is still healthy.'
 
-# The dedicated flag and exact runner hash must be explicit through every layer.
-foreach ($source in @($webDeploy, $dashboardDeploy, $verifier)) {
-  Assert-Contains $source '\[switch\]\$AllowOwnedTaskBatterySettingsMigration' `
-    'Web/dashboard/verifier must expose the explicit battery-settings migration switch.'
-  Assert-Contains $source '\[string\]\$ExpectedRunnerSha256' `
-    'Battery-settings migration must remain bound to the exact trusted runner SHA256.'
+# This narrower design intentionally adds no battery-specific bypass to Web,
+# dashboard, or the strict account verifier. The existing provenance migration
+# window remains unchanged and is still the only verifier exemption.
+foreach ($source in @($recovery, $webDeploy, $dashboardDeploy, $verifier)) {
+  Assert-NotContains $source 'AllowOwnedTaskBatterySettingsMigration' `
+    'Battery settings recovery must not introduce a Web/dashboard/verifier bypass switch.'
 }
-Assert-Contains $webDeploy '\$dashboardDeployArgs\s*\+=\s*@\([\s\S]*AllowOwnedTaskBatterySettingsMigration[\s\S]*ExpectedRunnerSha256' `
-  'Web deploy must explicitly propagate battery migration switch + trusted runner SHA to dashboard deploy.'
-Assert-Contains $dashboardDeploy '\$accountVerifierArgs\s*\+=\s*@\([\s\S]*AllowOwnedTaskBatterySettingsMigration[\s\S]*ExpectedRunnerSha256' `
-  'Dashboard deploy must explicitly propagate battery migration switch + trusted runner SHA to account verifier.'
-
-# The verifier may accept the outage only for an already-canonical trusted action,
-# canonical SYSTEM principal, and battery-only definition drift. It must not treat
-# non-canonical action provenance as a battery migration.
-Assert-Contains $verifier 'Test-Phase7CBatteryOnlyTaskDrift\s+-Drift\s+\$taskDefinitionDrift' `
-  'Verifier must independently prove exact battery-only definition drift.'
-Assert-Contains $verifier '\[bool\]\$ownership\.owned[\s\S]*\[bool\]\$ownership\.canonical[\s\S]*-not\s+\[bool\]\$ownership\.repairRequired' `
-  'Battery migration must require owned + canonical + no action-provenance repair.'
-Assert-Contains $verifier 'SYSTEM[\s\S]*ServiceAccount[\s\S]*Highest' `
-  'Battery migration must preserve SYSTEM + ServiceAccount + Highest principal proof.'
-Assert-Contains $verifier 'PHASE7C_ACCOUNT_VERIFY_BATTERY_MIGRATION_CONTROLLED_OUTAGE=PASS' `
-  'Verifier must emit an explicit marker after proving the controlled pre-repair outage.'
-Assert-Contains $verifier 'PHASE7C_ACCOUNT_VERIFY_BATTERY_MIGRATION_TASK_DRIFT=PASS' `
-  'Verifier must emit explicit proof that task drift is battery-only.'
-
-# Dashboard may restart only Web/API during the controlled outage. It must prove
-# executor processes are stopped before and remain stopped after that restart,
-# and must not require Telegram readiness until lifecycle recovery is complete.
-Assert-Contains $dashboardDeploy 'PHASE7C_DASHBOARD_DEPLOY_BATTERY_MIGRATION_EXECUTORS_STOPPED=PASS' `
-  'Dashboard battery migration path must prove executors are stopped before Web/API restart.'
-Assert-Contains $dashboardDeploy 'PHASE7C_DASHBOARD_DEPLOY_BATTERY_MIGRATION_EXECUTORS_STILL_STOPPED=PASS' `
-  'Dashboard battery migration path must prove executors remain stopped after Web/API restart.'
-Assert-Contains $dashboardDeploy 'if \(-not \$AllowOwnedTaskBatterySettingsMigration\)[\s\S]*Wait-TelegramRecoveryAfterApiRestart' `
-  'Telegram recovery wait must remain mandatory on normal deploys and be deferred only during battery outage migration.'
-
-# Battery and provenance migration windows are distinct proof modes. Accidentally
-# enabling both would make the verifier contract ambiguous and must fail closed.
-foreach ($source in @($webDeploy, $dashboardDeploy, $verifier)) {
-  Assert-Contains $source 'AllowOwnedTaskProvenanceMigration[\s\S]*AllowOwnedTaskBatterySettingsMigration[\s\S]*throw' `
-    'Provenance and battery migration windows must be mutually exclusive.'
-}
-Assert-NotContains $recovery 'AllowOwnedTaskProvenanceMigration[\s\S]*AllowOwnedTaskBatterySettingsMigration[\s\S]*@webApiDeployArgs' `
-  'Recovery must never request both migration windows in the same Web/API deploy invocation.'
+Assert-NotContains $verifier 'BATTERY_MIGRATION_CONTROLLED_OUTAGE' `
+  'Strict account verifier must not learn a battery-outage exemption mode.'
+Assert-Contains $recovery 'AllowOwnedTaskProvenanceMigration' `
+  'Existing trusted action-provenance migration window must remain available for its original scope.'
 
 Write-Host 'PHASE7C_BATTERY_SETTINGS_RECOVERY_MIGRATION_SOURCE=PASS'
