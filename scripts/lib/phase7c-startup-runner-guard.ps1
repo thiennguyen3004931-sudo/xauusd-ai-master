@@ -32,6 +32,12 @@ function Open-Phase7CStartupRunnerLock([string]$Path) {
     $stream.Write($bytes, 0, $bytes.Length)
     $stream.Flush($true)
     $stream.Position = 0
+
+    # The FileStream owns the OS-level singleton lock. Keep an explicit script-scope
+    # strong reference so GC/finalization cannot release the lock while the persistent
+    # SYSTEM lifecycle-broker process is still alive. The runner still disposes the
+    # returned stream explicitly during shutdown.
+    $script:Phase7CStartupRunnerLockAnchor = $stream
     return $stream
   } catch {
     $stream.Dispose()
