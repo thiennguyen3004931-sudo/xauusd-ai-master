@@ -65,13 +65,25 @@ function Get-Phase7CTrustedGitFileSha256 {
     throw "Runner source is not tracked by Git. relativePath=$relative"
   }
 
-  $headResult = Invoke-Phase7CGitCommand -RepositoryRoot $root -Arguments @('cat-file', '-e', ("HEAD:{0}" -f $relative))
-  if ($headResult.exitCode -ne 0) {
+  $headBlobResult = Invoke-Phase7CGitCommand -RepositoryRoot $root -Arguments @('rev-parse', '--verify', ("HEAD:{0}" -f $relative))
+  if ($headBlobResult.exitCode -ne 0 -or $headBlobResult.output.Count -lt 1) {
     throw "Runner source is not present in accepted Git HEAD. relativePath=$relative"
   }
+  $headBlob = ([string]$headBlobResult.output[-1]).Trim()
+  if ([string]::IsNullOrWhiteSpace($headBlob)) {
+    throw "Accepted Git HEAD returned an empty runner blob id. relativePath=$relative"
+  }
 
-  $diffResult = Invoke-Phase7CGitCommand -RepositoryRoot $root -Arguments @('diff', '--quiet', 'HEAD', '--', $relative)
-  if ($diffResult.exitCode -ne 0) {
+  $worktreeBlobResult = Invoke-Phase7CGitCommand -RepositoryRoot $root -Arguments @('hash-object', ("--path={0}" -f $relative), '--', $relative)
+  if ($worktreeBlobResult.exitCode -ne 0 -or $worktreeBlobResult.output.Count -lt 1) {
+    throw "Cannot hash runner worktree source through Git clean filters. relativePath=$relative"
+  }
+  $worktreeBlob = ([string]$worktreeBlobResult.output[-1]).Trim()
+  if ([string]::IsNullOrWhiteSpace($worktreeBlob)) {
+    throw "Runner worktree hashing returned an empty blob id. relativePath=$relative"
+  }
+
+  if (-not $headBlob.Equals($worktreeBlob, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Runner worktree source differs from accepted Git HEAD. relativePath=$relative"
   }
 
