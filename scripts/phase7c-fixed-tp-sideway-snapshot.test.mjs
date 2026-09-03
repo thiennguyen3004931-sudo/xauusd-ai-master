@@ -94,23 +94,23 @@ test("legacy Sideway persisted state restores Fixed TP disabled without changing
     "RED_TARGET: old managed state must restore target null.");
 
   assert.match(loadState, /version\s*:\s*1/,
-    "Sideway local state version must stay compatible; Task 6 is additive state normalization, not a state-format reset.");
+    "Sideway local state version must stay compatible; change is additive state normalization, not a state-format reset.");
 });
 
-test("Sideway Fixed TP snapshot never overwrites broker TP2 or Daily Recovery takeProfit", () => {
-  const entryFlow = block("const recoveryTakeProfit =", "function readStrategyEntryConfigSnapshot()");
-  const managedBuilder = block("function buildManagedState(", "async function managePosition(");
-
-  assert.match(entryFlow, /takeProfit\s*:\s*executionPlan\.takeProfit/,
-    "existing broker TP2/Daily Recovery takeProfit payload must remain authoritative.");
+test("Sideway sends Fixed TP to MT5 on initial non-Recovery order and preserves canonical Recovery TP precedence", () => {
+  const entryFlow = block("const fixedTpSnapshot = buildFixedTpSnapshot({", "if (!order.accepted) {");
+  assert.match(entryFlow, /const\s+brokerTakeProfit\s*=\s*dailyRecovery\.mode\s*===\s*["']RECOVERY_TP["'][\s\S]*?executionPlan\.takeProfit[\s\S]*?fixedTpSnapshot\.enabled[\s\S]*?fixedTpSnapshot\.targetPrice[\s\S]*?executionPlan\.takeProfit/,
+    "RED_TARGET: non-Recovery Sideway orders with Fixed TP enabled must send the Fixed TP target to MT5 while Recovery keeps canonical Recovery TP.");
+  assert.match(entryFlow, /takeProfit\s*:\s*brokerTakeProfit/,
+    "RED_TARGET: Sideway initial /v1/orders payload must use brokerTakeProfit.");
   assert.match(entryFlow, /tp2\s*:\s*executionPlan\.takeProfit/,
-    "existing durable Sideway TP2 snapshot must remain unchanged.");
-  assert.match(managedBuilder, /tp2\s*:\s*Number\(pending\.tp2\)/,
-    "managed TP2 must still come from the existing pending TP2 field.");
-  assert.match(managedBuilder, /recoveryTakeProfit\s*:\s*Number\(pending\.recoveryTakeProfit\s*\?\?\s*0\)/,
-    "Daily Recovery takeProfit metadata must remain independent.");
-  assert.doesNotMatch(entryFlow, /takeProfit\s*:\s*[^,\n]*fixedTp/i,
-    "Fixed TP must never overwrite broker takeProfit.");
-  assert.doesNotMatch(managedBuilder, /tp2\s*:\s*[^,\n]*fixedTp/i,
-    "Fixed TP must never overwrite Sideway TP2.");
+    "Sideway native TP2 management metadata must remain unchanged.");
+});
+
+test("Sideway verifies actual fill and reconciles broker Fixed TP from actual entry", () => {
+  const fillFlow = block("state.managed = buildManagedState(opened, state.pendingEntry, brokerClockOffsetMs);", "state.pendingEntry = null;");
+  assert.match(fillFlow, /await\s+reconcileFixedTpBrokerTakeProfit\s*\(/,
+    "RED_TARGET: Sideway must reconcile broker TP after actual fill when Fixed TP is enabled.");
+  assert.match(sidewaySource, /async function reconcileFixedTpBrokerTakeProfit\([\s\S]*?takeProfit\s*:\s*targetPrice[\s\S]*?\/v1\/positions\/\$\{encodeURIComponent\(ticket\)\}/,
+    "RED_TARGET: Sideway Fixed TP reconcile must PATCH the managed MT5 position with actual-entry-derived targetPrice.");
 });
