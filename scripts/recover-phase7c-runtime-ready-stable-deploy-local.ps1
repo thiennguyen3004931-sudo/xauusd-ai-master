@@ -13,7 +13,9 @@ $OwnershipLibrary = Join-Path $PSScriptRoot "lib\phase7c-scheduled-task-ownershi
 $WebApiDeploy = Join-Path $PSScriptRoot "deploy-phase7c-web-ui-local.ps1"
 $TaskInstaller = Join-Path $PSScriptRoot "register-phase7c-executor-task-local.ps1"
 $TaskName = "XAUUSD-Phase7C-Executors"
-$BrokerHeartbeat = Join-Path $ProjectRoot ".runtime\phase7c-lifecycle-broker\state\heartbeat.json"
+$BrokerState = Join-Path $ProjectRoot ".runtime\phase7c-lifecycle-broker\state"
+$BrokerHeartbeat = Join-Path $BrokerState "heartbeat.json"
+$ApiSidRecord = Join-Path $BrokerState "api-user-sid.txt"
 $ReadyStableMs = 5000
 
 if ($ExpectedCommit -notmatch '^[0-9a-fA-F]{40}$') {
@@ -45,6 +47,22 @@ function Read-JsonFile([string]$Path, [string]$Label) {
   }
   try { return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json }
   catch { throw "$Label file is invalid: $Path. $($_.Exception.Message)" }
+}
+
+function Get-Phase7CRecordedApiUserSid {
+  if (-not (Test-Path -LiteralPath $ApiSidRecord -PathType Leaf)) {
+    throw "Lifecycle broker API SID record is missing before task repair: $ApiSidRecord"
+  }
+  $value = ([string](Get-Content -LiteralPath $ApiSidRecord -Raw)).Trim()
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    throw "Lifecycle broker API SID record is empty before task repair: $ApiSidRecord"
+  }
+  try {
+    $sid = New-Object System.Security.Principal.SecurityIdentifier($value)
+  } catch {
+    throw "Lifecycle broker API SID record is invalid before task repair: $value"
+  }
+  return [string]$sid.Value
 }
 
 function Invoke-ApiGet([string]$Path) {
@@ -301,9 +319,12 @@ if (-not (Test-Phase7CSystemTaskPrincipal $task.Principal)) {
 }
 
 $taskProvenanceRepairRequired = [bool]$taskOwnership.repairRequired -or -not [bool]$taskOwnership.canonical
+$apiUserSid = ""
 if ($taskProvenanceRepairRequired) {
   Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE=OWNED_REPAIR_REQUIRED"
   Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE_REASON=$($taskOwnership.reason)"
+  $apiUserSid = Get-Phase7CRecordedApiUserSid
+  Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_API_SID_PREFLIGHT=PASS"
 } else {
   Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE=CANONICAL_HASH_GUARD"
   Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE_REPAIR=SKIPPED_ALREADY_CANONICAL"
@@ -410,7 +431,8 @@ try {
       & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $TaskInstaller `
         -TaskName $TaskName `
         -ProjectRoot $ProjectRoot `
-        -Repair
+        -Repair `
+        -ApiUserSid $apiUserSid
       if ($LASTEXITCODE -ne 0) {
         throw "Canonical Scheduled Task provenance repair failed with exit code $LASTEXITCODE."
       }
