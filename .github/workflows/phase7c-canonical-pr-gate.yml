@@ -58,6 +58,8 @@ jobs:
           node --test scripts/phase7c-sideway-logic.test.mjs
           node --test scripts/phase7c-sideway-execution-guards.test.mjs
           node --test scripts/phase7c-execution-lock.test.mjs
+      - name: Prebuild API for compiled Fixed TP contracts
+        run: pnpm --filter @xauusd/api... build
       - name: Broker-native Fixed TP regressions
         run: |
           node --test scripts/phase7c-fixed-tp.test.mjs
