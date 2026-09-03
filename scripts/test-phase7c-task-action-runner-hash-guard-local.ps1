@@ -82,6 +82,12 @@ $ErrorActionPreference = 'Stop'
   Assert-Phase7CGuardTest (-not [bool]$foreignOwnership.owned) 'Foreign encoded PowerShell action must never be treated as Phase7C-owned.'
 
   Add-Content -LiteralPath $runnerPath -Value "`n# tampered after task hash was pinned" -Encoding UTF8
+  Invoke-TestGit -RepositoryRoot $tempRoot -Arguments @(
+    'update-index',
+    '--assume-unchanged',
+    '--',
+    'scripts/run-phase7c-executor-task-runner-local.ps1'
+  ) | Out-Null
 
   $dirtyRejected = $false
   try {
@@ -89,7 +95,7 @@ $ErrorActionPreference = 'Stop'
   } catch {
     $dirtyRejected = $true
   }
-  Assert-Phase7CGuardTest $dirtyRejected 'Trusted Git runner verification accepted a worktree runner that differs from HEAD.'
+  Assert-Phase7CGuardTest $dirtyRejected 'Trusted Git runner verification accepted an assume-unchanged worktree runner that differs from HEAD.'
 
   if (Test-Path -LiteralPath $markerPath) { Remove-Item -LiteralPath $markerPath -Force }
   $guardProcess = Start-Process -FilePath $powerShellExe -ArgumentList $guardArguments -Wait -PassThru -WindowStyle Hidden
@@ -102,7 +108,7 @@ $ErrorActionPreference = 'Stop'
   Write-Host 'LEGACY_ACTION_REPAIR_REQUIRED=PASS'
   Write-Host 'OLD_HASH_ACTION_REPAIR_REQUIRED=PASS'
   Write-Host 'FOREIGN_ENCODED_ACTION_BLOCKED=PASS'
-  Write-Host 'DIRTY_RUNNER_TRUST_REJECTED=PASS'
+  Write-Host 'ASSUME_UNCHANGED_TAMPER_REJECTED=PASS'
   Write-Host 'PRE_EXECUTION_HASH_MISMATCH_EXIT=86'
   Write-Host 'TAMPERED_RUNNER_EXECUTED=FALSE'
 } finally {
@@ -114,7 +120,4 @@ $ErrorActionPreference = 'Stop'
   try { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue } catch { }
 }
 
-# The test intentionally executes `git diff --quiet` against a dirty fixture,
-# which leaves Windows PowerShell's process-level LASTEXITCODE at 1 even though
-# that failure is the expected assertion path. All assertions above have passed.
 exit 0
