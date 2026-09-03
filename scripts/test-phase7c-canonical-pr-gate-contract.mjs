@@ -38,6 +38,13 @@ test("canonical Linux gate covers build plus trading-critical contracts", () => 
   ]) {
     assert.match(source, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `missing canonical Linux gate command: ${required}`);
   }
+
+  const fixedTpIndex = source.indexOf("- name: Broker-native Fixed TP regressions");
+  const apiBuildIndex = source.indexOf("pnpm --filter @xauusd/api... build");
+  assert.ok(
+    apiBuildIndex >= 0 && fixedTpIndex >= 0 && apiBuildIndex < fixedTpIndex,
+    "RED_TARGET: compiled API must be built before Fixed TP regressions import apps/api/dist.",
+  );
 });
 
 test("canonical Windows gate covers cross-shell lifecycle and LIVE source safety", () => {
