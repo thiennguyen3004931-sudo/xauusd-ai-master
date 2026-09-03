@@ -429,14 +429,20 @@ if ($taskBatterySettingsRepairRequired) {
   $runtimeGenerationBeforeBatteryRepair = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $WorkDir
   $lifecycleBeforeBatteryRepair = Invoke-ApiGet "/api/v1/phase7c/lifecycle"
   $taskBeforeBatteryRepair = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-  $lockAbsentBeforeBatteryRepair = [string]$runtimeGenerationBeforeBatteryRepair.startupRunnerLockState -in @('MISSING', 'RELEASED')
+  $lockStateBeforeBatteryRepair = [string]$runtimeGenerationBeforeBatteryRepair.startupRunnerLockState
+  $lockAbsentBeforeBatteryRepair = $lockStateBeforeBatteryRepair -in @('MISSING', 'RELEASED')
+  $lockHeldBeforeBatteryRepair = $lockStateBeforeBatteryRepair -eq 'HELD'
   $batteryRuntimeUnavailable = `
     [string]$taskBeforeBatteryRepair.State -ne 'Running' -or `
     -not [bool]$runtimeGenerationBeforeBatteryRepair.brokerProcessAlive -or `
     -not [bool]$runtimeGenerationBeforeBatteryRepair.brokerHeartbeatFresh -or `
     $lockAbsentBeforeBatteryRepair
 
-  $batteryPreWebRepairEligible = `
+  $batteryLifecycleStoppedNoExecutors = `
+    -not [bool]$lifecycleBeforeBatteryRepair.running -and `
+    -not (Test-Phase7CLifecycleHasAliveProcess -State $lifecycleBeforeBatteryRepair)
+
+  $batteryStrandedOutageEligible = `
     [string]$taskBeforeBatteryRepair.State -ne 'Running' -and `
     [string]$runtimeGenerationBeforeBatteryRepair.statusReadState -eq 'OK' -and `
     [string]$runtimeGenerationBeforeBatteryRepair.heartbeatReadState -eq 'OK' -and `
@@ -444,11 +450,28 @@ if ($taskBatterySettingsRepairRequired) {
     -not [bool]$runtimeGenerationBeforeBatteryRepair.brokerProcessAlive -and `
     -not [bool]$runtimeGenerationBeforeBatteryRepair.brokerHeartbeatFresh -and `
     $lockAbsentBeforeBatteryRepair -and `
-    -not [bool]$lifecycleBeforeBatteryRepair.running -and `
-    -not (Test-Phase7CLifecycleHasAliveProcess -State $lifecycleBeforeBatteryRepair)
+    $batteryLifecycleStoppedNoExecutors
 
-  if ($batteryRuntimeUnavailable -and -not $batteryPreWebRepairEligible) {
-    throw "Battery-settings task drift is paired with an unproven runtime outage; pre-Web repair blocked. taskState=$($taskBeforeBatteryRepair.State) brokerAlive=$($runtimeGenerationBeforeBatteryRepair.brokerProcessAlive) heartbeatFresh=$($runtimeGenerationBeforeBatteryRepair.brokerHeartbeatFresh) lock=$($runtimeGenerationBeforeBatteryRepair.startupRunnerLockState)"
+  $batteryHealthyBrokerStoppedLifecycleEligible = `
+    [string]$taskBeforeBatteryRepair.State -eq 'Running' -and `
+    [string]$runtimeGenerationBeforeBatteryRepair.statusReadState -eq 'OK' -and `
+    [string]$runtimeGenerationBeforeBatteryRepair.heartbeatReadState -eq 'OK' -and `
+    [bool]$runtimeGenerationBeforeBatteryRepair.brokerStatusPidMatch -and `
+    [bool]$runtimeGenerationBeforeBatteryRepair.brokerProcessAlive -and `
+    [bool]$runtimeGenerationBeforeBatteryRepair.brokerHeartbeatFresh -and `
+    $lockHeldBeforeBatteryRepair -and `
+    $batteryLifecycleStoppedNoExecutors
+
+  $batteryPreWebRepairEligible = `
+    $batteryStrandedOutageEligible -or `
+    $batteryHealthyBrokerStoppedLifecycleEligible
+
+  $batteryPreWebRepairRequired = `
+    $batteryRuntimeUnavailable -or `
+    -not [bool]$lifecycleBeforeBatteryRepair.running
+
+  if ($batteryPreWebRepairRequired -and -not $batteryPreWebRepairEligible) {
+    throw "Battery-settings task drift is paired with an unproven runtime/lifecycle state; pre-Web repair blocked. taskState=$($taskBeforeBatteryRepair.State) lifecycleRunning=$($lifecycleBeforeBatteryRepair.running) brokerAlive=$($runtimeGenerationBeforeBatteryRepair.brokerProcessAlive) heartbeatFresh=$($runtimeGenerationBeforeBatteryRepair.brokerHeartbeatFresh) lock=$lockStateBeforeBatteryRepair"
   }
 
   if ($batteryPreWebRepairEligible) {
@@ -457,6 +480,11 @@ if ($taskBatterySettingsRepairRequired) {
     Assert-PauseDisarmed -Stage "BATTERY_PRE_WEB_REPAIR"
     Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "BATTERY_PRE_WEB_REPAIR"
     Assert-FlatBroker -Stage "BATTERY_PRE_WEB_REPAIR"
+
+    $brokerPidBeforeBatteryRepair = Get-Phase7CBrokerPidFromHeartbeat
+    if ($batteryHealthyBrokerStoppedLifecycleEligible -and $brokerPidBeforeBatteryRepair -le 0) {
+      throw "Healthy-broker battery repair could not capture the current broker PID before task stop."
+    }
 
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
     $taskStopDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min($TimeoutSeconds, 30))
@@ -470,8 +498,22 @@ if ($taskBatterySettingsRepairRequired) {
       }
     } while ([DateTime]::UtcNow -lt $taskStopDeadline)
     if (-not $taskQuiesced) {
-      throw "Battery-stranded Scheduled Task did not quiesce before canonical settings repair. state=$($taskAfterStop.State)"
+      throw "Battery Scheduled Task did not quiesce before canonical settings repair. state=$($taskAfterStop.State)"
     }
+
+    $brokerProcessStopped = $brokerPidBeforeBatteryRepair -le 0
+    $brokerStopDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min($TimeoutSeconds, 30))
+    while (-not $brokerProcessStopped -and [DateTime]::UtcNow -lt $brokerStopDeadline) {
+      if ($null -eq (Get-Process -Id $brokerPidBeforeBatteryRepair -ErrorAction SilentlyContinue)) {
+        $brokerProcessStopped = $true
+        break
+      }
+      Start-Sleep -Milliseconds 250
+    }
+    if (-not $brokerProcessStopped) {
+      throw "Previous lifecycle broker process remained alive after battery Scheduled Task stop. pid=$brokerPidBeforeBatteryRepair"
+    }
+    Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BATTERY_PRE_WEB_PREVIOUS_BROKER_EXIT=PASS|PREVIOUS_PID=$brokerPidBeforeBatteryRepair"
 
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $TaskInstaller `
       -TaskName $TaskName `
@@ -683,3 +725,4 @@ if ($taskBatterySettingsRepairRequired) {
   Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_LIVE_TEST_ORDER=NONE"
   throw $originalError
 }
+
