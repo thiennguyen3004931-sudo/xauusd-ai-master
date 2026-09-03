@@ -75,6 +75,16 @@ Assert-True ($verifier -match 'brokerPid') "executor verifier must use brokerPid
 Assert-True (-not ($verifier -match 'startupRunnerStatus\.runnerPid')) "migrated-task verifier must not use legacy startup-runner-status runnerPid as liveness authority"
 Assert-True (-not ($verifier -match 'startup-runner-status\.json does not identify a live runner process')) "migrated-task verifier must not fail on a stale legacy startup-runner-status PID"
 
+# Runtime READY must use the same canonical broker ownership proof as the verifier.
+# A merely fresh heartbeat from an exited/replaced process must never make lifecycle.ready true.
+Assert-True ($brokerClient -match 'isPidAlive') "Broker API readiness must verify that heartbeat brokerPid is a live process"
+Assert-True ($brokerClient -match '(?s)heartbeat\?\.brokerPid.*status\?\.brokerPid|status\?\.brokerPid.*heartbeat\?\.brokerPid') "Broker API readiness must reconcile heartbeat brokerPid with status brokerPid"
+
+# START must not succeed on one transient ready sample. Require an explicit continuous stable window
+# before the lifecycle start flow reports READY and before LIVE ARM can consume runtimeReady=true.
+Assert-True ($lifecycle -match 'START_READY_STABLE_MS') "Lifecycle START must define an explicit stable READY window"
+Assert-True ($lifecycle -match '(?s)readySince.*START_READY_STABLE_MS') "waitForReady must require continuous READY for the stable window"
+
 # Closed request protocol and core safety reason codes must be represented in SYSTEM source.
 foreach ($requiredPattern in @(
   'REJECT_BROKER_BUSY',
