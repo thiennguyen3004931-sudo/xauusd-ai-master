@@ -10,6 +10,7 @@ on:
       - "scripts/run-phase7c-executor-task-runner-local.ps1"
       - "scripts/test-phase7c-startup-runner-lock-lifetime-local.ps1"
       - "scripts/test-phase7c-startup-runner-lock-persistent-loop-local.ps1"
+      - "scripts/test-phase7c-startup-runner-lock-system-task-local.ps1"
       - ".github/workflows/phase7c-startup-runner-lock-lifetime-ci.yml"
   pull_request:
     branches:
@@ -20,6 +21,7 @@ on:
       - "scripts/run-phase7c-executor-task-runner-local.ps1"
       - "scripts/test-phase7c-startup-runner-lock-lifetime-local.ps1"
       - "scripts/test-phase7c-startup-runner-lock-persistent-loop-local.ps1"
+      - "scripts/test-phase7c-startup-runner-lock-system-task-local.ps1"
       - ".github/workflows/phase7c-startup-runner-lock-lifetime-ci.yml"
 
 permissions:
@@ -28,7 +30,7 @@ permissions:
 jobs:
   lock-lifetime-windows:
     runs-on: windows-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Startup runner lock finite lifetime - Windows PowerShell 5.1
@@ -37,6 +39,9 @@ jobs:
       - name: Startup runner lock persistent loop - Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-startup-runner-lock-persistent-loop-local.ps1
+      - name: Startup runner lock persistent SYSTEM task - Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-startup-runner-lock-system-task-local.ps1
       - name: Startup runner lock finite lifetime - PowerShell 7
         shell: pwsh
         run: .\scripts\test-phase7c-startup-runner-lock-lifetime-local.ps1
