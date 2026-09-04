@@ -60,11 +60,11 @@ jobs:
       - name: P2 performance correlation regression
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-performance-correlation-schema.test.ts
 
-      - name: P2 performance intelligence regression
-        run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-performance-intelligence.test.ts
-
       - name: Build API dependency graph
         run: pnpm --filter @xauusd/api... build
+
+      - name: P2 performance intelligence regression
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-performance-intelligence.test.ts
 
       - name: Build web dependency graph
         run: pnpm --filter @xauusd/web... build
