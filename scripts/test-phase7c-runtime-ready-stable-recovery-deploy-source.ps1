@@ -33,8 +33,8 @@ Assert-True ($text.Contains('requires zero XAUUSD positions')) "helper must requ
 Assert-True ($text.Contains('requires zero pending XAUUSD orders')) "helper must require zero pending XAUUSD orders"
 
 # Ordinary runtime-ready recovery still deploys Web/API before its stable probe and
-# STOP -> repair/reload -> START sequence. A separately proven battery-stranded task may
-# be repaired and STARTed before Web deploy only because lifecycle is already STOPPED.
+# STOP -> repair/reload -> START sequence. Separately proven stopped-lifecycle paths
+# may restore a strict executor generation before Web deploy.
 Assert-True ($text.Contains('deploy-phase7c-web-ui-local.ps1')) "helper must reuse canonical Web/API deploy helper"
 $deployIndex = $text.IndexOf('& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy', [System.StringComparison]::Ordinal)
 $stableProbeIndex = $text.IndexOf('$stableBeforeRecovery = Wait-LifecycleReadyStable', [System.StringComparison]::Ordinal)
@@ -68,8 +68,13 @@ Assert-True ($text.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_TA
 Assert-True ($text.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_STARTUP_RUNNER_LOCK=HELD')) "canonical generation reload must prove the new startup runner lock is HELD"
 $generationTaskStopIndex = $text.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_TASK_STOP=PASS', [System.StringComparison]::Ordinal)
 $generationBrokerStopIndex = $text.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_BROKER_PROCESS_STOP=PASS', [System.StringComparison]::Ordinal)
-$generationTaskStartIndex = $text.IndexOf('Start-ScheduledTask -TaskName $TaskName', [System.StringComparison]::Ordinal)
 $generationLockIndex = $text.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_STARTUP_RUNNER_LOCK=HELD', [System.StringComparison]::Ordinal)
+$generationTaskStartMatches = [regex]::Matches($text, [regex]::Escape('Start-ScheduledTask -TaskName $TaskName'))
+$generationTaskStartCandidates = @($generationTaskStartMatches | Where-Object {
+  $_.Index -gt $generationBrokerStopIndex -and $_.Index -lt $generationLockIndex
+})
+Assert-True ($generationTaskStartCandidates.Count -eq 1) "post-Web canonical generation reload must have exactly one task start between broker-stop and lock proof"
+$generationTaskStartIndex = $generationTaskStartCandidates[0].Index
 Assert-True ($generationTaskStopIndex -gt $stopIndex) "generation task stop must occur only after lifecycle STOP"
 Assert-True ($generationBrokerStopIndex -gt $generationTaskStopIndex) "generation task restart must wait for old broker exit proof"
 Assert-True ($generationTaskStartIndex -gt $generationBrokerStopIndex) "canonical task must restart only after old broker process is dead"
