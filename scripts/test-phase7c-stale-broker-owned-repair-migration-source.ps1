@@ -48,45 +48,44 @@ Assert-PowerShellSyntax $WebDeployPath
 $recovery = Get-Content -LiteralPath $RecoveryPath -Raw
 $webDeploy = Get-Content -LiteralPath $WebDeployPath -Raw
 
-# RED production reproduction: after a guarded source fast-forward, the still-running
+# Production reproduction: after a guarded source fast-forward, the still-running
 # lifecycle broker can be older than source. Ordinary Web/API deploy must keep its
-# stale-source block, but the already-proven owned-task provenance repair path needs
-# one PID-bound migration window so canonical recovery can reach STOP -> repair -> START.
-Assert-Contains $webDeploy '\[switch\]\$AllowStaleBrokerSourceMigration' `
-  'RED: Web/API deploy is missing the narrow stale-broker source migration switch.'
-Assert-Contains $webDeploy '\[int\]\$ExpectedStaleBrokerPid' `
-  'Stale-broker migration must bind to the exact broker PID proven by recovery.'
-Assert-Contains $webDeploy 'AllowStaleBrokerSourceMigration[\s\S]*AllowOwnedTaskProvenanceMigration' `
-  'Stale-broker source migration must be legal only inside the owned-task provenance migration window.'
-Assert-Contains $webDeploy 'ExpectedStaleBrokerPid\s+-le\s+0' `
-  'Stale-broker migration must reject a missing or non-positive expected broker PID.'
-Assert-Contains $webDeploy '\$brokerPid\s+-ne\s+\$ExpectedStaleBrokerPid' `
-  'Stale-broker migration must fail closed if the live broker PID changed from the recovery preflight PID.'
+# stale-source block. Canonical recovery already owns one deliberately narrow proof
+# window: AllowOwnedTaskProvenanceMigration + exact trusted Git runner SHA. Reuse
+# that existing window rather than introducing a second generic stale-source bypass.
+Assert-Contains $webDeploy '\[switch\]\$AllowOwnedTaskProvenanceMigration' `
+  'Web/API deploy must retain the explicit owned-task provenance migration switch.'
+Assert-Contains $webDeploy '\[string\]\$ExpectedRunnerSha256' `
+  'Owned-task migration must stay bound to the exact trusted runner SHA256.'
 Assert-Contains $webDeploy 'PHASE7C_WEB_UI_DEPLOY_BROKER_SOURCE_STALE_MIGRATION=ALLOWED_OWNED_TASK_REPAIR' `
-  'Stale-broker migration must emit an explicit narrow audit marker.'
+  'RED: Web/API deploy is missing the narrow stale-broker allowance inside the already-proven owned-task migration window.'
+Assert-Contains $webDeploy 'if \(\$AllowOwnedTaskProvenanceMigration\)[\s\S]*PHASE7C_WEB_UI_DEPLOY_BROKER_SOURCE_STALE_MIGRATION=ALLOWED_OWNED_TASK_REPAIR[\s\S]*else[\s\S]*Web UI deploy blocked: lifecycle broker process is stale relative to source loaded at broker startup' `
+  'Stale broker source may be tolerated only inside the existing owned-task migration window; ordinary deploy must still fail closed.'
+Assert-Contains $webDeploy 'PHASE7C_WEB_UI_DEPLOY_BROKER_SOURCE_FRESH=PASS' `
+  'Fresh broker source must keep the existing PASS marker.'
 Assert-Contains $webDeploy 'Web UI deploy blocked: lifecycle broker process is stale relative to source loaded at broker startup' `
   'Ordinary Web/API deploy must preserve the existing stale-broker fail-closed error.'
 
-# Recovery must capture the current broker generation before Web deploy and forward
-# the stale-source exception only when task provenance is already proven owned +
-# repair-required. Because taskRepairRequired remains true, stable old executors can
-# never take the SKIPPED_ALREADY_STABLE branch after this exception is used.
-Assert-Contains $recovery '\$staleBrokerMigrationPid\s*=\s*Get-Phase7CBrokerPidFromHeartbeat' `
-  'Recovery must capture the current lifecycle broker PID before opening the stale-source migration window.'
-Assert-Contains $recovery 'AllowStaleBrokerSourceMigration' `
-  'Recovery must explicitly request the stale-broker migration window.'
-Assert-Contains $recovery 'ExpectedStaleBrokerPid[\s\S]*\$staleBrokerMigrationPid' `
-  'Recovery must pass the exact preflight broker PID to Web/API deploy.'
-Assert-Contains $recovery 'if \(\$taskProvenanceRepairRequired\)[\s\S]*AllowStaleBrokerSourceMigration' `
-  'Recovery may request stale-broker migration only for proven task provenance repair.'
+# Recovery opens AllowOwnedTaskProvenanceMigration only after it has classified the
+# task as owned + repair-required and validated the recorded API SID/principal. That
+# same condition keeps taskRepairRequired=true, so old stable executors can never
+# take SKIPPED_ALREADY_STABLE after the stale-source allowance is exercised.
+Assert-Contains $recovery 'if \(\$taskProvenanceRepairRequired\)[\s\S]*AllowOwnedTaskProvenanceMigration[\s\S]*ExpectedRunnerSha256[\s\S]*\$trustedRunnerSha256' `
+  'Recovery may open the migration window only for proven task provenance repair and exact trusted runner SHA.'
+Assert-Contains $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_API_SID_PREFLIGHT=PASS' `
+  'Recovery must validate the recorded API SID before building migration-window deploy arguments.'
 Assert-Contains $recovery '\$taskRepairRequired\s*=\s*\$taskProvenanceRepairRequired\s+-or\s+\$taskBatterySettingsRepairRequired' `
   'Provenance repair must remain a mandatory lifecycle recovery reason.'
 Assert-Contains $recovery '\$stableBeforeRecovery\s+-and\s+-not\s+\$taskRepairRequired' `
   'A provenance-repair rollout must remain ineligible for SKIPPED_ALREADY_STABLE.'
 
-Assert-Order $recovery '$staleBrokerMigrationPid = Get-Phase7CBrokerPidFromHeartbeat' '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy' `
-  'Recovery must bind the stale broker PID before Web/API deploy.'
+Assert-Order $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_API_SID_PREFLIGHT=PASS' '$webApiDeployArgs = @()' `
+  'API SID/principal proof must precede construction of the Web/API migration window.'
 Assert-Order $recovery '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy' '"/api/v1/phase7c/lifecycle/stop"' `
   'This bounded fix must preserve the established Web/API-before-lifecycle-STOP ordering.'
+Assert-Order $recovery '"/api/v1/phase7c/lifecycle/stop"' 'Stop-ScheduledTask' `
+  'Owned task stop must remain after lifecycle STOP.'
+Assert-Order $recovery 'Stop-ScheduledTask' '-Repair `' `
+  'Canonical task repair must remain after the owned task is stopped.'
 
 Write-Host "PHASE7C_STALE_BROKER_OWNED_REPAIR_MIGRATION_SOURCE_TEST=PASS"
