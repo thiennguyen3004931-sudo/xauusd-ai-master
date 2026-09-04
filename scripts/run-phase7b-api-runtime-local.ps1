@@ -16,6 +16,8 @@ $WorkDir = (Resolve-Path -LiteralPath $WorkDir).Path
 
 $AccountStatePath = Join-Path $WorkDir "phase7c-account-mode.json"
 $bridgeEnvSource = "TASK_FALLBACK"
+$accountMode = ""
+$liveExecutionEnabled = $false
 
 if (Test-Path -LiteralPath $AccountStatePath) {
   try {
@@ -111,6 +113,20 @@ $env:PHASE7C_RUNTIME_ROOT = $WorkDir
 $env:HOST = "127.0.0.1"
 $env:PORT = [string]$ApiPort
 $env:WEB_ORIGIN = $WebOrigin
+
+# P1 runtime-source attestation consumes only non-secret, already-validated
+# canonical startup context. Legacy task-fallback starts remain supported; in
+# that case the API writer degrades to UNKNOWN rather than inventing identity.
+if ($bridgeEnvSource -eq "ACCOUNT_MODE_STATE") {
+  $env:PHASE7C_SOURCE_ATTESTATION_ROOT = Join-Path $WorkDir "phase7c-source-attestation"
+  $env:PHASE7C_SOURCE_ATTESTATION_API_LAUNCHER = $PSCommandPath
+  $env:PHASE7C_SOURCE_ATTESTATION_ACCOUNT_MODE = $accountMode
+  $env:PHASE7C_SOURCE_ATTESTATION_LIVE_EXECUTION_ENABLED = if ($liveExecutionEnabled) { "true" } else { "false" }
+  $env:PHASE7C_SOURCE_ATTESTATION_CONTROL_API_URL = "http://127.0.0.1:$ApiPort"
+  Write-Host "PHASE7B_API_RUNTIME_SOURCE_ATTESTATION_CONTEXT=READY|ACCOUNT_MODE=$accountMode"
+} else {
+  Write-Host "PHASE7B_API_RUNTIME_SOURCE_ATTESTATION_CONTEXT=UNKNOWN|SOURCE=TASK_FALLBACK"
+}
 
 Write-Host "PHASE7B_API_RUNTIME_ROOT=$WorkDir"
 Write-Host "PHASE7B_API_LOT_SETTINGS_FILE=$($env:PHASE7C_LOT_SETTINGS_FILE)"
