@@ -1,0 +1,61 @@
+name: Phase7C Performance Effectiveness CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/api/src/contracts/phase7c-performance-effectiveness.schema.ts"
+      - "apps/api/src/services/phase7c-performance-management-evidence.service.ts"
+      - "apps/api/src/services/phase7c-performance-excursion.service.ts"
+      - "apps/api/src/services/phase7c-fast-move-effectiveness.service.ts"
+      - "apps/api/src/services/phase7c-performance-effectiveness.service.ts"
+      - "apps/api/src/routes/phase7c-performance-effectiveness.route.ts"
+      - "apps/api/src/app.ts"
+      - "apps/web/src/phase7c-performance-effectiveness-api.ts"
+      - "apps/web/src/phase7c-performance-effectiveness-types.ts"
+      - "apps/web/src/ui/Phase7CPerformanceEffectivenessCard.tsx"
+      - "apps/web/src/pages/Phase7CControlCenterShellPage.tsx"
+      - "scripts/phase7c-performance-effectiveness-schema.test.ts"
+      - "scripts/phase7c-performance-management-evidence.test.ts"
+      - "scripts/phase7c-performance-excursion.test.ts"
+      - "scripts/phase7c-fast-move-effectiveness.test.ts"
+      - "scripts/phase7c-performance-effectiveness.test.ts"
+      - "scripts/test-phase7c-performance-effectiveness-source.mjs"
+      - "docs/superpowers/specs/2026-09-04-p3-performance-effectiveness.md"
+      - "docs/superpowers/plans/2026-09-04-p3-performance-effectiveness.md"
+      - ".github/workflows/phase7c-performance-effectiveness-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: P3 effectiveness schema contract
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-performance-effectiveness-schema.test.ts
+
+      - name: Build API dependency graph
+        run: pnpm --filter @xauusd/api... build
+
+      - name: Build web dependency graph
+        run: pnpm --filter @xauusd/web... build
