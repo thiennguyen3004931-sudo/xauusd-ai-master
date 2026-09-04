@@ -16,7 +16,7 @@ permissions:
 jobs:
   contract-and-build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 18
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,11 +25,12 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: 10.18.0
+          run_install: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
@@ -38,5 +39,5 @@ jobs:
       - name: Performance Intelligence source contract
         run: node scripts/test-phase7c-performance-intelligence-source.mjs
 
-      - name: Build API
-        run: pnpm --filter @xauusd/api build
+      - name: Build API dependency graph
+        run: pnpm --filter @xauusd/api... build
