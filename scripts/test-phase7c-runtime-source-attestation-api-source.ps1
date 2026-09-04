@@ -56,7 +56,8 @@ foreach ($forbidden in @('router.post(', 'router.put(', 'router.patch(', 'router
 
 $serviceText = (Get-Content -LiteralPath $ApiService -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
 foreach ($component in @('api','lifecycle-broker','supervisor','trend','sideway','telegram','regime-notifier')) {
-  Assert-True ($serviceText.Contains("component: \"$component\"")) "Task4 aggregator missing component mapping: $component"
+  $needle = 'component: "' + $component + '"'
+  Assert-True ($serviceText.Contains($needle)) "Task4 aggregator missing component mapping: $component"
 }
 Assert-True ($serviceText.Contains('process.kill(pid, 0)')) "Task4 liveness must use signal 0 only"
 foreach ($forbidden in @('child_process', 'exec(', 'spawn(', 'ARM_LIVE', 'phase7CBotModeService', 'startPhase7CFromWeb', 'stopPhase7C', '/v1/orders', 'simple-git', 'git rev-parse')) {
