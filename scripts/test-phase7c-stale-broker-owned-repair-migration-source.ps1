@@ -64,7 +64,9 @@ Assert-Literal $recovery 'if ($taskProvenanceRepairRequired)' `
   'Recovery must classify the owned provenance repair path explicitly.'
 Assert-Literal $recovery "'-AllowOwnedTaskProvenanceMigration'" `
   'Recovery must explicitly open the existing owned-task migration window.'
-Assert-Literal $recovery "'-ExpectedRunnerSha256', $trustedRunnerSha256" `
+Assert-Literal $recovery "'-ExpectedRunnerSha256'," `
+  'Recovery must pass the expected runner SHA256 migration argument.'
+Assert-Literal $recovery '$trustedRunnerSha256' `
   'Recovery must bind the migration window to the trusted Git runner SHA256.'
 Assert-Literal $recovery '$taskRepairRequired = $taskProvenanceRepairRequired -or $taskBatterySettingsRepairRequired' `
   'Provenance repair must remain a mandatory lifecycle recovery reason.'
