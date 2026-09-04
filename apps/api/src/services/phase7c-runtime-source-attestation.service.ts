@@ -1,4 +1,15 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  closeSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 export type Phase7CRuntimeSourceComponentName =
   | "api"
@@ -97,6 +108,20 @@ export interface Phase7CRuntimeSourceAttestationDeps {
   sha256File: (file: string) => string;
   isPidAlive: (pid: number) => boolean;
 }
+
+const componentDefinitions: readonly {
+  component: Phase7CRuntimeSourceComponentName;
+  launcher: string;
+  pidFile?: string;
+}[] = [
+  { component: "api", launcher: "run-phase7b-api-runtime-local.ps1" },
+  { component: "lifecycle-broker", launcher: "run-phase7c-executor-task-runner-local.ps1" },
+  { component: "supervisor", launcher: "run-phase7c-executors-local.ps1", pidFile: "supervisor.pid" },
+  { component: "trend", launcher: "run-phase7c-trend-controller-local.ps1", pidFile: "trend.pid" },
+  { component: "sideway", launcher: "run-phase7c-sideway-controller-local.ps1", pidFile: "sideway.pid" },
+  { component: "telegram", launcher: "run-phase7c-telegram-mode-controller-local.ps1", pidFile: "telegram-mode.pid" },
+  { component: "regime-notifier", launcher: "run-phase7c-regime-notifier-local.ps1", pidFile: "regime-notifier.pid" },
+];
 
 function normalizedConfig(input: Phase7CRuntimeSourceConfigIdentity): Phase7CRuntimeSourceConfigIdentity {
   const accountMode = input.accountMode.trim().toUpperCase();
@@ -233,4 +258,287 @@ export function combinePhase7CRuntimeSourceVerdicts(
   if (values.includes("UNKNOWN")) return "UNKNOWN";
   if (values.includes("STALE")) return "STALE";
   return values.length > 0 ? "EXACT_MATCH" : "UNKNOWN";
+}
+
+function sha256File(file: string): string {
+  return `sha256:${createHash("sha256").update(readFileSync(file)).digest("hex")}`;
+}
+
+function isPidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function defaultRuntimeRoot(): string {
+  const explicitRuntimeRoot = process.env.PHASE7C_RUNTIME_ROOT?.trim();
+  if (explicitRuntimeRoot) return resolve(explicitRuntimeRoot);
+  const attestationRoot = process.env.PHASE7C_SOURCE_ATTESTATION_ROOT?.trim();
+  if (attestationRoot) return dirname(resolve(attestationRoot));
+  return resolve(process.cwd(), ".runtime");
+}
+
+function defaultProjectRoot(): string {
+  const apiLauncher = process.env.PHASE7C_SOURCE_ATTESTATION_API_LAUNCHER?.trim();
+  if (apiLauncher) return dirname(dirname(resolve(apiLauncher)));
+  return resolve(process.cwd());
+}
+
+function resolveDeps(overrides: Partial<Phase7CRuntimeSourceAttestationDeps> = {}): Phase7CRuntimeSourceAttestationDeps {
+  return {
+    runtimeRoot: overrides.runtimeRoot ?? defaultRuntimeRoot(),
+    projectRoot: overrides.projectRoot ?? defaultProjectRoot(),
+    apiPid: overrides.apiPid ?? process.pid,
+    now: overrides.now ?? (() => Date.now()),
+    readUtf8: overrides.readUtf8 ?? ((file) => readFileSync(file, "utf8")),
+    sha256File: overrides.sha256File ?? sha256File,
+    isPidAlive: overrides.isPidAlive ?? isPidAlive,
+  };
+}
+
+function isDeploymentManifest(value: unknown): value is Phase7CRuntimeSourceDeploymentManifest {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return item.version === 1
+    && typeof item.deploymentId === "string" && /^[0-9a-f]{32}$/.test(item.deploymentId)
+    && typeof item.sourceCommit === "string" && /^[0-9a-f]{40}$/.test(item.sourceCommit)
+    && typeof item.sourceTree === "string" && /^[0-9a-f]{40}$/.test(item.sourceTree)
+    && item.branch === "main"
+    && item.worktreeClean === true
+    && typeof item.createdAt === "number" && Number.isFinite(item.createdAt) && item.createdAt > 0
+    && typeof item.configFingerprint === "string" && /^sha256:[0-9a-f]{64}$/.test(item.configFingerprint);
+}
+
+function isComponentAttestation(value: unknown): value is Phase7CRuntimeSourceComponentAttestation {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return item.version === 1
+    && componentDefinitions.some(({ component }) => component === item.component)
+    && typeof item.deploymentId === "string" && /^[0-9a-f]{32}$/.test(item.deploymentId)
+    && typeof item.sourceCommit === "string" && /^[0-9a-f]{40}$/.test(item.sourceCommit)
+    && typeof item.sourceTree === "string" && /^[0-9a-f]{40}$/.test(item.sourceTree)
+    && typeof item.pid === "number" && Number.isInteger(item.pid) && item.pid > 0
+    && typeof item.startedAt === "number" && Number.isFinite(item.startedAt) && item.startedAt > 0
+    && typeof item.launcherSha256 === "string" && /^sha256:[0-9a-f]{64}$/.test(item.launcherSha256)
+    && typeof item.configFingerprint === "string" && /^sha256:[0-9a-f]{64}$/.test(item.configFingerprint);
+}
+
+function readJson(
+  deps: Phase7CRuntimeSourceAttestationDeps,
+  file: string,
+): { value: unknown | null; error: string | null } {
+  try {
+    return { value: JSON.parse(deps.readUtf8(file)), error: null };
+  } catch {
+    return { value: null, error: "EVIDENCE_READ_ERROR" };
+  }
+}
+
+function readPidFile(
+  deps: Phase7CRuntimeSourceAttestationDeps,
+  file: string,
+): { pid: number | null; errors: string[] } {
+  try {
+    const raw = deps.readUtf8(file).trim();
+    const pid = Number(raw);
+    if (!Number.isInteger(pid) || pid <= 0) return { pid: null, errors: ["CURRENT_PID_INVALID"] };
+    return { pid, errors: [] };
+  } catch {
+    return { pid: null, errors: ["CURRENT_PID_MISSING"] };
+  }
+}
+
+function readBrokerPid(
+  deps: Phase7CRuntimeSourceAttestationDeps,
+): { pid: number | null; errors: string[] } {
+  const stateRoot = join(deps.runtimeRoot, "phase7c-lifecycle-broker", "state");
+  const heartbeat = readJson(deps, join(stateRoot, "heartbeat.json"));
+  const status = readJson(deps, join(stateRoot, "status.json"));
+  if (heartbeat.error || status.error) {
+    return { pid: null, errors: ["BROKER_PID_EVIDENCE_MISSING"] };
+  }
+  const heartbeatPid = Number((heartbeat.value as Record<string, unknown>)?.brokerPid);
+  const statusPid = Number((status.value as Record<string, unknown>)?.brokerPid);
+  if (!Number.isInteger(heartbeatPid) || heartbeatPid <= 0 || !Number.isInteger(statusPid) || statusPid <= 0) {
+    return { pid: null, errors: ["BROKER_PID_EVIDENCE_INVALID"] };
+  }
+  if (heartbeatPid !== statusPid) {
+    return { pid: null, errors: ["BROKER_PID_EVIDENCE_MISMATCH"] };
+  }
+  return { pid: heartbeatPid, errors: [] };
+}
+
+function safeAlive(
+  deps: Phase7CRuntimeSourceAttestationDeps,
+  pid: number | null,
+  errors: string[],
+): boolean | null {
+  if (pid === null) return null;
+  try {
+    return deps.isPidAlive(pid);
+  } catch {
+    errors.push("PID_LIVENESS_UNAVAILABLE");
+    return null;
+  }
+}
+
+function expectedLauncherHash(
+  deps: Phase7CRuntimeSourceAttestationDeps,
+  launcher: string,
+  errors: string[],
+): string | null {
+  try {
+    const value = deps.sha256File(join(deps.projectRoot, "scripts", launcher));
+    if (!/^sha256:[0-9a-f]{64}$/.test(value)) {
+      errors.push("LAUNCHER_HASH_INVALID");
+      return null;
+    }
+    return value;
+  } catch {
+    errors.push("LAUNCHER_HASH_UNAVAILABLE");
+    return null;
+  }
+}
+
+export function getPhase7CRuntimeSourceAttestationSnapshot(
+  overrides: Partial<Phase7CRuntimeSourceAttestationDeps> = {},
+): Phase7CRuntimeSourceAttestationSnapshot {
+  const deps = resolveDeps(overrides);
+  const attestationRoot = join(deps.runtimeRoot, "phase7c-source-attestation");
+  const manifestRead = readJson(deps, join(attestationRoot, "deployment.json"));
+  const deployment = isDeploymentManifest(manifestRead.value) ? manifestRead.value : null;
+
+  const components = componentDefinitions.map(({ component, launcher, pidFile }) => {
+    const errors: string[] = [];
+    if (manifestRead.error || (manifestRead.value !== null && deployment === null)) {
+      errors.push("DEPLOYMENT_EVIDENCE_INVALID");
+    }
+
+    const componentRead = readJson(deps, join(attestationRoot, "components", `${component}.json`));
+    const attestation = isComponentAttestation(componentRead.value) ? componentRead.value : null;
+    if (componentRead.error || (componentRead.value !== null && attestation === null)) {
+      errors.push("COMPONENT_EVIDENCE_INVALID");
+    }
+
+    let currentPid: number | null;
+    if (component === "api") {
+      currentPid = deps.apiPid;
+    } else if (component === "lifecycle-broker") {
+      const brokerPid = readBrokerPid(deps);
+      currentPid = brokerPid.pid;
+      errors.push(...brokerPid.errors);
+    } else {
+      const current = readPidFile(deps, join(deps.runtimeRoot, "phase7c-executors", pidFile!));
+      currentPid = current.pid;
+      errors.push(...current.errors);
+    }
+
+    const currentPidAlive = safeAlive(deps, currentPid, errors);
+    const attestedPidAlive = safeAlive(deps, attestation?.pid ?? null, errors);
+    const expectedLauncherSha256 = expectedLauncherHash(deps, launcher, errors);
+
+    return evaluatePhase7CRuntimeSourceComponent({
+      component,
+      deployment,
+      attestation,
+      currentPid,
+      currentPidAlive,
+      attestedPidAlive,
+      expectedLauncherSha256,
+      evidenceErrors: errors,
+    });
+  });
+
+  return {
+    version: 1,
+    source: "PHASE7C_RUNTIME_SOURCE_ATTESTATION",
+    generatedAt: deps.now(),
+    readOnly: true,
+    deployment,
+    overall: combinePhase7CRuntimeSourceVerdicts(components.map((item) => item.verdict)),
+    components,
+    safety: {
+      readOnly: true,
+      modeMutation: false,
+      armMutation: false,
+      autoGate: false,
+      lifecycleGate: false,
+      orderMutation: false,
+      positionMutation: false,
+      strategyMutation: false,
+      autoRetune: false,
+    },
+  };
+}
+
+function writeAtomicJson(file: string, value: unknown): void {
+  mkdirSync(dirname(file), { recursive: true });
+  const tempFile = join(dirname(file), `.${randomUUID()}.tmp`);
+  let descriptor: number | null = null;
+  try {
+    descriptor = openSync(tempFile, "wx");
+    writeSync(descriptor, Buffer.from(JSON.stringify(value), "utf8"));
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = null;
+    renameSync(tempFile, file);
+  } finally {
+    if (descriptor !== null) closeSync(descriptor);
+    rmSync(tempFile, { force: true });
+  }
+}
+
+function requiredEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} is required for API runtime source attestation`);
+  return value;
+}
+
+export function writePhase7CApiRuntimeSourceAttestation(): Phase7CRuntimeSourceComponentAttestation {
+  const attestationRoot = resolve(requiredEnv("PHASE7C_SOURCE_ATTESTATION_ROOT"));
+  const launcherPath = resolve(requiredEnv("PHASE7C_SOURCE_ATTESTATION_API_LAUNCHER"));
+  const accountModeRaw = requiredEnv("PHASE7C_SOURCE_ATTESTATION_ACCOUNT_MODE").toUpperCase();
+  if (accountModeRaw !== "DEMO" && accountModeRaw !== "LIVE") {
+    throw new Error("PHASE7C_SOURCE_ATTESTATION_ACCOUNT_MODE must be DEMO or LIVE");
+  }
+  const liveRaw = requiredEnv("PHASE7C_SOURCE_ATTESTATION_LIVE_EXECUTION_ENABLED").toLowerCase();
+  if (liveRaw !== "true" && liveRaw !== "false") {
+    throw new Error("PHASE7C_SOURCE_ATTESTATION_LIVE_EXECUTION_ENABLED must be true or false");
+  }
+  const liveExecutionEnabled = liveRaw === "true";
+  if ((accountModeRaw === "LIVE") !== liveExecutionEnabled) {
+    throw new Error("API source attestation account/live-execution context is inconsistent");
+  }
+  const controlApiUrl = requiredEnv("PHASE7C_SOURCE_ATTESTATION_CONTROL_API_URL").replace(/\/+$/, "");
+  const runtimeRoot = dirname(attestationRoot);
+
+  const manifestValue = JSON.parse(readFileSync(join(attestationRoot, "deployment.json"), "utf8"));
+  if (!isDeploymentManifest(manifestValue)) {
+    throw new Error("Runtime source deployment manifest is invalid for API attestation");
+  }
+
+  const configIdentity: Phase7CRuntimeSourceConfigIdentity = {
+    version: 1,
+    accountMode: accountModeRaw,
+    liveExecutionEnabled,
+    runtimeRoot,
+    controlApiUrl,
+  };
+  const record: Phase7CRuntimeSourceComponentAttestation = {
+    version: 1,
+    component: "api",
+    deploymentId: manifestValue.deploymentId,
+    sourceCommit: manifestValue.sourceCommit,
+    sourceTree: manifestValue.sourceTree,
+    pid: process.pid,
+    startedAt: Date.now(),
+    launcherSha256: sha256File(launcherPath),
+    configFingerprint: fingerprintPhase7CRuntimeSourceConfig(configIdentity),
+  };
+  writeAtomicJson(join(attestationRoot, "components", "api.json"), record);
+  return record;
 }
