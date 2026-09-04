@@ -51,6 +51,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: P3 effectiveness source contract
+        run: node scripts/test-phase7c-performance-effectiveness-source.mjs
+
       - name: P3 effectiveness schema contract
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-performance-effectiveness-schema.test.ts
 
