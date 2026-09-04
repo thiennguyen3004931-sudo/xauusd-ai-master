@@ -26,7 +26,7 @@ export function fastMoveProfitLockCandidate({
     !(normalizedMarketPrice > 0) ||
     !(activation > 0) ||
     !(giveback >= 0) ||
-    !(activation > giveback)
+    !(activation >= giveback)
   ) {
     return {
       active: false,
