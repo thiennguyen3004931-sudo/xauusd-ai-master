@@ -9,15 +9,17 @@ $Stopper = Join-Path $PSScriptRoot "stop-phase7c-executors-local.ps1"
 $GuardLibrary = Join-Path $PSScriptRoot "lib\phase7c-startup-runner-guard.ps1"
 $AccountLibrary = Join-Path $PSScriptRoot "lib\phase7c-account-mode.ps1"
 $BrokerLibrary = Join-Path $PSScriptRoot "lib\phase7c-lifecycle-broker.ps1"
+$RuntimeSourceAttestationLibrary = Join-Path $PSScriptRoot "lib\phase7c-runtime-source-attestation.ps1"
 $ConfigPath = Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.json"
 
-foreach ($required in @($Supervisor, $Stopper, $GuardLibrary, $AccountLibrary, $BrokerLibrary, $ConfigPath)) {
+foreach ($required in @($Supervisor, $Stopper, $GuardLibrary, $AccountLibrary, $BrokerLibrary, $RuntimeSourceAttestationLibrary, $ConfigPath)) {
   if (-not (Test-Path -LiteralPath $required)) { throw "Phase7C lifecycle broker required file not found: $required" }
 }
 if ($RestartDelaySeconds -lt 5 -or $RestartDelaySeconds -gt 300) { throw "RestartDelaySeconds must be between 5 and 300." }
 . $GuardLibrary
 . $AccountLibrary
 . $BrokerLibrary
+. $RuntimeSourceAttestationLibrary
 
 # Canonical lifecycle result tokens are kept explicit for audit/source contracts.
 $CanonicalReasonCodes = @(
@@ -176,6 +178,24 @@ try {
 } catch {
   Write-Host "PHASE7C_EXECUTOR_TASK_RUNNER_LOCK=BLOCKED|PID=$PID"
   throw
+}
+
+$brokerAttestationConfigIdentity = Get-Phase7CRuntimeSourceConfigIdentity `
+  -RuntimeRoot $workDir `
+  -AccountMode ([string]$bootConfig.accountMode) `
+  -LiveExecutionEnabled ([bool]$bootConfig.liveExecutionEnabled) `
+  -ControlApiUrl $controlApiUrl
+try {
+  [void](Write-Phase7CRuntimeSourceComponentAttestation `
+    -RuntimeRoot $workDir `
+    -Component lifecycle-broker `
+    -ProcessId $PID `
+    -LauncherPath $PSCommandPath `
+    -ConfigIdentity $brokerAttestationConfigIdentity)
+  Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_LIFECYCLE_BROKER=PASS|PID=$PID"
+} catch {
+  Write-Warning "Lifecycle broker runtime source attestation degraded: $($_.Exception.Message)"
+  Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_LIFECYCLE_BROKER=DEGRADED|PID=$PID"
 }
 
 $script:brokerState = "BOOTING"
