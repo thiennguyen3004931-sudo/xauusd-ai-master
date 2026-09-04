@@ -8,6 +8,8 @@ $Recovery = Join-Path $ProjectRoot "scripts\recover-phase7c-runtime-ready-stable
 $WebDeploy = Join-Path $ProjectRoot "scripts\deploy-phase7c-web-ui-local.ps1"
 $BrokerRunner = Join-Path $ProjectRoot "scripts\run-phase7c-executor-task-runner-local.ps1"
 $Supervisor = Join-Path $ProjectRoot "scripts\run-phase7c-executors-local.ps1"
+$CanonicalWorkflow = Join-Path $ProjectRoot ".github\workflows\phase7c-canonical-pr-gate.yml"
+$RecoveryWorkflow = Join-Path $ProjectRoot ".github\workflows\phase7c-runtime-ready-stable-recovery-deploy-ci.yml"
 
 function Assert-True([bool]$Value, [string]$Message) {
   if (-not $Value) { throw $Message }
@@ -22,11 +24,13 @@ function Assert-PowerShellSyntax([string]$Path) {
   }
 }
 
-foreach ($path in @($Helper, $Recovery, $WebDeploy, $BrokerRunner, $Supervisor)) {
+foreach ($path in @($Helper, $Recovery, $WebDeploy, $BrokerRunner, $Supervisor, $CanonicalWorkflow, $RecoveryWorkflow)) {
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
     throw "Runtime source attestation source missing: $path"
   }
-  Assert-PowerShellSyntax $path
+  if ($path.EndsWith('.ps1', [System.StringComparison]::OrdinalIgnoreCase)) {
+    Assert-PowerShellSyntax $path
+  }
 }
 . $Helper
 
@@ -165,5 +169,45 @@ foreach ($pidPath in @('$TrendPidPath','$SidewayPidPath','$TelegramModePidPath',
 }
 Assert-True ($supervisorText.Contains('PHASE7C_RUNTIME_SOURCE_ATTESTATION_SUPERVISOR=DEGRADED')) "RED Task3: supervisor attestation failure must be non-fatal"
 Assert-True ($supervisorText.Contains('PHASE7C_RUNTIME_SOURCE_ATTESTATION_CHILD=DEGRADED')) "RED Task3: child attestation failure must be non-fatal"
+
+# Task 6: CI must keep P1 behavior/source coverage and retrigger recovery safety
+# whenever any P1 launch/deploy/attestation surface changes.
+$canonicalWorkflowText = (Get-Content -LiteralPath $CanonicalWorkflow -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
+$recoveryWorkflowText = (Get-Content -LiteralPath $RecoveryWorkflow -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
+
+foreach ($required in @(
+  'test-phase7c-runtime-source-attestation-source.ps1',
+  'test-phase7c-runtime-source-attestation-api-source.ps1',
+  'test-phase7c-runtime-source-attestation-web-source.ps1'
+)) {
+  Assert-True ($canonicalWorkflowText.Contains($required)) "RED Task6: canonical workflow must run $required"
+  Assert-True ($recoveryWorkflowText.Contains($required)) "RED Task6: recovery workflow must run $required"
+}
+Assert-True ($canonicalWorkflowText.Contains('phase7c-runtime-source-attestation.service.test.ts')) "RED Task6: canonical Linux must run P1 Node behavior tests"
+Assert-True ($canonicalWorkflowText.Contains('permissions:`n  contents: read')) "Task6 canonical workflow must preserve contents: read"
+Assert-True ($recoveryWorkflowText.Contains('permissions:`n  contents: read')) "Task6 recovery workflow must preserve contents: read"
+
+foreach ($requiredPath in @(
+  'scripts/lib/phase7c-runtime-source-attestation.ps1',
+  'scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1',
+  'scripts/deploy-phase7c-web-ui-local.ps1',
+  'scripts/run-phase7b-api-runtime-local.ps1',
+  'scripts/run-phase7c-executor-task-runner-local.ps1',
+  'scripts/run-phase7c-executors-local.ps1',
+  'apps/api/src/index.ts',
+  'apps/api/src/app.ts',
+  'apps/api/src/routes/phase7c-runtime-source-attestation.route.ts',
+  'apps/api/src/services/phase7c-runtime-source-attestation.service.ts',
+  'apps/api/src/services/phase7c-runtime-source-attestation.service.test.ts',
+  'apps/web/src/pages/Phase7CControlCenterShellPage.tsx',
+  'apps/web/src/phase7c-runtime-source-attestation-api.ts',
+  'apps/web/src/phase7c-runtime-source-attestation-types.ts',
+  'apps/web/src/ui/Phase7CRuntimeSourceAttestationCard.tsx',
+  'scripts/test-phase7c-runtime-source-attestation-source.ps1',
+  'scripts/test-phase7c-runtime-source-attestation-api-source.ps1',
+  'scripts/test-phase7c-runtime-source-attestation-web-source.ps1'
+)) {
+  Assert-True ($recoveryWorkflowText.Contains($requiredPath)) "RED Task6: recovery workflow path filters must include $requiredPath"
+}
 
 Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_SOURCE_TEST=PASS"
