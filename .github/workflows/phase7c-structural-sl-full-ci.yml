@@ -9,6 +9,8 @@ on:
     paths:
       - scripts/test-phase7c-structural-sl-monotonicity.mjs
       - scripts/phase7c-stop-monotonicity.mjs
+      - scripts/phase7c-fast-move-profit-lock.mjs
+      - scripts/phase7c-fast-move-profit-lock.test.mjs
       - scripts/phase7c-sideway-logic.mjs
       - scripts/run-phase7b-demo-controller.ts
       - scripts/run-phase7c-sideway-controller.mjs
@@ -17,6 +19,8 @@ on:
     paths:
       - scripts/test-phase7c-structural-sl-monotonicity.mjs
       - scripts/phase7c-stop-monotonicity.mjs
+      - scripts/phase7c-fast-move-profit-lock.mjs
+      - scripts/phase7c-fast-move-profit-lock.test.mjs
       - scripts/phase7c-sideway-logic.mjs
       - scripts/run-phase7b-demo-controller.ts
       - scripts/run-phase7c-sideway-controller.mjs
@@ -51,6 +55,9 @@ jobs:
 
       - name: Structural SL contract
         run: node --test ./scripts/test-phase7c-structural-sl-monotonicity.mjs
+
+      - name: Fast-Move profit-lock contract
+        run: node --test ./scripts/phase7c-fast-move-profit-lock.test.mjs
 
       - name: Build and test broker/risk/strategy dependencies
         run: |
@@ -108,6 +115,7 @@ jobs:
       - name: Parse modified Node sources
         run: |
           node --check scripts/phase7c-stop-monotonicity.mjs
+          node --check scripts/phase7c-fast-move-profit-lock.mjs
           node --check scripts/phase7c-sideway-logic.mjs
           node --check scripts/run-phase7c-sideway-controller.mjs
 
