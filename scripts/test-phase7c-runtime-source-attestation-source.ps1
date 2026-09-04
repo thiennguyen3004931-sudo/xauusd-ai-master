@@ -184,8 +184,8 @@ foreach ($required in @(
   Assert-True ($recoveryWorkflowText.Contains($required)) "RED Task6: recovery workflow must run $required"
 }
 Assert-True ($canonicalWorkflowText.Contains('phase7c-runtime-source-attestation.service.test.ts')) "RED Task6: canonical Linux must run P1 Node behavior tests"
-Assert-True ($canonicalWorkflowText.Contains('permissions:`n  contents: read')) "Task6 canonical workflow must preserve contents: read"
-Assert-True ($recoveryWorkflowText.Contains('permissions:`n  contents: read')) "Task6 recovery workflow must preserve contents: read"
+Assert-True ($canonicalWorkflowText.Contains("permissions:`n  contents: read")) "Task6 canonical workflow must preserve contents: read"
+Assert-True ($recoveryWorkflowText.Contains("permissions:`n  contents: read")) "Task6 recovery workflow must preserve contents: read"
 
 foreach ($requiredPath in @(
   'scripts/lib/phase7c-runtime-source-attestation.ps1',
