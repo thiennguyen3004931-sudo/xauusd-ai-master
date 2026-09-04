@@ -6,6 +6,8 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Helper = Join-Path $ProjectRoot "scripts\lib\phase7c-runtime-source-attestation.ps1"
 $Recovery = Join-Path $ProjectRoot "scripts\recover-phase7c-runtime-ready-stable-deploy-local.ps1"
 $WebDeploy = Join-Path $ProjectRoot "scripts\deploy-phase7c-web-ui-local.ps1"
+$BrokerRunner = Join-Path $ProjectRoot "scripts\run-phase7c-executor-task-runner-local.ps1"
+$Supervisor = Join-Path $ProjectRoot "scripts\run-phase7c-executors-local.ps1"
 
 function Assert-True([bool]$Value, [string]$Message) {
   if (-not $Value) { throw $Message }
@@ -20,7 +22,7 @@ function Assert-PowerShellSyntax([string]$Path) {
   }
 }
 
-foreach ($path in @($Helper, $Recovery, $WebDeploy)) {
+foreach ($path in @($Helper, $Recovery, $WebDeploy, $BrokerRunner, $Supervisor)) {
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
     throw "Runtime source attestation source missing: $path"
   }
@@ -141,5 +143,27 @@ $webManifestIndex = $webText.IndexOf('Initialize-Phase7CRuntimeSourceDeployment'
 $webFreshIndex = $webText.IndexOf('[void](Assert-LifecycleBrokerSourceFresh -WorkDir $WorkDir)', [System.StringComparison]::Ordinal)
 Assert-True ($webGitIndex -ge 0 -and $webManifestIndex -gt $webGitIndex) "RED Task2: Web manifest must follow exact Git guard"
 Assert-True ($webFreshIndex -gt $webManifestIndex) "RED Task2: Web manifest must precede broker freshness/build/restart"
+
+# Task 3: attest only at existing launch boundaries and use the real/canonical PIDs.
+$brokerText = (Get-Content -LiteralPath $BrokerRunner -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
+$supervisorText = (Get-Content -LiteralPath $Supervisor -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
+
+Assert-True ($brokerText.Contains('lib\phase7c-runtime-source-attestation.ps1')) "RED Task3: lifecycle broker must load P1 attestation helper"
+Assert-True ($brokerText.Contains('-Component lifecycle-broker')) "RED Task3: lifecycle broker component record missing"
+Assert-True ($brokerText.Contains('-ProcessId $PID')) "RED Task3: lifecycle broker must attest actual PowerShell PID"
+Assert-True ($brokerText.Contains('-LauncherPath $PSCommandPath')) "RED Task3: lifecycle broker must hash its canonical launcher"
+Assert-True ($brokerText.Contains('PHASE7C_RUNTIME_SOURCE_ATTESTATION_LIFECYCLE_BROKER=DEGRADED')) "RED Task3: broker attestation failure must be observable and non-fatal"
+
+Assert-True ($supervisorText.Contains('lib\phase7c-runtime-source-attestation.ps1')) "RED Task3: supervisor must load P1 attestation helper"
+Assert-True ($supervisorText.Contains('-Component supervisor')) "RED Task3: supervisor component record missing"
+Assert-True ($supervisorText.Contains('-ProcessId $PID')) "RED Task3: supervisor must attest actual PowerShell PID"
+foreach ($component in @('trend','sideway','telegram','regime-notifier')) {
+  Assert-True ($supervisorText.Contains("-Component $component")) "RED Task3: supervisor must attest child component $component"
+}
+foreach ($pidPath in @('$TrendPidPath','$SidewayPidPath','$TelegramModePidPath','$RegimeNotifierPidPath')) {
+  Assert-True ($supervisorText.Contains("Get-Content -LiteralPath $pidPath")) "RED Task3: child attestation must use canonical PID file $pidPath"
+}
+Assert-True ($supervisorText.Contains('PHASE7C_RUNTIME_SOURCE_ATTESTATION_SUPERVISOR=DEGRADED')) "RED Task3: supervisor attestation failure must be non-fatal"
+Assert-True ($supervisorText.Contains('PHASE7C_RUNTIME_SOURCE_ATTESTATION_CHILD=DEGRADED')) "RED Task3: child attestation failure must be non-fatal"
 
 Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_SOURCE_TEST=PASS"
