@@ -8,6 +8,7 @@ on:
       - "scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1"
       - "scripts/test-phase7c-runtime-ready-stable-recovery-deploy-source.ps1"
       - "scripts/test-phase7c-recovery-migration-verifier-window-source.ps1"
+      - "scripts/test-phase7c-stale-broker-owned-repair-migration-source.ps1"
       - "scripts/test-phase7c-lifecycle-broker-battery-task-source.ps1"
       - "scripts/test-phase7c-battery-settings-recovery-migration-source.ps1"
       - "scripts/test-phase7c-battery-stopped-lifecycle-preweb-repair-source.ps1"
@@ -41,6 +42,7 @@ on:
       - "scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1"
       - "scripts/test-phase7c-runtime-ready-stable-recovery-deploy-source.ps1"
       - "scripts/test-phase7c-recovery-migration-verifier-window-source.ps1"
+      - "scripts/test-phase7c-stale-broker-owned-repair-migration-source.ps1"
       - "scripts/test-phase7c-lifecycle-broker-battery-task-source.ps1"
       - "scripts/test-phase7c-battery-settings-recovery-migration-source.ps1"
       - "scripts/test-phase7c-battery-stopped-lifecycle-preweb-repair-source.ps1"
@@ -108,6 +110,12 @@ jobs:
       - name: Recovery migration verifier window contract with Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-recovery-migration-verifier-window-source.ps1
+      - name: Stale broker owned-repair migration contract with PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-stale-broker-owned-repair-migration-source.ps1
+      - name: Stale broker owned-repair migration contract with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-stale-broker-owned-repair-migration-source.ps1
       - name: Lifecycle broker battery task contract with PowerShell 7
         shell: pwsh
         run: .\scripts\test-phase7c-lifecycle-broker-battery-task-source.ps1
