@@ -158,12 +158,12 @@ try {
   if ([int]$executorConfig.version -ne 2) {
     throw "Web UI deploy requires executor task config version 2 before runtime attestation."
   }
-  $attestedAccountMode = ConvertTo-Phase7CAccountMode ([string]$executorConfig.accountMode)
-  $attestedLiveExecutionEnabled = [bool]$executorConfig.liveExecutionEnabled
-  if ($attestedAccountMode -eq "LIVE" -and -not $attestedLiveExecutionEnabled) {
+  $taskConfiguredAccountMode = ConvertTo-Phase7CAccountMode ([string]$executorConfig.accountMode)
+  $taskConfiguredLiveExecutionEnabled = [bool]$executorConfig.liveExecutionEnabled
+  if ($taskConfiguredAccountMode -eq "LIVE" -and -not $taskConfiguredLiveExecutionEnabled) {
     throw "Web UI deploy refuses an inconsistent LIVE executor config before runtime attestation."
   }
-  if ($attestedAccountMode -eq "DEMO" -and $attestedLiveExecutionEnabled) {
+  if ($taskConfiguredAccountMode -eq "DEMO" -and $taskConfiguredLiveExecutionEnabled) {
     throw "Web UI deploy refuses liveExecutionEnabled=true for DEMO before runtime attestation."
   }
 
@@ -178,10 +178,24 @@ try {
     throw "Web UI deploy API endpoint must match the canonical executor controlApiUrl before runtime attestation. expected=$expectedControlApiUrl configured=$configuredControlApiUrl"
   }
 
+  $accountStatePath = Join-Path $resolvedWorkDir "phase7c-account-mode.json"
+  $accountState = Read-JsonFile -Path $accountStatePath -Label "Canonical account-mode state"
+  if ([int]$accountState.version -ne 1) {
+    throw "Web UI deploy requires canonical account-mode state version 1 before runtime attestation."
+  }
+  $canonicalAttestedAccountMode = ConvertTo-Phase7CAccountMode ([string]$accountState.accountMode)
+  $canonicalAttestedLiveExecutionEnabled = [bool]$accountState.liveExecutionEnabled
+  if ($canonicalAttestedAccountMode -eq "LIVE" -and -not $canonicalAttestedLiveExecutionEnabled) {
+    throw "Web UI deploy refuses canonical LIVE account state with liveExecutionEnabled=false before runtime attestation."
+  }
+  if ($canonicalAttestedAccountMode -eq "DEMO" -and $canonicalAttestedLiveExecutionEnabled) {
+    throw "Web UI deploy refuses canonical DEMO account state with liveExecutionEnabled=true before runtime attestation."
+  }
+
   $attestationConfigIdentity = Get-Phase7CRuntimeSourceConfigIdentity `
     -RuntimeRoot $resolvedWorkDir `
-    -AccountMode $attestedAccountMode `
-    -LiveExecutionEnabled $attestedLiveExecutionEnabled `
+    -AccountMode $canonicalAttestedAccountMode `
+    -LiveExecutionEnabled $canonicalAttestedLiveExecutionEnabled `
     -ControlApiUrl $configuredControlApiUrl
   $deployment = Initialize-Phase7CRuntimeSourceDeployment `
     -RuntimeRoot $resolvedWorkDir `
