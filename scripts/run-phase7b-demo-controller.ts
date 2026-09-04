@@ -22,6 +22,7 @@ import {
   structuralStopWithBuffer,
   tightestKnownStop,
 } from "./phase7c-stop-monotonicity.mjs";
+import { fastMoveProfitLockCandidate } from "./phase7c-fast-move-profit-lock.mjs";
 import {
   compareStrategyEntryConfigVersion,
   createVirtualStrategyEntryConditionState,
@@ -163,6 +164,8 @@ type ManagedState = {
   partialAttempt: number;
   exitAttempt: number;
   structureAttempt: number;
+  fastMovePeakPrice?: number;
+  fastMoveAttempt?: number;
   dailyMode?: DailyMode;
   dailyNetPnlAtEntry?: number;
   recoveryTargetNetPnl?: number;
@@ -248,6 +251,8 @@ const bridgeEnvPath = process.env.ZIQ_BRIDGE_ENV ?? path.resolve("packages/mt5-b
 const ENGULF_BODY_TOLERANCE_PRICE = 0.1;
 const MIN_INITIAL_SL_PRICE = 6;
 const MAX_INITIAL_SL_PRICE = 10;
+const FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE = 10;
+const FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE = 6;
 const pullbackWaitMinutes = 15;
 const pullbackEntryService = new Phase7BPullbackEntryService();
 const DAILY_RECOVERY_MIN_TP_DISTANCE = 6;
@@ -320,6 +325,7 @@ console.log(`PHASE7B_DEMO_PULLBACK_WAIT_MINUTES=${pullbackWaitMinutes}`);
 console.log("PHASE7B_DEMO_PULLBACK_INVALIDATE=STRUCTURE_BREAK_OR_M15_ST_FLIP_OR_M5_ST_FLIP_OR_EXPIRY");
 console.log("PHASE7B_DEMO_PLUS6=SL_TO_ENTRY");
 console.log("PHASE7B_DEMO_PLUS10=PARTIAL_ONE_THIRD");
+console.log(`PHASE7B_DEMO_FAST_MOVE_PROFIT_LOCK=ON|ACTIVATION=+${FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE}|GIVEBACK=${FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE}|SOURCE=LIVE_BID_ASK`);
 console.log("PHASE7B_DEMO_POST_PLUS10_SL=M15_CONFIRMED_SWING_STRUCTURE_PLUS_1_BUFFER_ONLY_TIGHTEN");
 console.log("PHASE7B_DEMO_REVERSAL_EXIT=OPPOSING_M15_FVG_PLUS_REJECTION_CLOSE_AFTER_PLUS10");
 console.log(`PHASE7B_DEMO_FIXED_TP=${trendFixedTpEnabled ? `ON|DISTANCE=${trendFixedTpDistance}` : "OFF"}`);
@@ -1698,6 +1704,70 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
     }
 
     return;
+  }
+
+  const fastMove = fastMoveProfitLockCandidate({
+    side: managed.side,
+    entry: position.entry,
+    marketPrice: exitPrice,
+    previousPeakPrice: managed.fastMovePeakPrice,
+    activationDistance: FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE,
+    givebackDistance: FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE,
+  });
+  const previousFastMovePeak = Number(managed.fastMovePeakPrice);
+  if (
+    fastMove.peakPrice > 0 &&
+    (!Number.isFinite(previousFastMovePeak) || Math.abs(previousFastMovePeak - fastMove.peakPrice) > 1e-9)
+  ) {
+    managed.fastMovePeakPrice = fastMove.peakPrice;
+    saveState();
+  }
+
+  if (fastMove.active) {
+    const candidate = roundPrice(fastMove.candidateStop, spec.digits);
+    const fastMoveBaseline = tightestKnownStop(
+      managed.side,
+      Number(position.stopLoss),
+      Number(managed.lastStructuralStop),
+    );
+    if (stopStrictlyTightens(managed.side, fastMoveBaseline, candidate)) {
+      const minimumGap = Math.max(spec.stopsLevelTicks, spec.freezeLevelTicks) * spec.point;
+      const validAgainstMarket = managed.side === "BUY"
+        ? candidate < quote.bid - minimumGap
+        : candidate > quote.ask + minimumGap;
+      if (validAgainstMarket) {
+        managed.fastMoveAttempt = Number(managed.fastMoveAttempt ?? 0) + 1;
+        saveState();
+        const commandId = `p7b-fast-lock-${managed.ticket}-${managed.fastMoveAttempt}`;
+        const response = await patch<CommandResponse>(`/v1/positions/${encodeURIComponent(managed.ticket)}`, {
+          stopLoss: candidate,
+          commandId,
+        });
+        if (response.success) {
+          managed.lastStructuralStop = candidate;
+          saveState();
+          journal("FAST_MOVE_PROFIT_LOCK_TIGHTEN", {
+            ticket: managed.ticket,
+            side: managed.side,
+            favorable,
+            peakPrice: fastMove.peakPrice,
+            peakFavorable: fastMove.peakFavorable,
+            giveback: FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE,
+            stopLoss: candidate,
+            response,
+          });
+        } else {
+          journal("FAST_MOVE_PROFIT_LOCK_REJECTED", {
+            ticket: managed.ticket,
+            side: managed.side,
+            favorable,
+            peakPrice: fastMove.peakPrice,
+            stopLoss: candidate,
+            response,
+          });
+        }
+      }
+    }
   }
 
   const hold =

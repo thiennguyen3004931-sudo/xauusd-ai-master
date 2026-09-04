@@ -27,7 +27,12 @@ import {
   fixedTpCommandId,
 } from "./phase7c-fixed-tp.mjs";
 import { canonicalHoldReason } from "./phase7c-hold-observability.mjs";
-import { stopIsAtLeastAsTight } from "./phase7c-stop-monotonicity.mjs";
+import {
+  stopIsAtLeastAsTight,
+  stopStrictlyTightens,
+  tightestKnownStop,
+} from "./phase7c-stop-monotonicity.mjs";
+import { fastMoveProfitLockCandidate } from "./phase7c-fast-move-profit-lock.mjs";
 import {
   compareStrategyEntryConfigVersion,
   createVirtualStrategyEntryConditionState,
@@ -82,6 +87,8 @@ const dailyBotMagicNumbers = new Set([
 const DAILY_RECOVERY_MIN_TP_DISTANCE = 6;
 const DAILY_RECOVERY_MAX_TP_DISTANCE = 10;
 const DAILY_RECOVERY_TARGET_NET_USD = 1;
+const FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE = 10;
+const FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE = 4;
 const deviationPoints = clampInteger(process.env.MT5_DEVIATION_POINTS, 50, 1, 10000);
 const allowReal = truthy(process.env.MT5_ALLOW_REAL_ACCOUNT);
 const allowedLogins = new Set(
@@ -123,8 +130,9 @@ console.log(`PHASE7C_SIDEWAY_AUTO_LOT_MAX_AGE_MS=${autoLotMaxAgeMs}`);
 console.log("PHASE7C_SIDEWAY_ENTRY=M15_RANGING_PLUS_SUPPLY_DEMAND_EDGE_PLUS_M5_CONFIRMATION");
 console.log("PHASE7C_SIDEWAY_PLUS6=SL_TO_ENTRY");
 console.log("PHASE7C_SIDEWAY_PLUS10=PARTIAL_ONE_THIRD");
+console.log(`PHASE7C_SIDEWAY_FAST_MOVE_PROFIT_LOCK=ON|ACTIVATION=+${FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE}|GIVEBACK=${FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE}|SOURCE=LIVE_BID_ASK`);
 console.log("PHASE7C_SIDEWAY_TP2=OPPOSITE_RANGE_BOUNDARY");
-console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_NO_TRAILING");
+console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_PLUS_FAST_MOVE_LOCK");
 console.log("PHASE7C_SIDEWAY_DAILY_RECOVERY=REALIZED_NET_PNL_ALL_BOT_MAGICS");
 console.log(`PHASE7C_SIDEWAY_DAILY_RECOVERY_MAGICS=${[...dailyBotMagicNumbers].join(",")}`);
 console.log("PHASE7C_SIDEWAY_DAILY_RECOVERY_TP=FULL_POSITION_ADAPTIVE_6_TO_10");
@@ -945,6 +953,9 @@ function buildManagedState(opened, pending, brokerClockOffsetMs = 0) {
     timeStopAt: openedAt + maxHoldingMinutes * 60_000,
     partialAttempt: 0,
     breakEvenAttempt: 0,
+    fastMovePeakPrice: Number(opened.entry),
+    fastMoveStop: Number(pending.stopLoss),
+    fastMoveAttempt: 0,
     exitAttempt: 0,
   };
 }
@@ -1194,7 +1205,7 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
       reason: quoteFreshness.reason,
       ageMs: quoteFreshness.ageMs,
       quoteTimestamp: quote?.timestamp ?? null,
-      note: "Broker SL/TP remains active; dynamic TP1/BE actions are skipped on stale quote data.",
+      note: "Broker SL/TP remains active; dynamic TP1/BE/Fast-Move actions are skipped on stale quote data.",
     });
     return;
   }
@@ -1272,6 +1283,70 @@ async function managePosition(position, quote, spec, brokerClockOffsetMs = 0) {
 
     return;
   }
+
+  const fastMove = fastMoveProfitLockCandidate({
+    side: managed.side,
+    entry: managed.entry,
+    marketPrice,
+    previousPeakPrice: managed.fastMovePeakPrice,
+    activationDistance: FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE,
+    givebackDistance: FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE,
+  });
+  const previousFastMovePeak = Number(managed.fastMovePeakPrice);
+  if (
+    fastMove.peakPrice > 0 &&
+    (!Number.isFinite(previousFastMovePeak) || Math.abs(previousFastMovePeak - fastMove.peakPrice) > 1e-9)
+  ) {
+    managed.fastMovePeakPrice = fastMove.peakPrice;
+    saveState();
+  }
+
+  if (fastMove.active) {
+    const candidate = roundPrice(fastMove.candidateStop, Number(spec.digits ?? 2));
+    const fastMoveBaseline = tightestKnownStop(
+      managed.side,
+      Number(position.stopLoss),
+      Number(managed.fastMoveStop),
+      managed.breakEvenApplied ? Number(managed.entry) : 0,
+    );
+    if (stopStrictlyTightens(managed.side, fastMoveBaseline, candidate)) {
+      const minimumGap = Math.max(Number(spec.stopsLevelTicks ?? 0), Number(spec.freezeLevelTicks ?? 0)) * Number(spec.point);
+      const validAgainstMarket = managed.side === "BUY"
+        ? candidate < Number(quote.bid) - minimumGap
+        : candidate > Number(quote.ask) + minimumGap;
+      if (validAgainstMarket) {
+        managed.fastMoveAttempt = Number(managed.fastMoveAttempt ?? 0) + 1;
+        saveState();
+        const response = await bridgeRequest("PATCH", `/v1/positions/${encodeURIComponent(managed.ticket)}`, {
+          stopLoss: candidate,
+          commandId: `p7c-sideway-fast-lock-${managed.ticket}-${managed.fastMoveAttempt}`,
+        });
+        if (response.success) {
+          managed.fastMoveStop = candidate;
+          saveState();
+          journal("FAST_MOVE_PROFIT_LOCK_TIGHTEN", {
+            ticket: managed.ticket,
+            side: managed.side,
+            favorable,
+            peakPrice: fastMove.peakPrice,
+            peakFavorable: fastMove.peakFavorable,
+            giveback: FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE,
+            stopLoss: candidate,
+          });
+        } else {
+          journal("FAST_MOVE_PROFIT_LOCK_REJECTED", {
+            ticket: managed.ticket,
+            side: managed.side,
+            favorable,
+            peakPrice: fastMove.peakPrice,
+            stopLoss: candidate,
+            response,
+          });
+        }
+      }
+    }
+  }
+
   if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {
     const closeVolume = oneThirdPartialVolume(
       managed.initialVolume,
