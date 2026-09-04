@@ -26,11 +26,13 @@ $TelegramModeLauncher = Join-Path $PSScriptRoot "run-phase7c-telegram-mode-contr
 $RegimeNotifierLauncher = Join-Path $PSScriptRoot "run-phase7c-regime-notifier-local.ps1"
 $TradeNotifierLauncher = Join-Path $PSScriptRoot "run-phase7b-telegram-notifier-local.ps1"
 $AccountLibrary = Join-Path $PSScriptRoot "lib\phase7c-account-mode.ps1"
+$RuntimeSourceAttestationLibrary = Join-Path $PSScriptRoot "lib\phase7c-runtime-source-attestation.ps1"
 
-foreach ($required in @($TrendLauncher, $SidewayLauncher, $TelegramModeLauncher, $RegimeNotifierLauncher, $TradeNotifierLauncher, $AccountLibrary)) {
+foreach ($required in @($TrendLauncher, $SidewayLauncher, $TelegramModeLauncher, $RegimeNotifierLauncher, $TradeNotifierLauncher, $AccountLibrary, $RuntimeSourceAttestationLibrary)) {
   if (-not (Test-Path -LiteralPath $required)) { throw "Required Phase7C runtime file not found: $required" }
 }
 . $AccountLibrary
+. $RuntimeSourceAttestationLibrary
 $AccountMode = ConvertTo-Phase7CAccountMode $AccountMode
 if ($AccountMode -eq "LIVE" -and -not $LiveExecutionEnabled) {
   throw "LIVE executor supervisor requires -LiveExecutionEnabled."
@@ -126,6 +128,11 @@ $RegimeNotifierErr = Join-Path $RuntimeDir "regime-notifier.err.log"
 $TradeNotifierOut = Join-Path $RuntimeDir "trade-notifier.out.log"
 $TradeNotifierErr = Join-Path $RuntimeDir "trade-notifier.err.log"
 $ActiveLotSettingsPath = Join-Path $RuntimeDir "active-lot-settings.json"
+$attestationConfigIdentity = Get-Phase7CRuntimeSourceConfigIdentity `
+  -RuntimeRoot $WorkDir `
+  -AccountMode $AccountMode `
+  -LiveExecutionEnabled ([bool]($AccountMode -eq "LIVE" -and $LiveExecutionEnabled)) `
+  -ControlApiUrl $ControlApiUrl
 
 function Read-EnvValueFromFile([string]$Path, [string]$Name) {
   return Get-Phase7CEnvValue $Path $Name
@@ -302,6 +309,18 @@ Stop-Phase7CExecutorOrphans
 Remove-Item -LiteralPath $TradeNotifierRuntimePath -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $env:ZIQ_PHASE7C_EXECUTION_LOCK -Force -ErrorAction SilentlyContinue
 Set-Content -LiteralPath $SupervisorPidPath -Value $PID -Encoding ascii
+try {
+  [void](Write-Phase7CRuntimeSourceComponentAttestation `
+    -RuntimeRoot $WorkDir `
+    -Component supervisor `
+    -ProcessId $PID `
+    -LauncherPath $PSCommandPath `
+    -ConfigIdentity $attestationConfigIdentity)
+  Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_SUPERVISOR=PASS|PID=$PID"
+} catch {
+  Write-Warning "Supervisor runtime source attestation degraded: $($_.Exception.Message)"
+  Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_SUPERVISOR=DEGRADED|PID=$PID"
+}
 
 $common = @("-NoProfile", "-ExecutionPolicy", "Bypass")
 $trendArgs = @(
@@ -398,12 +417,38 @@ function Start-TelegramModeChild {
   $process = Start-Process -FilePath "powershell.exe" -ArgumentList ($common + $telegramModeArgs) -WorkingDirectory $ProjectRoot -RedirectStandardOutput $TelegramModeOut -RedirectStandardError $TelegramModeErr -PassThru
   Set-Content -LiteralPath $TelegramModePidPath -Value $process.Id -Encoding ascii
   Write-Host "PHASE7C_TELEGRAM_MODE_PID=$($process.Id)"
+  try {
+    $telegramPid = [int](Get-Content -LiteralPath $TelegramModePidPath -Raw).Trim()
+    [void](Write-Phase7CRuntimeSourceComponentAttestation `
+      -RuntimeRoot $WorkDir `
+      -Component telegram `
+      -ProcessId $telegramPid `
+      -LauncherPath $TelegramModeLauncher `
+      -ConfigIdentity $attestationConfigIdentity)
+    Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_TELEGRAM=PASS|PID=$telegramPid"
+  } catch {
+    Write-Warning "Telegram runtime source attestation degraded: $($_.Exception.Message)"
+    Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_CHILD=DEGRADED|COMPONENT=telegram|PID=$($process.Id)"
+  }
   return $process
 }
 function Start-RegimeNotifierChild {
   $process = Start-Process -FilePath "powershell.exe" -ArgumentList ($common + $regimeNotifierArgs) -WorkingDirectory $ProjectRoot -RedirectStandardOutput $RegimeNotifierOut -RedirectStandardError $RegimeNotifierErr -PassThru
   Set-Content -LiteralPath $RegimeNotifierPidPath -Value $process.Id -Encoding ascii
   Write-Host "PHASE7C_REGIME_NOTIFIER_PID=$($process.Id)"
+  try {
+    $regimeNotifierPid = [int](Get-Content -LiteralPath $RegimeNotifierPidPath -Raw).Trim()
+    [void](Write-Phase7CRuntimeSourceComponentAttestation `
+      -RuntimeRoot $WorkDir `
+      -Component regime-notifier `
+      -ProcessId $regimeNotifierPid `
+      -LauncherPath $RegimeNotifierLauncher `
+      -ConfigIdentity $attestationConfigIdentity)
+    Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_REGIME_NOTIFIER=PASS|PID=$regimeNotifierPid"
+  } catch {
+    Write-Warning "Regime notifier runtime source attestation degraded: $($_.Exception.Message)"
+    Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_CHILD=DEGRADED|COMPONENT=regime-notifier|PID=$($process.Id)"
+  }
   return $process
 }
 function Start-TradeNotifierChild {
@@ -425,9 +470,35 @@ try {
   $trend = Start-Process -FilePath "powershell.exe" -ArgumentList ($common + $trendArgs) -WorkingDirectory $ProjectRoot -RedirectStandardOutput $TrendOut -RedirectStandardError $TrendErr -PassThru
   Set-Content -LiteralPath $TrendPidPath -Value $trend.Id -Encoding ascii
   Write-Host "PHASE7C_TREND_PID=$($trend.Id)"
+  try {
+    $trendPid = [int](Get-Content -LiteralPath $TrendPidPath -Raw).Trim()
+    [void](Write-Phase7CRuntimeSourceComponentAttestation `
+      -RuntimeRoot $WorkDir `
+      -Component trend `
+      -ProcessId $trendPid `
+      -LauncherPath $TrendLauncher `
+      -ConfigIdentity $attestationConfigIdentity)
+    Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_TREND=PASS|PID=$trendPid"
+  } catch {
+    Write-Warning "Trend runtime source attestation degraded: $($_.Exception.Message)"
+    Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_CHILD=DEGRADED|COMPONENT=trend|PID=$($trend.Id)"
+  }
   $sideway = Start-Process -FilePath "powershell.exe" -ArgumentList ($common + $sidewayArgs) -WorkingDirectory $ProjectRoot -RedirectStandardOutput $SidewayOut -RedirectStandardError $SidewayErr -PassThru
   Set-Content -LiteralPath $SidewayPidPath -Value $sideway.Id -Encoding ascii
   Write-Host "PHASE7C_SIDEWAY_PID=$($sideway.Id)"
+  try {
+    $sidewayPid = [int](Get-Content -LiteralPath $SidewayPidPath -Raw).Trim()
+    [void](Write-Phase7CRuntimeSourceComponentAttestation `
+      -RuntimeRoot $WorkDir `
+      -Component sideway `
+      -ProcessId $sidewayPid `
+      -LauncherPath $SidewayLauncher `
+      -ConfigIdentity $attestationConfigIdentity)
+    Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_SIDEWAY=PASS|PID=$sidewayPid"
+  } catch {
+    Write-Warning "Sideway runtime source attestation degraded: $($_.Exception.Message)"
+    Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_CHILD=DEGRADED|COMPONENT=sideway|PID=$($sideway.Id)"
+  }
 
   if ($Once) {
     $trend.WaitForExit(); $sideway.WaitForExit()
