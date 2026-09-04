@@ -597,10 +597,156 @@ if ($taskBatterySettingsRepairRequired) {
   }
 }
 
-  # Load the exact accepted Web/API source before any executor or SYSTEM task stop.
-  # When an owned legacy/stale-hash task has already passed provenance, principal,
-  # API SID, PAUSE/DISARMED, Bridge-session and flat-broker preflight, allow the
-  # strict account verifier to exempt only the startup-runner lock until repair.
+# Strict dashboard deploy requires live executor PID files and strict Telegram
+# verification. If the new deployment identity was created while lifecycle is already
+# STOPPED with zero executors, restore a fresh canonical SYSTEM generation and stable
+# READY lifecycle first rather than weakening dashboard safety.
+if ($runtimeSourceGenerationReloadRequired -and -not $taskRepairRequired) {
+  $preWebRuntimeGeneration = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $WorkDir
+  $preWebLifecycle = Invoke-ApiGet "/api/v1/phase7c/lifecycle"
+  $preWebTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+  $preWebLifecycleStopped = `
+    -not [bool]$preWebLifecycle.running -and `
+    -not (Test-Phase7CLifecycleHasAliveProcess -State $preWebLifecycle)
+  $preWebGenerationEligible = `
+    $preWebLifecycleStopped -and `
+    [string]$preWebTask.State -eq 'Running' -and `
+    [string]$preWebRuntimeGeneration.statusReadState -eq 'OK' -and `
+    [string]$preWebRuntimeGeneration.heartbeatReadState -eq 'OK' -and `
+    [bool]$preWebRuntimeGeneration.brokerStatusPidMatch -and `
+    [bool]$preWebRuntimeGeneration.brokerProcessAlive -and `
+    [bool]$preWebRuntimeGeneration.brokerHeartbeatFresh -and `
+    [string]$preWebRuntimeGeneration.startupRunnerLockState -eq 'HELD'
+
+  if ($preWebLifecycleStopped) {
+    if (-not $preWebGenerationEligible) {
+      throw "Stopped lifecycle requires a proven healthy canonical SYSTEM generation before strict Web/API deploy. taskState=$($preWebTask.State) brokerAlive=$($preWebRuntimeGeneration.brokerProcessAlive) heartbeatFresh=$($preWebRuntimeGeneration.brokerHeartbeatFresh) lock=$($preWebRuntimeGeneration.startupRunnerLockState)"
+    }
+
+    Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB=ELIGIBLE"
+    Assert-LifecycleExecutorsStopped -Stage "GENERATION_PRE_WEB"
+    Assert-PauseDisarmed -Stage "GENERATION_PRE_WEB"
+    Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "GENERATION_PRE_WEB"
+    Assert-FlatBroker -Stage "GENERATION_PRE_WEB"
+
+    $preWebOwnership = Test-Phase7CExecutorTaskActionOwnership `
+      -Actions $preWebTask.Actions `
+      -ExpectedRunnerPath $runnerPath `
+      -ExpectedRunnerSha256 $trustedRunnerSha256
+    $preWebDrift = @(Get-Phase7CExecutorTaskDrift -Task $preWebTask)
+    if (-not [bool]$preWebOwnership.owned -or -not [bool]$preWebOwnership.canonical -or [bool]$preWebOwnership.repairRequired -or $preWebDrift.Count -ne 0) {
+      throw "Canonical pre-Web source generation reload requires the Scheduled Task to remain exact canonical. ownership=$($preWebOwnership.reason) drift=$($preWebDrift -join ',')"
+    }
+    if (-not (Test-Phase7CSystemTaskPrincipal $preWebTask.Principal)) {
+      throw "Canonical pre-Web source generation reload requires SYSTEM + ServiceAccount + Highest."
+    }
+
+    $preWebBrokerPidBeforeStop = Get-Phase7CBrokerPidFromHeartbeat
+    if ($preWebBrokerPidBeforeStop -le 0) {
+      throw "Canonical pre-Web source generation reload could not capture the current lifecycle broker PID."
+    }
+
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    $preWebTaskStopDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min($TimeoutSeconds, 30))
+    $preWebTaskStopped = $false
+    do {
+      Start-Sleep -Milliseconds 250
+      $preWebTaskAfterStop = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+      if ([string]$preWebTaskAfterStop.State -notin @('Running', 'Queued')) {
+        $preWebTaskStopped = $true
+        break
+      }
+    } while ([DateTime]::UtcNow -lt $preWebTaskStopDeadline)
+    if (-not $preWebTaskStopped) {
+      throw "Canonical pre-Web source generation Scheduled Task did not quiesce. state=$($preWebTaskAfterStop.State)"
+    }
+    Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_TASK_STOP=PASS"
+
+    $preWebBrokerStopped = $false
+    $preWebBrokerStopDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min($TimeoutSeconds, 30))
+    while (-not $preWebBrokerStopped -and [DateTime]::UtcNow -lt $preWebBrokerStopDeadline) {
+      if ($null -eq (Get-Process -Id $preWebBrokerPidBeforeStop -ErrorAction SilentlyContinue)) {
+        $preWebBrokerStopped = $true
+        break
+      }
+      Start-Sleep -Milliseconds 250
+    }
+    if (-not $preWebBrokerStopped) {
+      throw "Previous lifecycle broker process remained alive after canonical pre-Web generation task stop. pid=$preWebBrokerPidBeforeStop"
+    }
+    Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_BROKER_PROCESS_STOP=PASS|PREVIOUS_PID=$preWebBrokerPidBeforeStop"
+
+    Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    $preWebTaskRestartDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min($TimeoutSeconds, 30))
+    $preWebBrokerPid = 0
+    $preWebTaskRestarted = $false
+    do {
+      Start-Sleep -Milliseconds 250
+      $preWebTaskAfterStart = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+      if ([string]$preWebTaskAfterStart.State -eq 'Running' -and (Test-Phase7CBrokerHeartbeatFresh)) {
+        $preWebBrokerPid = Get-Phase7CBrokerPidFromHeartbeat
+        if ($preWebBrokerPid -gt 0 -and $preWebBrokerPid -ne $preWebBrokerPidBeforeStop) {
+          $preWebTaskRestarted = $true
+          break
+        }
+      }
+    } while ([DateTime]::UtcNow -lt $preWebTaskRestartDeadline)
+    if (-not $preWebTaskRestarted) {
+      throw "Canonical pre-Web source generation task restart did not produce a fresh new lifecycle broker. previousPid=$preWebBrokerPidBeforeStop currentPid=$preWebBrokerPid"
+    }
+    Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_TASK_RESTART=PASS|BROKER_PID=$preWebBrokerPid"
+
+    $preWebTaskVerified = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    $preWebOwnershipVerified = Test-Phase7CExecutorTaskActionOwnership `
+      -Actions $preWebTaskVerified.Actions `
+      -ExpectedRunnerPath $runnerPath `
+      -ExpectedRunnerSha256 $trustedRunnerSha256
+    $preWebDriftVerified = @(Get-Phase7CExecutorTaskDrift -Task $preWebTaskVerified)
+    if (-not [bool]$preWebOwnershipVerified.owned -or -not [bool]$preWebOwnershipVerified.canonical -or [bool]$preWebOwnershipVerified.repairRequired -or $preWebDriftVerified.Count -ne 0) {
+      throw "Canonical pre-Web source generation task changed definition during restart. ownership=$($preWebOwnershipVerified.reason) drift=$($preWebDriftVerified -join ',')"
+    }
+    if (-not (Test-Phase7CSystemTaskPrincipal $preWebTaskVerified.Principal)) {
+      throw "Canonical pre-Web source generation task restart did not preserve SYSTEM + ServiceAccount + Highest."
+    }
+
+    $preWebBrokerAttestationPath = Join-Path $WorkDir "phase7c-source-attestation\components\lifecycle-broker.json"
+    $preWebBrokerAttestation = Read-JsonFile -Path $preWebBrokerAttestationPath -Label "Lifecycle broker source attestation after pre-Web generation reload"
+    if ([string]$preWebBrokerAttestation.component -ne 'lifecycle-broker' -or `
+        [string]$preWebBrokerAttestation.deploymentId -ne [string]$deployment.deploymentId -or `
+        [string]$preWebBrokerAttestation.sourceCommit -ne [string]$deployment.sourceCommit -or `
+        [string]$preWebBrokerAttestation.sourceTree -ne [string]$deployment.sourceTree -or `
+        [int]$preWebBrokerAttestation.pid -ne $preWebBrokerPid) {
+      throw "Canonical pre-Web source generation broker attestation does not match the new deployment."
+    }
+
+    $preWebLockPath = Join-Path $WorkDir "phase7c-executors\startup-runner.lock"
+    $preWebLockState = Get-Phase7CReadOnlyLockState -Path $preWebLockPath
+    if ($preWebLockState -ne 'HELD') {
+      throw "Canonical pre-Web source generation task restart did not restore the startup-runner singleton lock. state=$preWebLockState"
+    }
+    Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_STARTUP_RUNNER_LOCK=HELD"
+
+    Assert-PauseDisarmed -Stage "GENERATION_PRE_WEB_POST_TASK_RESTART"
+    Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "GENERATION_PRE_WEB_POST_TASK_RESTART"
+    Assert-FlatBroker -Stage "GENERATION_PRE_WEB_POST_TASK_RESTART"
+
+    [void](Invoke-ApiPost "/api/v1/phase7c/lifecycle/start" @{})
+    if (-not (Wait-LifecycleReadyStable -ProbeTimeoutSeconds ([Math]::Min($TimeoutSeconds, 30)))) {
+      throw "Lifecycle did not return to stable READY after canonical pre-Web source generation reload."
+    }
+    Assert-PauseDisarmed -Stage "GENERATION_PRE_WEB_READY"
+    Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "GENERATION_PRE_WEB_READY"
+    Assert-FlatBroker -Stage "GENERATION_PRE_WEB_READY"
+    Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_LIFECYCLE_READY=PASS"
+
+    $runtimeSourceGenerationReloadRequired = $false
+    Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD=SATISFIED_PRE_WEB"
+  }
+}
+
+  # Load the exact accepted Web/API source before any ordinary executor or SYSTEM task stop.
+  # Proven battery and stopped-lifecycle generation outages may be restored above first so
+  # the unchanged strict dashboard verifier always sees a healthy executor generation.
   $webApiDeployArgs = @()
   if ($taskProvenanceRepairRequired) {
     $webApiDeployArgs += @(

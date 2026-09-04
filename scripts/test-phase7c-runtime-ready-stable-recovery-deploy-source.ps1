@@ -33,8 +33,8 @@ Assert-True ($text.Contains('requires zero XAUUSD positions')) "helper must requ
 Assert-True ($text.Contains('requires zero pending XAUUSD orders')) "helper must require zero pending XAUUSD orders"
 
 # Ordinary runtime-ready recovery still deploys Web/API before its stable probe and
-# STOP -> repair/reload -> START sequence. A separately proven battery-stranded task may
-# be repaired and STARTed before Web deploy only because lifecycle is already STOPPED.
+# STOP -> repair/reload -> START sequence. Separately proven stopped-lifecycle paths
+# may restore a strict executor generation before Web deploy.
 Assert-True ($text.Contains('deploy-phase7c-web-ui-local.ps1')) "helper must reuse canonical Web/API deploy helper"
 $deployIndex = $text.IndexOf('& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy', [System.StringComparison]::Ordinal)
 $stableProbeIndex = $text.IndexOf('$stableBeforeRecovery = Wait-LifecycleReadyStable', [System.StringComparison]::Ordinal)
@@ -68,8 +68,13 @@ Assert-True ($text.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_TA
 Assert-True ($text.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_STARTUP_RUNNER_LOCK=HELD')) "canonical generation reload must prove the new startup runner lock is HELD"
 $generationTaskStopIndex = $text.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_TASK_STOP=PASS', [System.StringComparison]::Ordinal)
 $generationBrokerStopIndex = $text.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_BROKER_PROCESS_STOP=PASS', [System.StringComparison]::Ordinal)
-$generationTaskStartIndex = $text.IndexOf('Start-ScheduledTask -TaskName $TaskName', [System.StringComparison]::Ordinal)
 $generationLockIndex = $text.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_STARTUP_RUNNER_LOCK=HELD', [System.StringComparison]::Ordinal)
+$generationTaskStartMatches = [regex]::Matches($text, [regex]::Escape('Start-ScheduledTask -TaskName $TaskName'))
+$generationTaskStartCandidates = @($generationTaskStartMatches | Where-Object {
+  $_.Index -gt $generationBrokerStopIndex -and $_.Index -lt $generationLockIndex
+})
+Assert-True ($generationTaskStartCandidates.Count -eq 1) "post-Web canonical generation reload must have exactly one task start between broker-stop and lock proof"
+$generationTaskStartIndex = $generationTaskStartCandidates[0].Index
 Assert-True ($generationTaskStopIndex -gt $stopIndex) "generation task stop must occur only after lifecycle STOP"
 Assert-True ($generationBrokerStopIndex -gt $generationTaskStopIndex) "generation task restart must wait for old broker exit proof"
 Assert-True ($generationTaskStartIndex -gt $generationBrokerStopIndex) "canonical task must restart only after old broker process is dead"
@@ -125,8 +130,9 @@ Assert-True ($text.Contains('Test-Phase7CLifecycleHasAliveProcess')) "helper mus
 Assert-True ($text.Contains('$currentLifecycleNeedsStop = [bool]$currentLifecycle.running -or (Test-Phase7CLifecycleHasAliveProcess -State $currentLifecycle)')) "helper must STOP when any executor process remains alive"
 Assert-True ($text.Contains('if (-not [bool]$state.running -and -not (Test-Phase7CLifecycleHasAliveProcess -State $state)) { return }')) "lifecycle stop wait must require every executor process dead"
 Assert-True ($text.Contains('Get-Phase7CBrokerPidFromHeartbeat')) "helper must capture the previous broker PID before stopping the task"
-Assert-True ($text.Contains('BROKER_PROCESS_STOP=PASS')) "helper must prove the previous broker process exited before repair"
-$brokerProcessStopIndex = $text.IndexOf('BROKER_PROCESS_STOP=PASS', [System.StringComparison]::Ordinal)
+$ordinaryBrokerStopMarker = 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_BROKER_PROCESS_STOP=PASS'
+Assert-True ($text.Contains($ordinaryBrokerStopMarker)) "helper must prove the previous broker process exited before repair"
+$brokerProcessStopIndex = $text.IndexOf($ordinaryBrokerStopMarker, [System.StringComparison]::Ordinal)
 Assert-True ($brokerProcessStopIndex -gt $normalTaskStopIndex) "broker process exit proof must occur after ordinary Scheduled Task stop"
 Assert-True ($normalTaskRepairIndex -gt $brokerProcessStopIndex) "ordinary task repair must occur only after the previous broker process is dead"
 

@@ -12,6 +12,7 @@ on:
       - "scripts/test-phase7c-lifecycle-broker-battery-task-source.ps1"
       - "scripts/test-phase7c-battery-settings-recovery-migration-source.ps1"
       - "scripts/test-phase7c-battery-stopped-lifecycle-preweb-repair-source.ps1"
+      - "scripts/test-phase7c-stopped-lifecycle-preweb-generation-source.ps1"
       - "scripts/register-phase7c-executor-task-local.ps1"
       - "scripts/deploy-phase7c-web-ui-local.ps1"
       - "scripts/deploy-phase7c-mt5-dashboard-local.ps1"
@@ -46,6 +47,7 @@ on:
       - "scripts/test-phase7c-lifecycle-broker-battery-task-source.ps1"
       - "scripts/test-phase7c-battery-settings-recovery-migration-source.ps1"
       - "scripts/test-phase7c-battery-stopped-lifecycle-preweb-repair-source.ps1"
+      - "scripts/test-phase7c-stopped-lifecycle-preweb-generation-source.ps1"
       - "scripts/register-phase7c-executor-task-local.ps1"
       - "scripts/deploy-phase7c-web-ui-local.ps1"
       - "scripts/deploy-phase7c-mt5-dashboard-local.ps1"
@@ -134,6 +136,12 @@ jobs:
       - name: Battery stopped-lifecycle pre-Web repair contract with Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-battery-stopped-lifecycle-preweb-repair-source.ps1
+      - name: Stopped lifecycle pre-Web generation contract with PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-stopped-lifecycle-preweb-generation-source.ps1
+      - name: Stopped lifecycle pre-Web generation contract with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-stopped-lifecycle-preweb-generation-source.ps1
 
   safety-regression:
     runs-on: windows-latest
