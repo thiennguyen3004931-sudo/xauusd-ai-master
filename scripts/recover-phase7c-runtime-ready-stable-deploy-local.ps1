@@ -407,12 +407,26 @@ $attestationConfigIdentity = Get-Phase7CRuntimeSourceConfigIdentity `
   -AccountMode LIVE `
   -LiveExecutionEnabled $true `
   -ControlApiUrl $ControlApiUrl
+$previousDeployment = $null
+try {
+  $previousDeployment = Read-Phase7CRuntimeSourceDeployment -RuntimeRoot $WorkDir
+} catch {
+  $previousDeployment = $null
+}
 $deployment = Initialize-Phase7CRuntimeSourceDeployment `
   -RuntimeRoot $WorkDir `
   -SourceCommit $ExpectedCommit `
   -SourceTree $sourceTree `
   -Branch main `
   -ConfigIdentity $attestationConfigIdentity
+$runtimeSourceGenerationReloadRequired = `
+  $null -eq $previousDeployment -or `
+  [string]$previousDeployment.deploymentId -ne [string]$deployment.deploymentId
+if ($runtimeSourceGenerationReloadRequired) {
+  Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD=REQUIRED"
+} else {
+  Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD=NOT_REQUIRED"
+}
 Write-Host "PHASE7C_RUNTIME_SOURCE_DEPLOYMENT_ID=$($deployment.deploymentId)"
 Write-Host "PHASE7C_RUNTIME_SOURCE_COMMIT=$($deployment.sourceCommit)"
 Write-Host "PHASE7C_RUNTIME_SOURCE_TREE=$($deployment.sourceTree)"
@@ -612,7 +626,7 @@ if ($taskBatterySettingsRepairRequired) {
   Assert-FlatBroker -Stage "POST_WEB_API_DEPLOY"
 
   $stableBeforeRecovery = Wait-LifecycleReadyStable -ProbeTimeoutSeconds 8
-  if ($stableBeforeRecovery -and -not $taskRepairRequired) {
+  if ($stableBeforeRecovery -and -not $taskRepairRequired -and -not $runtimeSourceGenerationReloadRequired) {
     Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_LIFECYCLE_RECOVERY=SKIPPED_ALREADY_STABLE"
   } else {
     Assert-PauseDisarmed -Stage "PRE_LIFECYCLE_RECOVERY"
@@ -707,6 +721,113 @@ if ($taskBatterySettingsRepairRequired) {
       } else {
         Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_DEFINITION_REPAIR=PERFORMED_BATTERY_SETTINGS"
       }
+    } elseif ($runtimeSourceGenerationReloadRequired) {
+      Assert-LifecycleExecutorsStopped -Stage "PRE_GENERATION_RELOAD"
+      Assert-PauseDisarmed -Stage "PRE_GENERATION_RELOAD"
+      Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "PRE_GENERATION_RELOAD"
+      Assert-FlatBroker -Stage "PRE_GENERATION_RELOAD"
+
+      $generationTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+      $generationOwnership = Test-Phase7CExecutorTaskActionOwnership `
+        -Actions $generationTask.Actions `
+        -ExpectedRunnerPath $runnerPath `
+        -ExpectedRunnerSha256 $trustedRunnerSha256
+      $generationDrift = @(Get-Phase7CExecutorTaskDrift -Task $generationTask)
+      if (-not [bool]$generationOwnership.owned -or -not [bool]$generationOwnership.canonical -or [bool]$generationOwnership.repairRequired -or $generationDrift.Count -ne 0) {
+        throw "Canonical source generation reload requires the Scheduled Task to remain exact canonical. ownership=$($generationOwnership.reason) drift=$($generationDrift -join ',')"
+      }
+      if (-not (Test-Phase7CSystemTaskPrincipal $generationTask.Principal)) {
+        throw "Canonical source generation reload requires SYSTEM + ServiceAccount + Highest."
+      }
+
+      $brokerPidBeforeGenerationStop = Get-Phase7CBrokerPidFromHeartbeat
+      if ($brokerPidBeforeGenerationStop -le 0) {
+        throw "Canonical source generation reload could not capture the current lifecycle broker PID."
+      }
+
+      Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+      $generationTaskStopDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min($TimeoutSeconds, 30))
+      $generationTaskStopped = $false
+      do {
+        Start-Sleep -Milliseconds 250
+        $generationTaskAfterStop = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+        if ([string]$generationTaskAfterStop.State -notin @('Running', 'Queued')) {
+          $generationTaskStopped = $true
+          break
+        }
+      } while ([DateTime]::UtcNow -lt $generationTaskStopDeadline)
+      if (-not $generationTaskStopped) {
+        throw "Canonical source generation Scheduled Task did not quiesce. state=$($generationTaskAfterStop.State)"
+      }
+      Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_TASK_STOP=PASS"
+
+      $generationBrokerStopped = $false
+      $generationBrokerStopDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min($TimeoutSeconds, 30))
+      while (-not $generationBrokerStopped -and [DateTime]::UtcNow -lt $generationBrokerStopDeadline) {
+        if ($null -eq (Get-Process -Id $brokerPidBeforeGenerationStop -ErrorAction SilentlyContinue)) {
+          $generationBrokerStopped = $true
+          break
+        }
+        Start-Sleep -Milliseconds 250
+      }
+      if (-not $generationBrokerStopped) {
+        throw "Previous lifecycle broker process remained alive after canonical source generation task stop. pid=$brokerPidBeforeGenerationStop"
+      }
+      Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_BROKER_PROCESS_STOP=PASS|PREVIOUS_PID=$brokerPidBeforeGenerationStop"
+
+      Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+      $generationTaskRestartDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min($TimeoutSeconds, 30))
+      $generationBrokerPid = 0
+      $generationTaskRestarted = $false
+      do {
+        Start-Sleep -Milliseconds 250
+        $generationTaskAfterStart = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+        if ([string]$generationTaskAfterStart.State -eq 'Running' -and (Test-Phase7CBrokerHeartbeatFresh)) {
+          $generationBrokerPid = Get-Phase7CBrokerPidFromHeartbeat
+          if ($generationBrokerPid -gt 0 -and $generationBrokerPid -ne $brokerPidBeforeGenerationStop) {
+            $generationTaskRestarted = $true
+            break
+          }
+        }
+      } while ([DateTime]::UtcNow -lt $generationTaskRestartDeadline)
+      if (-not $generationTaskRestarted) {
+        throw "Canonical source generation task restart did not produce a fresh new lifecycle broker. previousPid=$brokerPidBeforeGenerationStop currentPid=$generationBrokerPid"
+      }
+      Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_TASK_RESTART=PASS|BROKER_PID=$generationBrokerPid"
+
+      $generationTaskVerified = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+      $generationOwnershipVerified = Test-Phase7CExecutorTaskActionOwnership `
+        -Actions $generationTaskVerified.Actions `
+        -ExpectedRunnerPath $runnerPath `
+        -ExpectedRunnerSha256 $trustedRunnerSha256
+      $generationDriftVerified = @(Get-Phase7CExecutorTaskDrift -Task $generationTaskVerified)
+      if (-not [bool]$generationOwnershipVerified.owned -or -not [bool]$generationOwnershipVerified.canonical -or [bool]$generationOwnershipVerified.repairRequired -or $generationDriftVerified.Count -ne 0) {
+        throw "Canonical source generation task changed definition during restart. ownership=$($generationOwnershipVerified.reason) drift=$($generationDriftVerified -join ',')"
+      }
+      if (-not (Test-Phase7CSystemTaskPrincipal $generationTaskVerified.Principal)) {
+        throw "Canonical source generation task restart did not preserve SYSTEM + ServiceAccount + Highest."
+      }
+
+      $generationBrokerAttestationPath = Join-Path $WorkDir "phase7c-source-attestation\components\lifecycle-broker.json"
+      $generationBrokerAttestation = Read-JsonFile -Path $generationBrokerAttestationPath -Label "Lifecycle broker source attestation after generation reload"
+      if ([string]$generationBrokerAttestation.component -ne 'lifecycle-broker' -or `
+          [string]$generationBrokerAttestation.deploymentId -ne [string]$deployment.deploymentId -or `
+          [string]$generationBrokerAttestation.sourceCommit -ne [string]$deployment.sourceCommit -or `
+          [string]$generationBrokerAttestation.sourceTree -ne [string]$deployment.sourceTree -or `
+          [int]$generationBrokerAttestation.pid -ne $generationBrokerPid) {
+        throw "Canonical source generation broker attestation does not match the new deployment."
+      }
+
+      $generationLockPath = Join-Path $WorkDir "phase7c-executors\startup-runner.lock"
+      $generationLockState = Get-Phase7CReadOnlyLockState -Path $generationLockPath
+      if ($generationLockState -ne 'HELD') {
+        throw "Canonical source generation task restart did not restore the startup-runner singleton lock. state=$generationLockState"
+      }
+      Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_STARTUP_RUNNER_LOCK=HELD"
+
+      Assert-PauseDisarmed -Stage "POST_GENERATION_RELOAD"
+      Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "POST_GENERATION_RELOAD"
+      Assert-FlatBroker -Stage "POST_GENERATION_RELOAD"
     }
 
     [void](Invoke-ApiPost "/api/v1/phase7c/lifecycle/start" @{})

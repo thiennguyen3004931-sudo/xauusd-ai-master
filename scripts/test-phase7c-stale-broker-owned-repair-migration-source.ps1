@@ -57,7 +57,7 @@ Assert-Literal $webDeploy 'PHASE7C_WEB_UI_DEPLOY_BROKER_SOURCE_FRESH=PASS' `
 # Recovery is the proof authority for this narrow window. It only appends the
 # migration arguments for taskProvenanceRepairRequired, after API SID validation,
 # and taskRepairRequired remains true so a stale old generation cannot be accepted
-# as SKIPPED_ALREADY_STABLE.
+# as SKIPPED_ALREADY_STABLE. A changed source deployment also blocks that skip.
 Assert-Literal $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_API_SID_PREFLIGHT=PASS' `
   'Recovery must validate the recorded API SID before owned-task migration.'
 Assert-Literal $recovery 'if ($taskProvenanceRepairRequired)' `
@@ -70,8 +70,8 @@ Assert-Literal $recovery '$trustedRunnerSha256' `
   'Recovery must bind the migration window to the trusted Git runner SHA256.'
 Assert-Literal $recovery '$taskRepairRequired = $taskProvenanceRepairRequired -or $taskBatterySettingsRepairRequired' `
   'Provenance repair must remain a mandatory lifecycle recovery reason.'
-Assert-Literal $recovery 'if ($stableBeforeRecovery -and -not $taskRepairRequired)' `
-  'A provenance-repair rollout must remain ineligible for SKIPPED_ALREADY_STABLE.'
+Assert-Literal $recovery 'if ($stableBeforeRecovery -and -not $taskRepairRequired -and -not $runtimeSourceGenerationReloadRequired)' `
+  'A provenance-repair rollout and a changed source deployment must remain ineligible for SKIPPED_ALREADY_STABLE.'
 Assert-Literal $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_TASK_PROVENANCE_REPAIR=PERFORMED' `
   'Canonical recovery must still require successful provenance repair before final PASS.'
 Assert-Literal $recovery 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_POST_REPAIR_STARTUP_RUNNER_LOCK=HELD' `

@@ -33,7 +33,7 @@ Assert-True ($text.Contains('requires zero XAUUSD positions')) "helper must requ
 Assert-True ($text.Contains('requires zero pending XAUUSD orders')) "helper must require zero pending XAUUSD orders"
 
 # Ordinary runtime-ready recovery still deploys Web/API before its stable probe and
-# STOP -> repair -> START sequence. A separately proven battery-stranded task may
+# STOP -> repair/reload -> START sequence. A separately proven battery-stranded task may
 # be repaired and STARTed before Web deploy only because lifecycle is already STOPPED.
 Assert-True ($text.Contains('deploy-phase7c-web-ui-local.ps1')) "helper must reuse canonical Web/API deploy helper"
 $deployIndex = $text.IndexOf('& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy', [System.StringComparison]::Ordinal)
@@ -50,8 +50,31 @@ Assert-True ($normalStartIndex -gt $stopIndex) "ordinary lifecycle START must oc
 Assert-True ($text.Contains('-ExpectedCommit $ExpectedCommit')) "Web/API deploy must use exact ExpectedCommit"
 Assert-True ($text.Contains('READY_STABLE_MS=5000')) "helper must require explicit 5 second continuous READY stability"
 Assert-True ($text.Contains('READY_STABLE_RESET')) "helper must reset stability window on any non-ready sample"
-Assert-True ($text.Contains('LIFECYCLE_RECOVERY=SKIPPED_ALREADY_STABLE')) "helper must skip executor recovery when lifecycle is already stable"
-Assert-True ($text.Contains('LIFECYCLE_RECOVERY=PERFORMED')) "helper must recover lifecycle only when stable readiness is absent"
+Assert-True ($text.Contains('LIFECYCLE_RECOVERY=SKIPPED_ALREADY_STABLE')) "helper must retain a same-generation stable no-op path"
+Assert-True ($text.Contains('LIFECYCLE_RECOVERY=PERFORMED')) "helper must recover lifecycle when stable readiness or source generation requires it"
+
+# P1 exact-match requires a fresh SYSTEM task generation whenever Initialize-Phase7C
+# creates a new deployment identity, even if the old lifecycle is still READY and the
+# Scheduled Task definition is already canonical. A stable old generation must never
+# qualify for SKIPPED_ALREADY_STABLE after Web/API has adopted the new deployment ID.
+Assert-True ($text.Contains('$runtimeSourceGenerationReloadRequired')) "helper must track whether the runtime source deployment identity changed"
+Assert-True ($text.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD=REQUIRED')) "helper must audit when canonical source generation reload is required"
+Assert-True ($text.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD=NOT_REQUIRED')) "helper must audit same-generation no-op eligibility"
+Assert-True ($text.Contains('$stableBeforeRecovery -and -not $taskRepairRequired -and -not $runtimeSourceGenerationReloadRequired')) "stable lifecycle skip must be blocked when source generation changed"
+Assert-True ($text.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_TASK_STOP=PASS')) "canonical generation reload must stop the owned SYSTEM task"
+Assert-True ($text.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_BROKER_PROCESS_STOP=PASS')) "canonical generation reload must prove the previous broker exited"
+Assert-True ($text.Contains('Start-ScheduledTask -TaskName $TaskName')) "canonical generation reload must restart the same Scheduled Task without repairing its definition"
+Assert-True ($text.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_TASK_RESTART=PASS')) "canonical generation reload must audit task restart"
+Assert-True ($text.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_STARTUP_RUNNER_LOCK=HELD')) "canonical generation reload must prove the new startup runner lock is HELD"
+$generationTaskStopIndex = $text.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_TASK_STOP=PASS', [System.StringComparison]::Ordinal)
+$generationBrokerStopIndex = $text.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_BROKER_PROCESS_STOP=PASS', [System.StringComparison]::Ordinal)
+$generationTaskStartIndex = $text.IndexOf('Start-ScheduledTask -TaskName $TaskName', [System.StringComparison]::Ordinal)
+$generationLockIndex = $text.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_STARTUP_RUNNER_LOCK=HELD', [System.StringComparison]::Ordinal)
+Assert-True ($generationTaskStopIndex -gt $stopIndex) "generation task stop must occur only after lifecycle STOP"
+Assert-True ($generationBrokerStopIndex -gt $generationTaskStopIndex) "generation task restart must wait for old broker exit proof"
+Assert-True ($generationTaskStartIndex -gt $generationBrokerStopIndex) "canonical task must restart only after old broker process is dead"
+Assert-True ($generationLockIndex -gt $generationTaskStartIndex) "new generation must prove startup lock HELD after task restart"
+Assert-True ($normalStartIndex -gt $generationLockIndex) "lifecycle START must occur only after the new SYSTEM generation is proven"
 
 # Battery-stranded pre-Web repair is a bounded exception: task action is already
 # canonical/trusted, battery-only definition drift is proven, lifecycle is already
@@ -80,17 +103,19 @@ Assert-True ($text.Contains('Get-Phase7CTrustedGitFileSha256')) "helper must der
 Assert-True ($text.Contains('Test-Phase7CExecutorTaskActionOwnership')) "helper must inspect task action ownership before mutation"
 Assert-True ($text.Contains('ExpectedRunnerSha256')) "helper must verify the task action against the expected runner SHA256"
 Assert-True ($text.Contains('TASK_PROVENANCE=CANONICAL_HASH_GUARD')) "helper must report canonical hash-guard provenance"
-Assert-True ($text.Contains('TASK_PROVENANCE_REPAIR=SKIPPED_ALREADY_CANONICAL')) "helper must skip broker-task restart when provenance is already canonical and definition is drift-free"
+Assert-True ($text.Contains('TASK_PROVENANCE_REPAIR=SKIPPED_ALREADY_CANONICAL')) "helper must skip task definition repair when provenance is already canonical and definition is drift-free"
 Assert-True ($text.Contains('TASK_PROVENANCE_REPAIR=PERFORMED')) "helper must report successful owned task provenance repair"
 Assert-True ($text.Contains('TASK_PROVENANCE_REPAIR=BLOCKED_UNPROVEN_OWNERSHIP')) "helper must fail closed for foreign or unproven task ownership"
-Assert-True ($text.Contains('Stop-ScheduledTask')) "helper must explicitly stop the owned SYSTEM task before repair"
-Assert-True ($text.Contains('-Repair')) "helper must invoke the canonical installer in repair mode"
+Assert-True ($text.Contains('Stop-ScheduledTask')) "helper must explicitly stop the owned SYSTEM task before repair/reload"
+Assert-True ($text.Contains('-Repair')) "helper must invoke the canonical installer in repair mode when repair is required"
 $taskStopMatches = [regex]::Matches($text, [regex]::Escape('Stop-ScheduledTask'))
 $taskRepairMatches = [regex]::Matches($text, '(?m)^\s*-Repair\s+`?\s*$')
 Assert-True ($taskStopMatches.Count -ge 1) "helper must contain Scheduled Task stop"
 Assert-True ($taskRepairMatches.Count -ge 1) "helper must contain canonical task repair invocation"
-$normalTaskStopIndex = $taskStopMatches[$taskStopMatches.Count - 1].Index
 $normalTaskRepairIndex = $taskRepairMatches[$taskRepairMatches.Count - 1].Index
+$normalTaskStopCandidates = @($taskStopMatches | Where-Object { $_.Index -lt $normalTaskRepairIndex })
+Assert-True ($normalTaskStopCandidates.Count -ge 1) "ordinary task repair must have a preceding Scheduled Task stop"
+$normalTaskStopIndex = $normalTaskStopCandidates[$normalTaskStopCandidates.Count - 1].Index
 Assert-True ($normalTaskStopIndex -gt $stopIndex) "ordinary Scheduled Task stop must occur only after lifecycle STOP"
 Assert-True ($normalTaskRepairIndex -gt $normalTaskStopIndex) "ordinary task repair must occur only after the owned SYSTEM task is stopped"
 Assert-True ($normalStartIndex -gt $normalTaskRepairIndex) "ordinary lifecycle START must occur only after task repair when repair is needed"
