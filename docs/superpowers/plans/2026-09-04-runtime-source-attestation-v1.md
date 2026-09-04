@@ -4,9 +4,9 @@
 
 **Goal:** Add a read-only runtime provenance layer that proves whether API, lifecycle broker, supervisor, Trend, Sideway, Telegram, and regime-notifier are running from the exact canonical deployment identity, without changing AUTO/ARM/lifecycle/order behavior.
 
-**Architecture:** A PowerShell helper creates/reuses an atomic deployment manifest after existing exact-source guards and writes process attestations at existing canonical launch boundaries. The Node API writes its own PID-bound attestation, aggregates all runtime evidence into `EXACT_MATCH | MISMATCH | STALE | UNKNOWN`, exposes one localhost GET-only endpoint, and the Control Center renders the result as a read-only card. No new daemon and no automatic remediation are introduced.
+**Architecture:** A PowerShell helper creates or reuses one atomic deployment manifest after the existing exact-source guards and writes PID-bound attestations at existing canonical launch boundaries. The Node API writes its own attestation from actual `process.pid`, aggregates manifest/component/PID/liveness/launcher-hash evidence into `EXACT_MATCH | MISMATCH | STALE | UNKNOWN`, exposes one localhost GET-only endpoint, and the Control Center renders a query-only card. No new daemon or automatic remediation is introduced.
 
-**Tech Stack:** PowerShell 7 + Windows PowerShell 5.1, Node.js 24, TypeScript 5.9, Express, React 19/MUI, TanStack Query, GitHub Actions.
+**Tech Stack:** PowerShell 7, Windows PowerShell 5.1, Node.js 24, TypeScript 5.9, Express, React/MUI, TanStack Query, GitHub Actions.
 
 **Spec:** `docs/superpowers/specs/2026-09-04-runtime-source-attestation-v1-design.md`
 
@@ -22,16 +22,15 @@
 - `POSITION_MUTATION=NONE`.
 - `STRATEGY_MUTATION=NONE`.
 - `AUTO_RETUNE=NONE`.
-- Required components are exactly: `api`, `lifecycle-broker`, `supervisor`, `trend`, `sideway`, `telegram`, `regime-notifier`.
-- Component/overall verdicts are exactly: `EXACT_MATCH`, `MISMATCH`, `STALE`, `UNKNOWN`.
-- Overall precedence is `MISMATCH` > `UNKNOWN` > `STALE` > `EXACT_MATCH`.
+- Required components are exactly `api`, `lifecycle-broker`, `supervisor`, `trend`, `sideway`, `telegram`, `regime-notifier`.
+- Verdicts are exactly `EXACT_MATCH`, `MISMATCH`, `STALE`, `UNKNOWN`; precedence is `MISMATCH` > `UNKNOWN` > `STALE` > `EXACT_MATCH`.
 - Ordinary GET handling must not execute Git commands.
-- Missing or malformed evidence must never become `EXACT_MATCH`.
-- Attestation write failures must be observability failures only: startup continues and the aggregator later reports `UNKNOWN`/`MISMATCH`; P1 must not block a healthy runtime.
-- Runtime files must be written atomically.
-- No raw env-file contents, API keys, Telegram tokens, passwords, ARM tokens, or other secrets may enter manifests, component records, fixtures, API responses, or logs.
-- Mutable strategy/risk settings are intentionally excluded from the V1 fingerprint. V1 fingerprints only launch identity (`accountMode`, `liveExecutionEnabled`, canonical runtime root, control API URL). This keeps P1 source provenance independent from pending lot/TP settings that already have their own active/configured restart contract.
-- LIVE rollout is a separate guarded operational step after merge/main CI; source implementation must not mutate the currently running LIVE bot.
+- Missing/malformed evidence never becomes `EXACT_MATCH`.
+- Attestation write failure is observability failure only: callers catch/log and startup continues.
+- Runtime JSON writes are atomic.
+- No API key, Telegram token, password, ARM token, raw env-file content, or replayable secret enters attestation files, tests, responses, or logs.
+- V1 `configFingerprint` contains only stable launch identity: `version`, `accountMode`, `liveExecutionEnabled`, canonical runtime root, control API URL. Mutable lot/TP/strategy settings remain under their existing configured-vs-active lifecycle contract and are not copied into P1.
+- Source implementation does not mutate the currently running LIVE bot. Post-merge runtime rollout is a separate operator-approved step.
 
 ---
 
@@ -39,37 +38,43 @@
 
 ### Create
 
-- `scripts/lib/phase7c-runtime-source-attestation.ps1` — PowerShell manifest/config fingerprint/atomic component-writer helper.
-- `apps/api/src/services/phase7c-runtime-source-attestation.service.ts` — Node schema, hashing, API self-attestation, PID resolution, aggregation, verdict logic.
-- `apps/api/src/services/phase7c-runtime-source-attestation.service.test.ts` — deterministic service tests using temp directories and injected liveness.
+- `scripts/lib/phase7c-runtime-source-attestation.ps1` — PowerShell canonical identity, SHA-256, atomic manifest/component writer.
+- `apps/api/src/services/phase7c-runtime-source-attestation.service.ts` — TypeScript schemas, canonicalization, API self-attestation, current-PID resolution, component/overall verdict aggregation.
+- `apps/api/src/services/phase7c-runtime-source-attestation.service.test.ts` — deterministic temp-directory tests with injected liveness/hash readers.
 - `apps/web/src/ui/Phase7CRuntimeSourceAttestationCard.tsx` — read-only Control Center card.
-- `scripts/test-phase7c-runtime-source-attestation-source.ps1` — PS7/PS5.1 helper + integration + no-mutation contract.
+- `scripts/test-phase7c-runtime-source-attestation-source.ps1` — PS7/PS5.1 functional + source-safety contract.
 
 ### Modify
 
-- `scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1` — create/reuse deployment manifest after exact Git guard and before any runtime generation start/restart.
-- `scripts/deploy-phase7c-web-ui-local.ps1` — create/reuse the same manifest after exact source guard and before API/Web restart; same identity must reuse `deploymentId`.
-- `scripts/run-phase7c-executor-task-runner-local.ps1` — best-effort lifecycle-broker attestation using canonical broker PID `$PID`.
-- `scripts/run-phase7c-executors-local.ps1` — best-effort supervisor attestation and child attestations using the exact PIDs already written to existing PID files.
-- `scripts/run-phase7b-api-runtime-local.ps1` — pass attestation root and canonical API launcher path to the Node process; do not write API record from the PowerShell wrapper.
-- `apps/api/src/index.ts` — best-effort API self-attestation from actual `process.pid` after listen succeeds.
-- `apps/api/src/routes/phase7c.route.ts` — localhost GET-only `/runtime-source-attestation` route.
-- `apps/web/src/phase7c-types.ts` — typed response contract.
-- `apps/web/src/api.ts` — read-only GET client.
-- `apps/web/src/pages/Phase7CControlCenterShellPage.tsx` — render new card alongside existing authorization/control cards.
-- `.github/workflows/phase7c-canonical-pr-gate.yml` — Node service test + PS7/PS5.1 source contract.
-- `.github/workflows/phase7c-runtime-ready-stable-recovery-deploy-ci.yml` — include new helper/test/integration paths and run the source contract in both PowerShell engines.
+- `scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1`
+- `scripts/deploy-phase7c-web-ui-local.ps1`
+- `scripts/run-phase7c-executor-task-runner-local.ps1`
+- `scripts/run-phase7c-executors-local.ps1`
+- `scripts/run-phase7b-api-runtime-local.ps1`
+- `apps/api/src/index.ts`
+- `apps/api/src/routes/phase7c.route.ts`
+- `apps/web/src/phase7c-types.ts`
+- `apps/web/src/api.ts`
+- `apps/web/src/pages/Phase7CControlCenterShellPage.tsx`
+- `scripts/test-phase7c-runtime-ready-stable-recovery-deploy-source.ps1`
+- `scripts/test-phase7c-web-ui-safe-deploy-source.ps1`
+- `scripts/test-phase7c-system-lifecycle-broker-source.ps1`
+- `.github/workflows/phase7c-canonical-pr-gate.yml`
+- `.github/workflows/phase7c-runtime-ready-stable-recovery-deploy-ci.yml`
 
 ### Deliberately unchanged
 
-- Trend/Sideway/Telegram/regime child controller scripts: the supervisor already owns canonical child PID creation and may attest on behalf of each child per the approved spec.
-- AUTO/ARM services/routes/cards.
-- MT5 bridge order endpoints.
-- strategy/risk execution logic.
+- `scripts/run-phase7c-trend-controller-local.ps1`
+- `scripts/run-phase7c-sideway-controller-local.ps1`
+- `scripts/run-phase7c-telegram-mode-controller-local.ps1`
+- `scripts/run-phase7c-regime-notifier-local.ps1`
+- AUTO/ARM implementation files, order routes, strategy rules, risk/TP business rules.
+
+The supervisor already owns the canonical child PID creation, so it can attest on behalf of Trend/Sideway/Telegram/regime-notifier without altering those child scripts.
 
 ---
 
-### Task 1: Core identity, fingerprint, manifest and verdict primitives
+### Task 1: Core identity, fingerprint, manifest, component and verdict primitives
 
 **Files:**
 - Create: `scripts/lib/phase7c-runtime-source-attestation.ps1`
@@ -78,25 +83,34 @@
 - Create: `scripts/test-phase7c-runtime-source-attestation-source.ps1`
 
 **Interfaces:**
-- PowerShell produces:
-  - `Get-Phase7CRuntimeSourceConfigIdentity -RuntimeRoot <path> -AccountMode <DEMO|LIVE> -LiveExecutionEnabled <bool> -ControlApiUrl <url>`
-  - `Get-Phase7CRuntimeSourceConfigFingerprint -ConfigIdentity <object>`
-  - `Initialize-Phase7CRuntimeSourceDeployment -RuntimeRoot <path> -SourceCommit <sha> -SourceTree <sha> -Branch main -ConfigIdentity <object>`
-  - `Read-Phase7CRuntimeSourceDeployment -RuntimeRoot <path>`
-  - `Write-Phase7CRuntimeSourceComponentAttestation -RuntimeRoot <path> -Component <name> -ProcessId <pid> -LauncherPath <path>`
-- TypeScript produces:
-  - `Phase7CRuntimeSourceComponentName`
-  - `Phase7CRuntimeSourceVerdict`
-  - `Phase7CRuntimeSourceDeploymentManifest`
-  - `Phase7CRuntimeSourceComponentAttestation`
-  - `canonicalizePhase7CRuntimeSourceConfig(input)`
-  - `fingerprintPhase7CRuntimeSourceConfig(input)`
-  - `evaluatePhase7CRuntimeSourceComponent(...)`
-  - `combinePhase7CRuntimeSourceVerdicts(...)`
 
-- [ ] **Step 1: Write the failing Node tests for verdict precedence and identity checks**
+PowerShell functions:
 
-Add tests that express the final behavior before the service exists:
+```text
+Get-Phase7CRuntimeSourceConfigIdentity([string] RuntimeRoot, [string] AccountMode, [bool] LiveExecutionEnabled, [string] ControlApiUrl)
+Get-Phase7CRuntimeSourceConfigFingerprint([object] ConfigIdentity) -> string
+Initialize-Phase7CRuntimeSourceDeployment([string] RuntimeRoot, [string] SourceCommit, [string] SourceTree, [string] Branch, [object] ConfigIdentity) -> PSCustomObject
+Read-Phase7CRuntimeSourceDeployment([string] RuntimeRoot) -> PSCustomObject
+Write-Phase7CRuntimeSourceComponentAttestation([string] RuntimeRoot, [string] Component, [int] ProcessId, [string] LauncherPath) -> PSCustomObject
+```
+
+TypeScript exports:
+
+```ts
+export type Phase7CRuntimeSourceComponentName =
+  | "api" | "lifecycle-broker" | "supervisor" | "trend"
+  | "sideway" | "telegram" | "regime-notifier";
+
+export type Phase7CRuntimeSourceVerdict =
+  | "EXACT_MATCH" | "MISMATCH" | "STALE" | "UNKNOWN";
+
+export function canonicalizePhase7CRuntimeSourceConfig(input: Phase7CRuntimeSourceConfigIdentity): string;
+export function fingerprintPhase7CRuntimeSourceConfig(input: Phase7CRuntimeSourceConfigIdentity): string;
+export function evaluatePhase7CRuntimeSourceComponent(input: Phase7CRuntimeSourceComponentEvaluationInput): Phase7CRuntimeSourceComponentResult;
+export function combinePhase7CRuntimeSourceVerdicts(values: readonly Phase7CRuntimeSourceVerdict[]): Phase7CRuntimeSourceVerdict;
+```
+
+- [ ] **Step 1: Write Node RED tests for verdict precedence and canonical fingerprint**
 
 ```ts
 import assert from "node:assert/strict";
@@ -106,44 +120,39 @@ import {
   fingerprintPhase7CRuntimeSourceConfig,
 } from "./phase7c-runtime-source-attestation.service";
 
-test("overall verdict precedence is mismatch > unknown > stale > exact", () => {
+const fixture = {
+  version: 1 as const,
+  accountMode: "LIVE" as const,
+  liveExecutionEnabled: true,
+  runtimeRoot: "F:\\Project\\XAUUSD_AI_MASTER\\xauusd-ai-master\\.runtime",
+  controlApiUrl: "http://127.0.0.1:3711",
+};
+
+test("fingerprint fixture is cross-language stable", () => {
+  assert.equal(
+    fingerprintPhase7CRuntimeSourceConfig(fixture),
+    "sha256:ad7ecee6a3c038992ba8816bf8ec8235bc2febbdad35fcd07a35c511512445d9",
+  );
+});
+
+test("overall precedence is mismatch then unknown then stale then exact", () => {
   assert.equal(combinePhase7CRuntimeSourceVerdicts(["EXACT_MATCH", "STALE"]), "STALE");
   assert.equal(combinePhase7CRuntimeSourceVerdicts(["STALE", "UNKNOWN"]), "UNKNOWN");
   assert.equal(combinePhase7CRuntimeSourceVerdicts(["UNKNOWN", "MISMATCH"]), "MISMATCH");
 });
-
-test("canonical fingerprint is deterministic", () => {
-  const value = fingerprintPhase7CRuntimeSourceConfig({
-    version: 1,
-    accountMode: "LIVE",
-    liveExecutionEnabled: true,
-    runtimeRoot: "F:\\Project\\XAUUSD_AI_MASTER\\xauusd-ai-master\\.runtime",
-    controlApiUrl: "http://127.0.0.1:3711",
-  });
-  assert.match(value, /^sha256:[0-9a-f]{64}$/);
-  assert.equal(value, fingerprintPhase7CRuntimeSourceConfig({
-    version: 1,
-    accountMode: "LIVE",
-    liveExecutionEnabled: true,
-    runtimeRoot: "F:\\Project\\XAUUSD_AI_MASTER\\xauusd-ai-master\\.runtime",
-    controlApiUrl: "http://127.0.0.1:3711",
-  }));
-});
 ```
 
-- [ ] **Step 2: Run the Node test and prove RED**
-
-Run:
+- [ ] **Step 2: Run Node test and prove RED**
 
 ```bash
 pnpm --filter @xauusd/api exec node --import tsx --test src/services/phase7c-runtime-source-attestation.service.test.ts
 ```
 
-Expected: FAIL because `phase7c-runtime-source-attestation.service.ts` does not exist/export the required interfaces/functions.
+Expected: FAIL because the new service/exports do not exist.
 
-- [ ] **Step 3: Write the failing PowerShell contract for the helper**
+- [ ] **Step 3: Write PowerShell RED contract**
 
-The test must use a temporary directory only and must assert the helper path/function names plus the exact read-only guarantees. Its first executable contract should include:
+Start with an explicit missing-helper failure, then use only a temp directory for functional checks:
 
 ```powershell
 $Helper = Join-Path $ProjectRoot "scripts\lib\phase7c-runtime-source-attestation.ps1"
@@ -158,84 +167,80 @@ $identity = Get-Phase7CRuntimeSourceConfigIdentity `
   -LiveExecutionEnabled $true `
   -ControlApiUrl "http://127.0.0.1:3711"
 $fingerprint = Get-Phase7CRuntimeSourceConfigFingerprint -ConfigIdentity $identity
-if ($fingerprint -notmatch '^sha256:[0-9a-f]{64}$') { throw "fingerprint invalid" }
+if ($fingerprint -ne "sha256:ad7ecee6a3c038992ba8816bf8ec8235bc2febbdad35fcd07a35c511512445d9") {
+  throw "Cross-language fingerprint mismatch: $fingerprint"
+}
 ```
 
-Also parse every modified PowerShell file with `[System.Management.Automation.Language.Parser]::ParseFile` and assert forbidden P1 mutations are absent (`ARM_LIVE`, `mode = "AUTO"`, `/v1/orders` mutation calls, `Start-ScheduledTask` introduced by P1 helper).
+The contract also parses every touched PowerShell source using `[System.Management.Automation.Language.Parser]::ParseFile`.
 
-- [ ] **Step 4: Run PS7 and PS5.1 and prove RED**
-
-Run:
+- [ ] **Step 4: Run PS7 and Windows PowerShell 5.1 and prove RED**
 
 ```powershell
 pwsh -NoProfile -File .\scripts\test-phase7c-runtime-source-attestation-source.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-phase7c-runtime-source-attestation-source.ps1
 ```
 
-Expected: both FAIL at the explicit missing-helper RED marker.
+Expected: both FAIL at `RED: runtime source attestation helper missing`.
 
-- [ ] **Step 5: Implement the minimal PowerShell helper**
+- [ ] **Step 5: Implement PowerShell canonicalization and atomic JSON**
 
-Use an `[ordered]` identity with exactly these V1 fields:
+Build an `[ordered]` identity with fields inserted exactly in this order:
 
 ```powershell
 [ordered]@{
   version = 1
-  accountMode = $AccountMode
+  accountMode = $AccountMode.Trim().ToUpperInvariant()
   liveExecutionEnabled = [bool]$LiveExecutionEnabled
   runtimeRoot = [System.IO.Path]::GetFullPath($RuntimeRoot)
   controlApiUrl = $ControlApiUrl.TrimEnd('/')
 }
 ```
 
-Serialize with `ConvertTo-Json -Depth 4 -Compress`, UTF-8 no BOM, SHA-256 the UTF-8 bytes, and return `sha256:<lowercase hex>`. Implement atomic JSON writes as sibling temp file -> close -> `[System.IO.File]::Replace` when destination exists, otherwise atomic `Move`.
+Canonical UTF-8 text must match compact JSON semantics used by `JSON.stringify`. Hash bytes with SHA-256 and return prefix `sha256:` followed by 64 lowercase hex characters.
 
-Manifest idempotency must compare the tuple:
+Atomic write helper behavior:
 
 ```text
-sourceCommit
-sourceTree
-branch
-worktreeClean=true
-configFingerprint
+create sibling temporary file in target directory
+write UTF-8 without BOM
+flush and close
+replace existing target atomically, or move temp file when target is absent
+remove orphan temp file in finally
 ```
 
-and reuse existing `deploymentId` + `createdAt` if identical; otherwise create `deploymentId=[guid]::NewGuid().ToString('N')` and a new Unix-ms timestamp.
+- [ ] **Step 6: Implement deployment idempotency and component writer**
 
-`Write-Phase7CRuntimeSourceComponentAttestation` must read the current manifest, SHA-256 the supplied launcher file, and write the exact component schema. It may throw internally; launch callers in later tasks catch/log and continue.
+Manifest identity tuple is exactly:
 
-- [ ] **Step 6: Implement matching TypeScript primitives**
-
-Define the exact unions:
-
-```ts
-export type Phase7CRuntimeSourceComponentName =
-  | "api" | "lifecycle-broker" | "supervisor" | "trend"
-  | "sideway" | "telegram" | "regime-notifier";
-
-export type Phase7CRuntimeSourceVerdict =
-  | "EXACT_MATCH" | "MISMATCH" | "STALE" | "UNKNOWN";
+```text
+sourceCommit + sourceTree + branch + worktreeClean(true) + configFingerprint
 ```
 
-Use `createHash("sha256")` for the same compact JSON identity representation and keep all filesystem/process dependencies injectable in evaluation helpers so tests do not touch LIVE runtime.
+If an existing valid manifest has the same tuple, preserve `deploymentId` and `createdAt`. Otherwise create a new 32-character lowercase GUID string with no separators and a new Unix-ms timestamp.
 
-- [ ] **Step 7: Expand tests to cover the approved verdict matrix**
+Component writer reads the manifest, hashes the supplied launcher bytes, and writes `version`, `component`, `deploymentId`, `sourceCommit`, `sourceTree`, `pid`, `startedAt`, `launcherSha256`, `configFingerprint`.
 
-Tests must cover: wrong commit/tree/deploymentId/config/hash -> `MISMATCH`; live current PID different from attested PID -> `MISMATCH`; dead historical PID with no new live PID -> `STALE`; missing/malformed evidence -> `UNKNOWN`; all exact -> `EXACT_MATCH`; and precedence combinations.
+- [ ] **Step 7: Implement matching TypeScript primitives and full verdict matrix**
 
-- [ ] **Step 8: Run core tests GREEN**
+The evaluator must return:
 
-Run:
-
-```bash
-pnpm --filter @xauusd/api exec node --import tsx --test src/services/phase7c-runtime-source-attestation.service.test.ts
+```text
+MISMATCH: valid contradictory evidence (commit/tree/deployment/fingerprint/launcher/component/current-live-PID mismatch)
+STALE: valid historical record, attested PID dead, no different current live PID
+UNKNOWN: missing/malformed/unreadable manifest/record/PID/hash evidence
+EXACT_MATCH: every required equality/liveness/hash check passes
 ```
 
-and both PowerShell commands from Step 4.
+- [ ] **Step 8: Expand Node tests to all approved cases**
 
-Expected: all PASS.
+Cover wrong commit, tree, deployment ID, config fingerprint, launcher hash, component name, live current PID vs attested PID, dead historical PID, missing/malformed manifest, missing/malformed component, overall precedence, all exact.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 9: Run Task 1 GREEN**
+
+Run the Node command from Step 2 and both PowerShell commands from Step 4. Expected: PASS.
+
+- [ ] **Step 10: Commit**
 
 ```bash
 git add scripts/lib/phase7c-runtime-source-attestation.ps1 scripts/test-phase7c-runtime-source-attestation-source.ps1 apps/api/src/services/phase7c-runtime-source-attestation.service.ts apps/api/src/services/phase7c-runtime-source-attestation.service.test.ts
@@ -247,25 +252,21 @@ git commit -m "feat: add runtime source attestation primitives"
 ### Task 2: Canonical deployment manifest creation/reuse
 
 **Files:**
-- Modify: `scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1` immediately after existing branch/clean/exact-commit Git guard.
-- Modify: `scripts/deploy-phase7c-web-ui-local.ps1` immediately after existing branch/clean/exact-commit Git guard and before `Assert-LifecycleBrokerSourceFresh` / build.
+- Modify: `scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1` after its existing branch/clean/exact-commit guard.
+- Modify: `scripts/deploy-phase7c-web-ui-local.ps1` after its existing branch/clean/exact-commit guard and before broker freshness/build/restart.
 - Modify: `scripts/test-phase7c-runtime-source-attestation-source.ps1`
 - Modify: `scripts/test-phase7c-runtime-ready-stable-recovery-deploy-source.ps1`
 - Modify: `scripts/test-phase7c-web-ui-safe-deploy-source.ps1`
 
-**Interfaces:**
-- Consumes Task 1 `Initialize-Phase7CRuntimeSourceDeployment`.
-- Produces `.runtime/phase7c-source-attestation/deployment.json` before any newly started P1-aware process needs it.
+**Interfaces:** Consumes `Initialize-Phase7CRuntimeSourceDeployment`; produces `.runtime/phase7c-source-attestation/deployment.json` before any P1-aware process starts.
 
-- [ ] **Step 1: Add RED source-contract assertions for ordering**
+- [ ] **Step 1: Add RED ordering assertions**
 
-Assert both canonical scripts load `lib\phase7c-runtime-source-attestation.ps1`, resolve the exact source tree with the already-proven `$ExpectedCommit`, and call `Initialize-Phase7CRuntimeSourceDeployment` only after Git guard success.
+Require both canonical paths to load `scripts/lib/phase7c-runtime-source-attestation.ps1`, resolve tree from the already-proven exact commit, and initialize the manifest only after source guard success. In Web deploy, initialization precedes dashboard/API restart. In recovery, initialization precedes every branch that may repair/restart the task or lifecycle.
 
-For Web deploy, assert manifest initialization occurs before dashboard/API runtime restart. For recovery, assert it occurs before any branch that can restart/repair the Scheduled Task or lifecycle.
+- [ ] **Step 2: Prove RED in PS7 + PS5.1**
 
-- [ ] **Step 2: Run existing + new source contracts and prove RED**
-
-Run in PS7 and PS5.1:
+Run:
 
 ```powershell
 .\scripts\test-phase7c-runtime-source-attestation-source.ps1
@@ -273,11 +274,11 @@ Run in PS7 and PS5.1:
 .\scripts\test-phase7c-web-ui-safe-deploy-source.ps1
 ```
 
-Expected: only the newly added attestation assertions fail; all pre-existing safety assertions remain green up to the new requirement.
+under both engines. Expected: only new attestation assertions fail.
 
-- [ ] **Step 3: Integrate manifest writer without weakening existing guards**
+- [ ] **Step 3: Integrate manifest initialization without weakening source gates**
 
-In each guarded path resolve tree using the existing Git executable after commit equality:
+After exact commit equality, resolve tree:
 
 ```powershell
 $sourceTree = ([string](& $gitExe rev-parse "$ExpectedCommit`^{tree}")).Trim().ToLowerInvariant()
@@ -286,24 +287,22 @@ if ($LASTEXITCODE -ne 0 -or $sourceTree -notmatch '^[0-9a-f]{40}$') {
 }
 ```
 
-Build config identity from canonical runtime root/account mode/control API state already available to the script. Call the helper and print audit-only markers:
+Build V1 config identity from canonical runtime root, account mode, live-execution boolean, and control API URL already available in each script. Initialize the manifest and emit values directly from the returned object:
 
-```text
-PHASE7C_RUNTIME_SOURCE_DEPLOYMENT_ID=<id>
-PHASE7C_RUNTIME_SOURCE_COMMIT=<sha>
-PHASE7C_RUNTIME_SOURCE_TREE=<sha>
-PHASE7C_RUNTIME_SOURCE_MANIFEST=READY
+```powershell
+Write-Host "PHASE7C_RUNTIME_SOURCE_DEPLOYMENT_ID=$($deployment.deploymentId)"
+Write-Host "PHASE7C_RUNTIME_SOURCE_COMMIT=$($deployment.sourceCommit)"
+Write-Host "PHASE7C_RUNTIME_SOURCE_TREE=$($deployment.sourceTree)"
+Write-Host "PHASE7C_RUNTIME_SOURCE_MANIFEST=READY"
 ```
 
-No attestation marker may alter the existing recovery decision tree.
+- [ ] **Step 4: Add idempotency functional assertions**
 
-- [ ] **Step 4: Add idempotency functional test**
+In the temp contract, identical tuple twice must preserve both `deploymentId` and `createdAt`; changing source tree or account mode must rotate both generation identity and timestamp.
 
-In the temp test, call `Initialize-...` twice with identical tuple and assert same `deploymentId`/`createdAt`; change source tree or account mode and assert the ID rotates.
+- [ ] **Step 5: Run all touched source contracts GREEN in both PowerShell engines**
 
-- [ ] **Step 5: Run all three contracts under PS7 and PS5.1**
-
-Expected: PASS and no existing recovery/deploy order assertion changes.
+Existing recovery ordering, battery repair, broker freshness, PAUSE/DISARM safety assertions must remain unchanged and pass.
 
 - [ ] **Step 6: Commit**
 
@@ -314,7 +313,7 @@ git commit -m "feat: stamp canonical runtime deployment identity"
 
 ---
 
-### Task 3: Lifecycle broker, supervisor and child PID attestations
+### Task 3: Broker, supervisor and executor child attestations
 
 **Files:**
 - Modify: `scripts/run-phase7c-executor-task-runner-local.ps1`
@@ -322,41 +321,30 @@ git commit -m "feat: stamp canonical runtime deployment identity"
 - Modify: `scripts/test-phase7c-runtime-source-attestation-source.ps1`
 - Modify: `scripts/test-phase7c-system-lifecycle-broker-source.ps1`
 
-**Interfaces:**
-- Consumes Task 1 component writer and Task 2 deployment manifest.
-- Produces canonical component files for `lifecycle-broker`, `supervisor`, `trend`, `sideway`, `telegram`, `regime-notifier`.
+**Interfaces:** Produces component records for `lifecycle-broker`, `supervisor`, `trend`, `sideway`, `telegram`, `regime-notifier`.
 
-- [ ] **Step 1: Add RED assertions for exact canonical PID binding**
+- [ ] **Step 1: Add RED canonical-PID assertions**
 
-Require:
+Lock exact PID sources:
 
 ```text
-lifecycle-broker -> $PID in task runner
-supervisor       -> $PID used for supervisor.pid
-trend            -> $trend.Id used for trend.pid
-sideway          -> $sideway.Id used for sideway.pid
-telegram         -> returned Start-Process child Id used for telegram-mode.pid
-regime-notifier  -> returned Start-Process child Id used for regime-notifier.pid
+lifecycle-broker = task-runner $PID
+supervisor = same $PID written to supervisor.pid
+trend = same Start-Process Id written to trend.pid
+sideway = same Start-Process Id written to sideway.pid
+telegram = same Start-Process Id written to telegram-mode.pid
+regime-notifier = same Start-Process Id written to regime-notifier.pid
 ```
 
-Require launcher paths exactly:
-
-```text
-scripts/run-phase7c-executor-task-runner-local.ps1
-scripts/run-phase7c-executors-local.ps1
-scripts/run-phase7c-trend-controller-local.ps1
-scripts/run-phase7c-sideway-controller-local.ps1
-scripts/run-phase7c-telegram-mode-controller-local.ps1
-scripts/run-phase7c-regime-notifier-local.ps1
-```
+Lock launcher files to the exact six existing scripts responsible for those processes.
 
 - [ ] **Step 2: Prove RED in PS7 + PS5.1**
 
-Run the new source contract plus lifecycle broker source contract. Expected: attestation markers/writer calls missing.
+Run the P1 source contract and lifecycle-broker source contract. Expected: writer calls missing.
 
-- [ ] **Step 3: Add best-effort broker attestation**
+- [ ] **Step 3: Add best-effort lifecycle-broker write**
 
-Dot-source the helper from the task runner. After runtime root is resolved and startup lock is acquired, call:
+After runtime root is resolved and startup lock acquired:
 
 ```powershell
 try {
@@ -364,7 +352,7 @@ try {
     -RuntimeRoot $workDir `
     -Component "lifecycle-broker" `
     -ProcessId $PID `
-    -LauncherPath $PSCommandPath
+    -LauncherPath $PSCommandPath | Out-Null
   Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_LIFECYCLE_BROKER=WRITTEN"
 } catch {
   Write-Warning "Runtime source attestation unavailable for lifecycle-broker: $($_.Exception.Message)"
@@ -373,25 +361,13 @@ try {
 
 The catch must not change broker state or exit.
 
-- [ ] **Step 4: Add best-effort supervisor and child attestations**
+- [ ] **Step 4: Add best-effort supervisor/child writer wrapper**
 
-After each existing PID file is written, write the corresponding attestation with that exact PID. Centralize this in a local helper such as:
+After each existing PID file write, call the shared helper with that exact PID and the direct launcher path. Do not alter child command-line parameters or trading environment.
 
-```powershell
-function Write-ChildSourceAttestation([string]$Component, [int]$ProcessId, [string]$LauncherPath) {
-  try {
-    Write-Phase7CRuntimeSourceComponentAttestation -RuntimeRoot $WorkDir -Component $Component -ProcessId $ProcessId -LauncherPath $LauncherPath
-  } catch {
-    Write-Warning "Runtime source attestation unavailable for ${Component}: $($_.Exception.Message)"
-  }
-}
-```
+- [ ] **Step 5: Run P1 + lifecycle broker source/protocol contracts GREEN**
 
-Do not modify child command lines or trading arguments.
-
-- [ ] **Step 5: Run PS7/PS5.1 source contracts GREEN**
-
-Also run existing lifecycle broker protocol/source contracts to prove lifecycle semantics did not change.
+Both PowerShell engines for P1; existing broker contracts at least under their current CI shells.
 
 - [ ] **Step 6: Commit**
 
@@ -402,7 +378,7 @@ git commit -m "feat: attest Phase7C executor runtime processes"
 
 ---
 
-### Task 4: API self-attestation, runtime aggregation and GET-only endpoint
+### Task 4: API self-attestation, aggregation and GET-only route
 
 **Files:**
 - Modify: `scripts/run-phase7b-api-runtime-local.ps1`
@@ -413,51 +389,36 @@ git commit -m "feat: attest Phase7C executor runtime processes"
 - Modify: `scripts/test-phase7c-runtime-source-attestation-source.ps1`
 
 **Interfaces:**
-- Produces `writePhase7CApiRuntimeSourceAttestation()`.
-- Produces `getPhase7CRuntimeSourceAttestationSnapshot()`.
-- Exposes `GET /api/v1/phase7c/runtime-source-attestation` only on loopback.
-
-- [ ] **Step 1: Add RED tests for full snapshot construction**
-
-Use a temp fixture tree with `deployment.json`, component JSON, PID files and broker heartbeat/status. Inject `isPidAlive` and `hashFile` functions so the test can prove all four verdicts without real processes.
-
-The all-exact fixture must assert:
 
 ```ts
-assert.equal(snapshot.readOnly, true);
-assert.equal(snapshot.overall, "EXACT_MATCH");
-assert.equal(snapshot.components.length, 7);
-assert.deepEqual(snapshot.safety, {
-  readOnly: true,
-  modeMutation: false,
-  armMutation: false,
-  autoGate: false,
-  lifecycleGate: false,
-  orderMutation: false,
-  positionMutation: false,
-  strategyMutation: false,
-  autoRetune: false,
-});
+export function writePhase7CApiRuntimeSourceAttestation(): Phase7CRuntimeSourceComponentAttestation;
+export function getPhase7CRuntimeSourceAttestationSnapshot(): Phase7CRuntimeSourceAttestationSnapshot;
 ```
 
-- [ ] **Step 2: Prove Node RED**
+Route: `GET /api/v1/phase7c/runtime-source-attestation`.
 
-Run the Task 1 Node command. Expected: snapshot/writer exports missing.
+- [ ] **Step 1: Add Node RED tests for complete snapshot**
 
-- [ ] **Step 3: Pass immutable API attestation context from PowerShell**
+Build temp fixtures and inject `isPidAlive`, `readFile`, `hashFile`, runtime root, project root, current API PID. All-exact fixture must assert seven components, overall `EXACT_MATCH`, `readOnly: true`, and every safety mutation/gate flag false.
 
-Set only non-secret process env values before `pnpm --filter '@xauusd/api' start`:
+- [ ] **Step 2: Prove RED**
+
+Run Task 1 Node command. Expected: snapshot/API-writer exports missing.
+
+- [ ] **Step 3: Pass only non-secret immutable context from API PowerShell launcher**
+
+Before `pnpm --filter '@xauusd/api' start`:
 
 ```powershell
 $env:PHASE7C_SOURCE_ATTESTATION_ROOT = Join-Path $WorkDir "phase7c-source-attestation"
 $env:PHASE7C_SOURCE_ATTESTATION_API_LAUNCHER = $PSCommandPath
 ```
 
-Do not pass commit/tree separately; Node reads the immutable deployment manifest.
+Commit/tree/fingerprint are read from deployment manifest; they are not rediscovered from Git.
 
-- [ ] **Step 4: Write API record from actual Node PID**
+- [ ] **Step 4: Write API component record from actual Node PID**
 
-In `apps/api/src/index.ts`, inside the successful `app.listen` callback call a non-throwing wrapper:
+In successful `app.listen` callback:
 
 ```ts
 try {
@@ -468,29 +429,23 @@ try {
 }
 ```
 
-The service writes `pid: process.pid`; the PowerShell wrapper PID must never be substituted.
+`pid` is always `process.pid`.
 
-- [ ] **Step 5: Implement canonical PID resolver and launcher mapping**
+- [ ] **Step 5: Implement current-PID and launcher mapping**
 
-Use exact mappings:
-
-```ts
-api -> process.pid
-lifecycle-broker -> heartbeat/status brokerPid (must agree)
-supervisor -> phase7c-executors/supervisor.pid
-trend -> phase7c-executors/trend.pid
-sideway -> phase7c-executors/sideway.pid
-telegram -> phase7c-executors/telegram-mode.pid
-regime-notifier -> phase7c-executors/regime-notifier.pid
+```text
+api -> process.pid -> scripts/run-phase7b-api-runtime-local.ps1
+lifecycle-broker -> heartbeat/status agreeing brokerPid -> scripts/run-phase7c-executor-task-runner-local.ps1
+supervisor -> supervisor.pid -> scripts/run-phase7c-executors-local.ps1
+trend -> trend.pid -> scripts/run-phase7c-trend-controller-local.ps1
+sideway -> sideway.pid -> scripts/run-phase7c-sideway-controller-local.ps1
+telegram -> telegram-mode.pid -> scripts/run-phase7c-telegram-mode-controller-local.ps1
+regime-notifier -> regime-notifier.pid -> scripts/run-phase7c-regime-notifier-local.ps1
 ```
 
-and exact launcher paths listed in Task 3 plus API launcher `scripts/run-phase7b-api-runtime-local.ps1`.
-
-The normal GET path may read files and hash launcher bytes; it must never shell out to Git.
+Use only read/hash/liveness operations. Liveness may use signal `0`; no process-control signal is allowed.
 
 - [ ] **Step 6: Implement localhost GET route**
-
-Place beside existing `/source-safety`/`/lifecycle` diagnostics:
 
 ```ts
 router.get("/runtime-source-attestation", (req, res) => {
@@ -503,35 +458,20 @@ router.get("/runtime-source-attestation", (req, res) => {
 });
 ```
 
-No POST/PUT/PATCH/DELETE sibling route is added.
+No POST/PUT/PATCH/DELETE attestation route exists.
 
-- [ ] **Step 7: Expand source contract with mutation and Git prohibitions**
+- [ ] **Step 7: Add source-safety prohibitions**
 
-Static assertions must reject these patterns in the new route/service/helper:
+The P1 source contract must reject P1 code paths containing mode mutation, ARM execution, lifecycle start/stop invocation, Scheduled Task start/stop, order mutation calls, `child_process`, `exec`, `spawn`, or Git subprocess calls in the API aggregator.
 
-```text
-phase7CBotModeService.set
-ARM_LIVE
-DISARM_LIVE
-Start-ScheduledTask
-Stop-ScheduledTask
-/v1/orders with POST/DELETE
-child_process
-exec(
-spawn(
-git rev-parse in GET service
-```
-
-Allow `process.kill(pid, 0)`-style liveness only; no signal other than `0`.
-
-- [ ] **Step 8: Run Node tests, API build and PowerShell contracts GREEN**
+- [ ] **Step 8: Run Node tests + API build + PS contracts GREEN**
 
 ```bash
 pnpm --filter @xauusd/api exec node --import tsx --test src/services/phase7c-runtime-source-attestation.service.test.ts
 pnpm --filter @xauusd/api build
 ```
 
-plus PS7/PS5.1 source contract.
+plus both PowerShell P1 source-contract commands.
 
 - [ ] **Step 9: Commit**
 
@@ -552,29 +492,22 @@ git commit -m "feat: expose read-only runtime source attestation"
 - Modify: `scripts/test-phase7c-runtime-source-attestation-source.ps1`
 
 **Interfaces:**
-- `getPhase7CRuntimeSourceAttestation(): Promise<Phase7CRuntimeSourceAttestationSnapshot>`
-- Card query key: `phase7c-runtime-source-attestation`.
 
-- [ ] **Step 1: Add RED static UI contract**
-
-Require the Web type/API/card/shell to contain the GET client and exact warning copy:
-
-```text
-Runtime Source Attestation
-READ-ONLY WARNING — NO AUTOMATIC ACTION TAKEN
+```ts
+export async function getPhase7CRuntimeSourceAttestation(): Promise<Phase7CRuntimeSourceAttestationSnapshot>;
 ```
 
-and forbid mutation imports/calls in the new card (`useMutation`, `setPhase7CBotMode`, `enablePhase7CAuto`, ARM execute APIs, lifecycle action APIs).
+TanStack query key: `phase7c-runtime-source-attestation`.
+
+- [ ] **Step 1: Add RED static UI assertions**
+
+Require type/getter/card/shell integration and exact warning copy `READ-ONLY WARNING — NO AUTOMATIC ACTION TAKEN`. Reject `useMutation` and imports/calls to AUTO, ARM, lifecycle mutation APIs in the new card.
 
 - [ ] **Step 2: Prove RED under PS7 + PS5.1**
 
-Expected: missing card/type/API getter.
+Expected: type/getter/card markers missing.
 
-- [ ] **Step 3: Add response types**
-
-Define `Phase7CRuntimeSourceAttestationSnapshot` with the exact V1 deployment/component/safety fields from the spec. Keep `sourceCommit` full length in data; shorten only at render time.
-
-- [ ] **Step 4: Add GET client**
+- [ ] **Step 3: Add Web response types and GET client**
 
 ```ts
 export async function getPhase7CRuntimeSourceAttestation(): Promise<Phase7CRuntimeSourceAttestationSnapshot> {
@@ -584,22 +517,13 @@ export async function getPhase7CRuntimeSourceAttestation(): Promise<Phase7CRunti
 }
 ```
 
-- [ ] **Step 5: Implement the card with query-only behavior**
+Keep full commit/ID in data and shorten only for display.
 
-Use `useQuery` with a 5-second refresh and `retry: false`. Render accepted commit, shortened deployment ID, overall verdict, and seven component rows. Color mapping:
+- [ ] **Step 4: Implement query-only card**
 
-```text
-EXACT_MATCH -> success
-MISMATCH -> error
-STALE -> warning
-UNKNOWN -> warning/default
-```
+Use `useQuery`, refresh interval 5 seconds, `retry: false`. Render accepted commit, deployment ID, overall verdict and seven component rows. Mapping: exact=success, mismatch=error, stale=warning, unknown=warning/default. Any non-exact overall displays the exact read-only warning. No buttons or switches.
 
-Non-exact overall must render the exact read-only warning. No button or switch belongs in this card.
-
-- [ ] **Step 6: Mount card in `Phase7CControlCenterShellPage`**
-
-Order:
+- [ ] **Step 5: Mount card between authorization and control content**
 
 ```tsx
 <Phase7CExecutionAuthorizationCard />
@@ -607,17 +531,13 @@ Order:
 <Phase7CControlCenterPage />
 ```
 
-This keeps authorization controls separate from provenance observability.
-
-- [ ] **Step 7: Run Web build and source contract GREEN**
+- [ ] **Step 6: Run Web build and both PowerShell source contracts GREEN**
 
 ```bash
 pnpm --filter @xauusd/web build
 ```
 
-plus PS7/PS5.1 source contract.
-
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/phase7c-types.ts apps/web/src/api.ts apps/web/src/ui/Phase7CRuntimeSourceAttestationCard.tsx apps/web/src/pages/Phase7CControlCenterShellPage.tsx scripts/test-phase7c-runtime-source-attestation-source.ps1
@@ -626,51 +546,51 @@ git commit -m "feat: show runtime source attestation in Control Center"
 
 ---
 
-### Task 6: CI coverage and regression lock
+### Task 6: CI coverage and touched-path regression lock
 
 **Files:**
 - Modify: `.github/workflows/phase7c-canonical-pr-gate.yml`
 - Modify: `.github/workflows/phase7c-runtime-ready-stable-recovery-deploy-ci.yml`
 - Modify: `scripts/test-phase7c-runtime-source-attestation-source.ps1`
 
-**Interfaces:**
-- CI must exercise Node service behavior, PS7, PS5.1, API build, Web build, and all existing touched-path safety regressions.
+**Interfaces:** CI must run Node behavior tests, PS7, PS5.1, API/Web builds, and existing lifecycle/recovery/deploy safety contracts.
 
-- [ ] **Step 1: Add RED workflow assertions to the source contract**
+- [ ] **Step 1: Add RED workflow assertions**
 
-Require both workflow files to reference `test-phase7c-runtime-source-attestation-source.ps1`. Require canonical Linux to run the TypeScript service test after installing workspace dependencies. Require recovery workflow path filters to include the new helper and all modified launch/deploy files.
+P1 source contract must require both workflows to reference `test-phase7c-runtime-source-attestation-source.ps1`. Recovery workflow path filters must include the new helper and every P1-modified launch/deploy path.
 
 - [ ] **Step 2: Prove RED**
 
-Run source contract in PS7/PS5.1. Expected: workflow markers missing.
+Run P1 source contract under PS7/PS5.1. Expected: workflow markers missing.
 
-- [ ] **Step 3: Update Canonical PR Gate**
+- [ ] **Step 3: Extend Canonical PR Gate**
 
-Add Linux step:
+Add Linux behavior test:
 
 ```yaml
 - name: Runtime source attestation service contract
   run: pnpm --filter @xauusd/api exec node --import tsx --test src/services/phase7c-runtime-source-attestation.service.test.ts
 ```
 
-Add Windows PS7 and PS5.1 source-contract steps. Do not grant write permissions; keep `permissions: contents: read`.
+Add Windows P1 source-contract steps for both `pwsh` and `powershell`. Preserve `permissions: contents: read`.
 
-- [ ] **Step 4: Update Runtime Ready Stable Recovery Deploy CI**
+- [ ] **Step 4: Extend Runtime Ready Stable Recovery Deploy CI**
 
-Add P1 paths to PR/push path filters and add source-contract steps in both PowerShell engines. Preserve all existing battery/recovery/safety jobs unchanged.
+Add P1 paths to both PR and main-push filters; add P1 source contract under both PowerShell engines. Do not remove or relax existing battery/recovery/safety steps.
 
-- [ ] **Step 5: Run complete local/source verification**
+- [ ] **Step 5: Run full final verification matrix**
 
-Run:
+Linux/cross-platform:
 
 ```bash
 pnpm --filter @xauusd/api exec node --import tsx --test src/services/phase7c-runtime-source-attestation.service.test.ts
 pnpm --filter @xauusd/api build
 pnpm --filter @xauusd/web build
 node --test scripts/test-phase7c-canonical-pr-gate-contract.mjs
+git diff --check
 ```
 
-On Windows run:
+Windows:
 
 ```powershell
 pwsh -NoProfile -File .\scripts\test-phase7c-runtime-source-attestation-source.ps1
@@ -682,7 +602,7 @@ pwsh -NoProfile -File .\scripts\test-phase7c-runtime-ready-stable-recovery-deplo
 pwsh -NoProfile -File .\scripts\test-phase7c-web-live-arm-demo-auto-source.ps1
 ```
 
-Expected: all PASS, `git diff --check` clean.
+Expected: all PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -693,18 +613,11 @@ git commit -m "ci: gate runtime source attestation"
 
 ---
 
-### Task 7: Final source verification, PR and production-acceptance evidence
+### Task 7: Exact-head review, PR, merge and source production acceptance
 
-**Files:**
-- Review all files changed by Tasks 1-6 plus the approved spec and this plan.
-- No new production file should be introduced in this task.
+**Files:** Review all P1 files, the approved spec, and this plan. No new production file in this task.
 
-**Interfaces:**
-- Produces an exact tested head suitable for PR/merge.
-
-- [ ] **Step 1: Verify branch provenance**
-
-Before PR, record:
+- [ ] **Step 1: Verify provenance and clean diff**
 
 ```bash
 git merge-base --is-ancestor 4f156ef1b019ef676cc23ed978c9487eb41f2fe6 HEAD
@@ -713,19 +626,19 @@ git diff --check
 git log --oneline --decorate -n 12
 ```
 
-Expected: accepted base is an ancestor; worktree clean; diff check clean.
+Expected: accepted P1 base is an ancestor, worktree clean, diff hygiene passes.
 
-- [ ] **Step 2: Re-run the complete verification matrix from Task 6**
+- [ ] **Step 2: Re-run Task 6 complete verification on the exact final head**
 
-Do not reuse earlier GREEN output. This is the final tested head.
+Earlier GREEN output is not reused as final evidence.
 
-- [ ] **Step 3: Inspect diff for forbidden scope expansion**
+- [ ] **Step 3: Diff-scope review**
 
-The diff must contain no changes to strategy entry/exit rules, AUTO/ARM policy, order routes, recovery sizing, lot/TP business rules, or MT5 bridge trading behavior.
+Reject any change to strategy entry/management/exit logic, AUTO/ARM policy, order routes, recovery sizing, lot/TP rules, or MT5 trading behavior.
 
 - [ ] **Step 4: Open non-draft PR against current `main`**
 
-PR body must state:
+PR body records:
 
 ```text
 P1_V1=READ_ONLY
@@ -737,26 +650,17 @@ AUTO_RETUNE=NONE
 LIVE_DEPLOYMENT_IN_PR=NONE
 ```
 
-and include the exact RED run evidence plus final GREEN run evidence.
+and exact RED/GREEN evidence.
 
 - [ ] **Step 5: Require fresh PR CI on exact PR head**
 
-Minimum required fresh checks:
-
-```text
-Phase7C Canonical PR Gate = SUCCESS
-Phase7C Runtime Ready Stable Recovery Deploy CI = SUCCESS
-```
-
-Do not merge if head SHA changes after the last inspected CI.
+At minimum both workflows must be `SUCCESS` on that head. If head changes, re-run/inspect fresh CI.
 
 - [ ] **Step 6: Merge only the exact tested head**
 
-Use squash merge with expected head SHA. After merge, capture the new `main` SHA and verify main-push CI on that exact merge SHA is SUCCESS.
+Squash merge with expected head SHA. Capture merged `main` SHA and require main-push CI success on that exact SHA.
 
-- [ ] **Step 7: Mark source production-accepted, not yet LIVE-proven**
-
-At this point the correct state is:
+- [ ] **Step 7: Record source-only completion state**
 
 ```text
 P1_SOURCE_PRODUCTION_ACCEPTED=TRUE
@@ -764,60 +668,41 @@ P1_RUNTIME_LIVE_PROVEN=FALSE
 LIVE_RUNTIME_MUTATION=NONE
 ```
 
-because old LIVE processes cannot retrospectively have P1 attestations.
+Old LIVE processes cannot retroactively acquire P1 attestations.
 
 ---
 
 ### Task 8: Guarded LIVE rollout and post-deploy proof — separate operator approval required
 
-**Files:**
-- No source edits.
-- Uses existing canonical source-sync/read-only-preflight/recovery/deploy procedures after exact merged main SHA is known.
+**Files:** No source edits. Use existing canonical sync/preflight/recovery/deploy procedures only after Task 7.
 
-**Interfaces:**
-- Produces the final acceptance condition `POST_DEPLOY_RUNTIME_ATTESTATION=EXACT_MATCH`.
+- [ ] **Step 1: Stop before runtime mutation and obtain explicit operator approval**
 
-- [ ] **Step 1: Stop before any LIVE mutation and obtain explicit operator approval**
+Present exact merged-main SHA, main-push CI and current LIVE state. Do not PAUSE, DISARM, restart or deploy before approval.
 
-Do not PAUSE, DISARM, restart, deploy, or recover as part of source implementation. Present current LIVE state and exact merged/main CI evidence first.
+- [ ] **Step 2: Guarded fast-forward source sync**
 
-- [ ] **Step 2: Sync LIVE source by guarded fast-forward only**
+Resolve actual merged `main` SHA from GitHub, require local `main`, clean worktree and fast-forward ancestry. No destructive reset/clean.
 
-After approval, resolve the actual merged main SHA from GitHub, verify local `main`, clean worktree, and fast-forward-only ancestry. No destructive Git reset/clean.
+- [ ] **Step 3: Fresh read-only LIVE preflight**
 
-- [ ] **Step 3: Run fresh read-only LIVE preflight**
+Require account/runtime/task/broker/lifecycle/positions/orders to classify a supported canonical deployment route. Mixed/blocked state stops rollout.
 
-Require account/runtime/positions/orders/task/broker/lifecycle state to classify an approved canonical deployment route. If mixed or blocked, stop; do not improvise a restart.
+- [ ] **Step 4: Run the existing canonical controlled deployment once**
 
-- [ ] **Step 4: Perform the existing canonical controlled deploy/recovery once**
+Use the actual merged SHA as `ExpectedCommit`. Existing recovery policy must finish `PAUSE + DISARMED + flat` before any later ARM/AUTO action.
 
-Use the exact merged SHA as `ExpectedCommit`. Preserve the existing policy that controlled recovery ends `PAUSE + DISARMED + flat` before any later operator ARM/AUTO action.
-
-- [ ] **Step 5: Query the new GET endpoint before ARM/AUTO**
+- [ ] **Step 5: Query P1 before ARM/AUTO**
 
 ```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation" -Method Get
+$attestation = Invoke-RestMethod -Uri "http://127.0.0.1:3711/api/v1/phase7c/runtime-source-attestation" -Method Get
+$attestation.overall
+$attestation.components | Format-Table component, verdict, pid, alive, sourceCommit
 ```
 
-Require:
+Require `overall=EXACT_MATCH`, every required component `EXACT_MATCH`, `readOnly=true`, canonical runtime health, task drift zero, fresh broker heartbeat, startup lock HELD, lifecycle READY and XAUUSD flat.
 
-```text
-overall=EXACT_MATCH
-api=EXACT_MATCH
-lifecycle-broker=EXACT_MATCH
-supervisor=EXACT_MATCH
-trend=EXACT_MATCH
-sideway=EXACT_MATCH
-telegram=EXACT_MATCH
-regime-notifier=EXACT_MATCH
-readOnly=true
-```
-
-Also require canonical runtime health, zero task definition drift, fresh broker heartbeat, startup lock HELD, lifecycle READY, XAUUSD flat.
-
-- [ ] **Step 6: Only after exact attestation proof, use existing manual ARM/AUTO procedure if the operator separately requests it**
-
-P1 itself must never invoke ARM/AUTO. The final P1 evidence is:
+- [ ] **Step 6: Record LIVE proof; ARM/AUTO remains separate manual procedure**
 
 ```text
 P1_RUNTIME_LIVE_PROVEN=TRUE
@@ -828,19 +713,21 @@ P1_ORDER_MUTATION=NONE
 P1_AUTO_RETUNE=NONE
 ```
 
+P1 never invokes ARM/AUTO; those remain the existing explicit operator flow.
+
 ---
 
-## Plan Self-Review Checklist
+## Self-Review Coverage Map
 
-Before execution starts, verify these mappings:
-
-- Spec deployment manifest/idempotency -> Tasks 1-2.
-- Spec non-secret fingerprint -> Task 1, with only stable launch identity in V1.
-- Spec seven required components/canonical PIDs -> Tasks 3-4.
-- Spec API self-PID -> Task 4.
-- Spec GET-only/no Git/no mutations -> Task 4 + Task 6 source contract.
-- Spec Control Center warning/no actions -> Task 5.
-- Spec PS7/PS5.1 + API/Web build + regression -> Task 6.
-- Spec PR/main CI -> Task 7.
-- Spec post-deploy `EXACT_MATCH` -> Task 8.
-- P2/P3/P4/P5 are not implemented by this plan.
+- Deployment manifest + same-identity `deploymentId` reuse: Tasks 1-2.
+- Non-secret, cross-language deterministic fingerprint: Task 1 exact digest fixture.
+- Atomic writes: Task 1.
+- Seven required components + canonical PIDs/launcher hashes: Tasks 3-4.
+- API attestation from real Node PID: Task 4.
+- `EXACT_MATCH/MISMATCH/STALE/UNKNOWN` + precedence: Tasks 1 and 4.
+- GET-only/localhost/no Git/no mutation: Tasks 4 and 6.
+- Read-only Control Center warning/no actions: Task 5.
+- PS7 + PS5.1 + API/Web build + existing safety regressions: Task 6.
+- Fresh PR/head + main-push CI: Task 7.
+- Post-deploy runtime `EXACT_MATCH`: Task 8.
+- P2/P3/P4/P5 remain outside this plan.
