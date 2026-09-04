@@ -8,8 +8,8 @@ const MIN_RECOMMENDATION_SAMPLE = 30;
 const ACTIVATION_PRICE = 10;
 
 const CURRENT_GIVEBACK: Record<Phase7CPerformanceStrategy, number> = {
-  TREND: 6,
-  SIDEWAY: 4,
+  TREND: 10,
+  SIDEWAY: 10,
 };
 
 const SHADOW_GIVEBACK: Record<Phase7CPerformanceStrategy, readonly number[]> = {
@@ -101,7 +101,7 @@ function replay(
   prices: readonly Phase7CFastMovePriceSample[],
   givebackPrice: number,
 ): Phase7CFastMoveReplayResult {
-  if (!(entry > 0) || !(givebackPrice >= 0) || !(ACTIVATION_PRICE > givebackPrice)) {
+  if (!(entry > 0) || !(givebackPrice >= 0) || !(ACTIVATION_PRICE >= givebackPrice)) {
     return emptyReplay(entry);
   }
 
