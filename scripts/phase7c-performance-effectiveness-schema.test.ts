@@ -101,6 +101,28 @@ const snapshot: Phase7CPerformanceEffectivenessSnapshot = {
     managementQualifiedRows: 1,
     evidenceCoveragePercent: 100,
   },
+  aggregates: {
+    strategy: [],
+    entryType: [],
+    regime: [],
+    rule: [],
+    management: [],
+    excursion: {
+      sampleSize: 1,
+      averageMfePrice: 15,
+      averageMaePrice: 2,
+      averageMfeR: 1.875,
+      averageMaeR: 0.25,
+      averageRealizedR: 1.125,
+      averagePeakToExitGivebackPrice: 6,
+    },
+    fastMove: {
+      exactSampleSize: 1,
+      triggeredRows: 1,
+      handoffRows: 1,
+      averageLockedProfitPrice: 4,
+    },
+  },
   rows: [row],
   notes: [],
 };
@@ -117,6 +139,7 @@ assert.equal(snapshot.safety.autoRetune, false);
 assert.equal(snapshot.rows[0]?.excursion.mfeR, 1.875);
 assert.equal(snapshot.rows[0]?.fastMove.current.givebackPrice, 6);
 assert.equal(snapshot.rows[0]?.management.events[0]?.family, "FAST_MOVE_TIGHTEN");
+assert.equal(snapshot.aggregates.fastMove.averageLockedProfitPrice, 4);
 assert.equal("autoApply" in snapshot, false);
 
 console.log("P3_PERFORMANCE_EFFECTIVENESS_SCHEMA_TEST=PASS");
