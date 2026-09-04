@@ -98,7 +98,9 @@ function Write-Phase7CRuntimeSourceAtomicJson {
 
   $json = $Value | ConvertTo-Json -Depth 8 -Compress
   $utf8 = New-Object System.Text.UTF8Encoding($false)
-  $tempPath = Join-Path $directory ('.' + [System.IO.Path]::GetFileName($Path) + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
+  $token = [guid]::NewGuid().ToString('N')
+  $tempPath = Join-Path $directory ('.' + [System.IO.Path]::GetFileName($Path) + '.' + $token + '.tmp')
+  $backupPath = Join-Path $directory ('.' + [System.IO.Path]::GetFileName($Path) + '.' + $token + '.bak')
   $stream = $null
   try {
     $bytes = $utf8.GetBytes($json)
@@ -114,7 +116,10 @@ function Write-Phase7CRuntimeSourceAtomicJson {
     $stream = $null
 
     if (Test-Path -LiteralPath $Path -PathType Leaf) {
-      [System.IO.File]::Replace($tempPath, $Path, $null)
+      [System.IO.File]::Replace($tempPath, $Path, $backupPath)
+      if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
+        Remove-Item -LiteralPath $backupPath -Force
+      }
     } else {
       [System.IO.File]::Move($tempPath, $Path)
     }
@@ -122,6 +127,9 @@ function Write-Phase7CRuntimeSourceAtomicJson {
     if ($null -ne $stream) { $stream.Dispose() }
     if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
       Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
+      Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
     }
   }
 }
