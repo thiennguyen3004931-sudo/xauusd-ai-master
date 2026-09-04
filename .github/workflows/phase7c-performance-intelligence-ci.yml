@@ -6,8 +6,10 @@ on:
       - "apps/api/src/services/phase7c-performance-intelligence.service.ts"
       - "apps/api/src/routes/phase7c-performance-intelligence.route.ts"
       - "apps/api/src/app.ts"
+      - "scripts/run-phase7b-demo-controller.ts"
       - "scripts/test-phase7c-performance-intelligence-source.mjs"
       - "scripts/phase7c-performance-intelligence.test.ts"
+      - "scripts/test-phase7c-trend-performance-attribution-observability-source.mjs"
       - ".github/workflows/phase7c-performance-intelligence-ci.yml"
   workflow_dispatch:
 
@@ -39,6 +41,9 @@ jobs:
 
       - name: Performance Intelligence source contract
         run: node scripts/test-phase7c-performance-intelligence-source.mjs
+
+      - name: Trend attribution observability source contract
+        run: node scripts/test-phase7c-trend-performance-attribution-observability-source.mjs
 
       - name: Build API dependency graph
         run: pnpm --filter @xauusd/api... build
