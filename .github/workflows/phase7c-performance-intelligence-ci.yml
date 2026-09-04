@@ -7,6 +7,7 @@ on:
       - "apps/api/src/routes/phase7c-performance-intelligence.route.ts"
       - "apps/api/src/app.ts"
       - "scripts/test-phase7c-performance-intelligence-source.mjs"
+      - "scripts/phase7c-performance-intelligence.test.ts"
       - ".github/workflows/phase7c-performance-intelligence-ci.yml"
   workflow_dispatch:
 
@@ -41,3 +42,6 @@ jobs:
 
       - name: Build API dependency graph
         run: pnpm --filter @xauusd/api... build
+
+      - name: Performance Intelligence semantic tests
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-performance-intelligence.test.ts
