@@ -16,8 +16,8 @@ export interface Phase7CPerformanceCorrelationFilters {
 }
 
 function clampLimit(value: number | undefined): number {
-  if (!Number.isFinite(value)) return 100;
-  return Math.min(500, Math.max(1, Math.trunc(value!)));
+  if (typeof value !== "number" || !Number.isFinite(value)) return 100;
+  return Math.min(500, Math.max(1, Math.trunc(value)));
 }
 
 function auditRootFromStreams(streams: readonly string[]): string {
