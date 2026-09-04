@@ -35,7 +35,7 @@ export interface Phase7CPerformanceCorrelationRow {
     verdict: Phase7CPerformanceCorrelationVerdict;
     method: Phase7CPerformanceCorrelationMethod;
     evidence: string[];
-    candidatePositionCount: number;
+    candidatePositionCount: number | null;
   };
   attribution: {
     entryType: Phase7CPerformanceCorrelationEntryType;
