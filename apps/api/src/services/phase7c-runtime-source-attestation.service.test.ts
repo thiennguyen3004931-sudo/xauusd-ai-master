@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -165,7 +165,7 @@ test("complete read-only snapshot reports all seven exact components", () => {
     for (const [component, pid, launcher] of components) {
       const launcherPath = join(scriptsRoot, launcher);
       writeFileSync(launcherPath, `${component}\n`);
-      const launcherSha256 = `sha256:${component.padEnd(64, "a").slice(0, 64)}`;
+      const launcherSha256 = `sha256:${String(pid % 10).repeat(64)}`;
       writeFileSync(join(componentRoot, `${component}.json`), JSON.stringify({
         version: 1,
         component,
@@ -188,9 +188,9 @@ test("complete read-only snapshot reports all seven exact components", () => {
     writeFileSync(join(brokerStateRoot, "status.json"), JSON.stringify({ version: 1, brokerPid: 4102 }));
 
     const launcherHashByPath = new Map(
-      components.map(([component, _pid, launcher]) => [
+      components.map(([_component, pid, launcher]) => [
         join(scriptsRoot, launcher),
-        `sha256:${component.padEnd(64, "a").slice(0, 64)}`,
+        `sha256:${String(pid % 10).repeat(64)}`,
       ]),
     );
 
@@ -199,7 +199,7 @@ test("complete read-only snapshot reports all seven exact components", () => {
       projectRoot,
       apiPid: 4101,
       now: () => deployment.createdAt + 99_999,
-      readUtf8: (file) => require("node:fs").readFileSync(file, "utf8"),
+      readUtf8: (file) => readFileSync(file, "utf8"),
       sha256File: (file) => launcherHashByPath.get(file) ?? (() => { throw new Error(`unexpected hash path ${file}`); })(),
       isPidAlive: (pid) => components.some(([, expectedPid]) => expectedPid === pid),
     });
