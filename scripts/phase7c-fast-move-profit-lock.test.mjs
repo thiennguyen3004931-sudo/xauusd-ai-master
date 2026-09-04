@@ -8,10 +8,24 @@ import {
   stopStrictlyTightens,
   tightestKnownStop,
 } from "./phase7c-stop-monotonicity.mjs";
+import {
+  transformPhase7CSidewayM5TrailingSource,
+  transformPhase7CTrendM5TrailingSource,
+} from "./phase7c-m5-structural-trailing-source-adapter.mjs";
+import {
+  transformPhase7CSidewayM5PreStructureProfitLockSource,
+  transformPhase7CTrendM5PreStructureProfitLockSource,
+} from "./phase7c-m5-prestructure-profit-lock-source-adapter.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const trendSource = fs.readFileSync(path.join(here, "run-phase7b-demo-controller.ts"), "utf8");
-const sidewaySource = fs.readFileSync(path.join(here, "run-phase7c-sideway-controller.mjs"), "utf8");
+const trendRawSource = fs.readFileSync(path.join(here, "run-phase7b-demo-controller.ts"), "utf8");
+const sidewayRawSource = fs.readFileSync(path.join(here, "run-phase7c-sideway-controller.mjs"), "utf8");
+const trendSource = transformPhase7CTrendM5PreStructureProfitLockSource(
+  transformPhase7CTrendM5TrailingSource(trendRawSource),
+);
+const sidewaySource = transformPhase7CSidewayM5PreStructureProfitLockSource(
+  transformPhase7CSidewayM5TrailingSource(sidewayRawSource),
+);
 
 const trendBuy = fastMoveProfitLockCandidate({
   side: "BUY",
@@ -130,9 +144,14 @@ assert.match(
 );
 assert.match(
   trendSource,
-  /const fastMoveStructure = managed\.partialApplied && latestM15[\s\S]*?latestConfirmedStructureStop\([\s\S]*?if \(fastMoveStructure === null\) \{[\s\S]*?fastMoveProfitLockCandidate/,
-  "Trend Fast-Move must hand off once a confirmed post-entry structure exists.",
+  /const fastMoveStructure = managed\.partialApplied && latestM5[\s\S]*?latestConfirmedM5Structure\([\s\S]*?if \(fastMoveStructure === null\) \{[\s\S]*?fastMoveProfitLockCandidate/,
+  "Trend Fast-Move must hand off to confirmed M5 structure before the pre-structure lock can advance again.",
 );
+assert.doesNotMatch(
+  trendSource,
+  /const fastMoveStructure = managed\.partialApplied && latestM15[\s\S]*?latestConfirmedStructureStop/,
+);
+
 assert.match(sidewaySource, /FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE\s*=\s*10/);
 assert.match(sidewaySource, /FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE\s*=\s*10/);
 assert.match(sidewaySource, /FAST_MOVE_PROFIT_LOCK_TIGHTEN/);
@@ -140,6 +159,11 @@ assert.match(
   sidewaySource,
   /const fastMoveEligible = stopIsAtLeastAsTight\(\s*managed\.side,\s*Number\(position\.stopLoss\),\s*Number\(managed\.entry\),\s*\);[\s\S]*?if \(fastMove\.active && fastMoveEligible\)/,
   "Pre-structure Sideway lock must only tighten after the broker stop is already at BE or better.",
+);
+assert.match(
+  sidewaySource,
+  /const fastMoveStructure = managed\.partialApplied[\s\S]*?latestConfirmedM5Structure\([\s\S]*?if \(fastMoveStructure === null\) \{[\s\S]*?fastMoveProfitLockCandidate/,
+  "Sideway Fast-Move must hand off to confirmed M5 structure before the pre-structure lock can advance again.",
 );
 
 console.log("M5_PRE_STRUCTURE_PROFIT_LOCK_CONTRACT=PASS");
