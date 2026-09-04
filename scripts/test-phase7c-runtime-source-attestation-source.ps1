@@ -4,6 +4,8 @@ $PSDefaultParameterValues['Get-Content:Encoding'] = 'UTF8'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Helper = Join-Path $ProjectRoot "scripts\lib\phase7c-runtime-source-attestation.ps1"
+$Recovery = Join-Path $ProjectRoot "scripts\recover-phase7c-runtime-ready-stable-deploy-local.ps1"
+$WebDeploy = Join-Path $ProjectRoot "scripts\deploy-phase7c-web-ui-local.ps1"
 
 function Assert-True([bool]$Value, [string]$Message) {
   if (-not $Value) { throw $Message }
@@ -18,10 +20,12 @@ function Assert-PowerShellSyntax([string]$Path) {
   }
 }
 
-if (-not (Test-Path -LiteralPath $Helper -PathType Leaf)) {
-  throw "RED: runtime source attestation helper missing: $Helper"
+foreach ($path in @($Helper, $Recovery, $WebDeploy)) {
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+    throw "Runtime source attestation source missing: $path"
+  }
+  Assert-PowerShellSyntax $path
 }
-Assert-PowerShellSyntax $Helper
 . $Helper
 
 $fixtureRoot = "F:\Project\XAUUSD_AI_MASTER\xauusd-ai-master\.runtime"
@@ -102,10 +106,40 @@ try {
   Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-$helperText = Get-Content -LiteralPath $Helper -Raw
+$helperText = (Get-Content -LiteralPath $Helper -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
 Assert-True ($helperText -notmatch '(?i)ARM_LIVE') "P1 helper must not ARM LIVE"
 Assert-True ($helperText -notmatch '(?i)mode\s*=\s*["'']AUTO["'']') "P1 helper must not set AUTO"
 Assert-True ($helperText -notmatch '(?i)Start-ScheduledTask') "P1 helper must not start Scheduled Tasks"
 Assert-True ($helperText -notmatch '(?i)/v1/orders') "P1 helper must not call order endpoints"
+
+# Task 2: both canonical deployment paths must create/reuse the same generation
+# only after exact source/config guards, and before any P1-aware runtime restart.
+$recoveryText = (Get-Content -LiteralPath $Recovery -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
+$webText = (Get-Content -LiteralPath $WebDeploy -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
+
+foreach ($pair in @(
+  [pscustomobject]@{ Name = 'recovery'; Text = $recoveryText },
+  [pscustomobject]@{ Name = 'web'; Text = $webText }
+)) {
+  Assert-True ($pair.Text.Contains('lib\phase7c-runtime-source-attestation.ps1')) "RED Task2: $($pair.Name) must load P1 attestation helper"
+  Assert-True ($pair.Text.Contains('Initialize-Phase7CRuntimeSourceDeployment')) "RED Task2: $($pair.Name) must initialize/reuse deployment manifest"
+  Assert-True ($pair.Text.Contains('PHASE7C_RUNTIME_SOURCE_DEPLOYMENT_ID=')) "RED Task2: $($pair.Name) must audit deploymentId"
+  Assert-True ($pair.Text.Contains('PHASE7C_RUNTIME_SOURCE_COMMIT=')) "RED Task2: $($pair.Name) must audit source commit"
+  Assert-True ($pair.Text.Contains('PHASE7C_RUNTIME_SOURCE_TREE=')) "RED Task2: $($pair.Name) must audit source tree"
+  Assert-True ($pair.Text.Contains('PHASE7C_RUNTIME_SOURCE_MANIFEST=READY')) "RED Task2: $($pair.Name) must audit manifest readiness"
+  Assert-True ($pair.Text.Contains('rev-parse "$ExpectedCommit`^{tree}"')) "RED Task2: $($pair.Name) must derive tree from exact accepted commit"
+}
+
+$recoveryGitIndex = $recoveryText.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GIT_GUARD=PASS', [System.StringComparison]::Ordinal)
+$recoveryManifestIndex = $recoveryText.IndexOf('Initialize-Phase7CRuntimeSourceDeployment', [System.StringComparison]::Ordinal)
+$recoveryMutationIndex = $recoveryText.IndexOf('$mutationStarted = $false', [System.StringComparison]::Ordinal)
+Assert-True ($recoveryGitIndex -ge 0 -and $recoveryManifestIndex -gt $recoveryGitIndex) "RED Task2: recovery manifest must follow exact Git guard"
+Assert-True ($recoveryMutationIndex -gt $recoveryManifestIndex) "RED Task2: recovery manifest must exist before recovery mutation gate"
+
+$webGitIndex = $webText.IndexOf('PHASE7C_WEB_UI_DEPLOY_GIT_CLEAN=PASS', [System.StringComparison]::Ordinal)
+$webManifestIndex = $webText.IndexOf('Initialize-Phase7CRuntimeSourceDeployment', [System.StringComparison]::Ordinal)
+$webFreshIndex = $webText.IndexOf('[void](Assert-LifecycleBrokerSourceFresh -WorkDir $WorkDir)', [System.StringComparison]::Ordinal)
+Assert-True ($webGitIndex -ge 0 -and $webManifestIndex -gt $webGitIndex) "RED Task2: Web manifest must follow exact Git guard"
+Assert-True ($webFreshIndex -gt $webManifestIndex) "RED Task2: Web manifest must precede broker freshness/build/restart"
 
 Write-Host "PHASE7C_RUNTIME_SOURCE_ATTESTATION_SOURCE_TEST=PASS"
