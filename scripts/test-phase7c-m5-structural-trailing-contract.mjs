@@ -118,6 +118,11 @@ assert.doesNotMatch(
   /const fastMoveStructure = managed\.partialApplied && latestM15[\s\S]*?latestConfirmedStructureStop/,
   "Canonical Trend source must not retain the old M15 Fast-Move ownership signal.",
 );
+assert.match(
+  transformedTrend,
+  /fastMoveHandedOffToM5[\s\S]*?saveState\(\)[\s\S]*?if \(fastMoveStructure === null\)/,
+  "Trend M5 handoff must be durably persisted so Fast-Move cannot resume after M5 data later becomes stale or rolls out of the candle window.",
+);
 
 const sidewaySource = fs.readFileSync(new URL("./run-phase7c-sideway-controller.mjs", import.meta.url), "utf8");
 const transformedSideway = transformPhase7CSidewayM5TrailingSource(sidewaySource);
@@ -129,6 +134,16 @@ assert.match(
   transformedSideway,
   /const fastMoveStructure = managed\.partialApplied[\s\S]*?latestConfirmedM5Structure\([\s\S]*?if \(fastMoveStructure === null\) \{[\s\S]*?fastMoveProfitLockCandidate/,
   "RED_TARGET: canonical Sideway Fast-Move must stop advancing once confirmed M5 structure owns trailing.",
+);
+assert.match(
+  transformedSideway,
+  /fastMoveHandedOffToM5[\s\S]*?saveState\(\)[\s\S]*?if \(fastMoveStructure === null\)/,
+  "Sideway M5 handoff must be durably persisted so Fast-Move cannot resume after handoff.",
+);
+assert.match(
+  transformedSideway,
+  /lastStructuralStop:\s*tightestKnownStop\([\s\S]*?managed\.lastStructuralStop[\s\S]*?managed\.fastMoveStop[\s\S]*?\)/,
+  "Sideway M5 structural evaluation must include the Fast-Move floor in its same-cycle monotonic baseline.",
 );
 
 const legacySidewaySource = sidewaySource.replace(
