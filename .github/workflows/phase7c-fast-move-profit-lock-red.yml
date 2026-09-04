@@ -1,0 +1,40 @@
+name: Phase7C Fast-Move Profit Lock RED
+
+on:
+  push:
+    branches:
+      - feat/phase7c-fast-move-profit-lock
+    paths:
+      - scripts/phase7c-fast-move-profit-lock.test.mjs
+      - .github/workflows/phase7c-fast-move-profit-lock-red.yml
+
+permissions:
+  contents: read
+
+jobs:
+  red-contract:
+    name: expected-red-before-production
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Prove contract is RED before production helper exists
+        shell: bash
+        run: |
+          set +e
+          node --test scripts/phase7c-fast-move-profit-lock.test.mjs > fast-move-red.log 2>&1
+          status=$?
+          cat fast-move-red.log
+          if [ "$status" -eq 0 ]; then
+            echo "EXPECTED_RED=FALSE"
+            exit 1
+          fi
+          if ! grep -q 'phase7c-fast-move-profit-lock.mjs' fast-move-red.log; then
+            echo "EXPECTED_RED_REASON=UNEXPECTED"
+            exit 1
+          fi
+          echo "EXPECTED_RED=TRUE"
+          echo "RED_REASON=PRODUCTION_HELPER_MISSING"
