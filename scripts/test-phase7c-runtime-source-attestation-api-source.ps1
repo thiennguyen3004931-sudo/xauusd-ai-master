@@ -20,7 +20,9 @@ foreach ($path in @($ApiRuntime, $ApiIndex, $ApiApp, $ApiService, $ApiRoute)) {
 $tokens = $null
 $errors = $null
 [void][System.Management.Automation.Language.Parser]::ParseFile($ApiRuntime, [ref]$tokens, [ref]$errors)
-Assert-True ($errors.Count -eq 0) "Task4 API runtime PowerShell syntax invalid: $($errors[0].Message)"
+if ($errors.Count -ne 0) {
+  throw "Task4 API runtime PowerShell syntax invalid: $($errors[0].Message)"
+}
 
 $runtimeText = (Get-Content -LiteralPath $ApiRuntime -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
 foreach ($marker in @(
