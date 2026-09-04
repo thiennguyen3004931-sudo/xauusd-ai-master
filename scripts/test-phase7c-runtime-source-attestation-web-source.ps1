@@ -42,8 +42,10 @@ foreach ($forbidden in @('useMutation', 'setPhase7CBotMode', 'runPhase7CLifecycl
 # defaults collapsed, keeps overall status/warnings/errors visible, and expands
 # read-only deployment/process details only on demand.
 Assert-True ($cardText.Contains('useState(false)')) "P1 card must default to collapsed"
-Assert-True ($cardText.Contains('Hiện chi tiết')) "P1 collapsed card must expose exact show-details label"
-Assert-True ($cardText.Contains('Ẩn chi tiết')) "P1 expanded card must expose exact hide-details label"
+$showDetailsLabel = "Hi$([char]0x1EC7)n chi ti$([char]0x1EBF)t"
+$hideDetailsLabel = "$([char]0x1EA8)n chi ti$([char]0x1EBF)t"
+Assert-True ($cardText.Contains($showDetailsLabel)) "P1 collapsed card must expose exact show-details label"
+Assert-True ($cardText.Contains($hideDetailsLabel)) "P1 expanded card must expose exact hide-details label"
 Assert-True ($cardText.Contains('aria-expanded={showDetails}')) "P1 details toggle must expose expansion state"
 
 $detailsGateToken = 'snapshot && showDetails ? ('
