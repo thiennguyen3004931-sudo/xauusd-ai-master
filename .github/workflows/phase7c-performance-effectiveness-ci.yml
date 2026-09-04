@@ -60,6 +60,9 @@ jobs:
       - name: P3 excursion contract
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-performance-excursion.test.ts
 
+      - name: P3 Fast-Move effectiveness contract
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-fast-move-effectiveness.test.ts
+
       - name: P2 performance correlation regression
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-performance-correlation-schema.test.ts
 
