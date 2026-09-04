@@ -116,40 +116,22 @@ assert.equal(
   "Structure or any later stop source must never loosen a tighter Fast-Move SELL floor.",
 );
 
+assert.match(trendSource, /FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE\s*=\s*10/);
+assert.match(trendSource, /FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE\s*=\s*6/);
+assert.match(trendSource, /FAST_MOVE_PROFIT_LOCK_TIGHTEN/);
 assert.match(
   trendSource,
-  /FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE\s*=\s*10/,
-  "RED_TARGET: Trend must activate Fast-Move lock at +10 price MFE.",
+  /const fastMoveStructure = managed\.partialApplied && latestM15[\s\S]*?latestConfirmedStructureStop\([\s\S]*?if \(fastMoveStructure === null\) \{[\s\S]*?fastMoveProfitLockCandidate/,
+  "RED_TARGET: Trend Fast-Move must hand off once a confirmed post-entry structure exists.",
 );
-assert.match(
-  trendSource,
-  /FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE\s*=\s*6/,
-  "RED_TARGET: Trend must allow the wider 6-price giveback.",
-);
-assert.match(
-  trendSource,
-  /FAST_MOVE_PROFIT_LOCK_TIGHTEN/,
-  "RED_TARGET: Trend controller must wire broker-facing Fast-Move SL tightening.",
-);
-assert.match(
-  sidewaySource,
-  /FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE\s*=\s*10/,
-  "RED_TARGET: Sideway must activate Fast-Move lock at +10 price MFE.",
-);
-assert.match(
-  sidewaySource,
-  /FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE\s*=\s*4/,
-  "RED_TARGET: Sideway must use the tighter 4-price giveback.",
-);
-assert.match(
-  sidewaySource,
-  /FAST_MOVE_PROFIT_LOCK_TIGHTEN/,
-  "RED_TARGET: Sideway controller must wire broker-facing Fast-Move SL tightening.",
-);
+assert.match(sidewaySource, /FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE\s*=\s*10/);
+assert.match(sidewaySource, /FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE\s*=\s*4/);
+assert.match(sidewaySource, /FAST_MOVE_PROFIT_LOCK_TIGHTEN/);
 
 console.log("FAST_MOVE_PROFIT_LOCK_CONTRACT=PASS");
 console.log("FAST_MOVE_BUY_SELL_SYMMETRY=PASS");
 console.log("FAST_MOVE_PEAK_PERSISTS_THROUGH_PULLBACK=PASS");
 console.log("FAST_MOVE_TREND_GIVEBACK_6=PASS");
 console.log("FAST_MOVE_SIDEWAY_GIVEBACK_4=PASS");
+console.log("FAST_MOVE_TREND_STRUCTURE_HANDOFF=PASS");
 console.log("FAST_MOVE_NEVER_LOOSENS_STOP=PASS");
