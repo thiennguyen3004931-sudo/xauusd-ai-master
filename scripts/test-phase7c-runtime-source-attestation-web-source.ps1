@@ -24,16 +24,17 @@ $shellText = (Get-Content -LiteralPath $Shell -Raw).Replace("`r`n", "`n").Replac
 Assert-True ($typesText.Contains('Phase7CRuntimeSourceAttestationSnapshot')) "Task5 Web response type missing"
 Assert-True ($apiText.Contains('getPhase7CRuntimeSourceAttestation')) "Task5 Web GET client missing"
 Assert-True ($apiText.Contains('/api/v1/phase7c/runtime-source-attestation')) "Task5 Web client must use exact GET endpoint"
-Assert-True ($apiText.Contains('cache: "no-store"')) "Task5 Web attestation GET must be no-store"
+Assert-True ($apiText.Contains('cache: \"no-store\"')) "Task5 Web attestation GET must be no-store"
 
 Assert-True ($cardText.Contains('phase7c-runtime-source-attestation')) "Task5 card query key missing"
 Assert-True ($cardText.Contains('refetchInterval: 5000')) "Task5 card must refresh every 5 seconds"
 Assert-True ($cardText.Contains('retry: false')) "Task5 card must not retry hidden failures"
-Assert-True ($cardText.Contains('READ-ONLY WARNING — NO AUTOMATIC ACTION TAKEN')) "Task5 exact read-only warning copy missing"
+$expectedReadOnlyWarning = "READ-ONLY WARNING $([char]0x2014) NO AUTOMATIC ACTION TAKEN"
+Assert-True ($cardText.Contains($expectedReadOnlyWarning)) "Task5 exact read-only warning copy missing"
 foreach ($component in @('api','lifecycle-broker','supervisor','trend','sideway','telegram','regime-notifier')) {
   Assert-True ($cardText.Contains($component)) "Task5 card missing component row token: $component"
 }
-foreach ($forbidden in @('useMutation', 'setPhase7CBotMode', 'runPhase7CLifecycleAction', 'ARM_LIVE', 'DISARM_LIVE', 'fetch(', 'method: "POST"')) {
+foreach ($forbidden in @('useMutation', 'setPhase7CBotMode', 'runPhase7CLifecycleAction', 'ARM_LIVE', 'DISARM_LIVE', 'fetch(', 'method: \"POST\"')) {
   Assert-True (-not $cardText.Contains($forbidden)) "Task5 card contains forbidden mutation/action token: $forbidden"
 }
 
