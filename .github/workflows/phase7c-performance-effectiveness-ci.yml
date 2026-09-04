@@ -57,6 +57,9 @@ jobs:
       - name: P3 management evidence contract
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-performance-management-evidence.test.ts
 
+      - name: P3 excursion contract
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-performance-excursion.test.ts
+
       - name: P2 performance correlation regression
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-performance-correlation-schema.test.ts
 
