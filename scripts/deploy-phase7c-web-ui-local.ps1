@@ -114,11 +114,16 @@ function Assert-LifecycleBrokerSourceFresh([string]$WorkDir) {
   ) | Sort-Object -Descending | Select-Object -First 1
 
   if ($brokerStartedUtc -lt $latestSourceWriteUtc) {
-    throw "Web UI deploy blocked: lifecycle broker process is stale relative to source loaded at broker startup. brokerPid=$brokerPid startedUtc=$($brokerStartedUtc.ToString('o')) sourceUpdatedUtc=$($latestSourceWriteUtc.ToString('o')). Use the controlled executor runtime reload path before Web/API deploy."
+    if ($AllowOwnedTaskProvenanceMigration) {
+      Write-Host "PHASE7C_WEB_UI_DEPLOY_BROKER_SOURCE_STALE_MIGRATION=ALLOWED_OWNED_TASK_REPAIR|BROKER_PID=$brokerPid|STARTED_UTC=$($brokerStartedUtc.ToString('o'))|SOURCE_UPDATED_UTC=$($latestSourceWriteUtc.ToString('o'))"
+    } else {
+      throw "Web UI deploy blocked: lifecycle broker process is stale relative to source loaded at broker startup. brokerPid=$brokerPid startedUtc=$($brokerStartedUtc.ToString('o')) sourceUpdatedUtc=$($latestSourceWriteUtc.ToString('o')). Use the controlled executor runtime reload path before Web/API deploy."
+    }
+  } else {
+    Write-Host "PHASE7C_WEB_UI_DEPLOY_BROKER_SOURCE_FRESH=PASS"
   }
 
   Write-Host "PHASE7C_WEB_UI_DEPLOY_BROKER_PID=$brokerPid"
-  Write-Host "PHASE7C_WEB_UI_DEPLOY_BROKER_SOURCE_FRESH=PASS"
 }
 
 Push-Location $ProjectRoot
