@@ -1,7 +1,7 @@
 # P1 Runtime Source Attestation V1 — Design
 
 Date: 2026-09-04
-Status: Approved in chat; implementation not started
+Status: Design approved in chat; written spec pending user review
 Base: `main@4f156ef1b019ef676cc23ed978c9487eb41f2fe6`
 Scope: P1 only
 Safety mode: READ-ONLY V1
@@ -60,8 +60,8 @@ A mismatch is reported, never repaired automatically.
 
 P1 V1 has four bounded parts:
 
-1. **Deployment identity manifest** — immutable identity for one canonical deployment generation.
-2. **Per-component process attestation** — one small record emitted by each runtime component at startup.
+1. **Deployment identity manifest** — immutable identity for one canonical runtime generation.
+2. **Per-component process attestation** — one small record emitted at each component startup.
 3. **Read-only attestation aggregator** — API service that validates records against current runtime PIDs and the deployment manifest.
 4. **Read-only Control Center presentation** — component-by-component status and an overall verdict.
 
@@ -77,7 +77,7 @@ Canonical runtime location:
 .runtime/phase7c-source-attestation/deployment.json
 ```
 
-The manifest belongs to the deployment generation, not to an individual process.
+The manifest belongs to the runtime generation, not to an individual process.
 
 ### 5.2 Schema
 
@@ -105,9 +105,34 @@ The manifest MUST be created only from a canonical source/deploy path that has a
 
 The manifest captures identity at deployment/start time. Runtime read APIs MUST NOT use a live `git rev-parse HEAD` call as a substitute for process provenance, because the worktree may change after a process started.
 
-`deploymentId` is a new opaque generation identifier created once per canonical deployment/recovery generation. All component attestations for that generation inherit the same value.
+### 5.4 Generation identity and idempotency
 
-### 5.4 Atomicity
+`deploymentId` identifies one effective runtime generation. The canonical manifest writer computes the prospective identity tuple:
+
+```text
+sourceCommit
+sourceTree
+branch
+worktreeClean=true
+configFingerprint
+```
+
+Generation rules are deterministic:
+
+1. If a valid existing manifest has the exact same identity tuple, the writer MUST reuse its existing `deploymentId` and `createdAt`.
+2. If the identity tuple changes, the writer MUST create a new `deploymentId` and `createdAt` and atomically replace the manifest.
+3. A same-source/same-config Web/API restart MUST NOT rotate `deploymentId`; otherwise healthy executor processes would be reported as mismatched solely because the API was restarted.
+4. A source, tree, or effective config change intentionally rotates the generation. Any still-running process from the previous generation then remains visibly non-exact until it is restarted through the canonical flow.
+
+This makes generation identity stable across harmless same-identity restarts while still detecting partial deployment of a new source/config generation.
+
+### 5.5 Manifest writer boundary
+
+A small shared canonical helper owns manifest creation/reuse. Existing guarded deploy/recovery/start paths call that helper only after their Git/config preconditions pass and before starting processes that need the identity.
+
+P1 MUST NOT introduce an independent deployment mechanism.
+
+### 5.6 Atomicity
 
 The deployment manifest MUST be written atomically: write a temporary sibling file, flush/close it, then replace/rename into the canonical path. A partially written JSON file is never accepted as valid evidence.
 
@@ -119,7 +144,7 @@ The deployment manifest MUST be written atomically: write a temporary sibling fi
 
 ### 6.2 Allowed inputs
 
-The fingerprint MAY include normalized non-secret values that materially define the deployment generation, for example:
+The fingerprint is derived from one canonical normalized non-secret object. It may include values that materially define the runtime generation, for example:
 
 - account mode (`DEMO` / `LIVE`);
 - live-execution-enabled boolean;
@@ -146,7 +171,7 @@ The fingerprint input material MUST NOT contain or serialize:
 
 Account login/server identity SHOULD NOT be placed in the attestation payload unless an existing public runtime view already exposes it and the implementation requires it. P1 does not need those fields to prove source identity.
 
-The implementation MUST define one canonical normalization function and hash exactly that normalized object with SHA-256.
+The implementation MUST define one canonical normalization function and hash exactly that normalized object with SHA-256. Equivalent normalized configuration MUST yield the same fingerprint across PowerShell 7, Windows PowerShell 5.1, and Node readers.
 
 ## 7. Component attestations
 
@@ -174,7 +199,7 @@ Trade notifier is intentionally out of the required V1 overall verdict because t
 
 ### 7.3 Record schema
 
-Each component writes:
+Each component record contains:
 
 ```json
 {
@@ -192,27 +217,41 @@ Each component writes:
 
 ### 7.4 Startup semantics
 
-A component MUST emit its attestation at startup from inherited immutable deployment identity, not by discovering a potentially changed Git worktree later.
+A component record MUST be emitted at startup from inherited immutable deployment identity, not by discovering a potentially changed Git worktree later.
 
 Expected propagation:
 
 ```text
-canonical deploy/recovery
+canonical deploy/recovery/start
   -> deployment manifest
   -> lifecycle broker / API launch environment
   -> supervisor launch environment
   -> trend / sideway / telegram / regime-notifier children
 ```
 
-The lifecycle broker runner is the canonical SYSTEM launch boundary for executor lifecycle. The supervisor remains the canonical child process launcher. P1 must extend those existing boundaries rather than introducing a parallel process-control mechanism.
+The lifecycle broker runner is the canonical SYSTEM launch boundary for executor lifecycle. The supervisor remains the canonical child process launcher. P1 extends those existing boundaries rather than introducing a parallel process-control mechanism.
 
-### 7.5 PID binding
+A component may write its own attestation, or the canonical launcher that has just created it may write the record on its behalf, provided the record contains the actual canonical runtime PID of the represented component and inherited immutable identity. The launcher MUST NOT use its own PID as the represented child PID.
 
-The `pid` in the attestation is the actual process PID of the component represented by that record. A launcher must not stamp its own PID into a child's record.
+### 7.5 Canonical PID identity
+
+P1 binds to the same process identity the existing runtime treats as canonical:
+
+- `api`: the running API process verifies its attestation PID against `process.pid`;
+- `lifecycle-broker`: broker PID comes from canonical broker heartbeat/status;
+- `supervisor`: existing `supervisor.pid`;
+- `trend`: existing `trend.pid`;
+- `sideway`: existing `sideway.pid`;
+- `telegram`: existing `telegram-mode.pid`;
+- `regime-notifier`: existing `regime-notifier.pid`.
+
+If a PowerShell wrapper is the PID currently used by lifecycle health, that wrapper PID is the P1 canonical PID. P1 does not silently switch to an internal Node child PID unless the lifecycle contract is separately redesigned.
 
 ### 7.6 Launcher hash
 
-`launcherSha256` hashes the canonical startup file directly responsible for that component's runtime launch. This provides secondary evidence that a component was launched through the expected source artifact.
+`launcherSha256` hashes the canonical startup artifact directly responsible for that component's canonical runtime process. This provides secondary evidence that the component was launched through the expected source artifact.
+
+The aggregator compares the recorded hash with the expected launcher artifact from the accepted deployment source. A changed launcher artifact after process start is therefore visible instead of being silently treated as exact.
 
 Launcher hash mismatch is a `MISMATCH` condition, not merely informational.
 
@@ -234,7 +273,7 @@ GET /api/v1/phase7c/runtime-source-attestation
 
 The endpoint is read-only and uses `cache-control: no-store`.
 
-For V1 it SHOULD follow the same localhost-oriented operational model as lifecycle/source-safety runtime diagnostics. It MUST NOT expose a mutation method under the same route.
+For V1 it follows the localhost-oriented operational model used by lifecycle runtime diagnostics. It MUST NOT expose a mutation method under the same route.
 
 ### 8.2 Data sources
 
@@ -242,9 +281,9 @@ The aggregator reads:
 
 - `deployment.json`;
 - component attestation JSON files;
-- current canonical PID files / lifecycle runtime status;
+- canonical PID/lifecycle evidence described in section 7.5;
 - current process liveness;
-- current canonical launcher files only for hash comparison when needed.
+- current canonical launcher files only for hash comparison.
 
 It does not execute Git commands during ordinary GET handling.
 
@@ -301,7 +340,7 @@ Use `UNKNOWN` when evidence is absent or unreadable without positive contradicto
 - deployment manifest missing or invalid;
 - component attestation missing;
 - component attestation malformed;
-- current PID cannot be resolved;
+- current canonical PID cannot be resolved;
 - launcher file/hash cannot be read.
 
 Invalid/missing evidence never becomes `EXACT_MATCH`.
@@ -406,7 +445,7 @@ When overall status is not `EXACT_MATCH`, the UI MUST explicitly state:
 READ-ONLY WARNING — NO AUTOMATIC ACTION TAKEN
 ```
 
-P1 V1 MUST NOT add an "Apply", "Repair", "Restart", "Pause", "Disarm", or "Retune" action to this card.
+P1 V1 MUST NOT add an `Apply`, `Repair`, `Restart`, `Pause`, `Disarm`, or `Retune` action to this card.
 
 ## 12. Integration with existing source safety
 
@@ -417,7 +456,7 @@ P1 attestation is a separate runtime endpoint because it has different semantics
 - source-safety = declared source contract;
 - runtime-source-attestation = evidence about currently running processes.
 
-They may be displayed together in Control Center, but the services should remain independently testable.
+They may be displayed together in Control Center, but the services remain independently testable.
 
 ## 13. Error handling
 
@@ -442,10 +481,12 @@ Therefore:
 
 - source-only merge/CI does not claim current old runtime is attested;
 - after canonical deployment/recovery of the P1 source, each new process must emit its attestation;
-- before that restart, P1 may correctly report `UNKNOWN`/`STALE`;
+- before that restart, P1 may correctly report `UNKNOWN`/`STALE`/`MISMATCH` depending on the evidence present;
 - this is not a reason to auto-restart or mutate LIVE.
 
 The deployment procedure remains the existing guarded deploy/recovery workflow. P1 does not invent a new deployment mechanism.
+
+A partial deployment of a new identity is intentionally visible: components already restarted into the new generation can be exact while still-running old-generation components are non-exact, producing an overall non-exact verdict until the canonical deployment completes.
 
 ## 15. Test strategy
 
@@ -456,12 +497,12 @@ Implementation follows TDD.
 Required cases:
 
 ```text
-all required components exact             -> EXACT_MATCH
-one component wrong commit                -> MISMATCH
-one component wrong tree                  -> MISMATCH
-deploymentId mismatch                     -> MISMATCH
-configFingerprint mismatch                -> MISMATCH
-launcherSha256 mismatch                   -> MISMATCH
+all required components exact              -> EXACT_MATCH
+one component wrong commit                 -> MISMATCH
+one component wrong tree                   -> MISMATCH
+deploymentId mismatch                      -> MISMATCH
+configFingerprint mismatch                 -> MISMATCH
+launcherSha256 mismatch                    -> MISMATCH
 live current PID != attested PID           -> MISMATCH
 old attested PID dead                      -> STALE
 missing component file                     -> UNKNOWN
@@ -471,6 +512,9 @@ malformed deployment manifest              -> UNKNOWN
 all exact except one UNKNOWN               -> UNKNOWN
 all exact except one STALE                 -> STALE
 MISMATCH plus UNKNOWN                      -> MISMATCH
+same source/tree/config redeploy            -> reuse deploymentId
+changed source/tree/config                  -> rotate deploymentId
+API attestation PID != process.pid          -> MISMATCH
 ```
 
 ### 15.2 Source/safety contract tests
@@ -488,16 +532,19 @@ position mutation absent
 strategy mutation absent
 auto-retune absent
 secret fields absent from schemas and fixtures
+ordinary GET path executes no Git command
 ```
 
 ### 15.3 Windows launch contract tests
 
-PowerShell source-contract tests must cover the launch propagation and atomic write semantics under both:
+PowerShell source-contract tests must cover generation propagation, canonical PID binding, and atomic write semantics under both:
 
 ```text
 PowerShell 7
 Windows PowerShell 5.1
 ```
+
+The normalization/fingerprint fixture must produce the same expected SHA-256 under the PowerShell and Node implementations/readers used by the design.
 
 ### 15.4 Build/regression gates
 
@@ -555,7 +602,7 @@ P1 exposes two stable identifiers intended for later reuse:
 
 P2 may stamp these identifiers into every decision lineage record. P3 may aggregate outcomes by rule-set/source generation. P4 may bind shadow observations to the same source generation. P5 may cite the exact evidence generation behind a recommendation.
 
-P1 itself must remain independent of those later analytics systems.
+P1 itself remains independent of those later analytics systems.
 
 ## 19. Final design decision
 
