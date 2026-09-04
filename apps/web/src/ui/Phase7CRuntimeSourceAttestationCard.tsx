@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Alert,
   Box,
+  Button,
   Card,
   CardContent,
   Chip,
@@ -39,6 +41,7 @@ function shortSha(value: string | null | undefined): string {
 }
 
 export function Phase7CRuntimeSourceAttestationCard() {
+  const [showDetails, setShowDetails] = useState(false);
   const query = useQuery({
     queryKey: ["phase7c-runtime-source-attestation"],
     queryFn: getPhase7CRuntimeSourceAttestation,
@@ -60,13 +63,23 @@ export function Phase7CRuntimeSourceAttestationCard() {
                 Đối chiếu source đã chấp nhận với các process Phase7C đang chạy. Chỉ đọc, không tự động thay đổi bot.
               </Typography>
             </Box>
-            {snapshot ? (
-              <Chip
-                label={snapshot.overall}
-                color={verdictColor(snapshot.overall)}
-                variant={snapshot.overall === "UNKNOWN" ? "outlined" : "filled"}
-              />
-            ) : null}
+            <Stack direction="row" spacing={1} alignItems="center">
+              {snapshot ? (
+                <Chip
+                  label={snapshot.overall}
+                  color={verdictColor(snapshot.overall)}
+                  variant={snapshot.overall === "UNKNOWN" ? "outlined" : "filled"}
+                />
+              ) : null}
+              <Button
+                size="small"
+                variant="text"
+                aria-expanded={showDetails}
+                onClick={() => setShowDetails((value) => !value)}
+              >
+                {showDetails ? "Ẩn chi tiết" : "Hiện chi tiết"}
+              </Button>
+            </Stack>
           </Stack>
 
           {query.isLoading ? (
@@ -80,7 +93,13 @@ export function Phase7CRuntimeSourceAttestationCard() {
             <Alert severity="warning">Không đọc được runtime source attestation. Không có hành động tự động nào được thực hiện.</Alert>
           ) : null}
 
-          {snapshot ? (
+          {snapshot && snapshot.overall !== "EXACT_MATCH" ? (
+            <Alert severity={snapshot.overall === "MISMATCH" ? "error" : "warning"}>
+              READ-ONLY WARNING — NO AUTOMATIC ACTION TAKEN
+            </Alert>
+          ) : null}
+
+          {snapshot && showDetails ? (
             <>
               <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
                 <Box sx={{ flex: 1 }}>
@@ -96,12 +115,6 @@ export function Phase7CRuntimeSourceAttestationCard() {
                   </Typography>
                 </Box>
               </Stack>
-
-              {snapshot.overall !== "EXACT_MATCH" ? (
-                <Alert severity={snapshot.overall === "MISMATCH" ? "error" : "warning"}>
-                  READ-ONLY WARNING — NO AUTOMATIC ACTION TAKEN
-                </Alert>
-              ) : null}
 
               <Divider />
 
