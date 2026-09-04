@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import {
   combinePhase7CRuntimeSourceVerdicts,
   evaluatePhase7CRuntimeSourceComponent,
   fingerprintPhase7CRuntimeSourceConfig,
+  getPhase7CRuntimeSourceAttestationSnapshot,
   type Phase7CRuntimeSourceComponentEvaluationInput,
   type Phase7CRuntimeSourceDeploymentManifest,
 } from "./phase7c-runtime-source-attestation.service";
@@ -130,4 +134,93 @@ test("missing or invalid evidence is unknown", () => {
   const readError = exactInput();
   readError.evidenceErrors = ["EVIDENCE_INVALID"];
   assert.equal(evaluatePhase7CRuntimeSourceComponent(readError).verdict, "UNKNOWN");
+});
+
+test("complete read-only snapshot reports all seven exact components", () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), "phase7c-runtime-source-snapshot-"));
+  try {
+    const runtimeRoot = join(tempRoot, ".runtime");
+    const projectRoot = join(tempRoot, "project");
+    const attestationRoot = join(runtimeRoot, "phase7c-source-attestation");
+    const componentRoot = join(attestationRoot, "components");
+    const executorRoot = join(runtimeRoot, "phase7c-executors");
+    const brokerStateRoot = join(runtimeRoot, "phase7c-lifecycle-broker", "state");
+    const scriptsRoot = join(projectRoot, "scripts");
+    mkdirSync(componentRoot, { recursive: true });
+    mkdirSync(executorRoot, { recursive: true });
+    mkdirSync(brokerStateRoot, { recursive: true });
+    mkdirSync(scriptsRoot, { recursive: true });
+
+    const components = [
+      ["api", 4101, "run-phase7b-api-runtime-local.ps1"],
+      ["lifecycle-broker", 4102, "run-phase7c-executor-task-runner-local.ps1"],
+      ["supervisor", 4103, "run-phase7c-executors-local.ps1"],
+      ["trend", 4104, "run-phase7c-trend-controller-local.ps1"],
+      ["sideway", 4105, "run-phase7c-sideway-controller-local.ps1"],
+      ["telegram", 4106, "run-phase7c-telegram-mode-controller-local.ps1"],
+      ["regime-notifier", 4107, "run-phase7c-regime-notifier-local.ps1"],
+    ] as const;
+
+    writeFileSync(join(attestationRoot, "deployment.json"), JSON.stringify(deployment));
+    for (const [component, pid, launcher] of components) {
+      const launcherPath = join(scriptsRoot, launcher);
+      writeFileSync(launcherPath, `${component}\n`);
+      const launcherSha256 = `sha256:${component.padEnd(64, "a").slice(0, 64)}`;
+      writeFileSync(join(componentRoot, `${component}.json`), JSON.stringify({
+        version: 1,
+        component,
+        deploymentId: deployment.deploymentId,
+        sourceCommit: deployment.sourceCommit,
+        sourceTree: deployment.sourceTree,
+        pid,
+        startedAt: deployment.createdAt + pid,
+        launcherSha256,
+        configFingerprint: deployment.configFingerprint,
+      }));
+    }
+
+    writeFileSync(join(executorRoot, "supervisor.pid"), "4103\n");
+    writeFileSync(join(executorRoot, "trend.pid"), "4104\n");
+    writeFileSync(join(executorRoot, "sideway.pid"), "4105\n");
+    writeFileSync(join(executorRoot, "telegram-mode.pid"), "4106\n");
+    writeFileSync(join(executorRoot, "regime-notifier.pid"), "4107\n");
+    writeFileSync(join(brokerStateRoot, "heartbeat.json"), JSON.stringify({ version: 1, brokerPid: 4102 }));
+    writeFileSync(join(brokerStateRoot, "status.json"), JSON.stringify({ version: 1, brokerPid: 4102 }));
+
+    const launcherHashByPath = new Map(
+      components.map(([component, _pid, launcher]) => [
+        join(scriptsRoot, launcher),
+        `sha256:${component.padEnd(64, "a").slice(0, 64)}`,
+      ]),
+    );
+
+    const snapshot = getPhase7CRuntimeSourceAttestationSnapshot({
+      runtimeRoot,
+      projectRoot,
+      apiPid: 4101,
+      now: () => deployment.createdAt + 99_999,
+      readUtf8: (file) => require("node:fs").readFileSync(file, "utf8"),
+      sha256File: (file) => launcherHashByPath.get(file) ?? (() => { throw new Error(`unexpected hash path ${file}`); })(),
+      isPidAlive: (pid) => components.some(([, expectedPid]) => expectedPid === pid),
+    });
+
+    assert.equal(snapshot.overall, "EXACT_MATCH");
+    assert.equal(snapshot.readOnly, true);
+    assert.equal(snapshot.components.length, 7);
+    assert.deepEqual(snapshot.components.map((item) => item.component), components.map(([name]) => name));
+    assert.ok(snapshot.components.every((item) => item.verdict === "EXACT_MATCH"));
+    assert.deepEqual(snapshot.safety, {
+      readOnly: true,
+      modeMutation: false,
+      armMutation: false,
+      autoGate: false,
+      lifecycleGate: false,
+      orderMutation: false,
+      positionMutation: false,
+      strategyMutation: false,
+      autoRetune: false,
+    });
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 });
