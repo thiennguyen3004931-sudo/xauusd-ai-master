@@ -4,6 +4,7 @@ import process from "node:process";
 
 const root = process.cwd();
 const servicePath = path.join(root, "apps/api/src/services/phase7c-performance-intelligence.service.ts");
+const correlationServicePath = path.join(root, "apps/api/src/services/phase7c-performance-correlation.service.ts");
 const schemaPath = path.join(root, "apps/api/src/contracts/phase7c-performance-correlation.schema.ts");
 const routePath = path.join(root, "apps/api/src/routes/phase7c-performance-intelligence.route.ts");
 const appPath = path.join(root, "apps/api/src/app.ts");
@@ -28,6 +29,7 @@ function mustNotContain(text, needle, label) {
 
 for (const [filePath, label] of [
   [servicePath, "service"],
+  [correlationServicePath, "correlation service"],
   [schemaPath, "correlation schema"],
   [routePath, "route"],
   [appPath, "app"],
@@ -41,6 +43,7 @@ for (const [filePath, label] of [
 }
 
 const service = fs.readFileSync(servicePath, "utf8");
+const correlationService = fs.readFileSync(correlationServicePath, "utf8");
 const schema = fs.readFileSync(schemaPath, "utf8");
 const route = fs.readFileSync(routePath, "utf8");
 const app = fs.readFileSync(appPath, "utf8");
@@ -61,8 +64,13 @@ mustContain(service, 'riskMutation: false', "service");
 mustContain(service, 'orderMutation: false', "service");
 mustContain(service, 'positionMutation: false', "service");
 mustContain(service, 'autoRetune: false', "service");
-mustContain(service, 'buildPhase7CPerformanceCorrelationBackfill', "service");
-mustContain(service, 'PHASE7C_PERFORMANCE_CORRELATION_SCHEMA_VERSION', "service");
+
+mustContain(correlationService, 'buildPhase7CPerformanceCorrelationBackfill', "correlation service");
+mustContain(correlationService, 'PHASE7C_PERFORMANCE_CORRELATION_SCHEMA_VERSION', "correlation service");
+mustContain(correlationService, 'getPhase7CPerformanceIntelligence', "correlation service");
+mustContain(correlationService, 'runtimeMutation: false', "correlation service");
+mustContain(correlationService, 'candidatePositionCount', "correlation service");
+mustContain(correlationService, 'no timestamp or price proximity matching is introduced', "correlation service");
 
 // Canonical decision audit path contract: executor decision streams are account-aware.
 mustContain(service, 'decisionAuditRoot', "service");
@@ -105,6 +113,7 @@ mustContain(app, 'phase7c-performance-intelligence.route', "app");
 mustContain(app, 'app.use("/api/v1/phase7c/performance-intelligence"', "app");
 
 mustContain(webApi, '/api/v1/phase7c/performance-intelligence', "web API");
+mustContain(webApi, 'method: "GET"', "web API");
 mustContain(webApi, 'cache: "no-store"', "web API");
 mustNotContain(webApi.toLowerCase(), 'method: "post"', "web API");
 mustNotContain(webApi.toLowerCase(), 'method: "put"', "web API");
@@ -128,8 +137,10 @@ const forbiddenServicePatterns = [
   /phase7CBotModeService\.set/,
   /Write-Phase7CLiveArmState/,
 ];
-for (const pattern of forbiddenServicePatterns) {
-  if (pattern.test(service)) fail(`service contains forbidden mutation pattern ${pattern}`);
+for (const [label, text] of [["service", service], ["correlation service", correlationService]]) {
+  for (const pattern of forbiddenServicePatterns) {
+    if (pattern.test(text)) fail(`${label} contains forbidden mutation pattern ${pattern}`);
+  }
 }
 
 console.log("P2_PERFORMANCE_INTELLIGENCE_SOURCE_CONTRACT=PASS");
