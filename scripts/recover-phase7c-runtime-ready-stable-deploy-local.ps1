@@ -11,6 +11,7 @@ $ConfigPath = Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.json
 $AccountLibrary = Join-Path $PSScriptRoot "lib\phase7c-account-mode.ps1"
 $OwnershipLibrary = Join-Path $PSScriptRoot "lib\phase7c-scheduled-task-ownership.ps1"
 $RuntimeOwnershipLibrary = Join-Path $PSScriptRoot "lib\phase7c-runtime-ownership-probe.ps1"
+$RuntimeSourceAttestationLibrary = Join-Path $PSScriptRoot "lib\phase7c-runtime-source-attestation.ps1"
 $WebApiDeploy = Join-Path $PSScriptRoot "deploy-phase7c-web-ui-local.ps1"
 $TaskInstaller = Join-Path $PSScriptRoot "register-phase7c-executor-task-local.ps1"
 $TaskName = "XAUUSD-Phase7C-Executors"
@@ -25,7 +26,7 @@ if ($ExpectedCommit -notmatch '^[0-9a-fA-F]{40}$') {
 if ($TimeoutSeconds -lt 30 -or $TimeoutSeconds -gt 600) {
   throw "TimeoutSeconds must be between 30 and 600."
 }
-foreach ($required in @($ConfigPath, $AccountLibrary, $OwnershipLibrary, $RuntimeOwnershipLibrary, $WebApiDeploy, $TaskInstaller)) {
+foreach ($required in @($ConfigPath, $AccountLibrary, $OwnershipLibrary, $RuntimeOwnershipLibrary, $RuntimeSourceAttestationLibrary, $WebApiDeploy, $TaskInstaller)) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
     throw "Runtime-ready stable recovery deploy required file not found: $required"
   }
@@ -34,6 +35,7 @@ foreach ($required in @($ConfigPath, $AccountLibrary, $OwnershipLibrary, $Runtim
 . $AccountLibrary
 . $OwnershipLibrary
 . $RuntimeOwnershipLibrary
+. $RuntimeSourceAttestationLibrary
 $ExpectedCommit = $ExpectedCommit.ToLowerInvariant()
 $gitExe = (Get-Command git -ErrorAction Stop).Source
 
@@ -307,6 +309,10 @@ try {
   if ($LASTEXITCODE -ne 0 -or $actualCommit -ne $ExpectedCommit) {
     throw "Runtime-ready stable recovery deploy exact commit mismatch. expected=$ExpectedCommit actual=$actualCommit"
   }
+  $sourceTree = ([string](& $gitExe rev-parse "$ExpectedCommit`^{tree}")).Trim().ToLowerInvariant()
+  if ($LASTEXITCODE -ne 0 -or $sourceTree -notmatch '^[0-9a-f]{40}$') {
+    throw "Could not resolve exact source tree for runtime attestation."
+  }
 } finally {
   Pop-Location
 }
@@ -396,6 +402,22 @@ if ([string]::IsNullOrWhiteSpace($ControlApiUrl)) {
   throw "Executor task controlApiUrl is missing."
 }
 
+$attestationConfigIdentity = Get-Phase7CRuntimeSourceConfigIdentity `
+  -RuntimeRoot $WorkDir `
+  -AccountMode LIVE `
+  -LiveExecutionEnabled $true `
+  -ControlApiUrl $ControlApiUrl
+$deployment = Initialize-Phase7CRuntimeSourceDeployment `
+  -RuntimeRoot $WorkDir `
+  -SourceCommit $ExpectedCommit `
+  -SourceTree $sourceTree `
+  -Branch main `
+  -ConfigIdentity $attestationConfigIdentity
+Write-Host "PHASE7C_RUNTIME_SOURCE_DEPLOYMENT_ID=$($deployment.deploymentId)"
+Write-Host "PHASE7C_RUNTIME_SOURCE_COMMIT=$($deployment.sourceCommit)"
+Write-Host "PHASE7C_RUNTIME_SOURCE_TREE=$($deployment.sourceTree)"
+Write-Host "PHASE7C_RUNTIME_SOURCE_MANIFEST=READY"
+
 $envInfo = Assert-Phase7CAccountEnv -EnvFile $EnvFile -AccountMode "LIVE" -RequireTrading
 $BridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
 $BridgeHeaders = @{ "x-mt5-api-key" = $envInfo.apiKey }
@@ -437,7 +459,6 @@ if ($taskBatterySettingsRepairRequired) {
     -not [bool]$runtimeGenerationBeforeBatteryRepair.brokerProcessAlive -or `
     -not [bool]$runtimeGenerationBeforeBatteryRepair.brokerHeartbeatFresh -or `
     $lockAbsentBeforeBatteryRepair
-
   $batteryLifecycleStoppedNoExecutors = `
     -not [bool]$lifecycleBeforeBatteryRepair.running -and `
     -not (Test-Phase7CLifecycleHasAliveProcess -State $lifecycleBeforeBatteryRepair)
@@ -725,4 +746,3 @@ if ($taskBatterySettingsRepairRequired) {
   Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_LIVE_TEST_ORDER=NONE"
   throw $originalError
 }
-

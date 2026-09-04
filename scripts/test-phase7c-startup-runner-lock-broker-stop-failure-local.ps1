@@ -6,8 +6,9 @@ $sourceStopper = Join-Path $PSScriptRoot 'stop-phase7c-executors-local.ps1'
 $sourceGuard = Join-Path $PSScriptRoot 'lib\phase7c-startup-runner-guard.ps1'
 $sourceAccount = Join-Path $PSScriptRoot 'lib\phase7c-account-mode.ps1'
 $sourceBroker = Join-Path $PSScriptRoot 'lib\phase7c-lifecycle-broker.ps1'
+$sourceAttestation = Join-Path $PSScriptRoot 'lib\phase7c-runtime-source-attestation.ps1'
 $ownershipLibrary = Join-Path $PSScriptRoot 'lib\phase7c-scheduled-task-ownership.ps1'
-foreach ($required in @($sourceRunner, $sourceStopper, $sourceGuard, $sourceAccount, $sourceBroker, $ownershipLibrary)) {
+foreach ($required in @($sourceRunner, $sourceStopper, $sourceGuard, $sourceAccount, $sourceBroker, $sourceAttestation, $ownershipLibrary)) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Required production source missing: $required" }
 }
 . $ownershipLibrary
@@ -127,6 +128,7 @@ try {
   Copy-Item -LiteralPath $sourceGuard -Destination (Join-Path $tempLib 'phase7c-startup-runner-guard.ps1') -Force
   Copy-Item -LiteralPath $sourceAccount -Destination (Join-Path $tempLib 'phase7c-account-mode.ps1') -Force
   Copy-Item -LiteralPath $sourceBroker -Destination (Join-Path $tempLib 'phase7c-lifecycle-broker.ps1') -Force
+  Copy-Item -LiteralPath $sourceAttestation -Destination (Join-Path $tempLib 'phase7c-runtime-source-attestation.ps1') -Force
 
   $stubSupervisor = @'
 param(

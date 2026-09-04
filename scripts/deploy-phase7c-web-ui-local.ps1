@@ -18,6 +18,8 @@ $LifecycleBrokerRunner = Join-Path $PSScriptRoot "run-phase7c-executor-task-runn
 $LifecycleBrokerGuardLibrary = Join-Path $PSScriptRoot "lib\phase7c-startup-runner-guard.ps1"
 $LifecycleBrokerAccountLibrary = Join-Path $PSScriptRoot "lib\phase7c-account-mode.ps1"
 $LifecycleBrokerLibrary = Join-Path $PSScriptRoot "lib\phase7c-lifecycle-broker.ps1"
+$RuntimeSourceAttestationLibrary = Join-Path $PSScriptRoot "lib\phase7c-runtime-source-attestation.ps1"
+$ExecutorConfigPath = Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.json"
 
 if ($AllowOwnedTaskProvenanceMigration) {
   if ($ExpectedRunnerSha256 -notmatch '^[0-9a-fA-F]{64}$') {
@@ -32,12 +34,16 @@ foreach ($required in @(
   $LifecycleBrokerRunner,
   $LifecycleBrokerGuardLibrary,
   $LifecycleBrokerAccountLibrary,
-  $LifecycleBrokerLibrary
+  $LifecycleBrokerLibrary,
+  $RuntimeSourceAttestationLibrary,
+  $ExecutorConfigPath
 )) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
     throw "Web UI deploy required file missing: $required"
   }
 }
+. $LifecycleBrokerAccountLibrary
+. $RuntimeSourceAttestationLibrary
 
 function Read-JsonFile([string]$Path, [string]$Label) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -48,6 +54,12 @@ function Read-JsonFile([string]$Path, [string]$Label) {
   } catch {
     throw "$Label file is invalid: $Path. $($_.Exception.Message)"
   }
+}
+
+function Resolve-ProjectPath([string]$Value) {
+  if ([string]::IsNullOrWhiteSpace($Value)) { return "" }
+  if ([System.IO.Path]::IsPathRooted($Value)) { return [System.IO.Path]::GetFullPath($Value) }
+  return [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot $Value))
 }
 
 function Assert-LifecycleBrokerSourceFresh([string]$WorkDir) {
@@ -92,7 +104,8 @@ function Assert-LifecycleBrokerSourceFresh([string]$WorkDir) {
     $LifecycleBrokerRunner,
     $LifecycleBrokerGuardLibrary,
     $LifecycleBrokerAccountLibrary,
-    $LifecycleBrokerLibrary
+    $LifecycleBrokerLibrary,
+    $RuntimeSourceAttestationLibrary
   )
   $latestSourceWriteUtc = @(
     $startupLoadedSources | ForEach-Object {
@@ -131,11 +144,69 @@ try {
   if ($currentCommit -ne $ExpectedCommit) {
     throw "Web UI deploy requires commit '$ExpectedCommit' but found '$currentCommit'. No runtime process was restarted."
   }
+  $sourceTree = (& $git.Source rev-parse "$ExpectedCommit`^{tree}").Trim().ToLowerInvariant()
+  if ($LASTEXITCODE -ne 0 -or $sourceTree -notmatch '^[0-9a-f]{40}$') {
+    throw "Could not resolve exact source tree for runtime attestation. No runtime process was restarted."
+  }
 
   Write-Host "PHASE7C_WEB_UI_DEPLOY=START"
   Write-Host "PHASE7C_WEB_UI_DEPLOY_BRANCH=$branch"
   Write-Host "PHASE7C_WEB_UI_DEPLOY_EXPECTED_COMMIT=$ExpectedCommit"
   Write-Host "PHASE7C_WEB_UI_DEPLOY_GIT_CLEAN=PASS"
+
+  $executorConfig = Read-JsonFile -Path $ExecutorConfigPath -Label "Executor task config"
+  if ([int]$executorConfig.version -ne 2) {
+    throw "Web UI deploy requires executor task config version 2 before runtime attestation."
+  }
+  $taskConfiguredAccountMode = ConvertTo-Phase7CAccountMode ([string]$executorConfig.accountMode)
+  $taskConfiguredLiveExecutionEnabled = [bool]$executorConfig.liveExecutionEnabled
+  if ($taskConfiguredAccountMode -eq "LIVE" -and -not $taskConfiguredLiveExecutionEnabled) {
+    throw "Web UI deploy refuses an inconsistent LIVE executor config before runtime attestation."
+  }
+  if ($taskConfiguredAccountMode -eq "DEMO" -and $taskConfiguredLiveExecutionEnabled) {
+    throw "Web UI deploy refuses liveExecutionEnabled=true for DEMO before runtime attestation."
+  }
+
+  $resolvedWorkDir = Resolve-ProjectPath $WorkDir
+  $configuredWorkDir = Resolve-ProjectPath ([string]$executorConfig.workDir)
+  if ([string]::IsNullOrWhiteSpace($resolvedWorkDir) -or $resolvedWorkDir -ne $configuredWorkDir) {
+    throw "Web UI deploy WorkDir must match the canonical executor runtime root before runtime attestation. requested=$resolvedWorkDir configured=$configuredWorkDir"
+  }
+  $configuredControlApiUrl = ([string]$executorConfig.controlApiUrl).TrimEnd('/')
+  $expectedControlApiUrl = "http://127.0.0.1:$ApiPort"
+  if ([string]::IsNullOrWhiteSpace($configuredControlApiUrl) -or $configuredControlApiUrl -ne $expectedControlApiUrl) {
+    throw "Web UI deploy API endpoint must match the canonical executor controlApiUrl before runtime attestation. expected=$expectedControlApiUrl configured=$configuredControlApiUrl"
+  }
+
+  $accountStatePath = Join-Path $resolvedWorkDir "phase7c-account-mode.json"
+  $accountState = Read-JsonFile -Path $accountStatePath -Label "Canonical account-mode state"
+  if ([int]$accountState.version -ne 1) {
+    throw "Web UI deploy requires canonical account-mode state version 1 before runtime attestation."
+  }
+  $canonicalAttestedAccountMode = ConvertTo-Phase7CAccountMode ([string]$accountState.accountMode)
+  $canonicalAttestedLiveExecutionEnabled = [bool]$accountState.liveExecutionEnabled
+  if ($canonicalAttestedAccountMode -eq "LIVE" -and -not $canonicalAttestedLiveExecutionEnabled) {
+    throw "Web UI deploy refuses canonical LIVE account state with liveExecutionEnabled=false before runtime attestation."
+  }
+  if ($canonicalAttestedAccountMode -eq "DEMO" -and $canonicalAttestedLiveExecutionEnabled) {
+    throw "Web UI deploy refuses canonical DEMO account state with liveExecutionEnabled=true before runtime attestation."
+  }
+
+  $attestationConfigIdentity = Get-Phase7CRuntimeSourceConfigIdentity `
+    -RuntimeRoot $resolvedWorkDir `
+    -AccountMode $canonicalAttestedAccountMode `
+    -LiveExecutionEnabled $canonicalAttestedLiveExecutionEnabled `
+    -ControlApiUrl $configuredControlApiUrl
+  $deployment = Initialize-Phase7CRuntimeSourceDeployment `
+    -RuntimeRoot $resolvedWorkDir `
+    -SourceCommit $ExpectedCommit `
+    -SourceTree $sourceTree `
+    -Branch main `
+    -ConfigIdentity $attestationConfigIdentity
+  Write-Host "PHASE7C_RUNTIME_SOURCE_DEPLOYMENT_ID=$($deployment.deploymentId)"
+  Write-Host "PHASE7C_RUNTIME_SOURCE_COMMIT=$($deployment.sourceCommit)"
+  Write-Host "PHASE7C_RUNTIME_SOURCE_TREE=$($deployment.sourceTree)"
+  Write-Host "PHASE7C_RUNTIME_SOURCE_MANIFEST=READY"
 
   [void](Assert-LifecycleBrokerSourceFresh -WorkDir $WorkDir)
 

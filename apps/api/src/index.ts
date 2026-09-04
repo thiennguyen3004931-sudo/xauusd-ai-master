@@ -5,6 +5,7 @@ import {
   stopAutoExecutionSoak,
 } from "./services/auto-execution-soak.service";
 import { warmPhase7CCanonicalDealLedgerOnStartup } from "./services/phase7c-canonical-deal-ledger.service";
+import { writePhase7CApiRuntimeSourceAttestation } from "./services/phase7c-runtime-source-attestation.service";
 
 const PORT = Number(process.env.PORT ?? 3001);
 const HOST = process.env.HOST ?? "127.0.0.1";
@@ -12,6 +13,18 @@ const HOST = process.env.HOST ?? "127.0.0.1";
 app.listen(PORT, HOST, () => {
   console.log(`XAUUSD API running at http://${HOST}:${PORT}`);
   console.log("Trading mode defaults to SHADOW. Live execution is not exposed by this API.");
+  try {
+    const attestation = writePhase7CApiRuntimeSourceAttestation();
+    console.log(
+      `PHASE7C_RUNTIME_SOURCE_API_ATTESTATION=PASS|PID=${attestation.pid}|DEPLOYMENT_ID=${attestation.deploymentId}`,
+    );
+  } catch (error) {
+    console.warn(
+      `PHASE7C_RUNTIME_SOURCE_API_ATTESTATION=UNKNOWN|REASON=${
+        error instanceof Error ? error.message : "unknown"
+      }`,
+    );
+  }
 });
 startAutoExecutionSoak();
 
