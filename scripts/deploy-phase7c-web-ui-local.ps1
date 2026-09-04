@@ -104,7 +104,8 @@ function Assert-LifecycleBrokerSourceFresh([string]$WorkDir) {
     $LifecycleBrokerRunner,
     $LifecycleBrokerGuardLibrary,
     $LifecycleBrokerAccountLibrary,
-    $LifecycleBrokerLibrary
+    $LifecycleBrokerLibrary,
+    $RuntimeSourceAttestationLibrary
   )
   $latestSourceWriteUtc = @(
     $startupLoadedSources | ForEach-Object {
