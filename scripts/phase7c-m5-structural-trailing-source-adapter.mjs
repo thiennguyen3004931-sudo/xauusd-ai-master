@@ -5,9 +5,24 @@ function replaceRequired(source, search, replacement, label) {
   return source.replace(search, replacement);
 }
 
+function replaceOneOfRequired(source, searches, replacement, label) {
+  const matches = searches.filter((search) => source.includes(search));
+  if (matches.length !== 1) {
+    throw new Error(
+      `Phase7C M5 structural trailing adapter expected exactly one ${label}, found ${matches.length}.`,
+    );
+  }
+  return source.replace(matches[0], replacement);
+}
+
 function prependImport(source) {
-  const importLine = 'import { evaluateM5StructuralTrail } from "./phase7c-m5-structural-trailing.mjs";\n';
-  return source.includes(importLine.trim()) ? source : importLine + source;
+  const importLine = 'import { evaluateM5StructuralTrail, latestConfirmedM5Structure } from "./phase7c-m5-structural-trailing.mjs";\n';
+  const legacyImportLine = 'import { evaluateM5StructuralTrail } from "./phase7c-m5-structural-trailing.mjs";\n';
+  if (source.includes(importLine.trim())) return source;
+  if (source.includes(legacyImportLine.trim())) {
+    return source.replace(legacyImportLine, importLine);
+  }
+  return importLine + source;
 }
 
 export function transformPhase7CTrendM5TrailingSource(input) {
@@ -26,6 +41,12 @@ export function transformPhase7CTrendM5TrailingSource(input) {
     "Trend post +10 trailing declaration",
   );
 
+  source = replaceRequired(
+    source,
+    "  fastMoveAttempt?: number;\n",
+    "  fastMoveAttempt?: number;\n  fastMoveHandedOffToM5?: boolean;\n",
+    "Trend durable Fast-Move M5 handoff state",
+  );
   source = replaceRequired(
     source,
     "    await managePosition(managedPosition, quote, spec, m15);",
@@ -49,6 +70,44 @@ export function transformPhase7CTrendM5TrailingSource(input) {
     "  const latestM15 = m15.at(-1);\n  const holdM15CloseTime = Number(latestM15?.closeTime ?? 0);",
     "  const latestM15 = m15.at(-1);\n  const latestM5 = m5.at(-1);\n  const holdM15CloseTime = Number(latestM15?.closeTime ?? 0);",
     "Trend latest M5 snapshot",
+  );
+
+  source = replaceRequired(
+    source,
+    `  const fastMoveStructure = managed.partialApplied && latestM15
+    ? latestConfirmedStructureStop(managed.side, m15, managed.signalTimestamp, latestM15.closeTime)
+    : null;
+  if (fastMoveStructure === null) {
+`,
+    `  const fastMoveStructure = managed.partialApplied && latestM5
+    ? latestConfirmedM5Structure({
+        side: managed.side,
+        bars: m5,
+        afterTimestamp: managed.partialActivatedAt ?? managed.signalTimestamp,
+        atOrBefore: latestM5.closeTime,
+      })
+    : null;
+  if (fastMoveStructure !== null && !managed.fastMoveHandedOffToM5) {
+    managed.fastMoveHandedOffToM5 = true;
+    saveState();
+    journal("FAST_MOVE_HANDOFF_M5_STRUCTURE", {
+      ticket: managed.ticket,
+      side: managed.side,
+      structurePrice: fastMoveStructure.price,
+      pivotM5CloseTime: fastMoveStructure.pivotCloseTime,
+      m5CloseTime: fastMoveStructure.confirmedAt,
+    });
+  }
+  if (!managed.fastMoveHandedOffToM5) {
+  if (fastMoveStructure === null) {
+`,
+    "Trend Fast-Move M5 ownership handoff",
+  );
+  source = replaceRequired(
+    source,
+    "  }\n  }\n\n  const hold =",
+    "  }\n  }\n  }\n\n  const hold =",
+    "Trend durable Fast-Move M5 handoff guard",
   );
 
   const oldTrailing = `    const structure = latestConfirmedStructureStop(managed.side, m15, managed.signalTimestamp, latest.closeTime);
@@ -137,9 +196,12 @@ export function transformPhase7CTrendM5TrailingSource(input) {
 export function transformPhase7CSidewayM5TrailingSource(input) {
   let source = prependImport(String(input));
 
-  source = replaceRequired(
+  source = replaceOneOfRequired(
     source,
-    'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_NO_TRAILING");',
+    [
+      'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_NO_TRAILING");',
+      'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_PLUS_FAST_MOVE_LOCK");',
+    ],
     'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_M5_CONFIRMED_STRUCTURE_TRAILING");',
     "Sideway management declaration",
   );
@@ -147,7 +209,7 @@ export function transformPhase7CSidewayM5TrailingSource(input) {
   source = replaceRequired(
     source,
     "    partialApplied: false,\n    breakEvenApplied: false,",
-    "    partialApplied: false,\n    partialActivatedAt: null,\n    breakEvenApplied: false,\n    lastStructuralStop: Number(opened.stopLoss || pending.stopLoss),\n    structureAttempt: 0,",
+    "    partialApplied: false,\n    partialActivatedAt: null,\n    breakEvenApplied: false,\n    lastStructuralStop: Number(opened.stopLoss || pending.stopLoss),\n    structureAttempt: 0,\n    fastMoveHandedOffToM5: false,",
     "Sideway managed trailing state",
   );
 
@@ -170,31 +232,104 @@ export function transformPhase7CSidewayM5TrailingSource(input) {
     "Sideway partial activation timestamp",
   );
 
-  const trailingInsertion = `
-  if (managed.partialApplied) {
+  const fastMoveHandoffPrefix = `  let sidewayM5ManagementSnapshot = null;
+  let sidewayM5ManagementLoadAttempted = false;
+  const loadSidewayM5ManagementSnapshot = async () => {
+    if (sidewayM5ManagementLoadAttempted) return sidewayM5ManagementSnapshot;
+    sidewayM5ManagementLoadAttempted = true;
     try {
-      const m5 = await bridgeGet(\`/v1/candles/\${encodeURIComponent(symbol)}?timeframe=M5&count=\${m5CandleCount}\`);
-      const latestM5 = Array.isArray(m5) ? m5.at(-1) : null;
-      const m5CloseTime = Number(latestM5?.closeTime ?? 0);
-      const m5Freshness = evaluateTimestampFreshness(m5CloseTime, {
+      const bars = await bridgeGet(\`/v1/candles/\${encodeURIComponent(symbol)}?timeframe=M5&count=\${m5CandleCount}\`);
+      const latest = Array.isArray(bars) ? bars.at(-1) : null;
+      const closeTime = Number(latest?.closeTime ?? 0);
+      const freshness = evaluateTimestampFreshness(closeTime, {
         maxAgeMs: maxM5AgeMs,
         clockOffsetMs: brokerClockOffsetMs,
       });
+      sidewayM5ManagementSnapshot = {
+        bars: Array.isArray(bars) ? bars : [],
+        latest,
+        closeTime,
+        freshness,
+        error: null,
+      };
+    } catch (error) {
+      sidewayM5ManagementSnapshot = {
+        bars: [],
+        latest: null,
+        closeTime: 0,
+        freshness: { fresh: false, reason: "M5_TRAILING_DATA_OR_BROKER_ERROR" },
+        error: errorMessage(error),
+      };
+    }
+    return sidewayM5ManagementSnapshot;
+  };
+
+  const fastMoveStructure = managed.partialApplied
+    ? await (async () => {
+        const snapshot = await loadSidewayM5ManagementSnapshot();
+        if (!snapshot?.latest || !snapshot.freshness?.fresh) return null;
+        return latestConfirmedM5Structure({
+          side: managed.side,
+          bars: snapshot.bars,
+          afterTimestamp: Number(managed.partialActivatedAt ?? managed.signalM5CloseTime ?? 0),
+          atOrBefore: snapshot.closeTime,
+        });
+      })()
+    : null;
+  if (fastMoveStructure !== null && !managed.fastMoveHandedOffToM5) {
+    managed.fastMoveHandedOffToM5 = true;
+    saveState();
+    journal("FAST_MOVE_HANDOFF_M5_STRUCTURE", {
+      ticket: managed.ticket,
+      side: managed.side,
+      structurePrice: fastMoveStructure.price,
+      pivotM5CloseTime: fastMoveStructure.pivotCloseTime,
+      m5CloseTime: fastMoveStructure.confirmedAt,
+    });
+  }
+  if (!managed.fastMoveHandedOffToM5) {
+  if (fastMoveStructure === null) {
+`;
+  source = replaceRequired(
+    source,
+    "  const fastMove = fastMoveProfitLockCandidate({",
+    `${fastMoveHandoffPrefix}  const fastMove = fastMoveProfitLockCandidate({`,
+    "Sideway Fast-Move M5 ownership handoff",
+  );
+  source = replaceRequired(
+    source,
+    "  }\n\n  if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {",
+    "  }\n  }\n  }\n\n  if (managed.breakEvenApplied && !managed.partialApplied && targetReached(managed.side, marketPrice, managed.tp1)) {",
+    "Sideway durable Fast-Move M5 handoff guard",
+  );
+
+  const trailingInsertion = `
+  if (managed.partialApplied) {
+    try {
+      const snapshot = await loadSidewayM5ManagementSnapshot();
+      const latestM5 = snapshot?.latest ?? null;
+      const m5CloseTime = Number(snapshot?.closeTime ?? 0);
+      const m5Freshness = snapshot?.freshness ?? { fresh: false, reason: "M5_DATA_MISSING" };
 
       if (!latestM5 || !m5Freshness.fresh) {
         journal("SIDEWAY_M5_STRUCTURAL_SL_SKIP", {
           ticket: managed.ticket,
-          reason: latestM5 ? m5Freshness.reason : "M5_DATA_MISSING",
+          reason: snapshot?.error ? "M5_TRAILING_DATA_OR_BROKER_ERROR" : latestM5 ? m5Freshness.reason : "M5_DATA_MISSING",
           m5CloseTime: m5CloseTime || null,
+          message: snapshot?.error ?? undefined,
         });
       } else {
         const m5Trail = evaluateM5StructuralTrail({
           side: managed.side,
-          bars: m5,
+          bars: snapshot.bars,
           afterTimestamp: Number(managed.partialActivatedAt ?? managed.signalM5CloseTime ?? 0),
           atOrBefore: m5CloseTime,
           currentStop: Number(position.stopLoss),
-          lastStructuralStop: Number(managed.lastStructuralStop ?? 0),
+          lastStructuralStop: tightestKnownStop(
+            managed.side,
+            Number(managed.lastStructuralStop ?? 0),
+            Number(managed.fastMoveStop ?? 0),
+          ),
           bid: quote.bid,
           ask: quote.ask,
           digits: Number(spec.digits ?? 2),
