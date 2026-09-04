@@ -92,6 +92,45 @@ export interface Phase7CPerformanceEffectivenessRow {
   };
 }
 
+export interface Phase7CPerformanceEffectivenessMetricBucket {
+  key: string;
+  sampleSize: number;
+  wins: number;
+  losses: number;
+  breakeven: number;
+  netPnl: number;
+  expectancy: number;
+  winRatePercent: number;
+  profitFactor: number | null;
+}
+
+export interface Phase7CPerformanceEffectivenessExcursionAggregate {
+  sampleSize: number;
+  averageMfePrice: number | null;
+  averageMaePrice: number | null;
+  averageMfeR: number | null;
+  averageMaeR: number | null;
+  averageRealizedR: number | null;
+  averagePeakToExitGivebackPrice: number | null;
+}
+
+export interface Phase7CPerformanceEffectivenessFastMoveAggregate {
+  exactSampleSize: number;
+  triggeredRows: number;
+  handoffRows: number;
+  averageLockedProfitPrice: number | null;
+}
+
+export interface Phase7CPerformanceEffectivenessAggregates {
+  strategy: Phase7CPerformanceEffectivenessMetricBucket[];
+  entryType: Phase7CPerformanceEffectivenessMetricBucket[];
+  regime: Phase7CPerformanceEffectivenessMetricBucket[];
+  rule: Phase7CPerformanceEffectivenessMetricBucket[];
+  management: Phase7CPerformanceEffectivenessMetricBucket[];
+  excursion: Phase7CPerformanceEffectivenessExcursionAggregate;
+  fastMove: Phase7CPerformanceEffectivenessFastMoveAggregate;
+}
+
 export interface Phase7CPerformanceEffectivenessSnapshot {
   schemaVersion: typeof PHASE7C_PERFORMANCE_EFFECTIVENESS_SCHEMA_VERSION;
   generatedAt: number;
@@ -116,6 +155,7 @@ export interface Phase7CPerformanceEffectivenessSnapshot {
     managementQualifiedRows: number;
     evidenceCoveragePercent: number;
   };
+  aggregates: Phase7CPerformanceEffectivenessAggregates;
   rows: Phase7CPerformanceEffectivenessRow[];
   notes: string[];
 }
