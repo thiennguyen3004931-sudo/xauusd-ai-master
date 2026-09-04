@@ -1706,6 +1706,10 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
     return;
   }
 
+  const fastMoveStructure = managed.partialApplied && latestM15
+    ? latestConfirmedStructureStop(managed.side, m15, managed.signalTimestamp, latestM15.closeTime)
+    : null;
+  if (fastMoveStructure === null) {
   const fastMove = fastMoveProfitLockCandidate({
     side: managed.side,
     entry: position.entry,
@@ -1768,6 +1772,7 @@ async function managePosition(position: Position, quote: Quote, spec: SymbolSpec
         }
       }
     }
+  }
   }
 
   const hold =
