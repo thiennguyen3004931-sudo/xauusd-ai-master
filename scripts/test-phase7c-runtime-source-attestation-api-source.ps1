@@ -62,6 +62,9 @@ foreach ($component in @('api','lifecycle-broker','supervisor','trend','sideway'
   Assert-True ($serviceText.Contains($needle)) "Task4 aggregator missing component mapping: $component"
 }
 Assert-True ($serviceText.Contains('process.kill(pid, 0)')) "Task4 liveness must use signal 0 only"
+Assert-True ($serviceText.Contains('EPERM')) "P1 liveness must distinguish permission-denied process probes from dead PIDs"
+Assert-True ($serviceText.Contains('ESRCH')) "P1 liveness must distinguish missing/dead PIDs explicitly"
+Assert-True ($serviceText.Contains('PID_LIVENESS_UNAVAILABLE')) "P1 unexpected liveness probe errors must remain fail-closed as UNKNOWN evidence"
 foreach ($forbidden in @('child_process', 'exec(', 'spawn(', 'ARM_LIVE', 'phase7CBotModeService', 'startPhase7CFromWeb', 'stopPhase7C', '/v1/orders', 'simple-git', 'git rev-parse')) {
   Assert-True (-not $serviceText.Contains($forbidden)) "Task4 service contains forbidden mutation/process/Git token: $forbidden"
 }
