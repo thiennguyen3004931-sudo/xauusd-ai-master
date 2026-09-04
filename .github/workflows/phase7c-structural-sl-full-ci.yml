@@ -11,6 +11,8 @@ on:
       - scripts/phase7c-stop-monotonicity.mjs
       - scripts/phase7c-fast-move-profit-lock.mjs
       - scripts/phase7c-fast-move-profit-lock.test.mjs
+      - scripts/phase7c-m5-structural-trailing-source-adapter.mjs
+      - scripts/test-phase7c-m5-structural-trailing-contract.mjs
       - scripts/phase7c-sideway-logic.mjs
       - scripts/run-phase7b-demo-controller.ts
       - scripts/run-phase7c-sideway-controller.mjs
@@ -21,6 +23,8 @@ on:
       - scripts/phase7c-stop-monotonicity.mjs
       - scripts/phase7c-fast-move-profit-lock.mjs
       - scripts/phase7c-fast-move-profit-lock.test.mjs
+      - scripts/phase7c-m5-structural-trailing-source-adapter.mjs
+      - scripts/test-phase7c-m5-structural-trailing-contract.mjs
       - scripts/phase7c-sideway-logic.mjs
       - scripts/run-phase7b-demo-controller.ts
       - scripts/run-phase7c-sideway-controller.mjs
@@ -59,6 +63,9 @@ jobs:
       - name: Fast-Move profit-lock contract
         run: node --test ./scripts/phase7c-fast-move-profit-lock.test.mjs
 
+      - name: M5 Fast-Move handoff contract
+        run: node ./scripts/test-phase7c-m5-structural-trailing-contract.mjs
+
       - name: Build and test broker/risk/strategy dependencies
         run: |
           pnpm --filter @xauusd/mt5-broker... build
@@ -81,41 +88,59 @@ jobs:
           pnpm --filter @xauusd/api... build
           pnpm --filter @xauusd/web... build
 
-      - name: Validate Trend controller TypeScript transform
+      - name: Validate canonical M5-transformed controller sources
         shell: bash
         run: |
           node <<'NODE'
           const fs = require("node:fs");
           const ts = require("typescript");
-          const source = fs.readFileSync("scripts/run-phase7b-demo-controller.ts", "utf8");
-          const transformed = ts.transpileModule(source, {
-            fileName: "run-phase7b-demo-controller.ts",
-            reportDiagnostics: true,
-            compilerOptions: {
-              target: ts.ScriptTarget.ES2022,
-              module: ts.ModuleKind.ESNext,
-              moduleResolution: ts.ModuleResolutionKind.Bundler,
-              verbatimModuleSyntax: false,
-            },
-          });
-          const errors = (transformed.diagnostics || []).filter(
-            (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
-          );
-          if (errors.length) {
-            for (const diagnostic of errors) {
-              console.error(ts.flattenDiagnosticMessageText(diagnostic.messageText, " "));
+
+          (async () => {
+            const {
+              transformPhase7CSidewayM5TrailingSource,
+              transformPhase7CTrendM5TrailingSource,
+            } = await import("./scripts/phase7c-m5-structural-trailing-source-adapter.mjs");
+
+            const trendRaw = fs.readFileSync("scripts/run-phase7b-demo-controller.ts", "utf8");
+            const trendSource = transformPhase7CTrendM5TrailingSource(trendRaw);
+            const transformedTrend = ts.transpileModule(trendSource, {
+              fileName: "run-phase7b-demo-controller.ts",
+              reportDiagnostics: true,
+              compilerOptions: {
+                target: ts.ScriptTarget.ES2022,
+                module: ts.ModuleKind.ESNext,
+                moduleResolution: ts.ModuleResolutionKind.Bundler,
+                verbatimModuleSyntax: false,
+              },
+            });
+            const trendErrors = (transformedTrend.diagnostics || []).filter(
+              (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
+            );
+            if (trendErrors.length) {
+              for (const diagnostic of trendErrors) {
+                console.error(ts.flattenDiagnosticMessageText(diagnostic.messageText, " "));
+              }
+              process.exit(1);
             }
+            fs.writeFileSync(".phase7c-m5-fast-move-trend-ci.mjs", transformedTrend.outputText, "utf8");
+
+            const sidewayRaw = fs.readFileSync("scripts/run-phase7c-sideway-controller.mjs", "utf8");
+            const sidewaySource = transformPhase7CSidewayM5TrailingSource(sidewayRaw);
+            fs.writeFileSync(".phase7c-m5-fast-move-sideway-ci.mjs", sidewaySource, "utf8");
+          })().catch((error) => {
+            console.error(error);
             process.exit(1);
-          }
-          fs.writeFileSync(".phase7c-structural-sl-trend-ci.mjs", transformed.outputText, "utf8");
+          });
           NODE
-          node --check .phase7c-structural-sl-trend-ci.mjs
-          rm -f .phase7c-structural-sl-trend-ci.mjs
+          node --check .phase7c-m5-fast-move-trend-ci.mjs
+          node --check .phase7c-m5-fast-move-sideway-ci.mjs
+          rm -f .phase7c-m5-fast-move-trend-ci.mjs .phase7c-m5-fast-move-sideway-ci.mjs
 
       - name: Parse modified Node sources
         run: |
           node --check scripts/phase7c-stop-monotonicity.mjs
           node --check scripts/phase7c-fast-move-profit-lock.mjs
+          node --check scripts/phase7c-m5-structural-trailing-source-adapter.mjs
           node --check scripts/phase7c-sideway-logic.mjs
           node --check scripts/run-phase7c-sideway-controller.mjs
 
