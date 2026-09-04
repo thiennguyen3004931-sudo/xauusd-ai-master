@@ -154,6 +154,12 @@ Assert-True ($webFreshSourcesStart -ge 0 -and $webFreshSourcesEnd -gt $webFreshS
 $webFreshSourcesBlock = $webText.Substring($webFreshSourcesStart, $webFreshSourcesEnd - $webFreshSourcesStart)
 Assert-True ($webFreshSourcesBlock.Contains('$RuntimeSourceAttestationLibrary')) "RED review: Web broker freshness must include P1 helper loaded by the broker"
 
+Assert-True ($webText.Contains('phase7c-account-mode.json')) "RED review: Web manifest identity must read durable canonical account state"
+Assert-True ($webText.Contains('-AccountMode $canonicalAttestedAccountMode')) "RED review: Web manifest identity must use canonical accountMode"
+Assert-True ($webText.Contains('-LiveExecutionEnabled $canonicalAttestedLiveExecutionEnabled')) "RED review: Web manifest identity must use canonical liveExecutionEnabled"
+$webAccountStateIndex = $webText.IndexOf('phase7c-account-mode.json', [System.StringComparison]::Ordinal)
+Assert-True ($webAccountStateIndex -ge 0 -and $webAccountStateIndex -lt $webManifestIndex) "RED review: Web canonical account state must be validated before manifest initialization"
+
 # Task 3: attest only at existing launch boundaries and use the real/canonical PIDs.
 $brokerText = (Get-Content -LiteralPath $BrokerRunner -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
 $supervisorText = (Get-Content -LiteralPath $Supervisor -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
