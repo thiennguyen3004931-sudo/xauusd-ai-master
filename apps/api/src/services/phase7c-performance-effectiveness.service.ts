@@ -1,14 +1,34 @@
+import path from "node:path";
 import {
   PHASE7C_PERFORMANCE_EFFECTIVENESS_SCHEMA_VERSION,
   type Phase7CPerformanceEffectivenessMetricBucket,
   type Phase7CPerformanceEffectivenessRow,
   type Phase7CPerformanceEffectivenessSnapshot,
+  type Phase7CPerformanceExcursion,
+  type Phase7CPerformanceStrategy,
 } from "../contracts/phase7c-performance-effectiveness.schema";
+import { getPhase7CPerformanceIntelligence } from "./phase7c-performance-intelligence.service";
+import { getPhase7CManagementEvidence } from "./phase7c-performance-management-evidence.service";
+import {
+  evaluatePhase7CExcursion,
+  type Phase7CExcursionBar,
+} from "./phase7c-performance-excursion.service";
 
 export interface Phase7CPerformanceEffectivenessRowsInput {
   rows: readonly Phase7CPerformanceEffectivenessRow[];
   generatedAt?: number;
 }
+
+export interface Phase7CPerformanceEffectivenessQuery {
+  days?: number;
+  symbol?: string;
+  limit?: number;
+}
+
+type PerformanceIntelligenceSnapshot = Awaited<ReturnType<typeof getPhase7CPerformanceIntelligence>>;
+type PerformanceIntelligenceTrade = PerformanceIntelligenceSnapshot["trades"][number];
+
+const M5_MS = 5 * 60_000;
 
 function round(value: number, digits = 2): number {
   const scale = 10 ** digits;
@@ -163,6 +183,212 @@ export function buildPhase7CPerformanceEffectivenessSnapshotFromRows(
       "Excursion aggregates include only COMPLETE_M5_WINDOW evidence. R metrics remain null when initial structural risk is not proven.",
       "Fast-Move locked-profit distance is derived only from explicit FAST_MOVE_TIGHTEN stop evidence. Shadow replay remains separate and SHADOW_ONLY.",
       "This snapshot performs no runtime, strategy, risk, order, position, mode, ARM, AUTO, or LIVE-test-order mutation.",
+    ],
+  };
+}
+
+function runtimeRoot(): string {
+  const configured = process.env.PHASE7C_RUNTIME_ROOT?.trim();
+  if (configured) return path.resolve(configured);
+  const demoDir = process.env.PHASE7B_DEMO_WORK_DIR?.trim();
+  if (demoDir) return path.resolve(demoDir, "..");
+  return path.resolve(process.cwd(), ".runtime");
+}
+
+function unavailableExcursion(): Phase7CPerformanceExcursion {
+  return {
+    evidence: "UNAVAILABLE",
+    initialRiskPrice: null,
+    mfePrice: null,
+    maePrice: null,
+    mfeR: null,
+    maeR: null,
+    realizedR: null,
+    peakToExitGivebackPrice: null,
+  };
+}
+
+async function readHistoricalM5Bars(
+  symbol: string,
+  openedAt: number,
+  closedAt: number,
+): Promise<{ bars: Phase7CExcursionBar[]; warning: string | null }> {
+  const apiKey = (process.env.MT5_BRIDGE_API_KEY ?? process.env.MT5_API_KEY ?? "").trim();
+  if (!apiKey) return { bars: [], warning: "MT5_BRIDGE_API_KEY_MISSING" };
+  const base = (process.env.MT5_BRIDGE_BASE_URL ?? "http://127.0.0.1:8765").replace(/\/$/, "");
+  const fromMs = Math.max(0, Math.trunc(openedAt - M5_MS));
+  const toMs = Math.max(fromMs + 1, Math.trunc(closedAt + M5_MS));
+  const params = new URLSearchParams({
+    timeframe: "M5",
+    fromMs: String(fromMs),
+    toMs: String(toMs),
+  });
+  try {
+    const response = await fetch(
+      `${base}/v1/history/candles/${encodeURIComponent(symbol)}?${params.toString()}`,
+      {
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          "x-mt5-api-key": apiKey,
+        },
+      },
+    );
+    if (!response.ok) {
+      return { bars: [], warning: `M5_HISTORY_HTTP_${response.status}` };
+    }
+    const payload = await response.json() as unknown;
+    if (!Array.isArray(payload)) return { bars: [], warning: "M5_HISTORY_PAYLOAD_INVALID" };
+    const bars = payload
+      .map((item) => {
+        const row = item as Record<string, unknown>;
+        return {
+          openTime: Number(row.openTime),
+          closeTime: Number(row.closeTime),
+          high: Number(row.high),
+          low: Number(row.low),
+        };
+      });
+    return { bars, warning: null };
+  } catch {
+    return { bars: [], warning: "M5_HISTORY_UNAVAILABLE" };
+  }
+}
+
+function fastMoveContract(strategy: Phase7CPerformanceStrategy) {
+  return {
+    activationPrice: 10,
+    givebackPrice: strategy === "TREND" ? 6 : 4,
+    source: "LIVE_BID_ASK" as const,
+  };
+}
+
+async function effectivenessRow(
+  trade: PerformanceIntelligenceTrade,
+  accountMode: "DEMO" | "LIVE",
+  symbol: string,
+): Promise<Phase7CPerformanceEffectivenessRow> {
+  const strategy = trade.strategy as Phase7CPerformanceStrategy;
+  const exactCorrelation = trade.correlation.verdict === "EXACT";
+  const warnings: string[] = [];
+
+  const management = exactCorrelation
+    ? getPhase7CManagementEvidence({
+        runtimeRoot: runtimeRoot(),
+        accountMode,
+        strategy,
+        positionId: trade.positionId,
+        openedAt: trade.openedAt,
+        closedAt: trade.closedAt,
+      })
+    : {
+        evidence: "UNMATCHED" as const,
+        events: [],
+        source: { journalPath: "", available: false, parsedRows: 0, malformedRows: 0 },
+        warnings: ["CORRELATION_NOT_EXACT"],
+      };
+  warnings.push(...management.warnings);
+
+  let excursion = unavailableExcursion();
+  if (exactCorrelation) {
+    const history = await readHistoricalM5Bars(symbol, trade.openedAt, trade.closedAt);
+    if (history.warning) warnings.push(history.warning);
+    if (history.bars.length > 0) {
+      excursion = evaluatePhase7CExcursion({
+        side: trade.side,
+        entry: trade.entry,
+        exit: trade.exit,
+        openedAt: trade.openedAt,
+        closedAt: trade.closedAt,
+        initialRiskPrice: null,
+        bars: history.bars,
+      });
+      if (excursion.evidence !== "COMPLETE_M5_WINDOW") {
+        warnings.push(`M5_WINDOW_${excursion.evidence}`);
+      }
+    }
+  } else {
+    warnings.push("CORRELATION_NOT_EXACT");
+  }
+
+  const fastMoveTriggered = management.events.some(
+    (event) => event.family === "FAST_MOVE_TIGHTEN" || event.family === "FAST_MOVE_REJECTED",
+  );
+  const handoffToM5 = management.events.some(
+    (event) => event.family === "FAST_MOVE_HANDOFF_M5_STRUCTURE",
+  );
+
+  return {
+    schemaVersion: PHASE7C_PERFORMANCE_EFFECTIVENESS_SCHEMA_VERSION,
+    tradeKey: `${accountMode}:${strategy}:${trade.positionId}:${trade.id}`,
+    positionId: trade.positionId,
+    symbol: trade.symbol,
+    accountMode,
+    strategy,
+    side: trade.side,
+    entryType: trade.attribution.entryType,
+    regime: trade.attribution.regime,
+    openedAt: trade.openedAt,
+    closedAt: trade.closedAt,
+    entry: trade.entry,
+    exit: trade.exit,
+    initialVolume: trade.volume,
+    netPnl: trade.netPnl,
+    correlation: {
+      verdict: trade.correlation.verdict,
+      evidence: [...trade.correlation.evidence],
+    },
+    rules: {
+      passed: [...trade.attribution.passedRules],
+      blocked: [...trade.attribution.blockedRules],
+    },
+    excursion,
+    management: {
+      evidence: management.evidence,
+      events: [...management.events],
+    },
+    fastMove: {
+      current: fastMoveContract(strategy),
+      triggered: fastMoveTriggered,
+      handoffToM5,
+    },
+    quality: {
+      exactCorrelation,
+      completeExcursionEvidence: excursion.evidence === "COMPLETE_M5_WINDOW",
+      exactManagementEvidence: management.evidence === "EXACT",
+      warnings: [...new Set(warnings)],
+    },
+  };
+}
+
+export async function getPhase7CPerformanceEffectivenessSnapshot(
+  query: Phase7CPerformanceEffectivenessQuery = {},
+): Promise<Phase7CPerformanceEffectivenessSnapshot> {
+  const days = query.days ?? 90;
+  const symbol = query.symbol?.trim().toUpperCase() || "XAUUSD";
+  const limit = Math.min(200, Math.max(1, Math.trunc(query.limit ?? 100)));
+  const intelligence = await getPhase7CPerformanceIntelligence(days, symbol);
+  const accountMode = intelligence.account.accountMode;
+  const selected = [...intelligence.trades]
+    .filter((trade) => trade.strategy === "TREND" || trade.strategy === "SIDEWAY")
+    .sort((left, right) => right.closedAt - left.closedAt)
+    .slice(0, limit);
+
+  const rows: Phase7CPerformanceEffectivenessRow[] = [];
+  for (const trade of selected) {
+    rows.push(await effectivenessRow(trade, accountMode, symbol));
+  }
+  const snapshot = buildPhase7CPerformanceEffectivenessSnapshotFromRows({
+    rows,
+    generatedAt: intelligence.generatedAt,
+  });
+  return {
+    ...snapshot,
+    notes: [
+      ...snapshot.notes,
+      "M5 excursion data is loaded through the bridge GET-only historical-candles endpoint; unavailable or incomplete windows remain null.",
+      "Initial structural risk is not inferred from current accounting history, so production R metrics remain null until exact initial-risk evidence is persisted.",
+      "SHADOW_ONLY Fast-Move alternatives are not replayed from M5 OHLC because candle high/low does not prove intrabar price ordering. Ordered bid/ask evidence is required.",
     ],
   };
 }
