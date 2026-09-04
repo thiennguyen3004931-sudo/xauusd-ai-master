@@ -7,8 +7,8 @@ export function Phase7CControlCenterShellPage() {
   return (
     <Stack spacing={3}>
       <Phase7CExecutionAuthorizationCard />
-      <Phase7CRuntimeSourceAttestationCard />
       <Phase7CControlCenterPage />
+      <Phase7CRuntimeSourceAttestationCard />
     </Stack>
   );
 }
