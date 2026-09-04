@@ -73,6 +73,11 @@ const neverLoosen = evaluateM5StructuralTrail({
 });
 assert.equal(neverLoosen.allowed, false);
 assert.equal(neverLoosen.reason, "NOT_STRICTLY_TIGHTER");
+assert.equal(
+  neverLoosen.confirmedAt,
+  3_000,
+  "Confirmed M5 structure ownership must remain observable even when its candidate cannot tighten the current Fast-Move floor.",
+);
 
 const sellBars = [
   { closeTime: 1_000, low: 98, high: 104 },
@@ -103,6 +108,16 @@ assert.match(transformedTrend, /PHASE7B_DEMO_POST_PLUS10_SL=M5_CONFIRMED_SWING_S
 assert.match(transformedTrend, /evaluateM5StructuralTrail/);
 assert.match(transformedTrend, /m5CloseTime/);
 assert.doesNotMatch(transformedTrend, /const structure = latestConfirmedStructureStop\(managed\.side, m15/);
+assert.match(
+  transformedTrend,
+  /const fastMoveStructure = managed\.partialApplied && latestM5[\s\S]*?latestConfirmedM5Structure\([\s\S]*?if \(fastMoveStructure === null\) \{[\s\S]*?fastMoveProfitLockCandidate/,
+  "RED_TARGET: canonical Trend Fast-Move must hand off to confirmed M5 structure, not M15 structure.",
+);
+assert.doesNotMatch(
+  transformedTrend,
+  /const fastMoveStructure = managed\.partialApplied && latestM15[\s\S]*?latestConfirmedStructureStop/,
+  "Canonical Trend source must not retain the old M15 Fast-Move ownership signal.",
+);
 
 const sidewaySource = fs.readFileSync(new URL("./run-phase7c-sideway-controller.mjs", import.meta.url), "utf8");
 const transformedSideway = transformPhase7CSidewayM5TrailingSource(sidewaySource);
@@ -110,10 +125,31 @@ assert.match(transformedSideway, /PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PL
 assert.match(transformedSideway, /SIDEWAY_M5_STRUCTURAL_SL_TIGHTEN/);
 assert.match(transformedSideway, /managed\.partialApplied/);
 assert.match(transformedSideway, /evaluateM5StructuralTrail/);
+assert.match(
+  transformedSideway,
+  /const fastMoveStructure = managed\.partialApplied[\s\S]*?latestConfirmedM5Structure\([\s\S]*?if \(fastMoveStructure === null\) \{[\s\S]*?fastMoveProfitLockCandidate/,
+  "RED_TARGET: canonical Sideway Fast-Move must stop advancing once confirmed M5 structure owns trailing.",
+);
+
+const legacySidewaySource = sidewaySource.replace(
+  'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_PLUS_FAST_MOVE_LOCK");',
+  'console.log("PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_NO_TRAILING");',
+);
+assert.notEqual(legacySidewaySource, sidewaySource, "Fast-Move Sideway declaration must exist in the source fixture.");
+const transformedLegacySideway = transformPhase7CSidewayM5TrailingSource(legacySidewaySource);
+assert.match(
+  transformedLegacySideway,
+  /PHASE7C_SIDEWAY_MANAGEMENT=PLUS6_BREAK_EVEN_PLUS10_ONE_THIRD_M5_CONFIRMED_STRUCTURE_TRAILING/,
+  "M5 adapter must remain backward-compatible with the pre-Fast-Move Sideway declaration.",
+);
 
 const recoveryIndex = transformedSideway.indexOf('if (managed.dailyMode === "RECOVERY_TP")');
+const fastMoveHandoffIndex = transformedSideway.indexOf("const fastMoveStructure = managed.partialApplied");
+const fastMoveIndex = transformedSideway.indexOf("fastMoveProfitLockCandidate({", fastMoveHandoffIndex);
 const trailingIndex = transformedSideway.indexOf("SIDEWAY_M5_STRUCTURAL_SL_TIGHTEN");
-assert.ok(recoveryIndex >= 0 && trailingIndex > recoveryIndex, "Sideway Recovery must return before native M5 trailing.");
+assert.ok(recoveryIndex >= 0 && fastMoveHandoffIndex > recoveryIndex, "Sideway Recovery must return before M5/Fast-Move management.");
+assert.ok(fastMoveHandoffIndex >= 0 && fastMoveIndex > fastMoveHandoffIndex, "Sideway M5 ownership check must run before Fast-Move advancement.");
+assert.ok(trailingIndex > fastMoveIndex, "Sideway confirmed M5 structural trailing must remain available after Fast-Move handoff.");
 
 const trendAccountModeSource = fs.readFileSync(new URL("./run-phase7c-trend-account-mode.mjs", import.meta.url), "utf8");
 const trendCanonicalIndex = trendAccountModeSource.indexOf("transformPhase7CTrendCanonicalDailyRecoverySource(accountAdapted)");
