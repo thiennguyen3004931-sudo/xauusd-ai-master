@@ -54,9 +54,16 @@ mustNotContain(service, 'phase7c-sideway-decision-observability.jsonl', "service
 // Canonical normalized decision records store entry mode in setup.entryState
 // and strategy-condition evidence in entryConditions.conditions[].status.
 mustContain(service, '"entryState"', "service");
-mustContain(service, '"conditions"', "service");
+mustContain(service, 'record.conditions', "service");
 mustContain(service, 'status === "PASS"', "service");
 mustContain(service, 'status === "FAIL"', "service");
+
+// Correlation is explicit-ID only; never infer by timestamp/price proximity.
+mustContain(service, 'EXPLICIT_IDENTITY_GRAPH', "service");
+mustContain(service, '"POSITION"', "service");
+mustContain(service, '"ORDER"', "service");
+mustContain(service, '"SIGNAL"', "service");
+mustContain(service, 'no timestamp or price proximity matching is used', "service");
 
 mustContain(route, 'router.get("/"', "route");
 if (/router\.(post|put|patch|delete)\s*\(/i.test(route)) fail("route must be GET-only");
@@ -81,5 +88,5 @@ console.log("P2_PERFORMANCE_INTELLIGENCE_ROUTE=GET_ONLY");
 console.log("P2_PERFORMANCE_INTELLIGENCE_ACCOUNTING=REUSES_MT5_PERFORMANCE");
 console.log("P2_PERFORMANCE_INTELLIGENCE_AUDIT_PATH=CANONICAL_ACCOUNT_AWARE");
 console.log("P2_PERFORMANCE_INTELLIGENCE_RULE_EVIDENCE=CANONICAL_ENTRY_CONDITIONS");
-console.log("P2_PERFORMANCE_INTELLIGENCE_CORRELATION=FAIL_CLOSED");
+console.log("P2_PERFORMANCE_INTELLIGENCE_CORRELATION=EXPLICIT_IDENTITY_GRAPH_FAIL_CLOSED");
 console.log("P2_PERFORMANCE_INTELLIGENCE_RUNTIME_MUTATION=NONE");
