@@ -19,16 +19,16 @@ const trendBuy = evaluatePhase7CFastMoveEffectiveness({
 });
 assert.deepEqual(trendBuy.current.contract, {
   activationPrice: 10,
-  givebackPrice: 6,
+  givebackPrice: 10,
   source: "LIVE_BID_ASK",
 });
 assert.equal(trendBuy.current.mode, "CURRENT_OBSERVED_CONTRACT");
 assert.equal(trendBuy.current.result.triggered, true);
 assert.equal(trendBuy.current.result.peakPrice, 115);
 assert.equal(trendBuy.current.result.peakFavorable, 15);
-assert.equal(trendBuy.current.result.stopHit, true);
-assert.equal(trendBuy.current.result.stopPrice, 109);
-assert.equal(trendBuy.current.result.lockedProfitPrice, 9);
+assert.equal(trendBuy.current.result.stopHit, false);
+assert.equal(trendBuy.current.result.stopPrice, 105);
+assert.equal(trendBuy.current.result.lockedProfitPrice, 5);
 assert.deepEqual(trendBuy.shadow.map((row) => row.givebackPrice), [4, 5, 7, 8]);
 assert.ok(trendBuy.shadow.every((row) => row.mode === "SHADOW_ONLY"));
 assert.equal(trendBuy.shadow[0]?.result.stopPrice, 111);
@@ -59,8 +59,9 @@ const trendSell = evaluatePhase7CFastMoveEffectiveness({
 assert.equal(trendSell.current.result.triggered, true);
 assert.equal(trendSell.current.result.peakPrice, 85);
 assert.equal(trendSell.current.result.peakFavorable, 15);
-assert.equal(trendSell.current.result.stopPrice, 91);
-assert.equal(trendSell.current.result.lockedProfitPrice, 9);
+assert.equal(trendSell.current.result.stopHit, false);
+assert.equal(trendSell.current.result.stopPrice, 95);
+assert.equal(trendSell.current.result.lockedProfitPrice, 5);
 assert.equal(trendSell.sample.recommendationEligible, true);
 
 const sideway = evaluatePhase7CFastMoveEffectiveness({
@@ -72,12 +73,26 @@ const sideway = evaluatePhase7CFastMoveEffectiveness({
 });
 assert.deepEqual(sideway.current.contract, {
   activationPrice: 10,
-  givebackPrice: 4,
+  givebackPrice: 10,
   source: "LIVE_BID_ASK",
 });
 assert.deepEqual(sideway.shadow.map((row) => row.givebackPrice), [3, 5, 6]);
-assert.equal(sideway.current.result.stopPrice, 111);
-assert.equal(sideway.current.result.lockedProfitPrice, 11);
+assert.equal(sideway.current.result.stopPrice, 105);
+assert.equal(sideway.current.result.lockedProfitPrice, 5);
+
+const exactlyAtActivation = evaluatePhase7CFastMoveEffectiveness({
+  strategy: "TREND",
+  side: "BUY",
+  entry: 100,
+  prices: [
+    { timestamp: 1, price: 100 },
+    { timestamp: 2, price: 110 },
+  ],
+  sampleSize: 50,
+});
+assert.equal(exactlyAtActivation.current.result.triggered, true);
+assert.equal(exactlyAtActivation.current.result.stopPrice, null);
+assert.equal(exactlyAtActivation.current.result.lockedProfitPrice, null);
 
 const belowActivation = evaluatePhase7CFastMoveEffectiveness({
   strategy: "TREND",
@@ -95,5 +110,6 @@ assert.equal(belowActivation.current.result.stopPrice, null);
 assert.equal(belowActivation.current.result.lockedProfitPrice, null);
 
 console.log("P3_FAST_MOVE_EFFECTIVENESS_TEST=PASS");
+console.log("P3_FAST_MOVE_CURRENT_GIVEBACK_10=TRUE");
 console.log("P3_FAST_MOVE_SHADOW_ONLY=TRUE");
 console.log("P3_FAST_MOVE_MIN_RECOMMENDATION_SAMPLE=30");
