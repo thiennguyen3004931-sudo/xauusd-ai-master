@@ -148,6 +148,12 @@ $webFreshIndex = $webText.IndexOf('[void](Assert-LifecycleBrokerSourceFresh -Wor
 Assert-True ($webGitIndex -ge 0 -and $webManifestIndex -gt $webGitIndex) "RED Task2: Web manifest must follow exact Git guard"
 Assert-True ($webFreshIndex -gt $webManifestIndex) "RED Task2: Web manifest must precede broker freshness/build/restart"
 
+$webFreshSourcesStart = $webText.IndexOf('$startupLoadedSources = @(', [System.StringComparison]::Ordinal)
+$webFreshSourcesEnd = if ($webFreshSourcesStart -ge 0) { $webText.IndexOf("`n  )", $webFreshSourcesStart, [System.StringComparison]::Ordinal) } else { -1 }
+Assert-True ($webFreshSourcesStart -ge 0 -and $webFreshSourcesEnd -gt $webFreshSourcesStart) "RED review: Web broker freshness source set is not structurally readable"
+$webFreshSourcesBlock = $webText.Substring($webFreshSourcesStart, $webFreshSourcesEnd - $webFreshSourcesStart)
+Assert-True ($webFreshSourcesBlock.Contains('$RuntimeSourceAttestationLibrary')) "RED review: Web broker freshness must include P1 helper loaded by the broker"
+
 # Task 3: attest only at existing launch boundaries and use the real/canonical PIDs.
 $brokerText = (Get-Content -LiteralPath $BrokerRunner -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
 $supervisorText = (Get-Content -LiteralPath $Supervisor -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
