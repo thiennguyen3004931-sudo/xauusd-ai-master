@@ -112,8 +112,10 @@ $taskStopMatches = [regex]::Matches($text, [regex]::Escape('Stop-ScheduledTask')
 $taskRepairMatches = [regex]::Matches($text, '(?m)^\s*-Repair\s+`?\s*$')
 Assert-True ($taskStopMatches.Count -ge 1) "helper must contain Scheduled Task stop"
 Assert-True ($taskRepairMatches.Count -ge 1) "helper must contain canonical task repair invocation"
-$normalTaskStopIndex = $taskStopMatches[$taskStopMatches.Count - 1].Index
 $normalTaskRepairIndex = $taskRepairMatches[$taskRepairMatches.Count - 1].Index
+$normalTaskStopCandidates = @($taskStopMatches | Where-Object { $_.Index -lt $normalTaskRepairIndex })
+Assert-True ($normalTaskStopCandidates.Count -ge 1) "ordinary task repair must have a preceding Scheduled Task stop"
+$normalTaskStopIndex = $normalTaskStopCandidates[$normalTaskStopCandidates.Count - 1].Index
 Assert-True ($normalTaskStopIndex -gt $stopIndex) "ordinary Scheduled Task stop must occur only after lifecycle STOP"
 Assert-True ($normalTaskRepairIndex -gt $normalTaskStopIndex) "ordinary task repair must occur only after the owned SYSTEM task is stopped"
 Assert-True ($normalStartIndex -gt $normalTaskRepairIndex) "ordinary lifecycle START must occur only after task repair when repair is needed"
