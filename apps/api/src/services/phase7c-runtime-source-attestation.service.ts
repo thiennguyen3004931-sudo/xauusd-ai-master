@@ -269,8 +269,13 @@ function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error
+      ? String((error as { code?: unknown }).code ?? "").trim().toUpperCase()
+      : "";
+    if (code === "EPERM") return true;
+    if (code === "ESRCH") return false;
+    throw error;
   }
 }
 
