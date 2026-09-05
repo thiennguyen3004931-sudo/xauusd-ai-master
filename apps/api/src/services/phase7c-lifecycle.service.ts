@@ -38,6 +38,42 @@ export type Phase7CLifecycleStopProvenance =
   | "web-control-center-stop"
   | "local-lifecycle-api-stop";
 
+export type Phase7CReadyWaitDecision =
+  | { state: "WAITING_FOR_READY"; readySince: null }
+  | { state: "WAITING_FOR_STABILITY"; readySince: number }
+  | { state: "PASS"; readySince: number }
+  | { state: "FAIL"; readySince: null };
+
+export function evaluatePhase7CReadyWindow(input: {
+  startedAt: number;
+  now: number;
+  ready: boolean;
+  readySince: number | null;
+  acquireTimeoutMs?: number;
+  stableMs?: number;
+}): Phase7CReadyWaitDecision {
+  const acquireTimeoutMs = input.acquireTimeoutMs ?? START_TIMEOUT_MS;
+  const stableMs = input.stableMs ?? START_READY_STABLE_MS;
+  const acquireDeadline = input.startedAt + acquireTimeoutMs;
+
+  if (input.ready) {
+    if (input.readySince === null && input.now >= acquireDeadline) {
+      return { state: "FAIL", readySince: null };
+    }
+    const nextReadySince = input.readySince ?? input.now;
+    if (input.now - nextReadySince >= stableMs) {
+      return { state: "PASS", readySince: nextReadySince };
+    }
+    return { state: "WAITING_FOR_STABILITY", readySince: nextReadySince };
+  }
+
+  if (input.now >= acquireDeadline) {
+    return { state: "FAIL", readySince: null };
+  }
+
+  return { state: "WAITING_FOR_READY", readySince: null };
+}
+
 type TelegramModeStatus = {
   ready?: boolean;
   status?: string;
@@ -214,20 +250,24 @@ export function assertPhase7CSelectedAccountReady(telemetry: Mt5TelemetrySnapsho
 export const assertPhase7CDemoReady = assertPhase7CSelectedAccountReady;
 
 async function waitForReady(timeoutMs = START_TIMEOUT_MS) {
-  const deadline = Date.now() + timeoutMs;
+  const startedAt = Date.now();
   let readySince: number | null = null;
-  while (Date.now() < deadline) {
+  while (true) {
     const status = getPhase7CLifecycleRuntimeStatus();
     const now = Date.now();
-    if (status.ready) {
-      readySince ??= now;
-      if (now - readySince >= START_READY_STABLE_MS) return status;
-    } else {
-      readySince = null;
-    }
+    const decision = evaluatePhase7CReadyWindow({
+      startedAt,
+      now,
+      ready: status.ready,
+      readySince,
+      acquireTimeoutMs: timeoutMs,
+      stableMs: START_READY_STABLE_MS,
+    });
+    if (decision.state === "PASS") return status;
+    if (decision.state === "FAIL") return null;
+    readySince = decision.readySince;
     await sleep(500);
   }
-  return null;
 }
 
 async function waitForStopped(timeoutMs = STOP_VERIFY_TIMEOUT_MS) {
