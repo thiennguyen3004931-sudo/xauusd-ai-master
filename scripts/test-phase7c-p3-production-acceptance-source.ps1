@@ -46,6 +46,7 @@ Require-Literal "P3_ARM_MUTATION=NONE"
 Require-Literal "P3_LIVE_TEST_ORDER=NONE"
 Require-Literal "-Method Get"
 
+Reject-Regex "rev-parse\s+HEAD[^\r\n]*\|\s*Select-Object\s+-First\s+1" "P3 verifier must not pipe native git rev-parse through Select-Object -First 1 because the downstream early-stop can make LASTEXITCODE nonzero after valid output."
 Reject-Regex "-Method\s+(Post|Put|Patch|Delete)\b" "P3 production acceptance verifier must be GET-only."
 Reject-Regex "Invoke-RestMethod[^\r\n]+/(arm|auto|mode|orders?|positions?)\b" "P3 verifier must not call mutation/control endpoints."
 Reject-Regex "Restart-(Service|Process)|Stop-Process|Start-Process|Stop-ScheduledTask|Start-ScheduledTask" "P3 verifier must not restart runtime processes or tasks."
