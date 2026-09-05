@@ -120,12 +120,12 @@ const counterfactual = {
   safety: {},
   summary: {
     tradeCount: 12,
-    scenarioCount: 6,
-    exactCount: 0,
+    scenarioCount: 7,
+    exactCount: 1,
     boundedCount: 5,
     unavailableCount: 1,
-    evidenceQualifiedCount: 5,
-    evidenceCoveragePercent: 83.3,
+    evidenceQualifiedCount: 6,
+    evidenceCoveragePercent: 85.7,
   },
   aggregates: { family: [] },
   scenarios: [
@@ -141,6 +141,12 @@ const counterfactual = {
       verdict: "BOUNDED",
       managementFamily: "FAST_MOVE_TIGHTEN",
       lockedDelta: 2,
+    }),
+    scenario({
+      id: "fm-exact-positive",
+      family: "FAST_MOVE_GIVEBACK",
+      verdict: "EXACT",
+      lockedDelta: 3,
     }),
     scenario({
       id: "be-positive",
@@ -199,10 +205,14 @@ assert.ok(entry.reasonCodes.includes("COUNTERFACTUAL_ENTRY_REPLAY_UNAVAILABLE"))
 
 const fastMove = snapshot.recommendations.find((item) => item.targetScope === "MANAGEMENT" && item.targetKey === "FAST_MOVE_TIGHTEN");
 assert.ok(fastMove);
+assert.equal(fastMove.counterfactual.verdict, "BOUNDED");
+assert.equal(fastMove.counterfactual.exactCount, 1);
+assert.ok(fastMove.counterfactual.boundedCount >= 1);
 assert.equal(fastMove.action, "REVIEW_CHANGE");
 assert.equal(fastMove.confidence, "MEDIUM");
 assert.equal(fastMove.counterfactual.counterfactualNetPnlDelta, null);
 assert.equal(fastMove.counterfactual.counterfactualRealizedRDelta, null);
+assert.ok(fastMove.reasonCodes.includes("BOUNDED_DIRECTIONAL_EVIDENCE"));
 assert.ok(fastMove.reasonCodes.includes("PNL_NOT_PROVABLE"));
 assert.ok(fastMove.reasonCodes.includes("REALIZED_R_NOT_PROVABLE"));
 
