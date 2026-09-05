@@ -47,9 +47,13 @@ jobs:
           [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'scripts/rollout-phase7c-production-source-transition-local.ps1'), [ref]$tokens, [ref]$errors)
           if (@($errors).Count -ne 0) { throw ($errors | ForEach-Object Message) -join '; ' }
 
-      - name: Verify self-patch diff
+      - name: Normalize helper EOF and verify self-patch diff
         shell: pwsh
         run: |
+          $path = Join-Path $PWD 'scripts/rollout-phase7c-production-source-transition-local.ps1'
+          $text = [System.IO.File]::ReadAllText($path)
+          $text = $text.TrimEnd("`r", "`n") + "`r`n"
+          [System.IO.File]::WriteAllText($path, $text, [System.Text.UTF8Encoding]::new($false))
           git diff --check
           if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
           $changed = @(git diff --name-only)
