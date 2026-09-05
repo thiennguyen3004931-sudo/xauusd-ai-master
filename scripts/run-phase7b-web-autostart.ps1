@@ -13,7 +13,13 @@ $ApiRunner = Join-Path $PSScriptRoot "run-phase7b-api-runtime-local.ps1"
 if (-not (Test-Path -LiteralPath $ApiRunner)) { throw "Phase 7B API runtime launcher not found: $ApiRunner" }
 $JobObjectHelper = Join-Path $PSScriptRoot "lib\phase7b-windows-job-object.ps1"
 if (-not (Test-Path -LiteralPath $JobObjectHelper)) { throw "Phase 7B Job Object helper not found: $JobObjectHelper" }
+$RuntimeSourceAttestationLibrary = Join-Path $PSScriptRoot "lib\phase7c-runtime-source-attestation.ps1"
+if (-not (Test-Path -LiteralPath $RuntimeSourceAttestationLibrary)) { throw "Phase7C runtime source attestation library not found: $RuntimeSourceAttestationLibrary" }
+$WebSourceAttestationHelper = Join-Path $PSScriptRoot "lib\phase7b-web-source-attestation.ps1"
+if (-not (Test-Path -LiteralPath $WebSourceAttestationHelper)) { throw "Phase7B Web source attestation helper not found: $WebSourceAttestationHelper" }
 . $JobObjectHelper
+. $RuntimeSourceAttestationLibrary
+. $WebSourceAttestationHelper
 
 if ([string]::IsNullOrWhiteSpace($BridgeEnv)) {
   $BridgeEnv = Join-Path $ProjectRoot "packages\mt5-broker\bridge\.env.phase7b-demo"
@@ -26,6 +32,42 @@ if ($WebPort -lt 1024 -or $WebPort -gt 65535) { throw "WebPort is invalid." }
 if ($ApiPort -eq $WebPort) { throw "ApiPort and WebPort must be different." }
 if ($StartupTimeoutSeconds -lt 30 -or $StartupTimeoutSeconds -gt 300) {
   throw "StartupTimeoutSeconds must be between 30 and 300."
+}
+
+$attestationRoot = Join-Path $WorkDir "phase7c-source-attestation"
+$deploymentManifestPath = Join-Path $attestationRoot "deployment.json"
+$webPidPath = Join-Path $attestationRoot "web.pid"
+$webAttestationEnabled = Test-Path -LiteralPath $deploymentManifestPath -PathType Leaf
+$webAttestationConfigIdentity = $null
+if ($webAttestationEnabled) {
+  $accountStatePath = Join-Path $WorkDir "phase7c-account-mode.json"
+  if (-not (Test-Path -LiteralPath $accountStatePath -PathType Leaf)) {
+    throw "Web runtime source attestation requires canonical account-mode state: $accountStatePath"
+  }
+  try {
+    $accountState = Get-Content -LiteralPath $accountStatePath -Raw | ConvertFrom-Json
+  } catch {
+    throw "Web runtime source attestation account-mode state is invalid JSON: $accountStatePath. $($_.Exception.Message)"
+  }
+  if ([int]$accountState.version -ne 1) {
+    throw "Web runtime source attestation requires account-mode state version 1."
+  }
+  $attestedAccountMode = ([string]$accountState.accountMode).Trim().ToUpperInvariant()
+  if ($attestedAccountMode -notin @("DEMO", "LIVE")) {
+    throw "Web runtime source attestation accountMode must be DEMO or LIVE. Actual=$attestedAccountMode"
+  }
+  $attestedLiveExecutionEnabled = [bool]$accountState.liveExecutionEnabled
+  if (($attestedAccountMode -eq "LIVE") -ne $attestedLiveExecutionEnabled) {
+    throw "Web runtime source attestation account/live-execution context is inconsistent."
+  }
+  $webAttestationConfigIdentity = Get-Phase7CRuntimeSourceConfigIdentity `
+    -RuntimeRoot $WorkDir `
+    -AccountMode $attestedAccountMode `
+    -LiveExecutionEnabled $attestedLiveExecutionEnabled `
+    -ControlApiUrl "http://127.0.0.1:$ApiPort"
+  Write-Host "PHASE7B_WEB_RUNTIME_SOURCE_ATTESTATION_CONTEXT=READY|ACCOUNT_MODE=$attestedAccountMode"
+} else {
+  Write-Host "PHASE7B_WEB_RUNTIME_SOURCE_ATTESTATION_CONTEXT=UNKNOWN|DEPLOYMENT_MANIFEST=MISSING"
 }
 
 $runtimeJob = New-Phase7BKillOnCloseJob -Name ("Phase7B-Web-{0}-{1}" -f $PID, [guid]::NewGuid().ToString('N'))
@@ -64,6 +106,11 @@ if ($apiListening -and $webListening) {
 if ($apiListening -or $webListening) {
   throw "Phase 7B WEB autostart found a partial port conflict. API=$apiListening WEB=$webListening"
 }
+
+# No Web runtime owns the ports at this point. Remove only stale Web PID evidence;
+# historical component JSON is retained so the API can classify it STALE/UNKNOWN
+# until this launch passes both readiness probes and publishes fresh evidence.
+Remove-Item -LiteralPath $webPidPath -Force -ErrorAction SilentlyContinue
 
 $values = @{}
 Get-Content $BridgeEnv | ForEach-Object {
@@ -207,9 +254,23 @@ if (-not $apiReady -or -not $webReady) {
 
 Write-Host "PHASE7B_WEB_AUTOSTART_API=PASS"
 Write-Host "PHASE7B_WEB_AUTOSTART_UI=PASS"
-Write-Host "PHASE7B_WEB_AUTOSTART_STATUS=RUNNING"
 
 try {
+  if ($webAttestationEnabled) {
+    [void](New-Item -ItemType Directory -Force -Path $attestationRoot)
+    Set-Content -LiteralPath $webPidPath -Value ([string]$PID) -Encoding ASCII -NoNewline
+    $webAttestation = Write-Phase7BWebRuntimeSourceAttestation `
+      -RuntimeRoot $WorkDir `
+      -ProcessId $PID `
+      -LauncherPath $PSCommandPath `
+      -ConfigIdentity $webAttestationConfigIdentity
+    Write-Host "PHASE7B_WEB_RUNTIME_SOURCE_ATTESTATION=PASS|PID=$PID|DEPLOYMENT_ID=$($webAttestation.deploymentId)|SOURCE_COMMIT=$($webAttestation.sourceCommit)"
+  } else {
+    Write-Host "PHASE7B_WEB_RUNTIME_SOURCE_ATTESTATION=UNKNOWN|DEPLOYMENT_MANIFEST=MISSING"
+  }
+
+  Write-Host "PHASE7B_WEB_AUTOSTART_STATUS=RUNNING"
+
   while ($true) {
     Start-Sleep -Seconds 5
     $apiProcess.Refresh()
@@ -220,6 +281,7 @@ try {
   }
 }
 finally {
+  Remove-Item -LiteralPath $webPidPath -Force -ErrorAction SilentlyContinue
   Stop-ProcessTree $apiProcess.Id
   Stop-ProcessTree $webProcess.Id
 }
