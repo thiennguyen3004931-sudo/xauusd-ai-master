@@ -4,13 +4,16 @@ on:
   push:
     branches:
       - fix/phase7c-runtime-source-generation-reconciliation
+      - fix/phase7c-generation-reconciliation-failclosed-resume
     paths:
       - 'scripts/reconcile-phase7c-runtime-source-generation-local.ps1'
+      - 'scripts/resume-phase7c-runtime-source-generation-reconciliation-local.ps1'
       - 'scripts/test-phase7c-runtime-source-generation-reconciliation-source.ps1'
       - '.github/workflows/phase7c-runtime-source-generation-reconciliation-ci.yml'
   pull_request:
     paths:
       - 'scripts/reconcile-phase7c-runtime-source-generation-local.ps1'
+      - 'scripts/resume-phase7c-runtime-source-generation-reconciliation-local.ps1'
       - 'scripts/test-phase7c-runtime-source-generation-reconciliation-source.ps1'
       - '.github/workflows/phase7c-runtime-source-generation-reconciliation-ci.yml'
 
@@ -35,23 +38,35 @@ jobs:
       - name: Parse helper - PowerShell 7
         shell: pwsh
         run: |
-          $tokens = $null
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path './scripts/reconcile-phase7c-runtime-source-generation-local.ps1'),
-            [ref]$tokens,
-            [ref]$errors
+          $files = @(
+            './scripts/reconcile-phase7c-runtime-source-generation-local.ps1',
+            './scripts/resume-phase7c-runtime-source-generation-reconciliation-local.ps1'
           )
-          if ($errors.Count -ne 0) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            )
+            if ($errors.Count -ne 0) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
+          }
 
       - name: Parse helper - Windows PowerShell 5.1
         shell: powershell
         run: |
-          $tokens = $null
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path './scripts/reconcile-phase7c-runtime-source-generation-local.ps1'),
-            [ref]$tokens,
-            [ref]$errors
+          $files = @(
+            './scripts/reconcile-phase7c-runtime-source-generation-local.ps1',
+            './scripts/resume-phase7c-runtime-source-generation-reconciliation-local.ps1'
           )
-          if ($errors.Count -ne 0) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            )
+            if ($errors.Count -ne 0) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
+          }
