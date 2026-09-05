@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildPhase7CDecisionMonitor,
   canReusePhase7CDecisionMonitorCache,
+  canReusePhase7CDecisionMonitorPending,
 } from "../apps/api/src/services/phase7c-decision-monitor.service.ts";
 
 function fixture() {
@@ -178,5 +179,37 @@ test("decision-monitor cache is bypassed immediately when canonical bot mode cha
     }),
     true,
     "same-mode snapshots should retain the existing 2-second cache behavior",
+  );
+});
+
+test("decision-monitor in-flight request is not reused across a canonical bot-mode transition", () => {
+  const pending = {
+    symbol: "XAUUSD",
+    accountMode: "LIVE",
+    accountGuardValid: true,
+    botMode: "PAUSE",
+  };
+  const accountModeState = { accountMode: "LIVE", valid: true };
+
+  assert.equal(
+    canReusePhase7CDecisionMonitorPending({
+      pending,
+      symbol: "XAUUSD",
+      accountModeState,
+      currentBotMode: "AUTO",
+    }),
+    false,
+    "an in-flight PAUSE request must not be handed to a caller after PAUSE -> AUTO",
+  );
+
+  assert.equal(
+    canReusePhase7CDecisionMonitorPending({
+      pending,
+      symbol: "XAUUSD",
+      accountModeState,
+      currentBotMode: "PAUSE",
+    }),
+    true,
+    "same-mode callers may still share the in-flight request",
   );
 });
