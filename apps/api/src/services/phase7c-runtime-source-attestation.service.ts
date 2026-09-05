@@ -13,6 +13,7 @@ import { dirname, join, resolve } from "node:path";
 
 export type Phase7CRuntimeSourceComponentName =
   | "api"
+  | "web"
   | "lifecycle-broker"
   | "supervisor"
   | "trend"
@@ -115,6 +116,7 @@ const componentDefinitions: readonly {
   pidFile?: string;
 }[] = [
   { component: "api", launcher: "run-phase7b-api-runtime-local.ps1" },
+  { component: "web", launcher: "run-phase7b-web-autostart.ps1" },
   { component: "lifecycle-broker", launcher: "run-phase7c-executor-task-runner-local.ps1" },
   { component: "supervisor", launcher: "run-phase7c-executors-local.ps1", pidFile: "supervisor.pid" },
   { component: "trend", launcher: "run-phase7c-trend-controller-local.ps1", pidFile: "trend.pid" },
@@ -432,6 +434,10 @@ export function getPhase7CRuntimeSourceAttestationSnapshot(
     let currentPid: number | null;
     if (component === "api") {
       currentPid = deps.apiPid;
+    } else if (component === "web") {
+      const current = readPidFile(deps, join(attestationRoot, "web.pid"));
+      currentPid = current.pid;
+      errors.push(...current.errors);
     } else if (component === "lifecycle-broker") {
       const brokerPid = readBrokerPid(deps);
       currentPid = brokerPid.pid;
