@@ -5,9 +5,10 @@ on:
     branches:
       - feat/phase7c-web-source-attestation
     paths:
-      - "scripts/lib/phase7c-runtime-source-attestation.ps1"
+      - "scripts/lib/phase7b-web-source-attestation.ps1"
       - "scripts/run-phase7b-web-autostart.ps1"
       - "apps/api/src/services/phase7c-runtime-source-attestation.service.ts"
+      - "apps/api/src/services/phase7c-runtime-source-attestation.service.test.ts"
       - "apps/api/src/services/phase7c-web-runtime-source-attestation.service.test.ts"
       - "scripts/phase7c-web-source-attestation.contract.test.mjs"
       - ".github/workflows/phase7c-web-source-attestation-ci.yml"
@@ -15,9 +16,10 @@ on:
     branches:
       - main
     paths:
-      - "scripts/lib/phase7c-runtime-source-attestation.ps1"
+      - "scripts/lib/phase7b-web-source-attestation.ps1"
       - "scripts/run-phase7b-web-autostart.ps1"
       - "apps/api/src/services/phase7c-runtime-source-attestation.service.ts"
+      - "apps/api/src/services/phase7c-runtime-source-attestation.service.test.ts"
       - "apps/api/src/services/phase7c-web-runtime-source-attestation.service.test.ts"
       - "scripts/phase7c-web-source-attestation.contract.test.mjs"
       - ".github/workflows/phase7c-web-source-attestation-ci.yml"
@@ -48,21 +50,30 @@ jobs:
       - name: Web runtime source attestation API tests
         shell: pwsh
         run: pnpm --filter @xauusd/api exec tsx --test src/services/phase7c-web-runtime-source-attestation.service.test.ts src/services/phase7c-runtime-source-attestation.service.test.ts
+      - name: API build
+        shell: pwsh
+        run: pnpm --filter @xauusd/api build
       - name: PowerShell 7 parse gate
         shell: pwsh
         run: |
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'scripts/lib/phase7c-runtime-source-attestation.ps1'), [ref]$null, [ref]$errors)
-          if ($errors.Count -gt 0) { $errors | Format-List | Out-String | Write-Error; exit 1 }
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'scripts/run-phase7b-web-autostart.ps1'), [ref]$null, [ref]$errors)
-          if ($errors.Count -gt 0) { $errors | Format-List | Out-String | Write-Error; exit 1 }
+          foreach ($file in @(
+            'scripts/lib/phase7b-web-source-attestation.ps1',
+            'scripts/run-phase7b-web-autostart.ps1'
+          )) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) { $errors | Format-List | Out-String | Write-Error; exit 1 }
+          }
       - name: Windows PowerShell 5.1 parse gate
         shell: powershell
         run: |
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'scripts/lib/phase7c-runtime-source-attestation.ps1'), [ref]$null, [ref]$errors)
-          if ($errors.Count -gt 0) { $errors | Format-List | Out-String | Write-Error; exit 1 }
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'scripts/run-phase7b-web-autostart.ps1'), [ref]$null, [ref]$errors)
-          if ($errors.Count -gt 0) { $errors | Format-List | Out-String | Write-Error; exit 1 }
+          foreach ($file in @(
+            'scripts/lib/phase7b-web-source-attestation.ps1',
+            'scripts/run-phase7b-web-autostart.ps1'
+          )) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) { $errors | Format-List | Out-String | Write-Error; exit 1 }
+          }
