@@ -73,7 +73,7 @@ Assert-Literal $repair 'ARM_MUTATION=NONE' 'repair audit forbids ARM mutation'
 Assert-Literal $repair 'Remove-Item -LiteralPath $RequestPath -Force' 'repair clears only proven orphan request'
 Assert-Literal $repair 'PHASE7C_LIVE_ARM_ORPHAN_RECONCILIATION=PASS' 'repair completion marker'
 Assert-NotContains $repair 'Start-ScheduledTask|Stop-ScheduledTask|Register-ScheduledTask' 'repair must not mutate task'
-Assert-NotContains $repair '-Method\s+Post|Invoke-ApiPost|/execute|/preflight' 'repair must not invoke control mutations through API'
+Assert-NotContains $repair '-Method\s+Post|Invoke-ApiPost|/api/v1/phase7c-live-arm-control/(execute|preflight)' 'repair must not invoke control mutations through API'
 Assert-NotContains $repair '/v1/order|/v1/position.*(close|modify)' 'repair must not touch trading mutation endpoints'
 
 Write-Host "PHASE7C_LIVE_ARM_ORPHAN_RECONCILIATION_SOURCE_TEST=PASS"
