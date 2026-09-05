@@ -19,6 +19,8 @@ function Forbid-Text([string]$Needle, [string]$Message) {
 }
 
 Require-Text '[string]$ExpectedCommit' 'helper must require exact ExpectedCommit input'
+Require-Text '[string]$ProjectRoot = ""' 'helper must support an explicit ProjectRoot when executed outside the repository'
+Require-Text '$ScriptsRoot = Join-Path $ProjectRoot "scripts"' 'helper must resolve runtime libraries from the explicit production ProjectRoot'
 Require-Text 'branch --show-current' 'helper must require canonical main branch'
 Require-Text 'status --porcelain' 'helper must require a clean worktree'
 Require-Text 'rev-parse HEAD' 'helper must pin the exact local commit'

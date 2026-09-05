@@ -1,17 +1,23 @@
 param(
   [Parameter(Mandatory = $true)] [string]$ExpectedCommit,
+  [string]$ProjectRoot = "",
   [int]$TimeoutSeconds = 120
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$ProjectRoot = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+  $ProjectRoot = Split-Path -Parent $PSScriptRoot
+} else {
+  $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
+}
+$ScriptsRoot = Join-Path $ProjectRoot "scripts"
 $ConfigPath = Join-Path $ProjectRoot ".runtime\phase7c-executor-task-config.json"
-$AccountLibrary = Join-Path $PSScriptRoot "lib\phase7c-account-mode.ps1"
-$OwnershipLibrary = Join-Path $PSScriptRoot "lib\phase7c-scheduled-task-ownership.ps1"
-$RuntimeOwnershipLibrary = Join-Path $PSScriptRoot "lib\phase7c-runtime-ownership-probe.ps1"
-$RuntimeSourceAttestationLibrary = Join-Path $PSScriptRoot "lib\phase7c-runtime-source-attestation.ps1"
+$AccountLibrary = Join-Path $ScriptsRoot "lib\phase7c-account-mode.ps1"
+$OwnershipLibrary = Join-Path $ScriptsRoot "lib\phase7c-scheduled-task-ownership.ps1"
+$RuntimeOwnershipLibrary = Join-Path $ScriptsRoot "lib\phase7c-runtime-ownership-probe.ps1"
+$RuntimeSourceAttestationLibrary = Join-Path $ScriptsRoot "lib\phase7c-runtime-source-attestation.ps1"
 $TaskName = "XAUUSD-Phase7C-Executors"
 $ReadyStableMs = 5000
 $SystemComponents = @('lifecycle-broker','supervisor','trend','sideway','telegram','regime-notifier')
