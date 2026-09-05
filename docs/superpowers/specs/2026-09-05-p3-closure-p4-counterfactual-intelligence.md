@@ -35,9 +35,9 @@ The verifier must fail closed on schema/safety/contract mismatch. A production a
 P4 is an evidence-gated counterfactual engine built on P3 rows. It never mutates execution state. Every alternative is classified by what the evidence can actually prove.
 
 ### Evidence verdicts
-- `EXACT`: ordered evidence is sufficient to replay the alternative without inventing intrabar ordering.
+- `EXACT`: ordered evidence is explicitly proven complete and valid, and is sufficient to replay the alternative without inventing intrabar ordering.
 - `BOUNDED`: explicit observed evidence allows a bounded alternative metric, but not a full counterfactual exit/PnL claim.
-- `UNAVAILABLE`: the required evidence does not exist or identity is not exact.
+- `UNAVAILABLE`: the required evidence does not exist, is incomplete/invalid, or identity is not exact.
 
 Unknown values remain `null`; the engine must never infer missing PnL, exit price, or intrabar ordering from M5 OHLC.
 
@@ -57,14 +57,15 @@ Create `phase7c-counterfactual-intelligence-v1` with:
 1. `FAST_MOVE_GIVEBACK`
    - baseline activation `10`, giveback `10`.
    - shadow giveback grid initially `4, 6, 8, 12` for both TREND and SIDEWAY.
-   - if ordered exit-side price samples are provided to the pure evaluator, replay can be `EXACT`.
+   - replay may be `EXACT` only when the pure evaluator receives canonical ordered exit-side samples together with an explicit completeness assertion and the samples are valid with strictly increasing timestamps.
+   - a non-empty but incomplete/invalid ordered stream must never be promoted to `EXACT`; explicit management evidence may still support a separate `BOUNDED` locked-profit-floor comparison.
    - if only explicit Fast-Move management events exist, derive bounded locked-profit-floor comparisons from explicit peak/stop evidence, mark `BOUNDED`, and leave hypothetical exit/PnL deltas null.
    - with no qualifying evidence, mark `UNAVAILABLE`.
 
 2. `RULE_OBSERVATION`
    - enumerate passed/blocked rule evidence from P3.
    - describe the alternative rule state for analysis.
-   - do not invent missed-trade or hypothetical PnL; therefore the counterfactual outcome remains unavailable unless future canonical replay evidence is added.
+   - do not invent missed-trade or hypothetical PnL; therefore the counterfactual verdict and outcome remain `UNAVAILABLE` unless future canonical rule-replay evidence is added.
 
 3. `MANAGEMENT_EXIT_POLICY`
    - version 1 records observed management family alternatives only where explicit management evidence exists.
