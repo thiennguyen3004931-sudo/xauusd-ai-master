@@ -107,10 +107,10 @@ assert.deepEqual(snapshot.summary, {
   tradeCount: 2,
   scenarioCount: 12,
   exactCount: 0,
-  boundedCount: 8,
-  unavailableCount: 4,
-  evidenceQualifiedCount: 8,
-  evidenceCoveragePercent: 66.7,
+  boundedCount: 6,
+  unavailableCount: 6,
+  evidenceQualifiedCount: 6,
+  evidenceCoveragePercent: 50,
 });
 
 const fastMove = snapshot.scenarios.filter((scenario) => scenario.family === "FAST_MOVE_GIVEBACK");
@@ -138,8 +138,9 @@ assert.equal(sidewayFastMove.every((scenario) => scenario.delta.lockedProfitPric
 const ruleScenarios = snapshot.scenarios.filter((scenario) => scenario.family === "RULE_OBSERVATION");
 assert.equal(ruleScenarios.length, 2);
 assert.deepEqual(ruleScenarios.map((scenario) => scenario.alternative.ruleId).sort(), ["RULE_A", "RULE_B"]);
-assert.equal(ruleScenarios.every((scenario) => scenario.evidence.verdict === "BOUNDED"), true);
+assert.equal(ruleScenarios.every((scenario) => scenario.evidence.verdict === "UNAVAILABLE"), true);
 assert.equal(ruleScenarios.every((scenario) => scenario.shadowOutcome.netPnl === null), true);
+assert.equal(ruleScenarios.every((scenario) => scenario.delta.netPnl === null), true);
 assert.equal(ruleScenarios.every((scenario) => scenario.quality.warnings.includes("COUNTERFACTUAL_RULE_OUTCOME_NOT_PROVABLE")), true);
 
 const managementScenarios = snapshot.scenarios.filter((scenario) => scenario.family === "MANAGEMENT_EXIT_POLICY");
@@ -181,5 +182,6 @@ assert.equal(snapshot.notes.some((note) => note.includes("recommendation")), tru
 
 console.log("P4_COUNTERFACTUAL_INTELLIGENCE_TEST=PASS");
 console.log("P4_FAST_MOVE_SHADOW_GRID=4_6_8_12");
+console.log("P4_RULE_COUNTERFACTUAL_OUTCOME_WITHOUT_REPLAY=UNAVAILABLE");
 console.log("P4_RULE_COUNTERFACTUAL_PNL_INFERENCE=NONE");
 console.log("P4_M5_OHLC_ORDER_INFERENCE=NONE");
