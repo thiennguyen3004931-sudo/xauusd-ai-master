@@ -50,6 +50,17 @@ for (const literal of [
   assert.ok(evaluator.includes(literal), `evaluator missing literal: ${literal}`);
 }
 
+const service = read(required[2]);
+assert.ok(
+  service.includes("buildPhase7CCounterfactualSnapshotFromRows"),
+  "P5 must derive P4 from the same canonical P3 rows to avoid cross-snapshot drift",
+);
+assert.equal(
+  service.includes("getPhase7CCounterfactualIntelligence("),
+  false,
+  "P5 must not independently reread P4/P3 while composing one recommendation snapshot",
+);
+
 const card = read(required[6]);
 for (const literal of [
   "P5 · Recommendation Intelligence",
