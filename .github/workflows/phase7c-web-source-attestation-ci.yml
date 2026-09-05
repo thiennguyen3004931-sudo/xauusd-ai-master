@@ -50,9 +50,9 @@ jobs:
       - name: Web runtime source attestation API tests
         shell: pwsh
         run: pnpm --filter @xauusd/api exec tsx --test src/services/phase7c-web-runtime-source-attestation.service.test.ts src/services/phase7c-runtime-source-attestation.service.test.ts
-      - name: API build
+      - name: API build with workspace dependencies
         shell: pwsh
-        run: pnpm --filter @xauusd/api build
+        run: pnpm exec turbo run build --filter=@xauusd/api
       - name: PowerShell 7 parse gate
         shell: pwsh
         run: |
