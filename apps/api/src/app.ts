@@ -21,6 +21,7 @@ import phase7cLiveArmControlRouter from "./routes/phase7c-live-arm-control.route
 import phase7cPerformanceIntelligenceRouter from "./routes/phase7c-performance-intelligence.route";
 import phase7cPerformanceEffectivenessRouter from "./routes/phase7c-performance-effectiveness.route";
 import phase7cCounterfactualIntelligenceRouter from "./routes/phase7c-counterfactual-intelligence.route";
+import phase7cRecommendationIntelligenceRouter from "./routes/phase7c-recommendation-intelligence.route";
 import phase7cChartRouter from "./routes/phase7c-chart.route";
 import phase7cUiRouter from "./routes/phase7c-ui.route";
 import phase7dRouter from "./routes/phase7d.route";
@@ -58,6 +59,7 @@ app.use("/api/v1/phase7c-live-arm-control", phase7cLiveArmControlRouter);
 app.use("/api/v1/phase7c/performance-intelligence", phase7cPerformanceIntelligenceRouter);
 app.use("/api/v1/phase7c/performance-effectiveness", phase7cPerformanceEffectivenessRouter);
 app.use("/api/v1/phase7c/counterfactual-intelligence", phase7cCounterfactualIntelligenceRouter);
+app.use("/api/v1/phase7c/recommendation-intelligence", phase7cRecommendationIntelligenceRouter);
 app.use("/api/v1/phase7c-chart", phase7cChartRouter);
 app.use("/api/v1/phase7c-ui", phase7cUiRouter);
 app.use("/api/v1/phase7d", phase7dRouter);
