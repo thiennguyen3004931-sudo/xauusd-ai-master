@@ -67,7 +67,7 @@ function ruleScenario(
   ruleId: string,
   observedState: "PASSED" | "BLOCKED",
 ): Phase7CCounterfactualScenario {
-  const evidenceExact = exactCorrelation(row);
+  const correlationExact = exactCorrelation(row);
   return {
     schemaVersion: PHASE7C_COUNTERFACTUAL_INTELLIGENCE_SCHEMA_VERSION,
     scenarioId: `${row.tradeKey}:RULE_OBSERVATION:${observedState}:${ruleId}`,
@@ -96,15 +96,19 @@ function ruleScenario(
       managementFamily: null,
     },
     evidence: {
-      verdict: evidenceExact ? "BOUNDED" : "UNAVAILABLE",
-      sources: evidenceExact ? [...row.correlation.evidence] : [],
+      verdict: "UNAVAILABLE",
+      sources: correlationExact ? [...row.correlation.evidence] : [],
     },
     actualOutcome: actualOutcome(row),
     shadowOutcome: emptyOutcome(),
     delta: { exitPrice: null, netPnl: null, realizedR: null, lockedProfitPrice: null },
     quality: {
-      warnings: evidenceExact
-        ? ["COUNTERFACTUAL_RULE_OUTCOME_NOT_PROVABLE", "COUNTERFACTUAL_PNL_NOT_PROVABLE"]
+      warnings: correlationExact
+        ? [
+            "RULE_REPLAY_EVIDENCE_MISSING",
+            "COUNTERFACTUAL_RULE_OUTCOME_NOT_PROVABLE",
+            "COUNTERFACTUAL_PNL_NOT_PROVABLE",
+          ]
         : ["CORRELATION_NOT_EXACT"],
     },
     safety: phase7CCounterfactualSafety(),
@@ -183,6 +187,7 @@ function scenariosForRow(row: Phase7CPerformanceEffectivenessRow): Phase7CCounte
         exactManagementEvidence: exactManagement(row),
         managementEvents: row.management.events,
         orderedExitSidePrices: [],
+        orderedExitSideEvidenceComplete: false,
         alternativeGivebackPrice: givebackPrice,
       }),
     );
@@ -277,9 +282,9 @@ export function buildPhase7CCounterfactualSnapshotFromRows(
     scenarios,
     notes: [
       "P4 is SHADOW_ONLY and read-only. It never applies parameters, changes strategy/risk, or mutates orders, positions, mode, or ARM state.",
-      "M5 OHLC is not treated as ordered intrabar evidence; historical Fast-Move scenarios remain BOUNDED or UNAVAILABLE unless canonical ordered exit-side prices exist.",
+      "M5 OHLC is not treated as ordered intrabar evidence; historical Fast-Move scenarios remain BOUNDED or UNAVAILABLE unless complete canonical ordered exit-side evidence exists.",
       "BOUNDED scenarios may compare explicit locked-profit floors, but counterfactual exit, PnL, and realized-R remain null when they are not provable.",
-      "RULE_OBSERVATION and MANAGEMENT_EXIT_POLICY describe evidence-bounded alternatives only; they do not manufacture missed-trade PnL or causal claims.",
+      "RULE_OBSERVATION remains UNAVAILABLE without canonical rule replay evidence; MANAGEMENT_EXIT_POLICY may be BOUNDED with exact observed management evidence. Neither manufactures missed-trade PnL or causal claims.",
       "P4 produces evidence and deltas, not a recommendation; P5 recommendation logic remains a separate future subsystem with AUTO_RETUNE disabled.",
     ],
   };
