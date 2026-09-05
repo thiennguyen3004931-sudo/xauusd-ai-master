@@ -48,6 +48,10 @@ assert.match(card, /READ ONLY/);
 assert.match(card, /SHADOW_ONLY/);
 assert.match(card, /Hiện chi tiết/);
 assert.match(card, /Ẩn chi tiết/);
+assert.match(card, /TREND \+10 \/ giveback 10/);
+assert.match(card, /SIDEWAY \+10 \/ giveback 10/);
+assert.doesNotMatch(card, /TREND \+10 \/ giveback 6/);
+assert.doesNotMatch(card, /SIDEWAY \+10 \/ giveback 4/);
 assert.doesNotMatch(card, /\b(Lưu|Áp dụng|Apply|Retune|Tự tối ưu)\b/i);
 assert.doesNotMatch(card, /method:\s*"(POST|PUT|PATCH|DELETE)"/);
 
@@ -62,9 +66,12 @@ assert.match(service, /modeMutation:\s*false/);
 assert.match(service, /armMutation:\s*false/);
 assert.match(service, /autoRetune:\s*false/);
 assert.match(service, /liveTestOrder:\s*false/);
+assert.match(service, /givebackPrice:\s*10/);
+assert.doesNotMatch(service, /givebackPrice:\s*strategy\s*===\s*"TREND"\s*\?\s*6\s*:\s*4/);
 assert.doesNotMatch(service, /fetch\([^\n]+\{[^}]*method:\s*"(POST|PUT|PATCH|DELETE)"/is);
 
 console.log("P3_PERFORMANCE_EFFECTIVENESS_SOURCE_TEST=PASS");
 console.log("P3_API=GET_ONLY_LOCALHOST");
 console.log("P3_UI_MUTATION=NONE");
+console.log("P3_FAST_MOVE_CURRENT_CONTRACT=ACTIVATION_10_GIVEBACK_10");
 console.log("P3_FAST_MOVE_SHADOW=SHADOW_ONLY");

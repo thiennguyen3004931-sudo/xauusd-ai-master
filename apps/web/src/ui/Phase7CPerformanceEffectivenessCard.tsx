@@ -119,7 +119,7 @@ export function Phase7CPerformanceEffectivenessCard() {
               )}
 
               <Alert severity="info">
-                Fast-Move current: TREND +10 / giveback 6 · SIDEWAY +10 / giveback 4. SHADOW_ONLY: chưa replay biến thể từ M5 OHLC vì high/low không chứng minh thứ tự giá intrabar; cần ordered bid/ask evidence.
+                Fast-Move current: TREND +10 / giveback 10 · SIDEWAY +10 / giveback 10. SHADOW_ONLY: chưa replay biến thể từ M5 OHLC vì high/low không chứng minh thứ tự giá intrabar; cần ordered bid/ask evidence.
               </Alert>
 
               {showDetails ? (
