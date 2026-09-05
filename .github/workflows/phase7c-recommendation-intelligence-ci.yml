@@ -33,6 +33,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -58,6 +60,9 @@ jobs:
       - name: P5 deterministic evaluator semantics
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-recommendation-evaluator.test.ts
 
+      - name: Build API dependency graph
+        run: pnpm --filter @xauusd/api... build
+
       - name: P5 composition semantics
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-recommendation-intelligence.test.ts
 
@@ -81,9 +86,6 @@ jobs:
 
       - name: P4 GET-only source regression
         run: node scripts/test-phase7c-counterfactual-api-source.mjs
-
-      - name: Build API dependency graph
-        run: pnpm --filter @xauusd/api... build
 
       - name: Build web dependency graph
         run: pnpm --filter @xauusd/web... build
