@@ -18,8 +18,15 @@ function Forbid-Text([string]$Needle, [string]$Message) {
   if ($source.Contains($Needle)) { throw $Message }
 }
 
+function Require-Ordering([string]$Before, [string]$After, [string]$Message) {
+  $beforeIndex = $source.IndexOf($Before, [System.StringComparison]::Ordinal)
+  $afterIndex = $source.IndexOf($After, [System.StringComparison]::Ordinal)
+  if ($beforeIndex -lt 0 -or $afterIndex -lt 0 -or $beforeIndex -ge $afterIndex) { throw $Message }
+}
+
 Require-Text '[string]$ExpectedCommit' 'helper must require exact ExpectedCommit input'
 Require-Text '[string]$ProjectRoot = ""' 'helper must support an explicit ProjectRoot when executed outside the repository'
+Require-Text '[switch]$ResumeFailClosed' 'helper must expose an explicit fail-closed resume mode'
 Require-Text '$ScriptsRoot = Join-Path $ProjectRoot "scripts"' 'helper must resolve runtime libraries from the explicit production ProjectRoot'
 Require-Text 'branch --show-current' 'helper must require canonical main branch'
 Require-Text 'status --porcelain' 'helper must require a clean worktree'
@@ -36,9 +43,15 @@ Require-Text 'SOURCE_TREE_MISMATCH' 'helper must classify source tree mismatch e
 Require-Text 'DEPLOYMENT_ID_MISMATCH' 'helper must classify deployment id mismatch explicitly'
 Require-Text 'Assert-FlatBroker' 'helper must verify XAUUSD positions and pending orders are zero'
 Require-Text 'bridgeSessionId' 'helper must preserve the Bridge session identity'
-Require-Text 'DISARM_LIVE' 'helper must canonical-disarm before SYSTEM generation restart'
-Require-Text '/api/v1/phase7c/lifecycle/stop' 'helper must stop the lifecycle before Scheduled Task restart'
-Require-Text 'Stop-ScheduledTask' 'helper must stop the canonical SYSTEM broker task'
+Require-Text 'DISARM_LIVE' 'helper must canonical-disarm before SYSTEM generation restart in normal mode'
+Require-Text '/api/v1/phase7c/lifecycle/stop' 'helper must stop the lifecycle before Scheduled Task restart in normal mode'
+Require-Text 'RESUME_FAIL_CLOSED_PREFLIGHT=PASS' 'resume mode must prove PAUSE + DISARMED + stopped lifecycle before mutation'
+Require-Text 'BROKER_IDENTITY_PREFLIGHT=' 'helper must publish how old broker identity was proven before task mutation'
+Require-Text 'ATTESTED_PROCESS_ALIVE' 'resume mode must be able to prove a live attested broker without relying on heartbeat alone'
+Require-Text 'ATTESTED_PROCESS_ABSENT' 'resume mode must explicitly support the already-exited attested broker state'
+Require-Text 'Get-Phase7CProcessCommandLine' 'live attested broker fallback must bind the process to canonical task command provenance'
+Require-Text 'BROKER_TASK_STOP=NOOP_ALREADY_STOPPED' 'resume mode must safely handle an already-stopped broker task'
+Require-Text 'Stop-ScheduledTask' 'helper must stop the canonical SYSTEM broker task when it is still running'
 Require-Text 'Start-ScheduledTask' 'helper must restart the canonical SYSTEM broker task'
 Require-Text 'lifecycle-broker.json' 'helper must verify fresh broker source attestation'
 Require-Text '/api/v1/phase7c/lifecycle/start' 'helper must restart the executor lifecycle from the reconciled broker generation'
@@ -55,6 +68,7 @@ Require-Text 'LIVE_TEST_ORDER=NONE' 'helper must never send a LIVE test order'
 Require-Text 'FAIL_CLOSED_MODE=PAUSE' 'helper failure path must remain PAUSE'
 Require-Text 'FAIL_CLOSED_ARM=DISARMED_BEST_EFFORT' 'helper failure path must remain DISARMED best effort'
 
+Require-Ordering '$oldBrokerPid =' '"/api/v1/phase7c/lifecycle/stop"' 'helper must capture/prove broker identity before lifecycle STOP rather than rereading a fragile heartbeat afterward'
 Forbid-Text 'deploy-phase7c-web-ui-local.ps1' 'generation reconciliation must not create another Web/API deployment generation'
 Forbid-Text 'Initialize-Phase7CRuntimeSourceDeployment' 'generation reconciliation must reuse the accepted deployment identity rather than minting a new one'
 
