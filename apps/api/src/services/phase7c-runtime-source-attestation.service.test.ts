@@ -136,7 +136,7 @@ test("missing or invalid evidence is unknown", () => {
   assert.equal(evaluatePhase7CRuntimeSourceComponent(readError).verdict, "UNKNOWN");
 });
 
-test("complete read-only snapshot reports all seven exact components", () => {
+test("complete read-only snapshot reports all eight exact components", () => {
   const tempRoot = mkdtempSync(join(tmpdir(), "phase7c-runtime-source-snapshot-"));
   try {
     const runtimeRoot = join(tempRoot, ".runtime");
@@ -153,6 +153,7 @@ test("complete read-only snapshot reports all seven exact components", () => {
 
     const components = [
       ["api", 4101, "run-phase7b-api-runtime-local.ps1"],
+      ["web", 4108, "run-phase7b-web-autostart.ps1"],
       ["lifecycle-broker", 4102, "run-phase7c-executor-task-runner-local.ps1"],
       ["supervisor", 4103, "run-phase7c-executors-local.ps1"],
       ["trend", 4104, "run-phase7c-trend-controller-local.ps1"],
@@ -179,6 +180,7 @@ test("complete read-only snapshot reports all seven exact components", () => {
       }));
     }
 
+    writeFileSync(join(attestationRoot, "web.pid"), "4108\n");
     writeFileSync(join(executorRoot, "supervisor.pid"), "4103\n");
     writeFileSync(join(executorRoot, "trend.pid"), "4104\n");
     writeFileSync(join(executorRoot, "sideway.pid"), "4105\n");
@@ -206,7 +208,7 @@ test("complete read-only snapshot reports all seven exact components", () => {
 
     assert.equal(snapshot.overall, "EXACT_MATCH");
     assert.equal(snapshot.readOnly, true);
-    assert.equal(snapshot.components.length, 7);
+    assert.equal(snapshot.components.length, 8);
     assert.deepEqual(snapshot.components.map((item) => item.component), components.map(([name]) => name));
     assert.ok(snapshot.components.every((item) => item.verdict === "EXACT_MATCH"));
     assert.deepEqual(snapshot.safety, {
