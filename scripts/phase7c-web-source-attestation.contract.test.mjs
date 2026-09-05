@@ -7,14 +7,40 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8");
 
-const library = read("scripts/lib/phase7c-runtime-source-attestation.ps1");
+const sharedLibrary = read("scripts/lib/phase7c-runtime-source-attestation.ps1");
+const webHelper = read("scripts/lib/phase7b-web-source-attestation.ps1");
 const launcher = read("scripts/run-phase7b-web-autostart.ps1");
 const service = read("apps/api/src/services/phase7c-runtime-source-attestation.service.ts");
 
-assert.match(
-  library,
+assert.doesNotMatch(
+  sharedLibrary,
   /\[ValidateSet\([^\]]*['"]web['"][^\]]*\)\]\s*\[string\]\$Component/s,
-  "PowerShell runtime-source attestation must accept web as a canonical component.",
+  "Web support must not mutate the broker-loaded shared component writer and force executor source staleness.",
+);
+assert.match(
+  webHelper,
+  /function\s+Write-Phase7BWebRuntimeSourceAttestation/,
+  "Web attestation must use a Web-only writer helper.",
+);
+assert.match(
+  webHelper,
+  /component\s*=\s*["']web["']/,
+  "Web-only writer must emit component=web.",
+);
+assert.match(
+  webHelper,
+  /Read-Phase7CRuntimeSourceDeployment/,
+  "Web-only writer must bind its evidence to the canonical deployment manifest.",
+);
+assert.match(
+  webHelper,
+  /Get-Phase7CRuntimeSourceConfigFingerprint/,
+  "Web-only writer must use the canonical V1 config fingerprint.",
+);
+assert.match(
+  webHelper,
+  /Write-Phase7CRuntimeSourceAtomicJson/,
+  "Web-only writer must reuse canonical atomic JSON semantics.",
 );
 
 assert.match(
@@ -36,7 +62,12 @@ assert.match(
 assert.match(
   launcher,
   /phase7c-runtime-source-attestation\.ps1/,
-  "Web autostart must load the canonical runtime-source attestation library.",
+  "Web autostart must load canonical V1 source-attestation primitives.",
+);
+assert.match(
+  launcher,
+  /phase7b-web-source-attestation\.ps1/,
+  "Web autostart must load the isolated Web attestation writer.",
 );
 assert.match(
   launcher,
@@ -45,14 +76,14 @@ assert.match(
 );
 assert.match(
   launcher,
-  /Write-Phase7CRuntimeSourceComponentAttestation[\s\S]*?-Component\s+["']web["']/,
+  /Write-Phase7BWebRuntimeSourceAttestation/,
   "Web autostart must write a canonical Web component attestation.",
 );
 
 const apiPassIndex = launcher.indexOf("PHASE7B_WEB_AUTOSTART_API=PASS");
 const uiPassIndex = launcher.indexOf("PHASE7B_WEB_AUTOSTART_UI=PASS");
 const runningIndex = launcher.indexOf("PHASE7B_WEB_AUTOSTART_STATUS=RUNNING");
-const writeIndex = launcher.indexOf("Write-Phase7CRuntimeSourceComponentAttestation");
+const writeIndex = launcher.indexOf("Write-Phase7BWebRuntimeSourceAttestation");
 assert.ok(apiPassIndex >= 0 && uiPassIndex >= 0, "Web self-test PASS markers must remain present.");
 assert.ok(runningIndex >= 0, "Web running marker must remain present.");
 assert.ok(
@@ -71,6 +102,7 @@ assert.ok(cleanupIndex > finallyIndex, "Web PID evidence must be removed during 
 
 console.log("PHASE7C_WEB_SOURCE_ATTESTATION_CONTRACT=PASS");
 console.log("WEB_COMPONENT_CANONICAL=TRUE");
+console.log("WEB_WRITER_ISOLATED_FROM_BROKER_SHARED_SOURCE=TRUE");
 console.log("WEB_PID_EVIDENCE=DEDICATED");
 console.log("WEB_ATTESTATION_AFTER_SELF_TEST=TRUE");
 console.log("WEB_RUNNING_AFTER_ATTESTATION=TRUE");
