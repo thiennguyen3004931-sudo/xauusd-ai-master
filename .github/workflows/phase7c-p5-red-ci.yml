@@ -1,0 +1,24 @@
+name: Phase7C P5 RED Contract CI
+
+on:
+  pull_request:
+    paths:
+      - "scripts/test-phase7c-recommendation-intelligence-source.mjs"
+      - "scripts/test-phase7c-recommendation-api-source.mjs"
+      - ".github/workflows/phase7c-p5-red-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  red-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: P5 source contract must be RED before implementation
+        run: node scripts/test-phase7c-recommendation-intelligence-source.mjs
+      - name: P5 GET-only API source contract must be RED before implementation
+        run: node scripts/test-phase7c-recommendation-api-source.mjs
