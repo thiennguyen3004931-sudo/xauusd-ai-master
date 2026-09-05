@@ -31,8 +31,13 @@ if ($ExpectedCommit -notmatch '^[0-9a-f]{40}$') {
     Fail-P3Acceptance "ExpectedCommit must be a 40-character Git SHA."
 }
 
-$head = (& git -C $ProjectRoot rev-parse HEAD 2>$null | Select-Object -First 1).Trim().ToLowerInvariant()
-if ($LASTEXITCODE -ne 0 -or $head -ne $ExpectedCommit) {
+$headRaw = @(& git -C $ProjectRoot rev-parse HEAD 2>$null)
+$headExitCode = $LASTEXITCODE
+if ($headExitCode -ne 0 -or $headRaw.Count -ne 1) {
+    Fail-P3Acceptance "could not resolve production HEAD exactly. exitCode=$headExitCode outputCount=$($headRaw.Count)"
+}
+$head = ([string]$headRaw[0]).Trim().ToLowerInvariant()
+if ($head -ne $ExpectedCommit) {
     Fail-P3Acceptance "production HEAD mismatch. expected=$ExpectedCommit actual=$head"
 }
 
