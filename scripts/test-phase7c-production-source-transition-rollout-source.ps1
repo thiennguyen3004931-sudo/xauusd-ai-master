@@ -51,6 +51,7 @@ Require-Source 'remoteMain\s+-ne\s+\$ExpectedRemoteMainCommit' 'remote main must
 Require-Source 'fetch.*refs/heads/main' 'pre-stage exact remote main before LIVE mutation'
 Require-Source 'merge-base.*--is-ancestor\s+\$ExpectedCurrentCommit\s+\$TargetCommit' 'current-to-target fast-forward ancestry proof'
 Require-Source 'merge-base.*--is-ancestor\s+\$TargetCommit\s+\$ExpectedRemoteMainCommit' 'target must remain reachable from pinned remote main'
+Require-Source 'remoteHelperParts\s*=.*-split\s+[''\"]\\s\+[''\"]' 'portable ls-tree token parsing across PS7 and PS5.1'
 Require-Source 'merge.*--ff-only' 'exact fast-forward transition'
 Require-Source 'rev-parse HEAD' 'post-transition exact HEAD proof'
 Require-Source 'runtime-source-attestation' 'runtime-source pre/post attestation'
@@ -73,6 +74,7 @@ Require-Source 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_FINAL_ARM=ARMED' 'final ARM
 Require-Source 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_STATUS=PASS' 'terminal PASS marker'
 
 Forbid-Source 'remoteMain\s+-ne\s+\$TargetCommit' 'self-referential remote-main equals rollout-target gate'
+Forbid-Source '\.Split\(\@\(' 'ambiguous multi-separator String.Split overload for ls-tree parsing'
 Forbid-Source 'git\s+pull|&\s*\$gitExe\s+pull' 'git pull'
 Forbid-Source 'reset\s+--hard' 'git reset --hard'
 Forbid-Source 'checkout\s+--force|checkout\s+-f' 'forced checkout'
@@ -82,5 +84,6 @@ Forbid-Source '/v1/(orders?|positions?)[^"''\r\n]*(send|close|cancel|modify|dele
 Write-Output 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_SOURCE_CONTRACT=PASS'
 Write-Output 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_GIT_MODE=EXACT_FF_ONLY'
 Write-Output 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_REMOTE_MAIN=INDEPENDENT_PIN'
+Write-Output 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_LS_TREE_PARSE=PORTABLE'
 Write-Output 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_EXTERNAL_HELPER_PROVENANCE=PINNED_BLOB'
 Write-Output 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_LIVE_TEST_ORDER=NONE'
