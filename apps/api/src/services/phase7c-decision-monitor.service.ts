@@ -5,6 +5,7 @@ import type { Mt5TelemetrySnapshot } from "./mt5.service";
 import { getMt5Telemetry } from "./mt5.service";
 import { getPhase7CLiveRegime } from "./phase7c-live-regime.service";
 import { phase7CLotSettingsService } from "./phase7c-lot-settings.service";
+import { phase7CBotModeService } from "./phase7c-bot-mode.service";
 import {
   accountModeAllowsBroker,
   getPhase7CAccountModeState,
@@ -674,28 +675,87 @@ export function buildPhase7CDecisionMonitor(input: {
   };
 }
 
-let cached: { at: number; value: ReturnType<typeof buildPhase7CDecisionMonitor> } | null = null;
-let pending: Promise<ReturnType<typeof buildPhase7CDecisionMonitor>> | null = null;
+type Phase7CDecisionMonitorSnapshot = ReturnType<typeof buildPhase7CDecisionMonitor>;
+type Phase7CBotMode = ReturnType<typeof phase7CBotModeService.get>["mode"];
+type Phase7CDecisionMonitorRequestContext = {
+  symbol: string;
+  accountMode: Phase7CAccountModeState["accountMode"];
+  accountGuardValid: boolean;
+  botMode: Phase7CBotMode;
+};
+type Phase7CDecisionMonitorPending = Phase7CDecisionMonitorRequestContext & {
+  promise: Promise<Phase7CDecisionMonitorSnapshot>;
+};
+
+let cached: { at: number; value: Phase7CDecisionMonitorSnapshot } | null = null;
+let pending: Phase7CDecisionMonitorPending | null = null;
+
+export function canReusePhase7CDecisionMonitorCache(input: {
+  cached: { at: number; value: Phase7CDecisionMonitorSnapshot } | null;
+  now: number;
+  symbol: string;
+  accountModeState: Pick<Phase7CAccountModeState, "accountMode" | "valid">;
+  currentBotMode: Phase7CBotMode;
+}): boolean {
+  return Boolean(
+    input.cached &&
+    input.now - input.cached.at <= 2_000 &&
+    input.cached.value.symbol === input.symbol.toUpperCase() &&
+    input.cached.value.safety.accountMode === input.accountModeState.accountMode &&
+    input.cached.value.safety.accountGuardValid === input.accountModeState.valid &&
+    input.cached.value.mode.active === input.currentBotMode
+  );
+}
+
+export function canReusePhase7CDecisionMonitorPending(input: {
+  pending: Phase7CDecisionMonitorRequestContext | null;
+  symbol: string;
+  accountModeState: Pick<Phase7CAccountModeState, "accountMode" | "valid">;
+  currentBotMode: Phase7CBotMode;
+}): boolean {
+  return Boolean(
+    input.pending &&
+    input.pending.symbol === input.symbol.toUpperCase() &&
+    input.pending.accountMode === input.accountModeState.accountMode &&
+    input.pending.accountGuardValid === input.accountModeState.valid &&
+    input.pending.botMode === input.currentBotMode
+  );
+}
 
 export async function getPhase7CDecisionMonitor(symbol = "XAUUSD") {
   const now = Date.now();
+  const normalizedSymbol = symbol.toUpperCase();
   const accountModeState = getPhase7CAccountModeState();
-  if (
-    cached &&
-    now - cached.at <= 2_000 &&
-    cached.value.symbol === symbol.toUpperCase() &&
-    cached.value.safety.accountMode === accountModeState.accountMode &&
-    cached.value.safety.accountGuardValid === accountModeState.valid
-  ) {
-    return cached.value;
+  const currentBotMode = phase7CBotModeService.get().mode;
+  if (canReusePhase7CDecisionMonitorCache({
+    cached,
+    now,
+    symbol: normalizedSymbol,
+    accountModeState,
+    currentBotMode,
+  })) {
+    return cached!.value;
   }
-  if (pending) return pending;
+  if (canReusePhase7CDecisionMonitorPending({
+    pending,
+    symbol: normalizedSymbol,
+    accountModeState,
+    currentBotMode,
+  })) {
+    return pending!.promise;
+  }
 
-  pending = (async () => {
+  const requestContext: Phase7CDecisionMonitorRequestContext = {
+    symbol: normalizedSymbol,
+    accountMode: accountModeState.accountMode,
+    accountGuardValid: accountModeState.valid,
+    botMode: currentBotMode,
+  };
+  const promise = (async () => {
     const [regime, demo, telemetry] = await Promise.all([
-      getPhase7CLiveRegime(symbol),
+      getPhase7CLiveRegime(normalizedSymbol),
       getPhase7BDemoStatus(),
-      getMt5Telemetry(symbol),
+      getMt5Telemetry(normalizedSymbol),
     ]);
     const value = buildPhase7CDecisionMonitor({
       regime,
@@ -710,11 +770,13 @@ export async function getPhase7CDecisionMonitor(symbol = "XAUUSD") {
     cached = { at: Date.now(), value };
     return value;
   })();
+  const request: Phase7CDecisionMonitorPending = { ...requestContext, promise };
+  pending = request;
 
   try {
-    return await pending;
+    return await promise;
   } finally {
-    pending = null;
+    if (pending === request) pending = null;
   }
 }
 
