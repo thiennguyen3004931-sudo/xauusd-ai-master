@@ -75,6 +75,8 @@ Write-Host "TASK_MUTATION=NONE"
 Write-Host "LIVE_TEST_ORDER=NONE"
 
 # Exact source/worktree guard.
+$RunnerRepoPath = "scripts/run-phase7c-live-arm-control-task-runner-local.ps1"
+$ExpectedRunnerBlob = ""
 Push-Location $ProjectRoot
 try {
   $branch = ([string](& git branch --show-current)).Trim()
@@ -83,6 +85,8 @@ try {
   if ($LASTEXITCODE -ne 0 -or $head -ne $ExpectedCommit) { throw "Production HEAD mismatch. expected=$ExpectedCommit actual=$head" }
   $dirty = @(& git status --porcelain --untracked-files=normal)
   if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw "Production worktree must be clean." }
+  $ExpectedRunnerBlob = ([string](& git rev-parse "$ExpectedCommit`:$RunnerRepoPath")).Trim().ToLowerInvariant()
+  if ($LASTEXITCODE -ne 0 -or $ExpectedRunnerBlob -notmatch '^[0-9a-f]{40}$') { throw "Could not resolve canonical LIVE ARM runner blob from ExpectedCommit." }
 } finally {
   Pop-Location
 }
@@ -116,10 +120,12 @@ if ([string]$Capability.liveArmStatus -ne "DISARMED" -or [bool]$Capability.liveE
 $Attestation = Invoke-RestMethod -Uri "$ControlApiUrl/api/v1/phase7c/runtime-source-attestation" -Method Get -TimeoutSec 12
 if ([string]$Attestation.overall -ne "EXACT_MATCH" -or $null -eq $Attestation.deployment) { throw "Runtime source attestation is not exact." }
 if ([string]$Attestation.deployment.sourceCommit -ne $ExpectedCommit) { throw "Runtime deployment source commit does not match ExpectedCommit." }
+$DeploymentId = [string]$Attestation.deployment.deploymentId
+if ([string]::IsNullOrWhiteSpace($DeploymentId)) { throw "Runtime source deployment id is missing." }
 $components = @($Attestation.components)
 if ($components.Count -ne 8) { throw "Runtime source attestation must contain 8 components." }
 foreach ($component in $components) {
-  if ([string]$component.verdict -ne "EXACT_MATCH" -or [string]$component.sourceCommit -ne $ExpectedCommit) {
+  if ([string]$component.verdict -ne "EXACT_MATCH" -or [string]$component.sourceCommit -ne $ExpectedCommit -or [string]$component.deploymentId -ne $DeploymentId) {
     throw "Runtime source component is not exact: $($component.component)"
   }
 }
@@ -150,6 +156,9 @@ $CanonicalRunner = Join-Path $ProjectRoot "scripts\run-phase7c-live-arm-control-
 $TaskActionText = "$([string]$TaskActions[0].Execute) $([string]$TaskActions[0].Arguments)"
 if ($TaskActionText.IndexOf($CanonicalRunner, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { throw "LIVE ARM task does not point to canonical runner." }
 if ([string]$Task.Principal.RunLevel -ne "Highest") { throw "LIVE ARM task must remain RunLevel Highest." }
+$ActualRunnerBlob = ([string](& git -C $ProjectRoot hash-object -- $CanonicalRunner)).Trim().ToLowerInvariant()
+if ($LASTEXITCODE -ne 0 -or $ActualRunnerBlob -ne $ExpectedRunnerBlob) { throw "LIVE ARM runner blob drift. expected=$ExpectedRunnerBlob actual=$ActualRunnerBlob" }
+Write-Host "LIVE_ARM_RUNNER_PROVENANCE=PASS|BLOB=$ActualRunnerBlob"
 $RunningInstances = Get-RunningTaskInstanceCount -Name $ArmTaskName
 if ($RunningInstances -ne 0) { throw "LIVE ARM task still has a running instance. count=$RunningInstances" }
 Write-Host "TASK_RUNNING_INSTANCE_COUNT=0"
@@ -210,8 +219,8 @@ try {
   $statusLocked = Read-JsonFile -Path $StatusPath -Label "Locked LIVE ARM control status"
   [void](Assert-OrphanPair -Request $requestLocked -Status $statusLocked)
 
-  # Remove only the exact stale request, then terminalize its matching status.
-  Remove-Item -LiteralPath $RequestPath -Force
+  # Terminalize the matching status first. The durable request remains present
+  # until status persistence succeeds, so any failure stays fail-closed.
   $completedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   Write-AtomicJson -Path $StatusPath -Value ([ordered]@{
     version = 1
@@ -225,6 +234,7 @@ try {
     completedAt = $completedAt
     finalArmStatus = "DISARMED"
   })
+  Remove-Item -LiteralPath $RequestPath -Force
 } finally {
   if ($null -ne $lockStream) { $lockStream.Dispose() }
 }
