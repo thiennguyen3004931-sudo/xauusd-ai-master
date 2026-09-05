@@ -3,59 +3,76 @@ Set-StrictMode -Version Latest
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Helper = Join-Path $PSScriptRoot "reconcile-phase7c-runtime-source-generation-local.ps1"
+$ResumeHelper = Join-Path $PSScriptRoot "resume-phase7c-runtime-source-generation-reconciliation-local.ps1"
 
-if (-not (Test-Path -LiteralPath $Helper -PathType Leaf)) {
-  throw "Missing runtime source generation reconciliation helper: $Helper"
+foreach ($required in @($Helper,$ResumeHelper)) {
+  if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Missing runtime source generation reconciliation helper: $required" }
 }
 
 $source = Get-Content -LiteralPath $Helper -Raw
+$resumeSource = Get-Content -LiteralPath $ResumeHelper -Raw
 
-function Require-Text([string]$Needle, [string]$Message) {
-  if (-not $source.Contains($Needle)) { throw $Message }
+function Require-Text([string]$Text,[string]$Needle,[string]$Message) {
+  if (-not $Text.Contains($Needle)) { throw $Message }
+}
+function Forbid-Text([string]$Text,[string]$Needle,[string]$Message) {
+  if ($Text.Contains($Needle)) { throw $Message }
 }
 
-function Forbid-Text([string]$Needle, [string]$Message) {
-  if ($source.Contains($Needle)) { throw $Message }
-}
+Require-Text $source '[string]$ExpectedCommit' 'helper must require exact ExpectedCommit input'
+Require-Text $source '[string]$ProjectRoot = ""' 'helper must support an explicit ProjectRoot when executed outside the repository'
+Require-Text $source '$ScriptsRoot = Join-Path $ProjectRoot "scripts"' 'helper must resolve runtime libraries from the explicit production ProjectRoot'
+Require-Text $source 'branch --show-current' 'helper must require canonical main branch'
+Require-Text $source 'status --porcelain' 'helper must require a clean worktree'
+Require-Text $source 'rev-parse HEAD' 'helper must pin the exact local commit'
+Require-Text $source 'XAUUSD-Phase7C-Executors' 'helper must target only the canonical executor Scheduled Task'
+Require-Text $source 'Get-Phase7CTrustedGitFileSha256' 'helper must verify the trusted Scheduled Task runner hash'
+Require-Text $source 'Test-Phase7CExecutorTaskActionOwnership' 'helper must prove Scheduled Task action ownership before mutation'
+Require-Text $source 'SYSTEM + ServiceAccount + Highest' 'helper must prove canonical SYSTEM task principal'
+Require-Text $source '/api/v1/phase7c/runtime-source-attestation' 'helper must read canonical runtime source attestation'
+Require-Text $source 'API_WEB_EXACT_PREFLIGHT=PASS' 'helper must require API and Web EXACT before generation mutation'
+Require-Text $source 'SYSTEM_GENERATION_MISMATCH_PREFLIGHT=PASS' 'helper must require six SYSTEM generation mismatches'
+Require-Text $source 'FULL_RUNTIME_SOURCE_ATTESTATION=PASS' 'helper must require final full runtime source attestation'
+Require-Text $source 'RUNTIME_SOURCE_ATTESTATION_EXACT_COUNT=8/8' 'helper must require all eight components exact'
+Require-Text $source 'FAIL_CLOSED_MODE=PAUSE' 'normal helper failure path must remain PAUSE'
+Require-Text $source 'FAIL_CLOSED_ARM=DISARMED_BEST_EFFORT' 'normal helper failure path must remain DISARMED best effort'
+Forbid-Text $source 'deploy-phase7c-web-ui-local.ps1' 'generation reconciliation must not create another Web/API deployment generation'
+Forbid-Text $source 'Initialize-Phase7CRuntimeSourceDeployment' 'generation reconciliation must reuse accepted deployment identity'
 
-Require-Text '[string]$ExpectedCommit' 'helper must require exact ExpectedCommit input'
-Require-Text '[string]$ProjectRoot = ""' 'helper must support an explicit ProjectRoot when executed outside the repository'
-Require-Text '$ScriptsRoot = Join-Path $ProjectRoot "scripts"' 'helper must resolve runtime libraries from the explicit production ProjectRoot'
-Require-Text 'branch --show-current' 'helper must require canonical main branch'
-Require-Text 'status --porcelain' 'helper must require a clean worktree'
-Require-Text 'rev-parse HEAD' 'helper must pin the exact local commit'
-Require-Text 'XAUUSD-Phase7C-Executors' 'helper must target only the canonical executor Scheduled Task'
-Require-Text 'Get-Phase7CTrustedGitFileSha256' 'helper must verify the trusted Scheduled Task runner hash'
-Require-Text 'Test-Phase7CExecutorTaskActionOwnership' 'helper must prove Scheduled Task action ownership before mutation'
-Require-Text 'SYSTEM + ServiceAccount + Highest' 'helper must prove canonical SYSTEM task principal'
-Require-Text '/api/v1/phase7c/runtime-source-attestation' 'helper must read canonical runtime source attestation'
-Require-Text 'API_WEB_EXACT_PREFLIGHT=PASS' 'helper must require API and Web EXACT before generation mutation'
-Require-Text 'SYSTEM_GENERATION_MISMATCH_PREFLIGHT=PASS' 'helper must require the six SYSTEM components to be generation-only mismatches'
-Require-Text 'SOURCE_COMMIT_MISMATCH' 'helper must classify source generation mismatch explicitly'
-Require-Text 'SOURCE_TREE_MISMATCH' 'helper must classify source tree mismatch explicitly'
-Require-Text 'DEPLOYMENT_ID_MISMATCH' 'helper must classify deployment id mismatch explicitly'
-Require-Text 'Assert-FlatBroker' 'helper must verify XAUUSD positions and pending orders are zero'
-Require-Text 'bridgeSessionId' 'helper must preserve the Bridge session identity'
-Require-Text 'DISARM_LIVE' 'helper must canonical-disarm before SYSTEM generation restart'
-Require-Text '/api/v1/phase7c/lifecycle/stop' 'helper must stop the lifecycle before Scheduled Task restart'
-Require-Text 'Stop-ScheduledTask' 'helper must stop the canonical SYSTEM broker task'
-Require-Text 'Start-ScheduledTask' 'helper must restart the canonical SYSTEM broker task'
-Require-Text 'lifecycle-broker.json' 'helper must verify fresh broker source attestation'
-Require-Text '/api/v1/phase7c/lifecycle/start' 'helper must restart the executor lifecycle from the reconciled broker generation'
-Require-Text 'READY_STABLE_MS=5000' 'helper must require stable lifecycle READY after restart'
-Require-Text 'FULL_RUNTIME_SOURCE_ATTESTATION=PASS' 'helper must require final full runtime source attestation'
-Require-Text 'RUNTIME_SOURCE_ATTESTATION_EXACT_COUNT=8/8' 'helper must require all eight components exact'
-Require-Text 'ARM_LIVE' 'helper must restore canonical LIVE ARM only after full verification'
-Require-Text 'FINAL_MODE=PAUSE' 'helper must finish in PAUSE'
-Require-Text 'FINAL_ARM=ARMED' 'helper must finish ARMED when reconciliation succeeds'
-Require-Text 'BRIDGE_RESTART=NONE' 'helper must preserve Bridge runtime'
-Require-Text 'WEB_API_RESTART=NONE' 'helper must not restart Web/API during SYSTEM generation reconciliation'
-Require-Text 'ORDER_MUTATION=NONE' 'helper must not submit or mutate orders'
-Require-Text 'LIVE_TEST_ORDER=NONE' 'helper must never send a LIVE test order'
-Require-Text 'FAIL_CLOSED_MODE=PAUSE' 'helper failure path must remain PAUSE'
-Require-Text 'FAIL_CLOSED_ARM=DISARMED_BEST_EFFORT' 'helper failure path must remain DISARMED best effort'
-
-Forbid-Text 'deploy-phase7c-web-ui-local.ps1' 'generation reconciliation must not create another Web/API deployment generation'
-Forbid-Text 'Initialize-Phase7CRuntimeSourceDeployment' 'generation reconciliation must reuse the accepted deployment identity rather than minting a new one'
+Require-Text $resumeSource '[string]$ExpectedCommit' 'resume helper must pin accepted runtime commit'
+Require-Text $resumeSource '[string]$ProjectRoot = ""' 'resume helper must support external Downloads execution'
+Require-Text $resumeSource 'RESUME_FAIL_CLOSED_PREFLIGHT=PASS' 'resume helper must prove PAUSE + DISARMED + stopped lifecycle before mutation'
+Require-Text $resumeSource 'API_WEB_EXACT_PREFLIGHT=PASS' 'resume helper must require API and Web exact'
+Require-Text $resumeSource 'SYSTEM_GENERATION_MISMATCH_PREFLIGHT=PASS' 'resume helper must retain strict generation-only mismatch gate'
+Require-Text $resumeSource 'SOURCE_COMMIT_MISMATCH' 'resume helper must require source commit mismatch reason'
+Require-Text $resumeSource 'SOURCE_TREE_MISMATCH' 'resume helper must require source tree mismatch reason'
+Require-Text $resumeSource 'DEPLOYMENT_ID_MISMATCH' 'resume helper must require deployment mismatch reason'
+Require-Text $resumeSource 'BROKER_IDENTITY_PREFLIGHT=' 'resume helper must publish broker identity proof'
+Require-Text $resumeSource 'ATTESTED_PROCESS_ALIVE' 'resume helper must support live attested broker provenance'
+Require-Text $resumeSource 'ATTESTED_PROCESS_ABSENT' 'resume helper must support already-exited attested broker state'
+Require-Text $resumeSource 'Get-Phase7CProcessCommandLine' 'resume helper must bind a live broker to canonical task command provenance'
+Require-Text $resumeSource 'Get-Phase7CReadOnlyLockState' 'resume helper must use startup-runner lock as ownership evidence'
+Require-Text $resumeSource 'BROKER_TASK_STOP=NOOP_ALREADY_STOPPED' 'resume helper must safely handle already-stopped broker task'
+Require-Text $resumeSource 'Stop-ScheduledTask' 'resume helper must stop an attested live broker task'
+Require-Text $resumeSource 'Start-ScheduledTask' 'resume helper must launch a fresh SYSTEM broker generation'
+Require-Text $resumeSource 'lifecycle-broker.json' 'resume helper must verify fresh lifecycle broker attestation'
+Require-Text $resumeSource '/api/v1/phase7c/lifecycle/start' 'resume helper must restart lifecycle while still DISARMED'
+Require-Text $resumeSource 'READY_STABLE_MS=5000' 'resume helper must require stable lifecycle ready'
+Require-Text $resumeSource 'RUNTIME_SOURCE_ATTESTATION_EXACT_COUNT=8/8' 'resume helper must require 8/8 exact before ARM'
+Require-Text $resumeSource 'FULL_RUNTIME_SOURCE_ATTESTATION=PASS' 'resume helper must prove full attestation'
+Require-Text $resumeSource 'ARM_LIVE' 'resume helper may restore ARM only after full exact proof'
+Require-Text $resumeSource 'FINAL_MODE=PAUSE' 'resume helper must finish PAUSE'
+Require-Text $resumeSource 'FINAL_ARM=ARMED' 'resume helper must finish ARMED on success'
+Require-Text $resumeSource 'BRIDGE_RESTART=NONE' 'resume helper must not restart Bridge'
+Require-Text $resumeSource 'WEB_API_RESTART=NONE' 'resume helper must not restart Web/API'
+Require-Text $resumeSource 'ORDER_MUTATION=NONE' 'resume helper must not mutate orders'
+Require-Text $resumeSource 'POSITION_MUTATION=NONE' 'resume helper must not mutate positions'
+Require-Text $resumeSource 'LIVE_TEST_ORDER=NONE' 'resume helper must never send LIVE test order'
+Require-Text $resumeSource 'FAIL_CLOSED_MODE=PAUSE' 'resume failure path must remain PAUSE'
+Require-Text $resumeSource 'FAIL_CLOSED_ARM=DISARMED_BEST_EFFORT' 'resume failure path must remain DISARMED best effort'
+Forbid-Text $resumeSource '"/api/v1/phase7c/lifecycle/stop"' 'fail-closed resume must not issue lifecycle STOP again'
+Forbid-Text $resumeSource 'deploy-phase7c-web-ui-local.ps1' 'resume must not create another Web/API deployment generation'
+Forbid-Text $resumeSource 'Initialize-Phase7CRuntimeSourceDeployment' 'resume must reuse accepted deployment identity'
 
 Write-Host 'PHASE7C_RUNTIME_SOURCE_GENERATION_RECONCILIATION_SOURCE_CONTRACT=PASS'
+Write-Host 'PHASE7C_RUNTIME_SOURCE_GENERATION_RECONCILIATION_FAIL_CLOSED_RESUME_CONTRACT=PASS'
