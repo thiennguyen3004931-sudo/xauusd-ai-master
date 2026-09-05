@@ -3,6 +3,7 @@ import { Phase7CExecutionAuthorizationCard } from "../ui/Phase7CExecutionAuthori
 import { Phase7CPerformanceIntelligenceCard } from "../ui/Phase7CPerformanceIntelligenceCard";
 import { Phase7CPerformanceEffectivenessCard } from "../ui/Phase7CPerformanceEffectivenessCard";
 import { Phase7CCounterfactualIntelligenceCard } from "../ui/Phase7CCounterfactualIntelligenceCard";
+import { Phase7CRecommendationIntelligenceCard } from "../ui/Phase7CRecommendationIntelligenceCard";
 import { Phase7CRuntimeSourceAttestationCard } from "../ui/Phase7CRuntimeSourceAttestationCard";
 import { Phase7CControlCenterPage } from "./Phase7CControlCenterPage";
 
@@ -14,6 +15,7 @@ export function Phase7CControlCenterShellPage() {
       <Phase7CPerformanceIntelligenceCard />
       <Phase7CPerformanceEffectivenessCard />
       <Phase7CCounterfactualIntelligenceCard />
+      <Phase7CRecommendationIntelligenceCard />
       <Phase7CRuntimeSourceAttestationCard />
     </Stack>
   );
