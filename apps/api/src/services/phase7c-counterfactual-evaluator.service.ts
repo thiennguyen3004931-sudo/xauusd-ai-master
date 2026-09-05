@@ -35,6 +35,7 @@ export interface Phase7CFastMoveCounterfactualInput {
   exactManagementEvidence: boolean;
   managementEvents: readonly Phase7CPerformanceManagementEvent[];
   orderedExitSidePrices?: readonly Phase7COrderedExitSidePrice[];
+  orderedExitSideEvidenceComplete?: boolean;
   alternativeGivebackPrice: number;
 }
 
@@ -133,6 +134,31 @@ function boundedAlternativeLockedProfit(
   };
 }
 
+function validOrderedPrices(
+  prices: readonly Phase7COrderedExitSidePrice[],
+): Phase7COrderedExitSidePrice[] | null {
+  if (prices.length === 0) return null;
+  const ordered = prices.map((sample) => ({
+    timestamp: Number(sample.timestamp),
+    price: Number(sample.price),
+  }));
+  if (
+    ordered.some(
+      (sample) =>
+        !Number.isFinite(sample.timestamp) ||
+        !Number.isFinite(sample.price) ||
+        sample.price <= 0,
+    )
+  ) {
+    return null;
+  }
+  ordered.sort((left, right) => left.timestamp - right.timestamp);
+  for (let index = 1; index < ordered.length; index += 1) {
+    if (ordered[index].timestamp <= ordered[index - 1].timestamp) return null;
+  }
+  return ordered;
+}
+
 function replayOrderedPrices(
   side: Phase7CPerformanceSide,
   entry: number,
@@ -140,17 +166,7 @@ function replayOrderedPrices(
   givebackPrice: number,
   fallbackExit: number,
 ): ReplayResult {
-  const ordered = [...prices]
-    .filter(
-      (sample) =>
-        Number.isFinite(Number(sample.timestamp)) &&
-        Number.isFinite(Number(sample.price)) &&
-        Number(sample.price) > 0,
-    )
-    .map((sample) => ({ timestamp: Number(sample.timestamp), price: Number(sample.price) }))
-    .sort((left, right) => left.timestamp - right.timestamp);
-
-  if (ordered.length === 0) {
+  if (prices.length === 0) {
     return { triggered: false, stopHit: false, exitPrice: null, lockedProfitPrice: null };
   }
 
@@ -158,7 +174,7 @@ function replayOrderedPrices(
   let triggered = false;
   let stopPrice: number | null = null;
 
-  for (const sample of ordered) {
+  for (const sample of prices) {
     bestFavorablePrice = side === "BUY"
       ? Math.max(bestFavorablePrice, sample.price)
       : Math.min(bestFavorablePrice, sample.price);
@@ -271,8 +287,17 @@ export function evaluateFastMoveCounterfactual(
     };
   }
 
-  const ordered = input.orderedExitSidePrices ?? [];
-  if (ordered.length > 0) {
+  const orderedInput = input.orderedExitSidePrices ?? [];
+  const ordered = validOrderedPrices(orderedInput);
+  const orderedEvidenceComplete = input.orderedExitSideEvidenceComplete === true;
+  const orderedEvidenceReplayable = orderedEvidenceComplete && ordered !== null;
+  const orderedEvidenceWarning = orderedInput.length > 0 && !orderedEvidenceReplayable
+    ? orderedEvidenceComplete
+      ? "ORDERED_EXIT_SIDE_EVIDENCE_INVALID"
+      : "ORDERED_EXIT_SIDE_EVIDENCE_INCOMPLETE"
+    : null;
+
+  if (orderedEvidenceReplayable && ordered !== null) {
     const replay = replayOrderedPrices(
       input.side,
       entry,
@@ -289,7 +314,7 @@ export function evaluateFastMoveCounterfactual(
     };
     return {
       ...base,
-      evidence: { verdict: "EXACT", sources: ["ORDERED_EXIT_SIDE_PRICES"] },
+      evidence: { verdict: "EXACT", sources: ["ORDERED_EXIT_SIDE_PRICES_COMPLETE"] },
       actualOutcome: {
         ...actualOutcome,
         lockedProfitPrice: actualComparableLocked,
@@ -340,7 +365,11 @@ export function evaluateFastMoveCounterfactual(
             : round(bounded.value - actualObservedLocked),
         },
         quality: {
-          warnings: ["COUNTERFACTUAL_EXIT_NOT_PROVABLE", "COUNTERFACTUAL_PNL_NOT_PROVABLE"],
+          warnings: [
+            ...(orderedEvidenceWarning ? [orderedEvidenceWarning] : []),
+            "COUNTERFACTUAL_EXIT_NOT_PROVABLE",
+            "COUNTERFACTUAL_PNL_NOT_PROVABLE",
+          ],
         },
       };
     }
@@ -353,11 +382,13 @@ export function evaluateFastMoveCounterfactual(
     shadowOutcome: unavailableOutcome(),
     delta: { exitPrice: null, netPnl: null, realizedR: null, lockedProfitPrice: null },
     quality: {
-      warnings: [
-        input.exactManagementEvidence
-          ? "ORDERED_OR_EXPLICIT_FAST_MOVE_EVIDENCE_MISSING"
-          : "MANAGEMENT_EVIDENCE_NOT_EXACT",
-      ],
+      warnings: orderedEvidenceWarning
+        ? [orderedEvidenceWarning]
+        : [
+            input.exactManagementEvidence
+              ? "ORDERED_OR_EXPLICIT_FAST_MOVE_EVIDENCE_MISSING"
+              : "MANAGEMENT_EVIDENCE_NOT_EXACT",
+          ],
     },
   };
 }
