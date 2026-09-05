@@ -90,4 +90,54 @@ Assert-True ($recovery.Contains('Canonical pre-Web source generation reload requ
 Assert-True (-not $recovery.Contains('GENERATION_PRE_WEB_TASK_REPAIR')) `
   'Stopped-lifecycle canonical generation recovery must not repair task definition.'
 
+# Production reproduction 2026-09-05: the first canonical Start-ScheduledTask
+# returned without error, but Windows held the task in Queued with zero COM task
+# instances, zero canonical PowerShell processes, a RELEASED startup lock, a dead
+# previous broker PID, and stale heartbeat/status. Battery, idle, network and task
+# enabled settings were all canonical. A bounded recovery may clear that orphan queue
+# only after re-proving the exact fail-closed shape, then retry the same task once.
+$orphanRequired = @(
+  'function Get-Phase7CCanonicalTaskProcessCount',
+  'function Get-Phase7CRunningTaskInstanceCount',
+  'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_ORPHAN_QUEUED=ELIGIBLE',
+  'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_ORPHAN_QUEUED_CLEAR=PASS',
+  'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_ORPHAN_QUEUED_RESTART_RETRY=ONCE',
+  '[string]$orphanQueuedTask.State -eq ''Queued''',
+  '$orphanCanonicalProcessCount -eq 0',
+  '$orphanRunningInstanceCount -eq 0',
+  '-not [bool]$orphanRuntimeGeneration.brokerProcessAlive',
+  '-not [bool]$orphanRuntimeGeneration.brokerHeartbeatFresh',
+  '[string]$orphanRuntimeGeneration.startupRunnerLockState -in @(''MISSING'', ''RELEASED'')',
+  'Assert-PauseDisarmed -Stage "GENERATION_PRE_WEB_ORPHAN_QUEUED"',
+  'Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "GENERATION_PRE_WEB_ORPHAN_QUEUED"',
+  'Assert-FlatBroker -Stage "GENERATION_PRE_WEB_ORPHAN_QUEUED"'
+)
+foreach ($literal in $orphanRequired) {
+  Assert-True ($recovery.Contains($literal)) "RED: orphan-queued generation recovery contract missing: $literal"
+}
+
+$orphanEligible = 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_ORPHAN_QUEUED=ELIGIBLE'
+$orphanClear = 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_ORPHAN_QUEUED_CLEAR=PASS'
+$orphanRetry = 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_ORPHAN_QUEUED_RESTART_RETRY=ONCE'
+$restartFailure = 'Canonical pre-Web source generation task restart did not produce a fresh new lifecycle broker.'
+$orphanEligibleIndex = $recovery.IndexOf($orphanEligible, [System.StringComparison]::Ordinal)
+$orphanClearIndex = $recovery.IndexOf($orphanClear, [System.StringComparison]::Ordinal)
+$orphanRetryIndex = $recovery.IndexOf($orphanRetry, [System.StringComparison]::Ordinal)
+$restartFailureIndex = $recovery.IndexOf($restartFailure, [System.StringComparison]::Ordinal)
+
+Assert-True ($orphanEligibleIndex -ge 0) 'Orphan queue recovery must expose exact eligibility.'
+Assert-True ($orphanClearIndex -gt $orphanEligibleIndex) 'Orphan queue clear must occur after eligibility.'
+Assert-True ($orphanRetryIndex -gt $orphanClearIndex) 'Single retry must occur after queue clear proof.'
+Assert-True ($restartFailureIndex -gt $orphanRetryIndex) 'Fail-closed broker restart error must remain after the bounded retry.'
+
+$orphanSection = $recovery.Substring($orphanEligibleIndex, $restartFailureIndex - $orphanEligibleIndex)
+Assert-True ($orphanSection.Contains('Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop')) `
+  'Orphan queue recovery must cancel only the same canonical Scheduled Task.'
+Assert-True ($orphanSection.Contains('Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop')) `
+  'Orphan queue recovery must retry only the same canonical Scheduled Task.'
+Assert-True (-not $orphanSection.Contains('Register-ScheduledTask')) `
+  'Orphan queue recovery must not re-register task definition.'
+Assert-True (-not $orphanSection.Contains('Restart-Service')) `
+  'Orphan queue recovery must never restart Task Scheduler service.'
+
 Write-Host "PHASE7C_STOPPED_LIFECYCLE_PREWEB_GENERATION_SOURCE_TEST=PASS"
