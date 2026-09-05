@@ -19,7 +19,7 @@ import type {
   Phase7CCounterfactualSnapshot,
 } from "../contracts/phase7c-counterfactual-intelligence.schema";
 import { getPhase7CPerformanceEffectivenessSnapshot } from "./phase7c-performance-effectiveness.service";
-import { getPhase7CCounterfactualIntelligence } from "./phase7c-counterfactual-intelligence.service";
+import { buildPhase7CCounterfactualSnapshotFromRows } from "./phase7c-counterfactual-intelligence.service";
 import {
   evaluatePhase7CRecommendationCandidate,
   MIN_SAMPLE_FOR_HIGH_CONFIDENCE,
@@ -56,7 +56,9 @@ function exactRow(row: Phase7CPerformanceEffectivenessRow): boolean {
   return row.correlation.verdict === "EXACT" && row.quality.exactCorrelation === true;
 }
 
-function observed(bucket: Phase7CPerformanceEffectivenessMetricBucket): Phase7CRecommendationObservedEffectiveness {
+function observed(
+  bucket: Phase7CPerformanceEffectivenessMetricBucket,
+): Phase7CRecommendationObservedEffectiveness {
   return {
     sampleSize: bucket.sampleSize,
     wins: bucket.wins,
@@ -86,7 +88,9 @@ function candidateRows(
 function contexts(rows: readonly Phase7CPerformanceEffectivenessRow[]) {
   return {
     strategies: [...new Set(rows.map((row) => row.strategy))].sort(),
-    regimes: [...new Set(rows.map((row) => row.regime).filter((value): value is string => Boolean(value)))].sort(),
+    regimes: [...new Set(
+      rows.map((row) => row.regime).filter((value): value is string => Boolean(value)),
+    )].sort(),
   };
 }
 
@@ -96,9 +100,12 @@ function scenarioComparableDelta(scenario: Phase7CCounterfactualScenario): numbe
   return null;
 }
 
-function aggregateVerdict(scenarios: readonly Phase7CCounterfactualScenario[]): Phase7CRecommendationP4Verdict {
-  if (scenarios.some((scenario) => scenario.evidence.verdict === "EXACT")) return "EXACT";
-  if (scenarios.some((scenario) => scenario.evidence.verdict === "BOUNDED")) return "BOUNDED";
+function aggregateVerdict(
+  scenarios: readonly Phase7CCounterfactualScenario[],
+): Phase7CRecommendationP4Verdict {
+  if (scenarios.length === 0) return "UNAVAILABLE";
+  if (scenarios.every((scenario) => scenario.evidence.verdict === "EXACT")) return "EXACT";
+  if (scenarios.some((scenario) => scenario.evidence.verdict !== "UNAVAILABLE")) return "BOUNDED";
   return "UNAVAILABLE";
 }
 
@@ -160,7 +167,7 @@ function recommendationCandidate(
 ): Phase7CRecommendationCandidate {
   const rows = candidateRows(effectiveness.rows, scope, bucket.key);
   const exactRows = rows.filter(exactRow).length;
-  const lineageExact = bucket.sampleSize > 0 && exactRows >= bucket.sampleSize;
+  const lineageExact = bucket.sampleSize > 0 && rows.length > 0 && exactRows === rows.length;
   const p4 = counterfactualEvidence(scenarios);
   const decision = evaluatePhase7CRecommendationCandidate({
     targetScope: scope,
@@ -284,6 +291,7 @@ export function buildPhase7CRecommendationSnapshotFromEvidence(
       "Evidence score is an audit completeness score, not a probability, confidence interval, expected return, or causal estimate.",
       "P3 observational differences alone never create RULE or ENTRY_TYPE change recommendations; canonical P4 evidence is required.",
       "BOUNDED counterfactual evidence can support human REVIEW_CHANGE only with explicit directional deltas, sufficient sample size, and no contradiction; confidence is capped at MEDIUM.",
+      "P4 evidence is considered EXACT for a target only when every matched scenario is EXACT; mixed EXACT/BOUNDED/UNAVAILABLE evidence remains fail-closed as BOUNDED.",
       "Unproved counterfactual PnL and realized-R remain null and are never inferred from observed P3 outcomes.",
     ],
   };
@@ -292,13 +300,14 @@ export function buildPhase7CRecommendationSnapshotFromEvidence(
 export async function getPhase7CRecommendationIntelligence(
   query: Phase7CRecommendationQuery = {},
 ): Promise<Phase7CRecommendationSnapshot> {
-  const [effectiveness, counterfactual] = await Promise.all([
-    getPhase7CPerformanceEffectivenessSnapshot(query),
-    getPhase7CCounterfactualIntelligence(query),
-  ]);
+  const effectiveness = await getPhase7CPerformanceEffectivenessSnapshot(query);
+  const counterfactual = buildPhase7CCounterfactualSnapshotFromRows({
+    rows: effectiveness.rows,
+    generatedAt: effectiveness.generatedAt,
+  });
   return buildPhase7CRecommendationSnapshotFromEvidence({
     effectiveness,
     counterfactual,
-    generatedAt: Math.max(effectiveness.generatedAt, counterfactual.generatedAt),
+    generatedAt: effectiveness.generatedAt,
   });
 }
