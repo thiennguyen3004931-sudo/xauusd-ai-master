@@ -255,10 +255,10 @@ async function readHistoricalM5Bars(
   }
 }
 
-function fastMoveContract(strategy: Phase7CPerformanceStrategy) {
+function fastMoveContract(_strategy: Phase7CPerformanceStrategy) {
   return {
     activationPrice: 10,
-    givebackPrice: strategy === "TREND" ? 6 : 4,
+    givebackPrice: 10,
     source: "LIVE_BID_ASK" as const,
   };
 }
