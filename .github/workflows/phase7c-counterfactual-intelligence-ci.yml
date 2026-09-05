@@ -48,3 +48,6 @@ jobs:
 
       - name: P4 counterfactual evaluator contract
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-counterfactual-evaluator.test.ts
+
+      - name: P4 counterfactual snapshot contract
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-counterfactual-intelligence.test.ts
