@@ -51,6 +51,8 @@ Require-Literal "UNAVAILABLE"
 Require-Literal "SHADOW_ONLY"
 Require-Literal "-Method Get"
 
+Reject-Regex "rev-parse\s+HEAD[^\r\n]*\|\s*Select-Object\s+-First\s+1" "P4 verifier must not pipe native git rev-parse through Select-Object -First 1 because the downstream early-stop can make LASTEXITCODE nonzero after valid output."
+Reject-Regex "branch\s+--show-current[^\r\n]*\|\s*Select-Object\s+-First\s+1" "P4 verifier must not pipe native git branch through Select-Object -First 1 because the downstream early-stop can make LASTEXITCODE nonzero after valid output."
 Reject-Regex "-Method\s+(Post|Put|Patch|Delete)\b" "P4 production acceptance verifier must be GET-only."
 Reject-Regex "Invoke-RestMethod[^\r\n]+/(arm|auto|mode|orders?|positions?|lifecycle)\b" "P4 verifier must not call mutation/control endpoints."
 Reject-Regex "Restart-(Service|Process)|Stop-Process|Start-Process|Stop-ScheduledTask|Start-ScheduledTask" "P4 verifier must not restart runtime processes or tasks."
