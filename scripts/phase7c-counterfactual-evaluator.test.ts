@@ -14,6 +14,7 @@ const exact = evaluateFastMoveCounterfactual({
   exactCorrelation: true,
   exactManagementEvidence: true,
   managementEvents: [],
+  orderedExitSideEvidenceComplete: true,
   orderedExitSidePrices: [
     { timestamp: 1_000, price: 100 },
     { timestamp: 2_000, price: 110 },
@@ -37,6 +38,34 @@ assert.equal(exact.delta.exitPrice, 0);
 assert.equal(exact.delta.lockedProfitPrice, 0);
 assert.equal(exact.delta.netPnl, null);
 assert.equal(exact.delta.realizedR, null);
+
+const incompleteOrdered = evaluateFastMoveCounterfactual({
+  tradeKey: "LIVE:TREND:1b:t1b",
+  positionId: "1b",
+  strategy: "TREND",
+  side: "BUY",
+  entry: 100,
+  actualExit: 112,
+  actualNetPnl: 12,
+  actualRealizedR: null,
+  exactCorrelation: true,
+  exactManagementEvidence: false,
+  managementEvents: [],
+  orderedExitSideEvidenceComplete: false,
+  orderedExitSidePrices: [
+    { timestamp: 3_000, price: 118 },
+    { timestamp: 5_000, price: 112 },
+  ],
+  alternativeGivebackPrice: 6,
+});
+
+assert.equal(incompleteOrdered.evidence.verdict, "UNAVAILABLE");
+assert.equal(incompleteOrdered.shadowOutcome.exitPrice, null);
+assert.equal(incompleteOrdered.delta.exitPrice, null);
+assert.equal(
+  incompleteOrdered.quality.warnings.includes("ORDERED_EXIT_SIDE_EVIDENCE_INCOMPLETE"),
+  true,
+);
 
 const bounded = evaluateFastMoveCounterfactual({
   tradeKey: "LIVE:TREND:2:t2",
@@ -95,7 +124,7 @@ assert.equal(unavailable.delta.exitPrice, null);
 assert.equal(unavailable.delta.lockedProfitPrice, null);
 assert.equal(unavailable.quality.warnings.includes("CORRELATION_NOT_EXACT"), true);
 
-for (const scenario of [exact, bounded, unavailable]) {
+for (const scenario of [exact, incompleteOrdered, bounded, unavailable]) {
   assert.equal(scenario.safety.readOnly, true);
   assert.equal(scenario.safety.shadowOnly, true);
   assert.equal(scenario.safety.strategyMutation, false);
@@ -111,4 +140,5 @@ for (const scenario of [exact, bounded, unavailable]) {
 
 console.log("P4_COUNTERFACTUAL_EVALUATOR_TEST=PASS");
 console.log("P4_EVIDENCE_VERDICTS=EXACT_BOUNDED_UNAVAILABLE");
+console.log("P4_EXACT_REPLAY_REQUIRES_COMPLETE_ORDERED_EVIDENCE=PASS");
 console.log("P4_COUNTERFACTUAL_PNL_INFERENCE=NONE_WITHOUT_EXECUTION_EVIDENCE");
