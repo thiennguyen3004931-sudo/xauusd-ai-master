@@ -49,10 +49,20 @@ assert.match(
   "Web autostart must write a canonical Web component attestation.",
 );
 
-const readyIndex = launcher.indexOf("PHASE7B_WEB_AUTOSTART_STATUS=RUNNING");
+const apiPassIndex = launcher.indexOf("PHASE7B_WEB_AUTOSTART_API=PASS");
+const uiPassIndex = launcher.indexOf("PHASE7B_WEB_AUTOSTART_UI=PASS");
+const runningIndex = launcher.indexOf("PHASE7B_WEB_AUTOSTART_STATUS=RUNNING");
 const writeIndex = launcher.indexOf("Write-Phase7CRuntimeSourceComponentAttestation");
-assert.ok(readyIndex >= 0, "Web readiness marker must remain present.");
-assert.ok(writeIndex > readyIndex, "Web attestation must be written only after API+Web self-test readiness passes.");
+assert.ok(apiPassIndex >= 0 && uiPassIndex >= 0, "Web self-test PASS markers must remain present.");
+assert.ok(runningIndex >= 0, "Web running marker must remain present.");
+assert.ok(
+  writeIndex > apiPassIndex && writeIndex > uiPassIndex,
+  "Web attestation must be written only after API+Web self-test readiness passes.",
+);
+assert.ok(
+  writeIndex < runningIndex,
+  "Web runtime must not report RUNNING until canonical Web attestation is written.",
+);
 
 const finallyIndex = launcher.lastIndexOf("finally {");
 const cleanupIndex = launcher.lastIndexOf("Remove-Item -LiteralPath $webPidPath");
@@ -63,6 +73,7 @@ console.log("PHASE7C_WEB_SOURCE_ATTESTATION_CONTRACT=PASS");
 console.log("WEB_COMPONENT_CANONICAL=TRUE");
 console.log("WEB_PID_EVIDENCE=DEDICATED");
 console.log("WEB_ATTESTATION_AFTER_SELF_TEST=TRUE");
+console.log("WEB_RUNNING_AFTER_ATTESTATION=TRUE");
 console.log("WEB_PID_CLEANUP=TRUE");
 console.log("STRATEGY_CHANGE=NONE");
 console.log("RISK_CHANGE=NONE");
