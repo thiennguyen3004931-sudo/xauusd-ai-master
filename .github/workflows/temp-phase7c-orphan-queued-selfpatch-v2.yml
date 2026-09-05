@@ -1,0 +1,52 @@
+name: TEMP Phase7C Orphan Queued Self Patch V2
+
+on:
+  push:
+    branches:
+      - fix/phase7c-orphan-queued-generation-restart
+    paths:
+      - ".github/workflows/temp-phase7c-orphan-queued-selfpatch-v2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/phase7c-orphan-queued-generation-restart
+          fetch-depth: 0
+
+      - name: Apply bounded orphan-queued production patch
+        shell: pwsh
+        run: python .github/phase7c-orphan-queued-patch.py
+
+      - name: Verify parser and RED contract now GREEN with PowerShell 7
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile("scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1", [ref]$tokens, [ref]$errors)
+          if ($errors.Count -ne 0) { throw $errors[0].Message }
+          .\scripts\test-phase7c-stopped-lifecycle-preweb-generation-source.ps1
+          .\scripts\test-phase7c-orphan-queued-generation-restart-source.ps1
+
+      - name: Verify RED contract now GREEN with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          .\scripts\test-phase7c-stopped-lifecycle-preweb-generation-source.ps1
+          .\scripts\test-phase7c-orphan-queued-generation-restart-source.ps1
+
+      - name: Commit production patch only
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1
+          git diff --cached --check
+          git diff --cached --quiet && { echo "NO_PRODUCTION_PATCH"; exit 1; } || true
+          git commit -m "fix(phase7c): recover orphan queued generation restart"
+          git push origin HEAD:fix/phase7c-orphan-queued-generation-restart
