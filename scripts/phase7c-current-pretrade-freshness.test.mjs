@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPhase7CDecisionMonitor } from "../apps/api/src/services/phase7c-decision-monitor.service.ts";
+import {
+  buildPhase7CDecisionMonitor,
+  canReusePhase7CDecisionMonitorCache,
+} from "../apps/api/src/services/phase7c-decision-monitor.service.ts";
 
 function fixture() {
   const now = 1_776_000_000_000;
@@ -133,4 +136,47 @@ test("stale Sideway audit stays in history but cannot populate current pre-trade
   assert.equal(historical.timestamp, input.staleSidewayDecision.timestamp);
   assert.equal(historical.plan?.entry, 2500);
   assert.equal(historical.sizing?.finalLot, 0.09);
+});
+
+test("decision-monitor cache is bypassed immediately when canonical bot mode changes", () => {
+  const input = fixture();
+  const snapshot = buildPhase7CDecisionMonitor({
+    ...input,
+    regime: {
+      ...input.regime,
+      activeMode: "PAUSE",
+      modeMatchesRecommendation: false,
+    },
+  });
+
+  const cached = { at: input.now, value: snapshot };
+  const accountModeState = {
+    accountMode: snapshot.safety.accountMode,
+    valid: snapshot.safety.accountGuardValid,
+  };
+
+  assert.equal(snapshot.mode.active, "PAUSE");
+  assert.equal(
+    canReusePhase7CDecisionMonitorCache({
+      cached,
+      now: input.now + 100,
+      symbol: "XAUUSD",
+      accountModeState,
+      currentBotMode: "AUTO",
+    }),
+    false,
+    "a PAUSE snapshot must not survive an immediate PAUSE -> AUTO transition",
+  );
+
+  assert.equal(
+    canReusePhase7CDecisionMonitorCache({
+      cached,
+      now: input.now + 100,
+      symbol: "XAUUSD",
+      accountModeState,
+      currentBotMode: "PAUSE",
+    }),
+    true,
+    "same-mode snapshots should retain the existing 2-second cache behavior",
+  );
 });
