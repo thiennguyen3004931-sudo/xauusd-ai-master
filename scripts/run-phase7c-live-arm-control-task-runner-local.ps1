@@ -15,8 +15,10 @@ $LockPath = Join-Path $WorkDir "phase7c-live-arm-control.lock"
 $ArmScript = Join-Path $PSScriptRoot "arm-phase7c-live-local.ps1"
 $DisarmScript = Join-Path $PSScriptRoot "disarm-phase7c-live-local.ps1"
 $GetArmStatusScript = Join-Path $PSScriptRoot "get-phase7c-live-arm-local.ps1"
+$ChildTimeoutMs = 30000
+$PowerShellExe = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 
-foreach ($required in @($ArmScript, $DisarmScript, $GetArmStatusScript)) {
+foreach ($required in @($ArmScript, $DisarmScript, $GetArmStatusScript, $PowerShellExe)) {
   if (-not (Test-Path -LiteralPath $required)) { throw "Required LIVE ARM component missing: $required" }
 }
 
@@ -60,11 +62,78 @@ function Write-ControlStatus(
   })
 }
 
+function Quote-ChildArgument([string]$Value) {
+  if ($null -eq $Value) { return '""' }
+  return '"' + $Value.Replace('"', '\"') + '"'
+}
+
+function Invoke-BoundedPowerShellChild(
+  [string]$ScriptPath,
+  [string[]]$ScriptArguments,
+  [string]$Label
+) {
+  $token = "$PID.$([guid]::NewGuid().ToString('N'))"
+  $stdoutPath = Join-Path $WorkDir "phase7c-live-arm-child.$token.stdout.log"
+  $stderrPath = Join-Path $WorkDir "phase7c-live-arm-child.$token.stderr.log"
+  $process = $null
+  try {
+    $argumentParts = @(
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      (Quote-ChildArgument $ScriptPath)
+    )
+    foreach ($item in @($ScriptArguments)) {
+      $argumentParts += (Quote-ChildArgument ([string]$item))
+    }
+
+    $process = Start-Process `
+      -FilePath $PowerShellExe `
+      -ArgumentList $argumentParts `
+      -PassThru `
+      -WindowStyle Hidden `
+      -RedirectStandardOutput $stdoutPath `
+      -RedirectStandardError $stderrPath
+
+    if (-not $process.WaitForExit($ChildTimeoutMs)) {
+      try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
+      try { [void]$process.WaitForExit(5000) } catch {}
+      throw "CHILD_TIMEOUT label=$Label timeoutMs=$ChildTimeoutMs"
+    }
+
+    $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw -ErrorAction SilentlyContinue } else { "" }
+    $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue } else { "" }
+    $exitCode = [int]$process.ExitCode
+
+    if (-not [string]::IsNullOrWhiteSpace($stdout)) { Write-Host $stdout.TrimEnd() }
+    if (-not [string]::IsNullOrWhiteSpace($stderr)) { Write-Warning $stderr.TrimEnd() }
+
+    return [pscustomobject]@{
+      exitCode = $exitCode
+      stdout = [string]$stdout
+      stderr = [string]$stderr
+    }
+  } finally {
+    if ($null -ne $process) { try { $process.Dispose() } catch {} }
+    foreach ($file in @($stdoutPath, $stderrPath)) {
+      try { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue } catch {}
+    }
+  }
+}
+
 function Read-CanonicalArmStatus() {
-  $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $GetArmStatusScript -WorkDir $WorkDir 2>&1 | Out-String
-  if ($LASTEXITCODE -ne 0) { throw "Canonical LIVE ARM status command failed. $output" }
-  $match = [regex]::Match($output, 'PHASE7C_LIVE_ARM_STATUS=([^\r\n]+)')
-  if (-not $match.Success) { throw "Canonical LIVE ARM status output is missing PHASE7C_LIVE_ARM_STATUS. $output" }
+  $result = Invoke-BoundedPowerShellChild `
+    -ScriptPath $GetArmStatusScript `
+    -ScriptArguments @('-WorkDir', $WorkDir) `
+    -Label 'GET_ARM_STATUS'
+  if ([int]$result.exitCode -ne 0) {
+    throw "Canonical LIVE ARM status command failed. exitCode=$($result.exitCode) stderr=$($result.stderr)"
+  }
+  $match = [regex]::Match([string]$result.stdout, 'PHASE7C_LIVE_ARM_STATUS=([^\r\n]+)')
+  if (-not $match.Success) {
+    throw "Canonical LIVE ARM status output is missing PHASE7C_LIVE_ARM_STATUS. output=$($result.stdout)"
+  }
   return $match.Groups[1].Value.Trim().ToUpperInvariant()
 }
 
@@ -95,13 +164,23 @@ try {
   Write-ControlStatus $requestId $action "RUNNING" "PREFLIGHT" "Đang chạy canonical LIVE ARM/DISARM guard." $startedAt
 
   if ($action -eq "ARM_LIVE") {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ArmScript -WorkDir $WorkDir -ControlApiUrl $ControlApiUrl
-    if ($LASTEXITCODE -ne 0) { throw "Canonical LIVE ARM failed with exit code $LASTEXITCODE." }
+    $armResult = Invoke-BoundedPowerShellChild `
+      -ScriptPath $ArmScript `
+      -ScriptArguments @('-WorkDir', $WorkDir, '-ControlApiUrl', $ControlApiUrl) `
+      -Label 'ARM_LIVE'
+    if ([int]$armResult.exitCode -ne 0) {
+      throw "Canonical LIVE ARM failed with exit code $($armResult.exitCode). stderr=$($armResult.stderr)"
+    }
     $finalArmStatus = Read-CanonicalArmStatus
     if ($finalArmStatus -ne "ARMED") { throw "LIVE ARM command completed but bridge did not report ARMED. Actual=$finalArmStatus" }
   } else {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $DisarmScript -WorkDir $WorkDir -Reason "web-live-arm-control"
-    if ($LASTEXITCODE -ne 0) { throw "Canonical LIVE DISARM failed with exit code $LASTEXITCODE." }
+    $disarmResult = Invoke-BoundedPowerShellChild `
+      -ScriptPath $DisarmScript `
+      -ScriptArguments @('-WorkDir', $WorkDir, '-Reason', 'web-live-arm-control') `
+      -Label 'DISARM_LIVE'
+    if ([int]$disarmResult.exitCode -ne 0) {
+      throw "Canonical LIVE DISARM failed with exit code $($disarmResult.exitCode). stderr=$($disarmResult.stderr)"
+    }
     $finalArmStatus = Read-CanonicalArmStatus
     if ($finalArmStatus -eq "ARMED") { throw "LIVE DISARM command completed but bridge still reports ARMED." }
   }
@@ -116,9 +195,10 @@ try {
 } catch {
   $completedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   $message = $_.Exception.Message
+  $failurePhase = if ($message -like 'CHILD_TIMEOUT*') { 'CHILD_TIMEOUT' } else { 'FAILED' }
   $finalArmStatus = "UNKNOWN"
   try { $finalArmStatus = Read-CanonicalArmStatus } catch {}
-  try { Write-ControlStatus $requestId $action "FAIL" "FAILED" $message $startedAt $completedAt $finalArmStatus } catch {}
+  try { Write-ControlStatus $requestId $action "FAIL" $failurePhase $message $startedAt $completedAt $finalArmStatus } catch {}
   Write-Error $message
   exit 1
 } finally {
