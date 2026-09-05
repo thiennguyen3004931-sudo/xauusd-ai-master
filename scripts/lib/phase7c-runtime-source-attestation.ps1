@@ -232,7 +232,7 @@ function Initialize-Phase7CRuntimeSourceDeployment {
 function Write-Phase7CRuntimeSourceComponentAttestation {
   param(
     [Parameter(Mandatory = $true)] [string]$RuntimeRoot,
-    [Parameter(Mandatory = $true)] [ValidateSet('api','web','lifecycle-broker','supervisor','trend','sideway','telegram','regime-notifier')] [string]$Component,
+    [Parameter(Mandatory = $true)] [ValidateSet('api','lifecycle-broker','supervisor','trend','sideway','telegram','regime-notifier')] [string]$Component,
     [Parameter(Mandatory = $true)] [int]$ProcessId,
     [Parameter(Mandatory = $true)] [string]$LauncherPath,
     [Parameter(Mandatory = $true)] $ConfigIdentity
