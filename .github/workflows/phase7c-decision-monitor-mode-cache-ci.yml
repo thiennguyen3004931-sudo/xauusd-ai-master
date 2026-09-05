@@ -1,0 +1,29 @@
+name: Phase7C Decision Monitor Mode Cache CI
+
+on:
+  push:
+    branches:
+      - fix/phase7c-decision-monitor-mode-cache
+    paths:
+      - "apps/api/src/services/phase7c-decision-monitor.service.ts"
+      - "scripts/phase7c-decision-monitor-mode-cache.test.mjs"
+      - ".github/workflows/phase7c-decision-monitor-mode-cache-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "apps/api/src/services/phase7c-decision-monitor.service.ts"
+      - "scripts/phase7c-decision-monitor-mode-cache.test.mjs"
+      - ".github/workflows/phase7c-decision-monitor-mode-cache-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  mode-cache-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decision monitor canonical mode cache contract
+        run: node scripts/phase7c-decision-monitor-mode-cache.test.mjs
