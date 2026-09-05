@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import type { Mt5TelemetrySnapshot } from "./mt5.service";
 import { getMt5Telemetry } from "./mt5.service";
 import { getPhase7CLiveRegime } from "./phase7c-live-regime.service";
+import { phase7CBotModeService } from "./phase7c-bot-mode.service";
 import { phase7CLotSettingsService } from "./phase7c-lot-settings.service";
 import {
   accountModeAllowsBroker,
@@ -680,12 +681,14 @@ let pending: Promise<ReturnType<typeof buildPhase7CDecisionMonitor>> | null = nu
 export async function getPhase7CDecisionMonitor(symbol = "XAUUSD") {
   const now = Date.now();
   const accountModeState = getPhase7CAccountModeState();
+  const currentBotMode = phase7CBotModeService.get().mode;
   if (
     cached &&
     now - cached.at <= 2_000 &&
     cached.value.symbol === symbol.toUpperCase() &&
     cached.value.safety.accountMode === accountModeState.accountMode &&
-    cached.value.safety.accountGuardValid === accountModeState.valid
+    cached.value.safety.accountGuardValid === accountModeState.valid &&
+    cached.value.mode.active === currentBotMode
   ) {
     return cached.value;
   }
