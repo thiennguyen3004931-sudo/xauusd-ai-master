@@ -61,3 +61,6 @@ jobs:
 
       - name: P4 Control Center source contract
         run: node scripts/test-phase7c-counterfactual-intelligence-source.mjs
+
+      - name: Build web dependency graph
+        run: pnpm --filter @xauusd/web... build
