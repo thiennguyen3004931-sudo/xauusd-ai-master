@@ -103,8 +103,17 @@ async function evaluate(action: Phase7CLiveArmAction) {
   const armed = telemetry.health?.liveExecutionArmed === true && armStatus === "ARMED";
   const bridgeSessionId = telemetry.health?.bridgeSessionId ?? null;
   const status = readStatus();
-  const noControlRunning =
-    !status || status.status !== "RUNNING" || Date.now() - status.updatedAt > REQUEST_RUNNING_STALE_MS;
+  const requestExists = fs.existsSync(requestPath());
+  const statusAgeMs = status ? Date.now() - status.updatedAt : null;
+  const statusRunning = status?.status === "RUNNING" &&
+    statusAgeMs !== null && statusAgeMs <= REQUEST_RUNNING_STALE_MS;
+  const noControlRunning = !requestExists && !statusRunning;
+  const orphanedControlRequest = requestExists && (
+    !status ||
+    status.status !== "RUNNING" ||
+    statusAgeMs === null ||
+    statusAgeMs > REQUEST_RUNNING_STALE_MS
+  );
 
   const commonChecks = {
     taskInstalled: installed,
@@ -152,6 +161,7 @@ async function evaluate(action: Phase7CLiveArmAction) {
     bridgeSessionId,
     openXauusdPositions: telemetry.positions.length,
     taskInstalled: installed,
+    orphanedControlRequest: requestExists && orphanedControlRequest,
     checks,
     blockedBy,
   };
@@ -168,6 +178,7 @@ export async function getPhase7CLiveArmControlCapability() {
     liveExecutionArmed: arm.liveExecutionArmed,
     bridgeSessionId: arm.bridgeSessionId,
     openXauusdPositions: arm.openXauusdPositions,
+    orphanedControlRequest: arm.orphanedControlRequest || disarm.orphanedControlRequest,
     canArm: arm.approved,
     canDisarm: disarm.approved,
     armChecks: arm.checks,
