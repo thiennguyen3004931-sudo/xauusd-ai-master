@@ -1,4 +1,5 @@
 import type {
+  Phase7CPerformanceEntryType,
   Phase7CPerformanceManagementEvent,
   Phase7CPerformanceSide,
   Phase7CPerformanceStrategy,
@@ -24,6 +25,8 @@ export interface Phase7CFastMoveCounterfactualInput {
   positionId: string;
   strategy: Phase7CPerformanceStrategy;
   side: Phase7CPerformanceSide;
+  entryType?: Phase7CPerformanceEntryType;
+  regime?: string | null;
   entry: number;
   actualExit: number;
   actualNetPnl: number;
@@ -47,7 +50,7 @@ function round(value: number, digits = 6): number {
   return Math.round((value + Number.EPSILON) * scale) / scale;
 }
 
-function safety(): Phase7CCounterfactualSafety {
+export function phase7CCounterfactualSafety(): Phase7CCounterfactualSafety {
   return {
     readOnly: true,
     shadowOnly: true,
@@ -224,6 +227,8 @@ export function evaluateFastMoveCounterfactual(
     positionId: input.positionId,
     strategy: input.strategy,
     side: input.side,
+    entryType: input.entryType ?? "UNKNOWN",
+    regime: input.regime ?? null,
     family: "FAST_MOVE_GIVEBACK" as const,
     mode: "SHADOW_ONLY" as const,
     baseline: {
@@ -242,7 +247,7 @@ export function evaluateFastMoveCounterfactual(
       ruleState: "ALTERNATIVE" as const,
       managementFamily: "FAST_MOVE_TIGHTEN",
     },
-    safety: safety(),
+    safety: phase7CCounterfactualSafety(),
   };
 
   const actualObservedLocked = explicitLockedProfit(input.side, entry, input.managementEvents);
@@ -299,9 +304,7 @@ export function evaluateFastMoveCounterfactual(
           : round(shadowOutcome.lockedProfitPrice - actualComparableLocked),
       },
       quality: {
-        warnings: [
-          "COUNTERFACTUAL_PNL_NOT_COMPUTED_WITHOUT_EXECUTION_VALUE_MODEL",
-        ],
+        warnings: ["COUNTERFACTUAL_PNL_NOT_COMPUTED_WITHOUT_EXECUTION_VALUE_MODEL"],
       },
     };
   }
@@ -337,10 +340,7 @@ export function evaluateFastMoveCounterfactual(
             : round(bounded.value - actualObservedLocked),
         },
         quality: {
-          warnings: [
-            "COUNTERFACTUAL_EXIT_NOT_PROVABLE",
-            "COUNTERFACTUAL_PNL_NOT_PROVABLE",
-          ],
+          warnings: ["COUNTERFACTUAL_EXIT_NOT_PROVABLE", "COUNTERFACTUAL_PNL_NOT_PROVABLE"],
         },
       };
     }
