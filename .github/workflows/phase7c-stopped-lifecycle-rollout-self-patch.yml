@@ -1,0 +1,70 @@
+name: Phase7C Stopped Lifecycle Rollout Self Patch
+
+on:
+  push:
+    branches:
+      - fix/phase7c-production-rollout-stopped-lifecycle-resume
+
+permissions:
+  contents: write
+
+jobs:
+  self-patch:
+    if: ${{ !contains(github.event.head_commit.message, '[self-patch]') }}
+    runs-on: windows-2025
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/phase7c-production-rollout-stopped-lifecycle-resume
+          fetch-depth: 1
+
+      - name: Apply stopped lifecycle rollout patch
+        shell: pwsh
+        run: ./scripts/patch-phase7c-stopped-lifecycle-rollout-ci.ps1
+
+      - name: Production source transition rollout contract - PowerShell 7
+        shell: pwsh
+        run: ./scripts/test-phase7c-production-source-transition-rollout-source.ps1
+
+      - name: Production source transition rollout contract - Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/test-phase7c-production-source-transition-rollout-source.ps1
+
+      - name: Parse rollout helper - PowerShell 7
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'scripts/rollout-phase7c-production-source-transition-local.ps1'), [ref]$tokens, [ref]$errors)
+          if (@($errors).Count -ne 0) { throw ($errors | ForEach-Object Message) -join '; ' }
+
+      - name: Parse rollout helper - Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'scripts/rollout-phase7c-production-source-transition-local.ps1'), [ref]$tokens, [ref]$errors)
+          if (@($errors).Count -ne 0) { throw ($errors | ForEach-Object Message) -join '; ' }
+
+      - name: Verify self-patch diff
+        shell: pwsh
+        run: |
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
+          $changed = @(git diff --name-only)
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --name-only failed' }
+          if ($changed.Count -ne 1 -or $changed[0] -ne 'scripts/rollout-phase7c-production-source-transition-local.ps1') {
+            throw "Self-patch must modify exactly the rollout helper. changed=$($changed -join ',')"
+          }
+
+      - name: Commit GREEN helper
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/rollout-phase7c-production-source-transition-local.ps1
+          git commit -m "fix(phase7c): resume rollout from stopped lifecycle [self-patch]"
+          if ($LASTEXITCODE -ne 0) { throw 'git commit failed' }
+          git push origin HEAD:fix/phase7c-production-rollout-stopped-lifecycle-resume
+          if ($LASTEXITCODE -ne 0) { throw 'git push failed' }
