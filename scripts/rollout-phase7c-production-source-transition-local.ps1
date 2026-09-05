@@ -231,7 +231,7 @@ try {
 
     $remoteHelperLine = @(& $gitExe ls-tree $ExpectedRemoteMainCommit -- $HelperRepoPath)
     if ($LASTEXITCODE -ne 0 -or $remoteHelperLine.Count -ne 1) { throw 'Pinned remote main does not contain the rollout helper.' }
-    $remoteHelperParts = ([string]$remoteHelperLine[0]).Split(@(' ', [char]9), [System.StringSplitOptions]::RemoveEmptyEntries)
+    $remoteHelperParts = @(([string]$remoteHelperLine[0]) -split '\s+' | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
     if ($remoteHelperParts.Count -lt 4 -or [string]$remoteHelperParts[1] -ne 'blob' -or ([string]$remoteHelperParts[2]).ToLowerInvariant() -ne $ExpectedHelperBlobSha1) {
         throw "Pinned remote-main helper blob mismatch. expected=$ExpectedHelperBlobSha1 actual=$([string]$remoteHelperParts[2])"
     }
