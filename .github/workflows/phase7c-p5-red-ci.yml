@@ -7,6 +7,7 @@ on:
       - "scripts/test-phase7c-recommendation-api-source.mjs"
       - "scripts/phase7c-recommendation-evaluator.test.ts"
       - "scripts/phase7c-recommendation-intelligence.test.ts"
+      - "scripts/test-phase7c-p5-production-acceptance-source.ps1"
       - "apps/api/src/contracts/phase7c-recommendation-intelligence.schema.ts"
       - "apps/api/src/services/phase7c-recommendation-evaluator.service.ts"
       - ".github/workflows/phase7c-p5-red-ci.yml"
@@ -55,7 +56,7 @@ jobs:
       - name: P5 evaluator semantics
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-recommendation-evaluator.test.ts
 
-  composition-red:
+  composition-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -73,5 +74,15 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: P5 composition semantics must be RED before composition implementation
+      - name: P5 composition semantics
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-recommendation-intelligence.test.ts
+
+  verifier-red:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: P5 production acceptance source contract must be RED before verifier implementation
+        shell: pwsh
+        run: .\scripts\test-phase7c-p5-production-acceptance-source.ps1 -ProjectRoot $PWD
