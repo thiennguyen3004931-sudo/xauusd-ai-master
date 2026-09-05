@@ -6,6 +6,9 @@ on:
       - "scripts/test-phase7c-recommendation-intelligence-source.mjs"
       - "scripts/test-phase7c-recommendation-api-source.mjs"
       - "scripts/phase7c-recommendation-evaluator.test.ts"
+      - "scripts/phase7c-recommendation-intelligence.test.ts"
+      - "apps/api/src/contracts/phase7c-recommendation-intelligence.schema.ts"
+      - "apps/api/src/services/phase7c-recommendation-evaluator.service.ts"
       - ".github/workflows/phase7c-p5-red-ci.yml"
   workflow_dispatch:
 
@@ -19,7 +22,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: P5 source contract must be RED before implementation
+      - name: P5 source contract
         run: node scripts/test-phase7c-recommendation-intelligence-source.mjs
 
   api-red:
@@ -28,10 +31,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: P5 GET-only API source contract must be RED before implementation
+      - name: P5 GET-only API source contract
         run: node scripts/test-phase7c-recommendation-api-source.mjs
 
-  evaluator-red:
+  evaluator-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -49,5 +52,26 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: P5 evaluator semantics must be RED before implementation
+      - name: P5 evaluator semantics
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-recommendation-evaluator.test.ts
+
+  composition-red:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: P5 composition semantics must be RED before composition implementation
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-recommendation-intelligence.test.ts
