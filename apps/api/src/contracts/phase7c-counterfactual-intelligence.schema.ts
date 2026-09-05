@@ -58,6 +58,8 @@ export interface Phase7CCounterfactualScenario {
   positionId: string;
   strategy: Phase7CPerformanceStrategy;
   side: Phase7CPerformanceSide;
+  entryType: Phase7CPerformanceEntryType;
+  regime: string | null;
   family: Phase7CCounterfactualFamily;
   mode: "SHADOW_ONLY";
   baseline: Phase7CCounterfactualParameters;
