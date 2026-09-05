@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory = $true)] [string]$TargetCommit,
     [Parameter(Mandatory = $true)] [string]$ExpectedRemoteMainCommit,
     [Parameter(Mandatory = $true)] [string]$ExpectedHelperBlobSha1,
+    [ValidateSet('ARMED','DISARMED')] [string]$ExpectedInitialArm = 'ARMED',
     [int]$TimeoutSeconds = 180
 )
 
@@ -275,7 +276,7 @@ $BridgeHeaders = @{ 'x-mt5-api-key' = $envInfo.apiKey }
 
 Assert-CanonicalTask -Stage 'PREFLIGHT'
 Assert-Pause -Stage 'PREFLIGHT'
-Assert-Arm -Expected 'ARMED' -Stage 'PREFLIGHT'
+Assert-Arm -Expected $ExpectedInitialArm -Stage 'PREFLIGHT'
 $healthBefore = Get-BridgeHealth
 if (-not [bool]$healthBefore.connected -or [string]$healthBefore.status -ne 'ok' -or [string]$healthBefore.configuredAccountMode -ne 'LIVE' -or [string]$healthBefore.accountMode -ne 'real') {
     throw 'PREFLIGHT Bridge must be healthy LIVE/real.'
@@ -288,7 +289,7 @@ Wait-LifecycleReadyStable -Stage 'PREFLIGHT'
 $oldDeploymentId = Assert-RuntimeSourceExact -ExpectedCommit $ExpectedCurrentCommit -ExpectedTree $currentTree -Stage 'PREFLIGHT'
 Write-Host "PHASE7C_PRODUCTION_SOURCE_TRANSITION_PREVIOUS_DEPLOYMENT_ID=$oldDeploymentId"
 Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_PREFLIGHT_MODE=PAUSE'
-Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_PREFLIGHT_ARM=ARMED'
+Write-Host "PHASE7C_PRODUCTION_SOURCE_TRANSITION_PREFLIGHT_ARM=$ExpectedInitialArm"
 Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_ORDER_MUTATION=NONE'
 Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_POSITION_MUTATION=NONE'
 Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_LIVE_TEST_ORDER=NONE'
@@ -296,12 +297,16 @@ Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_LIVE_TEST_ORDER=NONE'
 $mutationStarted = $false
 try {
     $mutationStarted = $true
-    Invoke-LiveArmAction -Action 'DISARM_LIVE'
+    if ($ExpectedInitialArm -eq 'ARMED') {
+        Invoke-LiveArmAction -Action 'DISARM_LIVE'
+        Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_DISARM=PASS'
+    } elseif ($ExpectedInitialArm -eq 'DISARMED') {
+        Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_DISARM=SKIPPED_ALREADY_DISARMED'
+    }
     Assert-Arm -Expected 'DISARMED' -Stage 'POST_DISARM'
     Assert-Pause -Stage 'POST_DISARM'
     Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage 'POST_DISARM'
     Assert-FlatBroker -Stage 'POST_DISARM'
-    Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_DISARM=PASS'
 
     [void](Invoke-ApiPost '/api/v1/phase7c/lifecycle/stop' @{})
     Wait-LifecycleStopped
