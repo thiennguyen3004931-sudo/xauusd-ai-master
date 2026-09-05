@@ -1,0 +1,33 @@
+name: Phase7C Production Source Transition Rollout CI
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/rollout-phase7c-production-source-transition-local.ps1'
+      - 'scripts/test-phase7c-production-source-transition-rollout-source.ps1'
+      - '.github/workflows/phase7c-production-source-transition-rollout-ci.yml'
+  push:
+    branches:
+      - 'feat/phase7c-production-source-transition-rollout'
+    paths:
+      - 'scripts/rollout-phase7c-production-source-transition-local.ps1'
+      - 'scripts/test-phase7c-production-source-transition-rollout-source.ps1'
+      - '.github/workflows/phase7c-production-source-transition-rollout-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  source-contract:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shell:
+          - pwsh
+          - powershell
+    steps:
+      - uses: actions/checkout@v4
+      - name: Production source transition source contract
+        shell: ${{ matrix.shell }}
+        run: .\scripts\test-phase7c-production-source-transition-rollout-source.ps1
