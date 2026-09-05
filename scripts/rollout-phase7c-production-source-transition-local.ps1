@@ -172,15 +172,15 @@ function Assert-RuntimeSourceExact([string]$ExpectedCommit, [string]$ExpectedTre
     if ([string]$snapshot.deployment.sourceCommit -ne $ExpectedCommit -or [string]$snapshot.deployment.sourceTree -ne $ExpectedTree) {
         throw "$Stage deployment source mismatch. commit=$($snapshot.deployment.sourceCommit) tree=$($snapshot.deployment.sourceTree)"
     }
+    $deploymentId = [string]$snapshot.deployment.deploymentId
+    if ([string]::IsNullOrWhiteSpace($deploymentId)) { throw "$Stage runtime-source deploymentId is missing." }
     $components = @($snapshot.components)
     if ($components.Count -ne 8) { throw "$Stage runtime-source requires exactly 8 components. actual=$($components.Count)" }
     foreach ($component in $components) {
-        if ([string]$component.verdict -ne 'EXACT_MATCH' -or [string]$component.sourceCommit -ne $ExpectedCommit -or [string]$component.sourceTree -ne $ExpectedTree) {
+        if ([string]$component.verdict -ne 'EXACT_MATCH' -or [string]$component.sourceCommit -ne $ExpectedCommit -or [string]$component.deploymentId -ne $deploymentId) {
             throw "$Stage runtime-source component mismatch. component=$($component.component) verdict=$($component.verdict)"
         }
     }
-    $deploymentId = [string]$snapshot.deployment.deploymentId
-    if ([string]::IsNullOrWhiteSpace($deploymentId)) { throw "$Stage runtime-source deploymentId is missing." }
     Write-Host "PHASE7C_PRODUCTION_SOURCE_TRANSITION_${Stage}_RUNTIME_SOURCE_ATTESTATION=8/8_EXACT"
     return $deploymentId
 }
