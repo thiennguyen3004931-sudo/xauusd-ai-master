@@ -36,7 +36,7 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Build API dependency graph
+        run: pnpm --filter @xauusd/api... build
       - name: READY acquire plus stable regression
         run: pnpm --filter @xauusd/api exec tsx --test src/services/phase7c-lifecycle-ready-window.test.ts
-      - name: API build
-        run: pnpm --filter @xauusd/api build
