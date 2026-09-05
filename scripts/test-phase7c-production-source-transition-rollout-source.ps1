@@ -3,7 +3,6 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$ProjectRoot = Split-Path -Parent $PSScriptRoot
 $HelperPath = Join-Path $PSScriptRoot 'rollout-phase7c-production-source-transition-local.ps1'
 $RecoveryPath = Join-Path $PSScriptRoot 'recover-phase7c-runtime-ready-stable-deploy-local.ps1'
 $P3VerifierPath = Join-Path $PSScriptRoot 'verify-phase7c-p3-production-acceptance-local.ps1'
@@ -69,7 +68,8 @@ Require-Source 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_STATUS=PASS' 'terminal PASS
 Forbid-Source 'git\s+pull|&\s*\$gitExe\s+pull' 'git pull'
 Forbid-Source 'reset\s+--hard' 'git reset --hard'
 Forbid-Source 'checkout\s+--force|checkout\s+-f' 'forced checkout'
-Forbid-Source 'LIVE_TEST_ORDER|test[-_ ]?order' 'LIVE test-order execution path'
+Forbid-Source '/v1/order|/v1/orders/.+Method\s+(Post|Put|Patch|Delete)' 'direct order mutation endpoint'
+Forbid-Source '/v1/position|/v1/positions/.+Method\s+(Post|Put|Patch|Delete)' 'direct position mutation endpoint'
 
 Write-Output 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_SOURCE_CONTRACT=PASS'
 Write-Output 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_GIT_MODE=EXACT_FF_ONLY'
