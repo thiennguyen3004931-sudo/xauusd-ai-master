@@ -116,6 +116,35 @@ test("dead historical attestation with no current live pid is stale", () => {
   assert.ok(result.reasonCodes.includes("ATTESTED_PID_DEAD"));
 });
 
+test("dead previous-deployment attestation with no current live pid is stale", () => {
+  const input = exactInput();
+  input.attestation!.sourceCommit = "1111111111111111111111111111111111111111";
+  input.attestation!.sourceTree = "2222222222222222222222222222222222222222";
+  input.attestation!.deploymentId = "ffffffffffffffffffffffffffffffff";
+  input.currentPid = null;
+  input.currentPidAlive = null;
+  input.attestedPidAlive = false;
+
+  const result = evaluatePhase7CRuntimeSourceComponent(input);
+
+  assert.equal(result.verdict, "STALE");
+  assert.ok(result.reasonCodes.includes("ATTESTED_PID_DEAD"));
+});
+
+test("live previous-deployment attestation remains mismatch", () => {
+  const input = exactInput();
+  input.attestation!.sourceCommit = "1111111111111111111111111111111111111111";
+  input.attestation!.sourceTree = "2222222222222222222222222222222222222222";
+  input.attestation!.deploymentId = "ffffffffffffffffffffffffffffffff";
+
+  const result = evaluatePhase7CRuntimeSourceComponent(input);
+
+  assert.equal(result.verdict, "MISMATCH");
+  assert.ok(result.reasonCodes.includes("SOURCE_COMMIT_MISMATCH"));
+  assert.ok(result.reasonCodes.includes("SOURCE_TREE_MISMATCH"));
+  assert.ok(result.reasonCodes.includes("DEPLOYMENT_ID_MISMATCH"));
+});
+
 test("missing or invalid evidence is unknown", () => {
   const missingManifest = exactInput();
   missingManifest.deployment = null;
