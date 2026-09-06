@@ -20,6 +20,7 @@ on:
       - "scripts/test-phase7c-task-action-runner-hash-guard-local.ps1"
       - "scripts/test-phase7c-task-installer-runner-hash-guard-local.ps1"
       - "scripts/test-phase7c-runtime-provenance-stale-runner-local.ps1"
+      - "scripts/test-phase7c-json-atomic-sharing-retry-local.ps1"
       - ".github/workflows/phase7c-startup-runner-lock-lifetime-ci.yml"
   pull_request:
     branches:
@@ -40,6 +41,7 @@ on:
       - "scripts/test-phase7c-task-action-runner-hash-guard-local.ps1"
       - "scripts/test-phase7c-task-installer-runner-hash-guard-local.ps1"
       - "scripts/test-phase7c-runtime-provenance-stale-runner-local.ps1"
+      - "scripts/test-phase7c-json-atomic-sharing-retry-local.ps1"
       - ".github/workflows/phase7c-startup-runner-lock-lifetime-ci.yml"
 
 permissions:
@@ -51,6 +53,9 @@ jobs:
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
+      - name: Atomic JSON transient sharing retry - Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-json-atomic-sharing-retry-local.ps1
       - name: Startup runner lock finite lifetime - Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-startup-runner-lock-lifetime-local.ps1
