@@ -162,6 +162,39 @@ function Assert-TransitionAttestation($Snapshot, [int]$ExpectedApiPid, [int]$Exp
   Assert-InactiveAttestations -Snapshot $Snapshot
 }
 
+function Wait-StoppedBrokerAttestation([int]$ExpectedApiPid, [int]$ExpectedWebPid, [int]$Seconds) {
+  $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
+  $allowedReasons = @('SOURCE_COMMIT_MISMATCH', 'SOURCE_TREE_MISMATCH', 'DEPLOYMENT_ID_MISMATCH')
+  do {
+    $snapshot = Invoke-ControlGet '/api/v1/phase7c/runtime-source-attestation'
+    [void](Assert-ApiWebExact -Snapshot $snapshot -ExpectedApiPid $ExpectedApiPid -ExpectedWebPid $ExpectedWebPid)
+    Assert-InactiveAttestations -Snapshot $snapshot
+
+    $broker = Get-AttestationComponent -Snapshot $snapshot -Name 'lifecycle-broker'
+    if ([string]$broker.verdict -eq 'STALE' -and $broker.alive -eq $false) {
+      return $snapshot
+    }
+
+    if ([string]$broker.verdict -eq 'MISMATCH' -and $broker.alive -eq $true) {
+      $reasons = @($broker.reasonCodes)
+      if ($reasons.Count -eq 0) {
+        throw 'Stopped transition live MISMATCH must retain at least one provenance reason while converging.'
+      }
+      foreach ($reason in $reasons) {
+        if ([string]$reason -notin $allowedReasons) {
+          throw "Stopped transition contains a non-provenance mismatch reason; convergence wait blocked. reason=$reason"
+        }
+      }
+      Start-Sleep -Milliseconds 250
+      continue
+    }
+
+    throw "Stopped transition produced an unexpected lifecycle-broker attestation state. verdict=$($broker.verdict) alive=$($broker.alive) reasons=$(@($broker.reasonCodes) -join ',')"
+  } while ([DateTime]::UtcNow -lt $deadline)
+
+  throw 'Timed out waiting for stopped lifecycle-broker attestation to converge to STALE/dead.'
+}
+
 function Assert-PostflightAttestation($Snapshot, [int]$ExpectedApiPid, [int]$ExpectedWebPid, [int]$NewBrokerPid) {
   if ([string]$Snapshot.overall -ne 'STALE') { throw "Postflight attestation overall must be STALE. actual=$($Snapshot.overall)" }
   [void](Assert-ApiWebExact -Snapshot $Snapshot -ExpectedApiPid $ExpectedApiPid -ExpectedWebPid $ExpectedWebPid)
@@ -425,7 +458,8 @@ Write-Host "PHASE7C_BROKER_RECONCILE_BROKER_PREVIOUS_PID_EXIT=PASS|PREVIOUS_PID=
 
 $afterStopSafety = Get-SafetySnapshot -Stage 'AFTER_STOP'
 Assert-StableExternalIdentity -Snapshot $afterStopSafety -ExpectedBridgeSessionId $bridgeSessionBefore -ExpectedBridgePid $bridgePidBefore
-Assert-TransitionAttestation -Snapshot $afterStopSafety.attestation -ExpectedApiPid $apiPidBefore -ExpectedWebPid $webPidBefore
+$afterStopAttestation = Wait-StoppedBrokerAttestation -ExpectedApiPid $apiPidBefore -ExpectedWebPid $webPidBefore -Seconds $TimeoutSeconds
+Assert-TransitionAttestation -Snapshot $afterStopAttestation -ExpectedApiPid $apiPidBefore -ExpectedWebPid $webPidBefore
 $taskStopped = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 Assert-CanonicalTask -Task $taskStopped -RunnerPath $runnerPath -RunnerSha256 $trustedRunnerSha256
 
