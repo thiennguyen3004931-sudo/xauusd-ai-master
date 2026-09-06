@@ -67,13 +67,13 @@ $contractSource = $contractAst.Extent.Text
   function New-Component(
     [string]$Verdict = 'MISMATCH',
     [bool]$Alive = $true,
-    [int]$Pid = 38044,
+    [int]$ProcessId = 38044,
     [object[]]$Reasons = @('SOURCE_COMMIT_MISMATCH','SOURCE_TREE_MISMATCH','DEPLOYMENT_ID_MISMATCH')
   ) {
     return [pscustomobject]@{
       verdict = $Verdict
       alive = $Alive
-      pid = $Pid
+      pid = $ProcessId
       reasonCodes = $Reasons
     }
   }
