@@ -22,124 +22,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $path = 'scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1'
-          $text = (Get-Content -LiteralPath $path -Raw).Replace("`r`n","`n").Replace("`r","`n")
-          if ($text.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PARTIAL_SOURCE_GENERATION=EXACT_BROKER_CONTINUATION')) {
-            Write-Host 'PATCH_ALREADY_APPLIED=TRUE'
-            exit 0
-          }
-
-          $old = '$RuntimeSourceAttestationLibrary = Join-Path $PSScriptRoot "lib\phase7c-runtime-source-attestation.ps1"'
-          $new = @'
-          $RuntimeSourceAttestationLibrary = Join-Path $PSScriptRoot "lib\phase7c-runtime-source-attestation.ps1"
-          $RuntimeSourceGenerationRoutingLibrary = Join-Path $PSScriptRoot "lib\phase7c-runtime-source-generation-routing.ps1"
-          $ExactBrokerContinuation = Join-Path $PSScriptRoot ("continue-phase7c-runtime-source-generation-" + "reconciliation-exact-broker-local.ps1")
-          '@.Trim()
-          if (-not $text.Contains($old)) { throw 'Anchor 1 missing' }
-          $text = $text.Replace($old,$new)
-
-          $old = 'foreach ($required in @($ConfigPath, $AccountLibrary, $OwnershipLibrary, $RuntimeOwnershipLibrary, $RuntimeSourceAttestationLibrary, $WebApiDeploy, $TaskInstaller)) {'
-          $new = 'foreach ($required in @($ConfigPath, $AccountLibrary, $OwnershipLibrary, $RuntimeOwnershipLibrary, $RuntimeSourceAttestationLibrary, $RuntimeSourceGenerationRoutingLibrary, $ExactBrokerContinuation, $WebApiDeploy, $TaskInstaller)) {'
-          if (-not $text.Contains($old)) { throw 'Anchor 2 missing' }
-          $text = $text.Replace($old,$new)
-
-          $old = @'
-          . $RuntimeOwnershipLibrary
-          . $RuntimeSourceAttestationLibrary
-          $ExpectedCommit = $ExpectedCommit.ToLowerInvariant()
-          '@.Trim()
-          $new = @'
-          . $RuntimeOwnershipLibrary
-          . $RuntimeSourceAttestationLibrary
-          . $RuntimeSourceGenerationRoutingLibrary
-          $ExpectedCommit = $ExpectedCommit.ToLowerInvariant()
-          '@.Trim()
-          if (-not $text.Contains($old)) { throw 'Anchor 3 missing' }
-          $text = $text.Replace($old,$new)
-
-          $old = @'
-          Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_MODE=PAUSE"
-          Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_ARM=DISARMED"
-
-          $mutationStarted = $false
-          '@.Trim()
-          $new = @'
-          Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_MODE=PAUSE"
-          Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_ARM=DISARMED"
-
-          $partialSourceGenerationRoute = $null
-          if (-not $runtimeSourceGenerationReloadRequired -and -not $taskRepairRequired) {
-            $attestationSnapshot = Invoke-ApiGet "/api/v1/phase7c/runtime-source-attestation"
-            $partialSourceGenerationRoute = Get-Phase7CRuntimeSourceGenerationRoute `
-              -Snapshot $attestationSnapshot `
-              -ExpectedCommit $ExpectedCommit `
-              -DeploymentId ([string]$deployment.deploymentId)
-            switch ([string]$partialSourceGenerationRoute.route) {
-              'NONE' {
-                Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_ROUTE=NONE"
-              }
-              'EXACT_BROKER_CONTINUATION' {
-                Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD=REQUIRED_ATTESTATION_RECONCILIATION"
-              }
-              'FULL_GENERATION_RELOAD' {
-                $runtimeSourceGenerationReloadRequired = $true
-                Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD=REQUIRED_ATTESTATION_RECONCILIATION"
-              }
-              default {
-                throw "Unsupported runtime source generation route: $([string]$partialSourceGenerationRoute.route)"
-              }
-            }
-          }
-
-          $mutationStarted = $false
-          '@.Trim()
-          if (-not $text.Contains($old)) { throw 'Anchor 4 missing' }
-          $text = $text.Replace($old,$new)
-
-          $old = @'
-          try {
-            $mutationStarted = $true
-
-          # A previous repair attempt can leave an already-canonical task stranded in
-          '@.Trim()
-          $new = @'
-          try {
-            $mutationStarted = $true
-
-          if ($null -ne $partialSourceGenerationRoute -and [string]$partialSourceGenerationRoute.route -eq 'EXACT_BROKER_CONTINUATION') {
-            Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PARTIAL_SOURCE_GENERATION=EXACT_BROKER_CONTINUATION"
-            # continue-phase7c-runtime-source-generation-reconciliation-exact-broker-local.ps1
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ExactBrokerContinuation `
-              -ExpectedCommit $ExpectedCommit `
-              -ProjectRoot $ProjectRoot `
-              -TimeoutSeconds $TimeoutSeconds
-            if ($LASTEXITCODE -ne 0) {
-              throw "Exact-broker source-generation continuation failed with exit code $LASTEXITCODE."
-            }
-            Assert-PauseDisarmed -Stage "PARTIAL_SOURCE_GENERATION_POST_RECONCILIATION"
-            Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "PARTIAL_SOURCE_GENERATION_POST_RECONCILIATION"
-            Assert-FlatBroker -Stage "PARTIAL_SOURCE_GENERATION_POST_RECONCILIATION"
-            $postReconciliationSnapshot = Invoke-ApiGet "/api/v1/phase7c/runtime-source-attestation"
-            $postReconciliationRoute = Get-Phase7CRuntimeSourceGenerationRoute `
-              -Snapshot $postReconciliationSnapshot `
-              -ExpectedCommit $ExpectedCommit `
-              -DeploymentId ([string]$deployment.deploymentId)
-            if ([string]$postReconciliationRoute.route -ne 'NONE') {
-              throw "Exact-broker source-generation continuation did not converge to full exact runtime. route=$([string]$postReconciliationRoute.route)"
-            }
-            Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PARTIAL_SOURCE_GENERATION=SATISFIED_PRE_WEB"
-          }
-
-          # A previous repair attempt can leave an already-canonical task stranded in
-          '@.Trim()
-          if (-not $text.Contains($old)) { throw 'Anchor 5 missing' }
-          $text = $text.Replace($old,$new)
-
-          Set-Content -LiteralPath $path -Value $text -Encoding utf8NoBOM
+          & ./scripts/.tmp-apply-phase7c-partial-source-generation-patch.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Guarded recovery patcher failed: $LASTEXITCODE" }
           git diff --check
           if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- $path
+          git add -- scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1
           git commit -m 'fix: reconcile partial source generation before web deploy'
           git push origin HEAD:fix/phase7c-partial-source-generation-reconciliation
