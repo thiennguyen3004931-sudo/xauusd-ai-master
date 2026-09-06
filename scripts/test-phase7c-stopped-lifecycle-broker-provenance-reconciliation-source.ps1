@@ -151,12 +151,11 @@ foreach ($literal in @(
   Assert-ContainsLiteral $literal 'Broker-only postflight/result contract'
 }
 
-# Explicitly forbid broad recovery/deploy semantics and trading/control mutations.
+# Explicitly forbid broad recovery/deploy semantics and any application POST mutation.
 foreach ($forbidden in @(
+  '-Method Post',
   '/api/v1/phase7c/lifecycle/start',
   '/api/v1/phase7c/lifecycle/restart',
-  '/api/v1/phase7c/bot-mode'' -Method Post',
-  '/api/v1/phase7c-live-arm-control',
   'Set-ScheduledTask',
   'Register-ScheduledTask',
   'Restart-Service',
@@ -165,9 +164,7 @@ foreach ($forbidden in @(
   'run-phase7c-executors-local.ps1',
   'Start-Phase7CExecutorRuntime',
   'deploy-phase7c-web-ui-local.ps1',
-  'deploy-phase7c-mt5-dashboard-local.ps1',
-  '/v1/order',
-  '/v1/position'
+  'deploy-phase7c-mt5-dashboard-local.ps1'
 )) {
   Assert-NotContainsLiteral $forbidden 'Broker-only reconciliation must not broaden mutation scope'
 }
