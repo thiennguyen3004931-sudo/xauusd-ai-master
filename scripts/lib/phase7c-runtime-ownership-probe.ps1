@@ -42,33 +42,88 @@ function Read-Phase7CRuntimeOwnershipJson {
     [Parameter(Mandatory = $true)] [string]$Path
   )
 
-  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-    return [pscustomobject]@{
-      ok = $false
-      value = $null
-      error = 'MISSING'
+  $maxAttempts = 8
+  $retryDelayMs = 5
+  $lastIoError = $null
+
+  for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    $stream = $null
+    $reader = $null
+    $raw = $null
+    try {
+      # These files are atomically replaced by the SYSTEM lifecycle broker while
+      # reconciliation/diagnostic probes may read them concurrently. Readers must
+      # explicitly allow FILE_SHARE_DELETE or Windows can reject File.Replace and
+      # terminate the broker heartbeat loop.
+      $shareMode = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+      $stream = [System.IO.File]::Open(
+        $Path,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        $shareMode
+      )
+      $reader = [System.IO.StreamReader]::new(
+        $stream,
+        [System.Text.Encoding]::UTF8,
+        $true,
+        1024,
+        $false
+      )
+      $raw = $reader.ReadToEnd()
+    } catch [System.UnauthorizedAccessException] {
+      return [pscustomobject]@{
+        ok = $false
+        value = $null
+        error = 'ACCESS_DENIED'
+      }
+    } catch [System.IO.FileNotFoundException] {
+      $lastIoError = 'MISSING'
+    } catch [System.IO.DirectoryNotFoundException] {
+      $lastIoError = 'MISSING'
+    } catch [System.IO.IOException] {
+      $lastIoError = 'INVALID_OR_UNREADABLE'
+    } catch {
+      return [pscustomobject]@{
+        ok = $false
+        value = $null
+        error = 'INVALID_OR_UNREADABLE'
+      }
+    } finally {
+      if ($null -ne $reader) {
+        $reader.Dispose()
+      } elseif ($null -ne $stream) {
+        $stream.Dispose()
+      }
+    }
+
+    if ($null -ne $raw) {
+      try {
+        $value = $raw | ConvertFrom-Json -ErrorAction Stop
+        return [pscustomobject]@{
+          ok = $true
+          value = $value
+          error = $null
+        }
+      } catch {
+        # A successfully-read malformed payload is real invalid evidence, not a
+        # transient sharing race. Preserve fail-closed behavior without retry.
+        return [pscustomobject]@{
+          ok = $false
+          value = $null
+          error = 'INVALID_OR_UNREADABLE'
+        }
+      }
+    }
+
+    if ($attempt -lt $maxAttempts) {
+      Start-Sleep -Milliseconds $retryDelayMs
     }
   }
 
-  try {
-    $value = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-    return [pscustomobject]@{
-      ok = $true
-      value = $value
-      error = $null
-    }
-  } catch [System.UnauthorizedAccessException] {
-    return [pscustomobject]@{
-      ok = $false
-      value = $null
-      error = 'ACCESS_DENIED'
-    }
-  } catch {
-    return [pscustomobject]@{
-      ok = $false
-      value = $null
-      error = 'INVALID_OR_UNREADABLE'
-    }
+  return [pscustomobject]@{
+    ok = $false
+    value = $null
+    error = if ($lastIoError -eq 'MISSING') { 'MISSING' } else { 'INVALID_OR_UNREADABLE' }
   }
 }
 
