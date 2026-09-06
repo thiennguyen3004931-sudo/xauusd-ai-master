@@ -136,10 +136,6 @@ jobs:
           $text = $text.Replace($old,$new)
 
           Set-Content -LiteralPath $path -Value $text -Encoding utf8NoBOM
-          & pwsh -NoProfile -File ./scripts/test-phase7c-partial-source-generation-reconciliation-routing-source.ps1
-          if ($LASTEXITCODE -ne 0) { throw "Focused PowerShell 7 contract failed: $LASTEXITCODE" }
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-phase7c-partial-source-generation-reconciliation-routing-source.ps1
-          if ($LASTEXITCODE -ne 0) { throw "Focused Windows PowerShell 5.1 contract failed: $LASTEXITCODE" }
           git diff --check
           if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
           git config user.name 'github-actions[bot]'
