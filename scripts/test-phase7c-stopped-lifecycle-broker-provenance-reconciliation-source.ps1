@@ -10,7 +10,7 @@ if (-not (Test-Path -LiteralPath $ReconcilePath -PathType Leaf)) {
 
 $tokens = $null
 $errors = $null
-[void][System.Management.Automation.Language.Parser]::ParseFile($ReconcilePath, [ref]$tokens, [ref]$errors)
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($ReconcilePath, [ref]$tokens, [ref]$errors)
 if ($errors.Count -ne 0) {
   throw "PowerShell syntax error in ${ReconcilePath}: $($errors[0].Message)"
 }
@@ -96,6 +96,41 @@ foreach ($literal in @(
 )) {
   Assert-ContainsLiteral $literal 'Runtime-source attestation classification'
 }
+
+# Regression: PowerShell nullable parameters are represented as either $null or an unboxed Int32.
+# Execute the actual Assert-ApiWebExact function body from the production AST so a .HasValue/.Value
+# access fails exactly as it did in the production preflight before any Scheduled Task mutation.
+$assertApiWebAst = $ast.Find({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'Assert-ApiWebExact'
+}, $true)
+if ($null -eq $assertApiWebAst) {
+  throw 'RED: Assert-ApiWebExact function is missing from reconciliation entrypoint.'
+}
+
+$assertApiWebSource = $assertApiWebAst.Extent.Text
+& {
+  param([string]$FunctionSource)
+  Set-StrictMode -Version Latest
+
+  function Get-AttestationComponent($Snapshot, [string]$Name) {
+    $matches = @($Snapshot.components | Where-Object { [string]$_.component -eq $Name })
+    if ($matches.Count -ne 1) { throw "Expected one component named $Name." }
+    return $matches[0]
+  }
+
+  Invoke-Expression $FunctionSource
+  $snapshot = [pscustomobject]@{
+    components = @(
+      [pscustomobject]@{ component = 'api'; verdict = 'EXACT_MATCH'; alive = $true; pid = 101 },
+      [pscustomobject]@{ component = 'web'; verdict = 'EXACT_MATCH'; alive = $true; pid = 202 }
+    )
+  }
+
+  [void](Assert-ApiWebExact -Snapshot $snapshot -ExpectedApiPid $null -ExpectedWebPid $null)
+  [void](Assert-ApiWebExact -Snapshot $snapshot -ExpectedApiPid 101 -ExpectedWebPid 202)
+} $assertApiWebSource
 
 # Canonical task/generation proof before mutation.
 foreach ($literal in @(
