@@ -365,9 +365,16 @@ function Test-StoppedMidpointEligible(
       [bool]$Generation.brokerHeartbeatFresh -or
       [string]$Generation.startupRunnerLockState -notin @('MISSING', 'RELEASED') -or
       [int]$Generation.statusBrokerPid -le 0) { return $false }
+
+  try {
+    $trustedRunnerSha256 = Normalize-Phase7CRunnerSha256 -Sha256 $RunnerSha256
+  } catch { return $false }
+  $expectedLauncherSha256 = 'sha256:' + $trustedRunnerSha256.ToLowerInvariant()
+  $attestedLauncherSha256 = ([string]$BrokerAttestation.launcherSha256).Trim().ToLowerInvariant()
+
   if ([string]$BrokerAttestation.component -ne 'lifecycle-broker' -or
       [int]$BrokerAttestation.pid -ne [int]$Generation.statusBrokerPid -or
-      [string]$BrokerAttestation.launcherSha256 -ne $RunnerSha256 -or
+      $attestedLauncherSha256 -ne $expectedLauncherSha256 -or
       [string]$BrokerAttestation.configFingerprint -ne [string]$Deployment.configFingerprint) { return $false }
 
   $provenanceDiff =
