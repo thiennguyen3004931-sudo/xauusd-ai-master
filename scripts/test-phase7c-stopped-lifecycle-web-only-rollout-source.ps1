@@ -42,6 +42,36 @@ Assert-Match $snapshot 'LIFECYCLE_RUNNING=false' 'Snapshot must require stopped 
 Assert-Match $snapshot 'POSITIONS=0' 'Snapshot must require zero XAUUSD positions.'
 Assert-Match $snapshot 'PENDING_ORDERS=0' 'Snapshot must require zero XAUUSD pending orders.'
 Assert-Match $snapshot 'bridgeSessionId' 'Snapshot must capture Bridge session identity.'
+
+# Canonical executor Scheduled Task ownership must be proven read-only before source acceptance.
+Assert-Match $snapshot 'phase7c-scheduled-task-ownership\.ps1' 'Snapshot must import canonical Scheduled Task ownership helpers.'
+Assert-Match $snapshot 'XAUUSD-Phase7C-Executors' 'Snapshot must inspect the canonical Phase7C executor Scheduled Task.'
+Assert-Match $snapshot 'Get-Phase7CExecutorTaskRunnerPath' 'Snapshot must resolve the canonical executor runner path.'
+Assert-Match $snapshot 'Get-Phase7CTrustedGitFileSha256' 'Snapshot must bind task ownership to the trusted Git HEAD runner hash.'
+Assert-Match $snapshot 'Test-Phase7CExecutorTaskActionOwnership' 'Snapshot must verify exact task action ownership.'
+Assert-Match $snapshot 'Get-Phase7CExecutorTaskDrift' 'Snapshot must reject Scheduled Task definition drift.'
+Assert-Match $snapshot 'ServiceAccount' 'Snapshot must require the canonical SYSTEM ServiceAccount principal.'
+Assert-Match $snapshot 'Highest' 'Snapshot must require highest run level.'
+Assert-Match $snapshot 'PHASE7C_STOPPED_WEB_SAFETY_TASK_OWNERSHIP=CANONICAL' 'Snapshot must emit canonical task ownership evidence.'
+Assert-Match $snapshot 'PHASE7C_STOPPED_WEB_SAFETY_TASK_DRIFT=NONE' 'Snapshot must emit zero task drift evidence.'
+
+# Inactive runtime-source components must be proven safely inactive before and after Web/API acceptance.
+Assert-Match $snapshot 'phase7c-runtime-source-attestation\.ps1' 'Snapshot must import runtime-source attestation helpers.'
+Assert-Match $snapshot '/api/v1/phase7c/runtime-source-attestation' 'Snapshot must read canonical runtime-source attestation through GET.'
+foreach ($inactiveRole in @('supervisor', 'trend', 'sideway', 'telegram', 'regime-notifier')) {
+  Assert-Match $snapshot ([regex]::Escape($inactiveRole)) "Snapshot must account for inactive runtime-source component '$inactiveRole'."
+}
+Assert-Match $snapshot 'STALE' 'Snapshot must require inactive attestations to be STALE/dead by default.'
+Assert-Match $snapshot 'PID_REUSED_UNRELATED' 'Snapshot must explicitly classify the proven safe PID-reuse exception.'
+Assert-Match $snapshot 'SOURCE_COMMIT_MISMATCH' 'PID-reuse exception must be restricted to provenance-only mismatch reasons.'
+Assert-Match $snapshot 'SOURCE_TREE_MISMATCH' 'PID-reuse exception must be restricted to provenance-only mismatch reasons.'
+Assert-Match $snapshot 'DEPLOYMENT_ID_MISMATCH' 'PID-reuse exception must be restricted to provenance-only mismatch reasons.'
+Assert-Match $snapshot 'run-phase7c-regime-notifier-local\.ps1' 'PID-reuse proof must scan for the regime-notifier wrapper.'
+Assert-Match $snapshot 'run-phase7c-regime-notifier\.mjs' 'PID-reuse proof must scan for the regime-notifier child.'
+Assert-Match $snapshot 'regime-notifier\.pid' 'PID-reuse proof must require the canonical regime-notifier PID file to be absent.'
+Assert-Match $snapshot 'Get-CimInstance\s+Win32_Process' 'PID-reuse proof must inspect the Windows process table read-only.'
+Assert-Match $snapshot 'PHASE7C_STOPPED_WEB_SAFETY_INACTIVE_ATTESTATIONS=SAFE' 'Snapshot must emit explicit inactive-attestation acceptance evidence.'
+
 Assert-NoMatch $snapshot '(?i)Invoke-RestMethod[^\r\n]*-Method\s+Post|Invoke-WebRequest[^\r\n]*-Method\s+Post' 'Snapshot must be GET-only.'
 Assert-NoMatch $snapshot '(?i)/command|ARM_LIVE|DISARM_LIVE|Start-ScheduledTask|Stop-ScheduledTask|Stop-Process|taskkill|Register-ScheduledTask|Enable-ScheduledTask|Disable-ScheduledTask' 'Snapshot must not contain runtime mutation primitives.'
 
