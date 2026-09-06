@@ -676,7 +676,10 @@ export function buildPhase7CDecisionMonitor(input: {
 }
 
 let cached: { at: number; value: ReturnType<typeof buildPhase7CDecisionMonitor> } | null = null;
-let pending: Promise<ReturnType<typeof buildPhase7CDecisionMonitor>> | null = null;
+let pending: {
+  mode: ReturnType<typeof phase7CBotModeService.get>["mode"];
+  promise: Promise<ReturnType<typeof buildPhase7CDecisionMonitor>>;
+} | null = null;
 
 export async function getPhase7CDecisionMonitor(symbol = "XAUUSD") {
   const now = Date.now();
@@ -692,9 +695,9 @@ export async function getPhase7CDecisionMonitor(symbol = "XAUUSD") {
   ) {
     return cached.value;
   }
-  if (pending) return pending;
+  if (pending?.mode === currentBotMode) return pending.promise;
 
-  pending = (async () => {
+  const request = (async () => {
     const [regime, demo, telemetry] = await Promise.all([
       getPhase7CLiveRegime(symbol),
       getPhase7BDemoStatus(),
@@ -713,11 +716,12 @@ export async function getPhase7CDecisionMonitor(symbol = "XAUUSD") {
     cached = { at: Date.now(), value };
     return value;
   })();
+  pending = { mode: currentBotMode, promise: request };
 
   try {
-    return await pending;
+    return await request;
   } finally {
-    pending = null;
+    if (pending?.promise === request) pending = null;
   }
 }
 
