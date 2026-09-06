@@ -133,7 +133,7 @@ $recovery = (Get-Content -LiteralPath $RecoveryPath -Raw).Replace("`r`n", "`n").
 $routeCall = "Get-Phase7CRuntimeSourceGenerationRoute"
 $exactHelper = "continue-phase7c-runtime-source-generation-reconciliation-exact-broker-local.ps1"
 $partialMarker = "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PARTIAL_SOURCE_GENERATION=EXACT_BROKER_CONTINUATION"
-$webDeploy = "& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy"
+$webDeploy = '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy'
 
 foreach ($literal in @($routeCall, $exactHelper, $partialMarker)) {
   Assert-True ($recovery.Contains($literal)) "RED: recovery integration missing: $literal"
