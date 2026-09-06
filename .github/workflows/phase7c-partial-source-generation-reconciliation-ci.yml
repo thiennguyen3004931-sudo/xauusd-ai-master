@@ -1,0 +1,40 @@
+name: Phase7C Partial Source Generation Reconciliation CI
+
+on:
+  push:
+    branches:
+      - fix/phase7c-partial-source-generation-reconciliation
+    paths:
+      - 'scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1'
+      - 'scripts/continue-phase7c-runtime-source-generation-reconciliation-exact-broker-local.ps1'
+      - 'scripts/lib/phase7c-runtime-source-generation-routing.ps1'
+      - 'scripts/test-phase7c-partial-source-generation-reconciliation-routing-source.ps1'
+      - '.github/workflows/phase7c-partial-source-generation-reconciliation-ci.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1'
+      - 'scripts/continue-phase7c-runtime-source-generation-reconciliation-exact-broker-local.ps1'
+      - 'scripts/lib/phase7c-runtime-source-generation-routing.ps1'
+      - 'scripts/test-phase7c-partial-source-generation-reconciliation-routing-source.ps1'
+      - '.github/workflows/phase7c-partial-source-generation-reconciliation-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  source-contract:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Partial source generation routing contract - PowerShell 7
+        shell: pwsh
+        run: ./scripts/test-phase7c-partial-source-generation-reconciliation-routing-source.ps1
+
+      - name: Partial source generation routing contract - Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/test-phase7c-partial-source-generation-reconciliation-routing-source.ps1
