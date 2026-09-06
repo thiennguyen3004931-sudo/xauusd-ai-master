@@ -1,0 +1,41 @@
+name: Phase7C Partial Source Generation Push Diagnostic
+
+on:
+  push:
+    branches:
+      - fix/phase7c-partial-source-generation-reconciliation
+    paths:
+      - '.github/workflows/phase7c-partial-source-generation-push-diagnostic.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check local commit and push dry-run
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $out = [System.Collections.Generic.List[string]]::new()
+          $out.Add("HEAD_BEFORE=$(git rev-parse HEAD)")
+          '# diagnostic only' | Set-Content -LiteralPath .phase7c-push-diagnostic -Encoding ascii
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .phase7c-push-diagnostic
+          git commit -m 'diagnostic local commit only' 2>&1 | ForEach-Object { $out.Add("COMMIT=$_") }
+          $out.Add("COMMIT_EXIT=$LASTEXITCODE")
+          $out.Add("HEAD_AFTER=$(git rev-parse HEAD)")
+          git push --dry-run origin HEAD:fix/phase7c-partial-source-generation-reconciliation 2>&1 | ForEach-Object { $out.Add("PUSH=$_") }
+          $out.Add("PUSH_EXIT=$LASTEXITCODE")
+          $out | Set-Content -LiteralPath phase7c-push-diagnostic.txt -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase7c-push-diagnostic
+          path: phase7c-push-diagnostic.txt
+          if-no-files-found: error
