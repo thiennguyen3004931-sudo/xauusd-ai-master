@@ -67,7 +67,30 @@ function Write-Phase7CJsonAtomic(
     )
 
     if ([System.IO.File]::Exists($Path)) {
-      [System.IO.File]::Replace($tempPath, $Path, $backupPath)
+      $replaceAttempt = 0
+      $replaceMaxAttempts = 21
+      while ($true) {
+        $replaceAttempt++
+        try {
+          [System.IO.File]::Replace($tempPath, $Path, $backupPath)
+          break
+        } catch {
+          $deepest = $_.Exception
+          while ($null -ne $deepest -and $null -ne $deepest.InnerException) {
+            $deepest = $deepest.InnerException
+          }
+          $nativeCode = if ($null -ne $deepest) { $deepest.HResult -band 0xFFFF } else { -1 }
+          $retryableSharingViolation = (
+            $null -ne $deepest -and
+            $deepest -is [System.IO.IOException] -and
+            $nativeCode -in @(32, 33)
+          )
+          if (-not $retryableSharingViolation -or $replaceAttempt -ge $replaceMaxAttempts) {
+            throw
+          }
+          Start-Sleep -Milliseconds 25
+        }
+      }
       if ([System.IO.File]::Exists($backupPath)) {
         [System.IO.File]::Delete($backupPath)
       }
