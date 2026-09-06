@@ -23,7 +23,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $path = 'scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1'
-          $text = Get-Content -LiteralPath $path -Raw
+          $text = (Get-Content -LiteralPath $path -Raw).Replace("`r`n","`n").Replace("`r","`n")
           if ($text.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PARTIAL_SOURCE_GENERATION=EXACT_BROKER_CONTINUATION')) {
             Write-Host 'PATCH_ALREADY_APPLIED=TRUE'
             exit 0
