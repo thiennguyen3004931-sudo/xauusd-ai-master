@@ -66,7 +66,6 @@ export interface Phase7CRuntimeSourceComponentEvaluationInput {
   currentPid: number | null;
   currentPidAlive: boolean | null;
   attestedPidAlive: boolean | null;
-  currentPidIdentityMatches?: boolean | null;
   attestedPidIdentityMatches?: boolean | null;
   expectedLauncherSha256: string | null;
   evidenceErrors: string[];
@@ -162,7 +161,7 @@ export function fingerprintPhase7CRuntimeSourceConfig(
   return `sha256:${digest}`;
 }
 
-function effectiveComponentAlive(
+function effectiveAttestedAlive(
   pidAlive: boolean | null,
   identityMatches: boolean | null | undefined,
 ): boolean | null {
@@ -187,11 +186,7 @@ function componentResult(
   verdict: Phase7CRuntimeSourceVerdict,
   reasonCodes: string[],
 ): Phase7CRuntimeSourceComponentResult {
-  const currentAlive = effectiveComponentAlive(
-    input.currentPidAlive,
-    input.currentPidIdentityMatches,
-  );
-  const attestedAlive = effectiveComponentAlive(
+  const attestedAlive = effectiveAttestedAlive(
     input.attestedPidAlive,
     input.attestedPidIdentityMatches,
   );
@@ -199,7 +194,7 @@ function componentResult(
     component: input.component,
     verdict,
     pid: input.currentPid ?? input.attestation?.pid ?? null,
-    alive: currentAlive ?? attestedAlive ?? null,
+    alive: input.currentPid !== null ? input.currentPidAlive : attestedAlive,
     sourceCommit: input.attestation?.sourceCommit ?? null,
     deploymentId: input.attestation?.deploymentId ?? null,
     reasonCodes,
@@ -213,11 +208,7 @@ export function evaluatePhase7CRuntimeSourceComponent(
     return componentResult(input, "UNKNOWN", ["EVIDENCE_MISSING"]);
   }
 
-  const currentProcessAlive = effectiveComponentAlive(
-    input.currentPidAlive,
-    input.currentPidIdentityMatches,
-  );
-  const attestedProcessAlive = effectiveComponentAlive(
+  const attestedProcessAlive = effectiveAttestedAlive(
     input.attestedPidAlive,
     input.attestedPidIdentityMatches,
   );
@@ -225,8 +216,8 @@ export function evaluatePhase7CRuntimeSourceComponent(
     (code) => code !== "CURRENT_PID_MISSING",
   );
   const noLiveCurrentProcess =
-    currentProcessAlive === false ||
-    (input.currentPid === null && currentProcessAlive !== true);
+    input.currentPidAlive === false ||
+    (input.currentPid === null && input.currentPidAlive !== true);
   if (
     noLiveCurrentProcess &&
     attestedProcessAlive === false &&
@@ -265,7 +256,7 @@ export function evaluatePhase7CRuntimeSourceComponent(
   }
   if (
     input.currentPid !== null &&
-    currentProcessAlive === true &&
+    input.currentPidAlive === true &&
     input.currentPid !== input.attestation.pid
   ) {
     mismatchReasons.push("PID_MISMATCH");
@@ -293,7 +284,7 @@ export function evaluatePhase7CRuntimeSourceComponent(
   }
 
   if (input.currentPid !== input.attestation.pid) {
-    if (currentProcessAlive === true) {
+    if (input.currentPidAlive === true) {
       return componentResult(input, "MISMATCH", ["PID_MISMATCH"]);
     }
     if (attestedProcessAlive === false) {
@@ -302,18 +293,10 @@ export function evaluatePhase7CRuntimeSourceComponent(
     return componentResult(input, "UNKNOWN", ["EVIDENCE_INVALID"]);
   }
 
-  if (currentProcessAlive === false || attestedProcessAlive === false) {
-    const reasonCodes: string[] = [];
-    if (input.currentPidAlive === true && input.currentPidIdentityMatches === false) {
-      reasonCodes.push("CURRENT_PID_IDENTITY_MISMATCH");
-    }
-    if (attestedProcessAlive === false) {
-      reasonCodes.push(attestedInactiveReason(input));
-    }
-    if (reasonCodes.length === 0) reasonCodes.push("ATTESTED_PID_DEAD");
-    return componentResult(input, "STALE", reasonCodes);
+  if (input.currentPidAlive === false || attestedProcessAlive === false) {
+    return componentResult(input, "STALE", [attestedInactiveReason(input)]);
   }
-  if (currentProcessAlive !== true || attestedProcessAlive !== true) {
+  if (input.currentPidAlive !== true || attestedProcessAlive !== true) {
     return componentResult(input, "UNKNOWN", ["EVIDENCE_MISSING"]);
   }
 
@@ -321,7 +304,6 @@ export function evaluatePhase7CRuntimeSourceComponent(
     "DEPLOYMENT_MATCH",
     "PID_MATCH",
     "PROCESS_ALIVE",
-    "PROCESS_IDENTITY_MATCH",
     "LAUNCHER_HASH_MATCH",
   ]);
 }
@@ -525,13 +507,10 @@ function safeAlive(
 function safeIdentityMatch(
   deps: Phase7CRuntimeSourceAttestationDeps,
   pid: number | null,
-  pidAlive: boolean | null,
   launcher: string,
   errors: string[],
 ): boolean | null {
   if (pid === null) return null;
-  if (pidAlive === false) return false;
-  if (pidAlive !== true) return null;
   try {
     return deps.matchesPidIdentity(pid, launcher);
   } catch {
@@ -597,31 +576,16 @@ export function getPhase7CRuntimeSourceAttestationSnapshot(
 
     const currentPidAlive = safeAlive(deps, currentPid, errors);
     const attestedPidAlive = safeAlive(deps, attestation?.pid ?? null, errors);
-    let currentPidIdentityMatches: boolean | null;
-    let attestedPidIdentityMatches: boolean | null;
-    if (component === "api") {
-      currentPidIdentityMatches = currentPidAlive === true ? true : currentPidAlive;
-      if (!attestation) {
-        attestedPidIdentityMatches = null;
-      } else if (attestedPidAlive === false) {
-        attestedPidIdentityMatches = false;
-      } else if (attestedPidAlive !== true) {
-        attestedPidIdentityMatches = null;
-      } else {
-        attestedPidIdentityMatches = attestation.pid === deps.apiPid;
-      }
-    } else {
-      currentPidIdentityMatches = safeIdentityMatch(
-        deps,
-        currentPid,
-        currentPidAlive,
-        launcher,
-        errors,
-      );
+    let attestedPidIdentityMatches: boolean | null | undefined;
+    if (
+      component !== "api" &&
+      currentPid === null &&
+      attestedPidAlive === true &&
+      attestation !== null
+    ) {
       attestedPidIdentityMatches = safeIdentityMatch(
         deps,
-        attestation?.pid ?? null,
-        attestedPidAlive,
+        attestation.pid,
         launcher,
         errors,
       );
@@ -635,7 +599,6 @@ export function getPhase7CRuntimeSourceAttestationSnapshot(
       currentPid,
       currentPidAlive,
       attestedPidAlive,
-      currentPidIdentityMatches,
       attestedPidIdentityMatches,
       expectedLauncherSha256,
       evidenceErrors: errors,
