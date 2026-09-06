@@ -1,0 +1,48 @@
+name: Phase7C Partial Source Generation Diagnostic
+
+on:
+  push:
+    branches:
+      - fix/phase7c-partial-source-generation-reconciliation
+    paths:
+      - '.github/workflows/phase7c-partial-source-generation-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Diagnose anchors
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = 'scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1'
+          $text = Get-Content -LiteralPath $path -Raw
+          $lines = [System.Collections.Generic.List[string]]::new()
+          try {
+            $lines.Add("HEAD=$env:GITHUB_SHA")
+            $old1 = '$RuntimeSourceAttestationLibrary = Join-Path $PSScriptRoot "lib\phase7c-runtime-source-attestation.ps1"'
+            $lines.Add("ANCHOR1=$($text.Contains($old1))")
+            $old2 = 'foreach ($required in @($ConfigPath, $AccountLibrary, $OwnershipLibrary, $RuntimeOwnershipLibrary, $RuntimeSourceAttestationLibrary, $WebApiDeploy, $TaskInstaller)) {'
+            $lines.Add("ANCHOR2=$($text.Contains($old2))")
+            $old3 = ". `$RuntimeOwnershipLibrary`n. `$RuntimeSourceAttestationLibrary`n`$ExpectedCommit = `$ExpectedCommit.ToLowerInvariant()"
+            $lines.Add("ANCHOR3_LF=$($text.Replace("`r`n","`n").Contains($old3))")
+            $old4 = "Write-Host `"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_MODE=PAUSE`"`nWrite-Host `"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_ARM=DISARMED`"`n`n`$mutationStarted = `$false"
+            $lines.Add("ANCHOR4_LF=$($text.Replace("`r`n","`n").Contains($old4))")
+            $old5 = "try {`n  `$mutationStarted = `$true`n`n# A previous repair attempt can leave an already-canonical task stranded in"
+            $lines.Add("ANCHOR5_LF=$($text.Replace("`r`n","`n").Contains($old5))")
+            $lines.Add('DIAGNOSTIC=PASS')
+          } catch {
+            $lines.Add("ERROR=$($_.Exception.Message)")
+          } finally {
+            $lines | Set-Content -LiteralPath phase7c-partial-source-generation-diagnostic.txt -Encoding utf8
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase7c-partial-source-generation-diagnostic
+          path: phase7c-partial-source-generation-diagnostic.txt
+          if-no-files-found: error
