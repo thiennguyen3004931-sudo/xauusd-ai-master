@@ -157,49 +157,167 @@ Assert-ContainsLiteral 'ORPHAN_QUEUED_RETRY=ONCE' 'Bounded known-safe queued ret
 $stopIndex = $source.IndexOf($stopLiteral, [System.StringComparison]::Ordinal)
 $startIndex = $source.IndexOf($startLiteral, [System.StringComparison]::Ordinal)
 if ($stopIndex -lt 0 -or $startIndex -le $stopIndex) {
-  throw 'RED: canonical Scheduled Task START must occur after STOP.'
+  throw 'RED: canonical Scheduled Task START must occur after STOP in the normal running-broker path.'
 }
 
-# Regression: after Windows reports the old PID exited and the startup lock released, the API
-# attestation can still report the just-dead broker as MISMATCH/alive for a short transition window.
-# The reconciliation must bounded-wait for the read-only attestation to converge to STALE/dead,
-# while failing closed immediately for API/Web drift, inactive-component drift, UNKNOWN evidence,
-# or any broker mismatch reason outside the already-approved provenance-only tuple.
-$waitStoppedAst = $ast.Find({
+# Regression: Windows can prove the canonical task quiesced, the old PID disappeared, and the startup
+# lock released while the read-only API still reports the same just-dead old PID as MISMATCH/alive.
+# That API liveness lag must not create a second hard wait after the stronger local stop proof.
+# The transition attestation gate must accept either STALE/dead or the exact same old PID retaining
+# only the already-approved provenance mismatch reasons. Any PID change, UNKNOWN state, or new reason
+# must still fail closed.
+$transitionAst = $ast.Find({
   param($node)
   $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-    $node.Name -eq 'Wait-StoppedBrokerAttestation'
+    $node.Name -eq 'Assert-StoppedTransitionAttestation'
 }, $true)
-if ($null -eq $waitStoppedAst) {
-  throw 'RED: stopped-broker attestation convergence helper is missing.'
+if ($null -eq $transitionAst) {
+  throw 'RED: stopped transition attestation helper is missing.'
 }
 
-$waitStoppedSource = $waitStoppedAst.Extent.Text
-foreach ($literal in @(
-  '[DateTime]::UtcNow.AddSeconds($Seconds)',
-  "Invoke-ControlGet '/api/v1/phase7c/runtime-source-attestation'",
-  'Assert-ApiWebExact',
-  'Assert-InactiveAttestations',
-  '[string]$broker.verdict -eq ''STALE''',
-  '$broker.alive -eq $false',
-  '[string]$broker.verdict -eq ''MISMATCH''',
-  '$broker.alive -eq $true',
-  'SOURCE_COMMIT_MISMATCH',
-  'SOURCE_TREE_MISMATCH',
-  'DEPLOYMENT_ID_MISMATCH',
-  'Start-Sleep -Milliseconds 250',
-  'Timed out waiting for stopped lifecycle-broker attestation to converge to STALE/dead.'
-)) {
-  if ($waitStoppedSource.IndexOf($literal, [System.StringComparison]::Ordinal) -lt 0) {
-    throw "RED: stopped-broker attestation convergence contract missing=$literal"
+$transitionSource = $transitionAst.Extent.Text
+& {
+  param([string]$FunctionSource)
+  Set-StrictMode -Version Latest
+
+  function Get-AttestationComponent($Snapshot, [string]$Name) {
+    $matches = @($Snapshot.components | Where-Object { [string]$_.component -eq $Name })
+    if ($matches.Count -ne 1) { throw "Expected one component named $Name." }
+    return $matches[0]
   }
+  function Assert-ApiWebExact($Snapshot, [Nullable[int]]$ExpectedApiPid, [Nullable[int]]$ExpectedWebPid) {
+    $api = Get-AttestationComponent -Snapshot $Snapshot -Name 'api'
+    $web = Get-AttestationComponent -Snapshot $Snapshot -Name 'web'
+    if ([string]$api.verdict -ne 'EXACT_MATCH' -or $api.alive -ne $true -or [int]$api.pid -ne [int]$ExpectedApiPid) { throw 'API drift' }
+    if ([string]$web.verdict -ne 'EXACT_MATCH' -or $web.alive -ne $true -or [int]$web.pid -ne [int]$ExpectedWebPid) { throw 'Web drift' }
+  }
+  function Assert-InactiveAttestations($Snapshot) {
+    foreach ($name in @('supervisor', 'trend', 'sideway', 'telegram', 'regime-notifier')) {
+      $component = Get-AttestationComponent -Snapshot $Snapshot -Name $name
+      if ([string]$component.verdict -ne 'STALE' -or $component.alive -ne $false) { throw 'Inactive drift' }
+    }
+  }
+
+  Invoke-Expression $FunctionSource
+
+  function New-TransitionSnapshot([string]$BrokerVerdict, [bool]$BrokerAlive, [int]$BrokerPid, [object[]]$BrokerReasons) {
+    return [pscustomobject]@{
+      components = @(
+        [pscustomobject]@{ component = 'api'; verdict = 'EXACT_MATCH'; alive = $true; pid = 101 },
+        [pscustomobject]@{ component = 'web'; verdict = 'EXACT_MATCH'; alive = $true; pid = 202 },
+        [pscustomobject]@{ component = 'lifecycle-broker'; verdict = $BrokerVerdict; alive = $BrokerAlive; pid = $BrokerPid; reasonCodes = $BrokerReasons },
+        [pscustomobject]@{ component = 'supervisor'; verdict = 'STALE'; alive = $false; pid = 401 },
+        [pscustomobject]@{ component = 'trend'; verdict = 'STALE'; alive = $false; pid = 402 },
+        [pscustomobject]@{ component = 'sideway'; verdict = 'STALE'; alive = $false; pid = 403 },
+        [pscustomobject]@{ component = 'telegram'; verdict = 'STALE'; alive = $false; pid = 404 },
+        [pscustomobject]@{ component = 'regime-notifier'; verdict = 'STALE'; alive = $false; pid = 405 }
+      )
+    }
+  }
+
+  $stale = New-TransitionSnapshot -BrokerVerdict 'STALE' -BrokerAlive $false -BrokerPid 303 -BrokerReasons @('ATTESTED_PID_DEAD')
+  $staleResult = Assert-StoppedTransitionAttestation -Snapshot $stale -ExpectedApiPid 101 -ExpectedWebPid 202 -ExpectedBrokerPid 303
+  if ([string]$staleResult -ne 'STALE_DEAD') { throw "Expected STALE_DEAD transition, actual=$staleResult" }
+
+  $lag = New-TransitionSnapshot -BrokerVerdict 'MISMATCH' -BrokerAlive $true -BrokerPid 303 -BrokerReasons @('SOURCE_COMMIT_MISMATCH','SOURCE_TREE_MISMATCH','DEPLOYMENT_ID_MISMATCH')
+  $lagResult = Assert-StoppedTransitionAttestation -Snapshot $lag -ExpectedApiPid 101 -ExpectedWebPid 202 -ExpectedBrokerPid 303
+  if ([string]$lagResult -ne 'API_LIVENESS_LAG') { throw "Expected API_LIVENESS_LAG transition, actual=$lagResult" }
+
+  $pidChanged = New-TransitionSnapshot -BrokerVerdict 'MISMATCH' -BrokerAlive $true -BrokerPid 304 -BrokerReasons @('SOURCE_COMMIT_MISMATCH')
+  $pidChangedFailed = $false
+  try { [void](Assert-StoppedTransitionAttestation -Snapshot $pidChanged -ExpectedApiPid 101 -ExpectedWebPid 202 -ExpectedBrokerPid 303) }
+  catch { $pidChangedFailed = $true }
+  if (-not $pidChangedFailed) { throw 'Expected changed broker PID to fail closed.' }
+
+  $badReason = New-TransitionSnapshot -BrokerVerdict 'MISMATCH' -BrokerAlive $true -BrokerPid 303 -BrokerReasons @('PID_MISMATCH')
+  $badReasonFailed = $false
+  try { [void](Assert-StoppedTransitionAttestation -Snapshot $badReason -ExpectedApiPid 101 -ExpectedWebPid 202 -ExpectedBrokerPid 303) }
+  catch { $badReasonFailed = $true }
+  if (-not $badReasonFailed) { throw 'Expected non-provenance mismatch reason to fail closed.' }
+
+  $unknown = New-TransitionSnapshot -BrokerVerdict 'UNKNOWN' -BrokerAlive $false -BrokerPid 303 -BrokerReasons @('EVIDENCE_INVALID')
+  $unknownFailed = $false
+  try { [void](Assert-StoppedTransitionAttestation -Snapshot $unknown -ExpectedApiPid 101 -ExpectedWebPid 202 -ExpectedBrokerPid 303) }
+  catch { $unknownFailed = $true }
+  if (-not $unknownFailed) { throw 'Expected UNKNOWN transition to fail closed.' }
+} $transitionSource
+
+Assert-NotContainsLiteral 'Timed out waiting for stopped lifecycle-broker attestation to converge to STALE/dead.' 'Reconciliation must not require API liveness convergence after local stop proof'
+Assert-NotContainsLiteral 'Wait-StoppedBrokerAttestation -ExpectedApiPid $apiPidBefore -ExpectedWebPid $webPidBefore -Seconds $TimeoutSeconds' 'Reconciliation must not insert a second bounded API liveness wait between proven STOP and START'
+Assert-ContainsLiteral 'PHASE7C_BROKER_RECONCILE_STOPPED_TRANSITION=' 'Stopped transition classification log'
+
+# Midpoint recovery regression: a prior fail-closed run can leave the canonical task Ready with the old
+# broker dead, heartbeat stale, and startup lock released. The same script must be able to resume from
+# that already-proven midpoint without requiring an artificial live broker first. Eligibility is strict:
+# canonical task has no active/queued instance, no canonical task process exists, runtime generation is
+# dead/stale/released, and the raw old broker attestation differs from the accepted deployment only by
+# source/deployment provenance while retaining canonical component/launcher/config identity.
+$midpointAst = $ast.Find({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'Test-StoppedMidpointEligible'
+}, $true)
+if ($null -eq $midpointAst) {
+  throw 'RED: stopped midpoint eligibility helper is missing.'
 }
 
-$waitCallLiteral = 'Wait-StoppedBrokerAttestation -ExpectedApiPid $apiPidBefore -ExpectedWebPid $webPidBefore -Seconds $TimeoutSeconds'
-Assert-ContainsLiteral $waitCallLiteral 'Stopped-broker attestation convergence call'
-$waitCallIndex = $source.IndexOf($waitCallLiteral, [System.StringComparison]::Ordinal)
-if ($waitCallIndex -le $stopIndex -or $waitCallIndex -ge $startIndex) {
-  throw 'RED: stopped-broker attestation convergence must occur after STOP and before START.'
+$midpointSource = $midpointAst.Extent.Text
+& {
+  param([string]$FunctionSource)
+  Set-StrictMode -Version Latest
+  Invoke-Expression $FunctionSource
+
+  $task = [pscustomobject]@{ State = 'Ready' }
+  $generation = [pscustomobject]@{
+    statusReadState = 'OK'
+    heartbeatReadState = 'OK'
+    brokerStatusPidMatch = $true
+    brokerProcessAlive = $false
+    brokerHeartbeatFresh = $false
+    startupRunnerLockState = 'RELEASED'
+    statusBrokerPid = 9388
+  }
+  $deployment = [pscustomobject]@{
+    deploymentId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    sourceCommit = '1111111111111111111111111111111111111111'
+    sourceTree = '2222222222222222222222222222222222222222'
+    configFingerprint = 'sha256:' + ('3' * 64)
+  }
+  $old = [pscustomobject]@{
+    component = 'lifecycle-broker'
+    deploymentId = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    sourceCommit = '4444444444444444444444444444444444444444'
+    sourceTree = '5555555555555555555555555555555555555555'
+    pid = 9388
+    launcherSha256 = 'sha256:' + ('6' * 64)
+    configFingerprint = $deployment.configFingerprint
+  }
+
+  $eligible = Test-StoppedMidpointEligible -Task $task -Generation $generation -BrokerAttestation $old -Deployment $deployment -RunnerSha256 $old.launcherSha256 -CanonicalProcessCount 0 -RunningTaskInstanceCount 0
+  if (-not $eligible) { throw 'Expected proven stopped midpoint tuple to be eligible.' }
+
+  $generation.brokerProcessAlive = $true
+  if (Test-StoppedMidpointEligible -Task $task -Generation $generation -BrokerAttestation $old -Deployment $deployment -RunnerSha256 $old.launcherSha256 -CanonicalProcessCount 0 -RunningTaskInstanceCount 0) {
+    throw 'Live broker must make stopped midpoint ineligible.'
+  }
+  $generation.brokerProcessAlive = $false
+
+  if (Test-StoppedMidpointEligible -Task $task -Generation $generation -BrokerAttestation $old -Deployment $deployment -RunnerSha256 $old.launcherSha256 -CanonicalProcessCount 1 -RunningTaskInstanceCount 0) {
+    throw 'Canonical task process presence must make stopped midpoint ineligible.'
+  }
+
+  $old.launcherSha256 = 'sha256:' + ('7' * 64)
+  if (Test-StoppedMidpointEligible -Task $task -Generation $generation -BrokerAttestation $old -Deployment $deployment -RunnerSha256 ('sha256:' + ('6' * 64)) -CanonicalProcessCount 0 -RunningTaskInstanceCount 0) {
+    throw 'Launcher identity drift must make stopped midpoint ineligible.'
+  }
+} $midpointSource
+
+foreach ($literal in @(
+  'PHASE7C_BROKER_RECONCILE_ENTRY=MIDPOINT_STOPPED',
+  'PHASE7C_BROKER_RECONCILE_MIDPOINT_REPROOF=PASS',
+  'phase7c-source-attestation\components\lifecycle-broker.json'
+)) {
+  Assert-ContainsLiteral $literal 'Stopped midpoint recovery contract'
 }
 
 # Postflight must prove the broker is exact at the accepted deployment and everything else stayed stopped/unchanged.
