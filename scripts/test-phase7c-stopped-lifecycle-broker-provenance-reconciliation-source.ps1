@@ -274,8 +274,19 @@ $midpointSource = $midpointAst.Extent.Text
 & {
   param([string]$FunctionSource)
   Set-StrictMode -Version Latest
+
+  function Normalize-Phase7CRunnerSha256 {
+    param([Parameter(Mandatory = $true)] [string]$Sha256)
+    $value = ([string]$Sha256).Trim().ToUpperInvariant()
+    if ($value -notmatch '^[0-9A-F]{64}$') {
+      throw "Runner SHA256 must be exactly 64 hexadecimal characters. value=$Sha256"
+    }
+    return $value
+  }
+
   Invoke-Expression $FunctionSource
 
+  $runnerSha256 = 'A' * 64
   $task = [pscustomobject]@{ State = 'Ready' }
   $generation = [pscustomobject]@{
     statusReadState = 'OK'
@@ -298,25 +309,25 @@ $midpointSource = $midpointAst.Extent.Text
     sourceCommit = '4444444444444444444444444444444444444444'
     sourceTree = '5555555555555555555555555555555555555555'
     pid = 9388
-    launcherSha256 = 'sha256:' + ('6' * 64)
+    launcherSha256 = 'sha256:' + ('a' * 64)
     configFingerprint = $deployment.configFingerprint
   }
 
-  $eligible = Test-StoppedMidpointEligible -Task $task -Generation $generation -BrokerAttestation $old -Deployment $deployment -RunnerSha256 $old.launcherSha256 -CanonicalProcessCount 0 -RunningTaskInstanceCount 0
+  $eligible = Test-StoppedMidpointEligible -Task $task -Generation $generation -BrokerAttestation $old -Deployment $deployment -RunnerSha256 $runnerSha256 -CanonicalProcessCount 0 -RunningTaskInstanceCount 0
   if (-not $eligible) { throw 'Expected proven stopped midpoint tuple to be eligible.' }
 
   $generation.brokerProcessAlive = $true
-  if (Test-StoppedMidpointEligible -Task $task -Generation $generation -BrokerAttestation $old -Deployment $deployment -RunnerSha256 $old.launcherSha256 -CanonicalProcessCount 0 -RunningTaskInstanceCount 0) {
+  if (Test-StoppedMidpointEligible -Task $task -Generation $generation -BrokerAttestation $old -Deployment $deployment -RunnerSha256 $runnerSha256 -CanonicalProcessCount 0 -RunningTaskInstanceCount 0) {
     throw 'Live broker must make stopped midpoint ineligible.'
   }
   $generation.brokerProcessAlive = $false
 
-  if (Test-StoppedMidpointEligible -Task $task -Generation $generation -BrokerAttestation $old -Deployment $deployment -RunnerSha256 $old.launcherSha256 -CanonicalProcessCount 1 -RunningTaskInstanceCount 0) {
+  if (Test-StoppedMidpointEligible -Task $task -Generation $generation -BrokerAttestation $old -Deployment $deployment -RunnerSha256 $runnerSha256 -CanonicalProcessCount 1 -RunningTaskInstanceCount 0) {
     throw 'Canonical task process presence must make stopped midpoint ineligible.'
   }
 
   $old.launcherSha256 = 'sha256:' + ('7' * 64)
-  if (Test-StoppedMidpointEligible -Task $task -Generation $generation -BrokerAttestation $old -Deployment $deployment -RunnerSha256 ('sha256:' + ('6' * 64)) -CanonicalProcessCount 0 -RunningTaskInstanceCount 0) {
+  if (Test-StoppedMidpointEligible -Task $task -Generation $generation -BrokerAttestation $old -Deployment $deployment -RunnerSha256 $runnerSha256 -CanonicalProcessCount 0 -RunningTaskInstanceCount 0) {
     throw 'Launcher identity drift must make stopped midpoint ineligible.'
   }
 } $midpointSource
