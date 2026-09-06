@@ -126,6 +126,48 @@ $contractSource = $contractAst.Extent.Text
   if (-not $unknownFailed) { throw 'Expected UNKNOWN inactive attestation to fail closed.' }
 } $contractSource $resolverSource
 
+$inactiveAst = $ast.Find({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'Assert-InactiveAttestations'
+}, $true)
+if ($null -eq $inactiveAst -or $inactiveAst.Extent.Text.IndexOf('Resolve-InactiveAttestationState', [System.StringComparison]::Ordinal) -lt 0) {
+  throw 'RED: inactive attestation gate must use the PID identity resolver.'
+}
+
+$postflightAst = $ast.Find({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'Assert-PostflightAttestation'
+}, $true)
+if ($null -eq $postflightAst) { throw 'RED: Assert-PostflightAttestation is missing.' }
+$postflightSource = $postflightAst.Extent.Text
+
+& {
+  param([string]$FunctionSource)
+  Set-StrictMode -Version Latest
+  $script:ExpectedCommit = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  $script:ExpectedDeploymentId = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+
+  function Assert-DeploymentAttestationIdentity($Snapshot) { if ($null -eq $Snapshot) { throw 'missing snapshot' } }
+  function Assert-ApiWebExact($Snapshot, [Nullable[int]]$ExpectedApiPid, [Nullable[int]]$ExpectedWebPid) { return $null }
+  function Assert-InactiveAttestations($Snapshot) { return }
+  function Get-AttestationComponent($Snapshot, [string]$Name) {
+    if ($Name -ne 'lifecycle-broker') { throw "Unexpected component: $Name" }
+    return [pscustomobject]@{
+      verdict = 'EXACT_MATCH'
+      alive = $true
+      pid = 303
+      sourceCommit = $script:ExpectedCommit
+      deploymentId = $script:ExpectedDeploymentId
+    }
+  }
+
+  Invoke-Expression $FunctionSource
+  $snapshot = [pscustomobject]@{ overall = 'MISMATCH'; components = @() }
+  Assert-PostflightAttestation -Snapshot $snapshot -ExpectedApiPid 101 -ExpectedWebPid 202 -NewBrokerPid 303
+} $postflightSource
+
 $source = (Get-Content -LiteralPath $ReconcilePath -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
 foreach ($literal in @(
   'Get-CimInstance Win32_Process',
@@ -135,7 +177,8 @@ foreach ($literal in @(
   'DEPLOYMENT_ID_MISMATCH',
   'run-phase7c-regime-notifier-local.ps1',
   'run-phase7c-regime-notifier.mjs',
-  'PHASE7C_BROKER_RECONCILE_INACTIVE_PID_REUSE=VERIFIED_UNRELATED'
+  'PHASE7C_BROKER_RECONCILE_INACTIVE_PID_REUSE=VERIFIED_UNRELATED',
+  'PHASE7C_BROKER_RECONCILE_POSTFLIGHT_EFFECTIVE_OVERALL=STALE'
 )) {
   if ($source.IndexOf($literal, [System.StringComparison]::Ordinal) -lt 0) {
     throw "RED: required PID-reuse safety contract missing: $literal"
