@@ -16,31 +16,82 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Diagnose anchors
+      - name: Diagnose replacement stages
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
+          $ErrorActionPreference = 'Continue'
           $path = 'scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1'
-          $text = Get-Content -LiteralPath $path -Raw
+          $text = (Get-Content -LiteralPath $path -Raw).Replace("`r`n","`n").Replace("`r","`n")
           $lines = [System.Collections.Generic.List[string]]::new()
+          $lines.Add("HEAD=$env:GITHUB_SHA")
           try {
-            $lines.Add("HEAD=$env:GITHUB_SHA")
             $old1 = '$RuntimeSourceAttestationLibrary = Join-Path $PSScriptRoot "lib\phase7c-runtime-source-attestation.ps1"'
-            $lines.Add("ANCHOR1=$($text.Contains($old1))")
+            $new1 = "$old1`n`$RuntimeSourceGenerationRoutingLibrary = Join-Path `$PSScriptRoot `"lib\phase7c-runtime-source-generation-routing.ps1`"`n`$ExactBrokerContinuation = Join-Path `$PSScriptRoot (`"continue-phase7c-runtime-source-generation-`" + `"reconciliation-exact-broker-local.ps1`")"
+            $lines.Add("A1_BEFORE=$($text.Contains($old1))")
+            $text = $text.Replace($old1,$new1)
+            $lines.Add("A1_AFTER=$($text.Contains('$RuntimeSourceGenerationRoutingLibrary'))")
+
             $old2 = 'foreach ($required in @($ConfigPath, $AccountLibrary, $OwnershipLibrary, $RuntimeOwnershipLibrary, $RuntimeSourceAttestationLibrary, $WebApiDeploy, $TaskInstaller)) {'
-            $lines.Add("ANCHOR2=$($text.Contains($old2))")
+            $new2 = 'foreach ($required in @($ConfigPath, $AccountLibrary, $OwnershipLibrary, $RuntimeOwnershipLibrary, $RuntimeSourceAttestationLibrary, $RuntimeSourceGenerationRoutingLibrary, $ExactBrokerContinuation, $WebApiDeploy, $TaskInstaller)) {'
+            $lines.Add("A2_BEFORE=$($text.Contains($old2))")
+            $text = $text.Replace($old2,$new2)
+            $lines.Add("A2_AFTER=$($text.Contains($new2))")
+
             $old3 = ". `$RuntimeOwnershipLibrary`n. `$RuntimeSourceAttestationLibrary`n`$ExpectedCommit = `$ExpectedCommit.ToLowerInvariant()"
-            $lines.Add("ANCHOR3_LF=$($text.Replace("`r`n","`n").Contains($old3))")
-            $old4 = "Write-Host `"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_MODE=PAUSE`"`nWrite-Host `"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_ARM=DISARMED`"`n`n`$mutationStarted = `$false"
-            $lines.Add("ANCHOR4_LF=$($text.Replace("`r`n","`n").Contains($old4))")
+            $new3 = ". `$RuntimeOwnershipLibrary`n. `$RuntimeSourceAttestationLibrary`n. `$RuntimeSourceGenerationRoutingLibrary`n`$ExpectedCommit = `$ExpectedCommit.ToLowerInvariant()"
+            $lines.Add("A3_BEFORE=$($text.Contains($old3))")
+            $text = $text.Replace($old3,$new3)
+            $lines.Add("A3_AFTER=$($text.Contains($new3))")
+
+            $old4 = "Write-Host `"PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_ARM=DISARMED`"`n`n`$mutationStarted = `$false"
+            $routeBlock = @'
+Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PREFLIGHT_ARM=DISARMED"
+
+$partialSourceGenerationRoute = $null
+if (-not $runtimeSourceGenerationReloadRequired -and -not $taskRepairRequired) {
+  $attestationSnapshot = Invoke-ApiGet "/api/v1/phase7c/runtime-source-attestation"
+  $partialSourceGenerationRoute = Get-Phase7CRuntimeSourceGenerationRoute -Snapshot $attestationSnapshot -ExpectedCommit $ExpectedCommit -DeploymentId ([string]$deployment.deploymentId)
+  if ([string]$partialSourceGenerationRoute.route -eq 'FULL_GENERATION_RELOAD') { $runtimeSourceGenerationReloadRequired = $true }
+  elseif ([string]$partialSourceGenerationRoute.route -notin @('NONE','EXACT_BROKER_CONTINUATION')) { throw "Unsupported runtime source generation route: $([string]$partialSourceGenerationRoute.route)" }
+}
+
+$mutationStarted = $false
+'@
+            $routeBlock = $routeBlock.Trim()
+            $lines.Add("A4_BEFORE=$($text.Contains($old4))")
+            $text = $text.Replace($old4,$routeBlock)
+            $lines.Add("A4_AFTER=$($text.Contains('Get-Phase7CRuntimeSourceGenerationRoute'))")
+
             $old5 = "try {`n  `$mutationStarted = `$true`n`n# A previous repair attempt can leave an already-canonical task stranded in"
-            $lines.Add("ANCHOR5_LF=$($text.Replace("`r`n","`n").Contains($old5))")
-            $lines.Add('DIAGNOSTIC=PASS')
+            $continuationBlock = @'
+try {
+  $mutationStarted = $true
+
+if ($null -ne $partialSourceGenerationRoute -and [string]$partialSourceGenerationRoute.route -eq 'EXACT_BROKER_CONTINUATION') {
+  Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PARTIAL_SOURCE_GENERATION=EXACT_BROKER_CONTINUATION"
+  # continue-phase7c-runtime-source-generation-reconciliation-exact-broker-local.ps1
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ExactBrokerContinuation -ExpectedCommit $ExpectedCommit -ProjectRoot $ProjectRoot -TimeoutSeconds $TimeoutSeconds
+  if ($LASTEXITCODE -ne 0) { throw "Exact-broker source-generation continuation failed with exit code $LASTEXITCODE." }
+  $postReconciliationSnapshot = Invoke-ApiGet "/api/v1/phase7c/runtime-source-attestation"
+  $postReconciliationRoute = Get-Phase7CRuntimeSourceGenerationRoute -Snapshot $postReconciliationSnapshot -ExpectedCommit $ExpectedCommit -DeploymentId ([string]$deployment.deploymentId)
+  if ([string]$postReconciliationRoute.route -ne 'NONE') { throw "Exact-broker source-generation continuation did not converge." }
+}
+
+# A previous repair attempt can leave an already-canonical task stranded in
+'@
+            $continuationBlock = $continuationBlock.Trim()
+            $lines.Add("A5_BEFORE=$($text.Contains($old5))")
+            $text = $text.Replace($old5,$continuationBlock)
+            $lines.Add("A5_AFTER=$($text.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_PARTIAL_SOURCE_GENERATION=EXACT_BROKER_CONTINUATION'))")
+
+            Set-Content -LiteralPath $path -Value $text -Encoding utf8NoBOM
+            git diff --check 2>&1 | ForEach-Object { $lines.Add("DIFFCHECK=$_") }
+            $lines.Add("DIFFCHECK_EXIT=$LASTEXITCODE")
+            git status --short 2>&1 | ForEach-Object { $lines.Add("STATUS=$_") }
           } catch {
             $lines.Add("ERROR=$($_.Exception.Message)")
-          } finally {
-            $lines | Set-Content -LiteralPath phase7c-partial-source-generation-diagnostic.txt -Encoding utf8
           }
+          $lines | Set-Content -LiteralPath phase7c-partial-source-generation-diagnostic.txt -Encoding utf8
       - uses: actions/upload-artifact@v4
         with:
           name: phase7c-partial-source-generation-diagnostic
