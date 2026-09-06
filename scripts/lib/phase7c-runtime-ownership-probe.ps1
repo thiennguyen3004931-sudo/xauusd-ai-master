@@ -50,8 +50,29 @@ function Read-Phase7CRuntimeOwnershipJson {
     }
   }
 
+  $stream = $null
+  $reader = $null
   try {
-    $value = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    # These files are atomically replaced by the SYSTEM lifecycle broker while
+    # reconciliation/diagnostic probes may read them concurrently. Readers must
+    # explicitly allow FILE_SHARE_DELETE or Windows can reject File.Replace and
+    # terminate the broker heartbeat loop.
+    $shareMode = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+    $stream = [System.IO.File]::Open(
+      $Path,
+      [System.IO.FileMode]::Open,
+      [System.IO.FileAccess]::Read,
+      $shareMode
+    )
+    $reader = [System.IO.StreamReader]::new(
+      $stream,
+      [System.Text.Encoding]::UTF8,
+      $true,
+      1024,
+      $false
+    )
+    $raw = $reader.ReadToEnd()
+    $value = $raw | ConvertFrom-Json -ErrorAction Stop
     return [pscustomobject]@{
       ok = $true
       value = $value
@@ -68,6 +89,12 @@ function Read-Phase7CRuntimeOwnershipJson {
       ok = $false
       value = $null
       error = 'INVALID_OR_UNREADABLE'
+    }
+  } finally {
+    if ($null -ne $reader) {
+      $reader.Dispose()
+    } elseif ($null -ne $stream) {
+      $stream.Dispose()
     }
   }
 }
