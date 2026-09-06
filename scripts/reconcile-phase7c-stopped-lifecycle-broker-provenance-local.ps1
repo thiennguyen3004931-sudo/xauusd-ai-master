@@ -286,7 +286,7 @@ function Assert-PostflightAttestation($Snapshot, [int]$ExpectedApiPid, [int]$Exp
 function Assert-LifecycleStoppedState($State, [string]$Stage) {
   if ($null -eq $State) { throw "$Stage lifecycle state is missing." }
   if ([bool]$State.running -or [bool]$State.ready) { throw "$Stage requires lifecycle running=false and ready=false." }
-  if ($null -eq $State.processes) { throw "$Stage requires lifecycle process map." }
+  if ($null -eq $State.processes) { throw "$Stage lifecycle process map is unavailable." }
   $alive = @()
   foreach ($property in @($State.processes.PSObject.Properties)) {
     if ($null -ne $property.Value -and [bool]$property.Value.alive) { $alive += [string]$property.Name }
