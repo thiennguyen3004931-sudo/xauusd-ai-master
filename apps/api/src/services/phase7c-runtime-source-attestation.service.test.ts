@@ -40,8 +40,6 @@ const exactInput = (): Phase7CRuntimeSourceComponentEvaluationInput => ({
   currentPid: 12345,
   currentPidAlive: true,
   attestedPidAlive: true,
-  currentPidIdentityMatches: true,
-  attestedPidIdentityMatches: true,
   expectedLauncherSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   evidenceErrors: [],
 });
@@ -73,7 +71,6 @@ test("exact component evidence is exact", () => {
     "DEPLOYMENT_MATCH",
     "PID_MATCH",
     "PROCESS_ALIVE",
-    "PROCESS_IDENTITY_MATCH",
     "LAUNCHER_HASH_MATCH",
   ]);
 });
@@ -113,7 +110,6 @@ test("dead historical attestation with no current live pid is stale", () => {
   const input = exactInput();
   input.currentPid = null;
   input.currentPidAlive = null;
-  input.currentPidIdentityMatches = null;
   input.attestedPidAlive = false;
   input.attestedPidIdentityMatches = false;
   const result = evaluatePhase7CRuntimeSourceComponent(input);
@@ -128,7 +124,6 @@ test("dead previous-deployment attestation with no current live pid is stale", (
   input.attestation!.deploymentId = "ffffffffffffffffffffffffffffffff";
   input.currentPid = null;
   input.currentPidAlive = null;
-  input.currentPidIdentityMatches = null;
   input.attestedPidAlive = false;
   input.attestedPidIdentityMatches = false;
 
@@ -147,7 +142,6 @@ test("reused previous-deployment PID is stale/dead when process identity does no
   input.attestation!.deploymentId = "f374073bbf1941abaae450d17fb238b0";
   input.currentPid = null;
   input.currentPidAlive = null;
-  input.currentPidIdentityMatches = null;
   input.attestedPidAlive = true;
   input.attestedPidIdentityMatches = false;
 
@@ -169,7 +163,6 @@ test("real previous-deployment orphan remains live mismatch when identity matche
   input.attestation!.deploymentId = "f374073bbf1941abaae450d17fb238b0";
   input.currentPid = null;
   input.currentPidAlive = null;
-  input.currentPidIdentityMatches = null;
   input.attestedPidAlive = true;
   input.attestedPidIdentityMatches = true;
 
@@ -208,7 +201,6 @@ test("missing or invalid evidence is unknown", () => {
   const unresolvedPid = exactInput();
   unresolvedPid.currentPid = null;
   unresolvedPid.currentPidAlive = null;
-  unresolvedPid.currentPidIdentityMatches = null;
   unresolvedPid.attestedPidAlive = null;
   unresolvedPid.attestedPidIdentityMatches = null;
   assert.equal(evaluatePhase7CRuntimeSourceComponent(unresolvedPid).verdict, "UNKNOWN");
@@ -218,7 +210,7 @@ test("missing or invalid evidence is unknown", () => {
   assert.equal(evaluatePhase7CRuntimeSourceComponent(readError).verdict, "UNKNOWN");
 });
 
-test("complete read-only snapshot reports all eight exact components", () => {
+test("complete read-only snapshot reports all eight exact components without identity probe", () => {
   const tempRoot = mkdtempSync(join(tmpdir(), "phase7c-runtime-source-snapshot-"));
   try {
     const runtimeRoot = join(tempRoot, ".runtime");
@@ -277,6 +269,7 @@ test("complete read-only snapshot reports all eight exact components", () => {
         `sha256:${String(pid % 10).repeat(64)}`,
       ]),
     );
+    let identityProbeCalls = 0;
 
     const snapshot = getPhase7CRuntimeSourceAttestationSnapshot({
       runtimeRoot,
@@ -286,7 +279,10 @@ test("complete read-only snapshot reports all eight exact components", () => {
       readUtf8: (file) => readFileSync(file, "utf8"),
       sha256File: (file) => launcherHashByPath.get(file) ?? (() => { throw new Error(`unexpected hash path ${file}`); })(),
       isPidAlive: (pid) => components.some(([, expectedPid]) => expectedPid === pid),
-      matchesPidIdentity: () => true,
+      matchesPidIdentity: () => {
+        identityProbeCalls += 1;
+        return true;
+      },
     });
 
     assert.equal(snapshot.overall, "EXACT_MATCH");
@@ -294,7 +290,7 @@ test("complete read-only snapshot reports all eight exact components", () => {
     assert.equal(snapshot.components.length, 8);
     assert.deepEqual(snapshot.components.map((item) => item.component), components.map(([name]) => name));
     assert.ok(snapshot.components.every((item) => item.verdict === "EXACT_MATCH"));
-    assert.ok(snapshot.components.every((item) => item.reasonCodes.includes("PROCESS_IDENTITY_MATCH")));
+    assert.equal(identityProbeCalls, 0);
     assert.deepEqual(snapshot.safety, {
       readOnly: true,
       modeMutation: false,
@@ -370,6 +366,8 @@ test("snapshot treats reused regime-notifier PID as stale/dead, not a live misma
         `sha256:${String(pid % 10).repeat(64)}`,
       ]),
     );
+    let identityProbeCalls = 0;
+    const identityProbePids: number[] = [];
 
     const snapshot = getPhase7CRuntimeSourceAttestationSnapshot({
       runtimeRoot,
@@ -379,7 +377,12 @@ test("snapshot treats reused regime-notifier PID as stale/dead, not a live misma
       readUtf8: (file) => readFileSync(file, "utf8"),
       sha256File: (file) => launcherHashByPath.get(file) ?? (() => { throw new Error(`unexpected hash path ${file}`); })(),
       isPidAlive: (pid) => components.some(([, expectedPid]) => expectedPid === pid),
-      matchesPidIdentity: (pid) => pid !== 38044,
+      matchesPidIdentity: (pid, launcher) => {
+        identityProbeCalls += 1;
+        identityProbePids.push(pid);
+        assert.equal(launcher, "run-phase7c-regime-notifier-local.ps1");
+        return pid !== 38044;
+      },
     });
 
     const regime = snapshot.components.find((item) => item.component === "regime-notifier");
@@ -390,6 +393,8 @@ test("snapshot treats reused regime-notifier PID as stale/dead, not a live misma
     assert.ok(regime.reasonCodes.includes("CURRENT_PID_MISSING"));
     assert.ok(regime.reasonCodes.includes("ATTESTED_PID_IDENTITY_MISMATCH"));
     assert.equal(snapshot.overall, "STALE");
+    assert.equal(identityProbeCalls, 1);
+    assert.deepEqual(identityProbePids, [38044]);
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }
