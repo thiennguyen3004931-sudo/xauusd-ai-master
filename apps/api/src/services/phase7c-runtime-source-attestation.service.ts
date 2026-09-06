@@ -181,6 +181,26 @@ export function evaluatePhase7CRuntimeSourceComponent(
     return componentResult(input, "UNKNOWN", ["EVIDENCE_MISSING"]);
   }
 
+  const inactiveEvidenceErrors = input.evidenceErrors.filter(
+    (code) => code !== "CURRENT_PID_MISSING",
+  );
+  const noLiveCurrentProcess =
+    input.currentPidAlive === false ||
+    (input.currentPid === null && input.currentPidAlive !== true);
+  if (
+    noLiveCurrentProcess &&
+    input.attestedPidAlive === false &&
+    inactiveEvidenceErrors.length === 0
+  ) {
+    return componentResult(
+      input,
+      "STALE",
+      input.currentPid === null
+        ? ["CURRENT_PID_MISSING", "ATTESTED_PID_DEAD"]
+        : ["ATTESTED_PID_DEAD"],
+    );
+  }
+
   const mismatchReasons: string[] = [];
   if (input.attestation.component !== input.component) {
     mismatchReasons.push("COMPONENT_MISMATCH");
