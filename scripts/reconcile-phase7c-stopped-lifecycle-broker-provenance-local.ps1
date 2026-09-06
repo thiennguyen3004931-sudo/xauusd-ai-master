@@ -94,11 +94,106 @@ function Get-AttestationComponent($Snapshot, [string]$Name) {
   return $matches[0]
 }
 
+function Get-InactiveComponentProcessContract([string]$Name) {
+  switch ($Name) {
+    'supervisor' {
+      return [pscustomobject]@{
+        pidFile = Join-Path $WorkDir 'phase7c-executors\supervisor.pid'
+        commandLineMarkers = @('run-phase7c-executors-local.ps1')
+      }
+    }
+    'trend' {
+      return [pscustomobject]@{
+        pidFile = Join-Path $WorkDir 'phase7c-executors\trend.pid'
+        commandLineMarkers = @('run-phase7c-trend-controller-local.ps1', 'run-phase7c-trend-account-mode.mjs', 'run-phase7c-trend-controller.mjs')
+      }
+    }
+    'sideway' {
+      return [pscustomobject]@{
+        pidFile = Join-Path $WorkDir 'phase7c-executors\sideway.pid'
+        commandLineMarkers = @('run-phase7c-sideway-controller-local.ps1', 'run-phase7c-sideway-locked.mjs', 'run-phase7c-sideway-account-mode.mjs')
+      }
+    }
+    'telegram' {
+      return [pscustomobject]@{
+        pidFile = Join-Path $WorkDir 'phase7c-executors\telegram-mode.pid'
+        commandLineMarkers = @('run-phase7c-telegram-mode-controller-local.ps1', 'run-phase7c-telegram-mode-controller.mjs')
+      }
+    }
+    'regime-notifier' {
+      return [pscustomobject]@{
+        pidFile = Join-Path $WorkDir 'phase7c-executors\regime-notifier.pid'
+        commandLineMarkers = @('run-phase7c-regime-notifier-local.ps1', 'run-phase7c-regime-notifier.mjs')
+      }
+    }
+    default { throw "Unsupported inactive component process contract: $Name" }
+  }
+}
+
+function Resolve-InactiveAttestationState($Component, [string]$Name) {
+  if ($null -eq $Component) { throw "Inactive component evidence is missing. component=$Name" }
+
+  if ([string]$Component.verdict -eq 'STALE' -and $Component.alive -eq $false) {
+    return 'STALE_DEAD'
+  }
+
+  if ([string]$Component.verdict -ne 'MISMATCH' -or $Component.alive -ne $true -or [int]$Component.pid -le 0) {
+    throw "Inactive component is not safely classifiable. component=$Name verdict=$($Component.verdict) alive=$($Component.alive) pid=$($Component.pid)"
+  }
+
+  $allowedReasons = @('SOURCE_COMMIT_MISMATCH', 'SOURCE_TREE_MISMATCH', 'DEPLOYMENT_ID_MISMATCH')
+  $reasons = @($Component.reasonCodes)
+  if ($reasons.Count -eq 0) {
+    throw "Inactive live mismatch requires provenance-only reasons. component=$Name"
+  }
+  foreach ($reason in $reasons) {
+    if ([string]$reason -notin $allowedReasons) {
+      throw "Inactive live mismatch contains a non-provenance reason. component=$Name reason=$reason"
+    }
+  }
+
+  $contract = Get-InactiveComponentProcessContract -Name $Name
+  if (Test-Path -LiteralPath ([string]$contract.pidFile) -PathType Leaf) {
+    throw "Inactive PID-reuse normalization requires the canonical PID file to be absent. component=$Name path=$($contract.pidFile)"
+  }
+
+  $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+  $attestedPidRows = @($processes | Where-Object { [int]$_.ProcessId -eq [int]$Component.pid })
+  if ($attestedPidRows.Count -ne 1) {
+    throw "Inactive PID-reuse normalization requires exactly one current OS process at the attested PID. component=$Name pid=$($Component.pid) current=$($attestedPidRows.Count)"
+  }
+
+  $componentProcesses = @()
+  foreach ($process in $processes) {
+    $commandLine = [string]$process.CommandLine
+    if ([string]::IsNullOrWhiteSpace($commandLine)) { continue }
+    foreach ($marker in @($contract.commandLineMarkers)) {
+      if ($commandLine.IndexOf([string]$marker, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        $componentProcesses += $process
+        break
+      }
+    }
+  }
+  if ($componentProcesses.Count -ne 0) {
+    $processIds = @($componentProcesses | ForEach-Object { [string]$_.ProcessId })
+    throw "Inactive component still has a matching wrapper/child process; PID-reuse normalization blocked. component=$Name pids=$($processIds -join ',')"
+  }
+
+  $attestedPidProcess = $attestedPidRows[0]
+  if ([string]::IsNullOrWhiteSpace([string]$attestedPidProcess.CommandLine)) {
+    throw "Inactive PID-reuse normalization requires readable command-line identity for the reused PID. component=$Name pid=$($Component.pid)"
+  }
+
+  Write-Host "PHASE7C_BROKER_RECONCILE_INACTIVE_PID_REUSE=VERIFIED_UNRELATED|COMPONENT=$Name|PID=$($Component.pid)|PROCESS=$($attestedPidProcess.Name)"
+  return 'PID_REUSED_UNRELATED'
+}
+
 function Assert-InactiveAttestations($Snapshot) {
   foreach ($name in @('supervisor', 'trend', 'sideway', 'telegram', 'regime-notifier')) {
     $component = Get-AttestationComponent -Snapshot $Snapshot -Name $name
-    if ([string]$component.verdict -ne 'STALE' -or $component.alive -ne $false) {
-      throw "Inactive component must remain STALE/dead. component=$name verdict=$($component.verdict) alive=$($component.alive)"
+    $state = Resolve-InactiveAttestationState -Component $component -Name $name
+    if ([string]$state -notin @('STALE_DEAD', 'PID_REUSED_UNRELATED')) {
+      throw "Inactive component produced an unexpected effective state. component=$name state=$state"
     }
   }
   Write-Host 'PHASE7C_BROKER_RECONCILE_INACTIVE_ATTESTATIONS=STALE_DEAD'
@@ -189,7 +284,7 @@ function Assert-StoppedTransitionAttestation($Snapshot, [int]$ExpectedApiPid, [i
 }
 
 function Assert-PostflightAttestation($Snapshot, [int]$ExpectedApiPid, [int]$ExpectedWebPid, [int]$NewBrokerPid) {
-  if ([string]$Snapshot.overall -ne 'STALE') { throw "Postflight attestation overall must be STALE. actual=$($Snapshot.overall)" }
+  if ([string]$Snapshot.overall -notin @('STALE', 'MISMATCH')) { throw "Postflight attestation overall must be STALE or a locally-resolvable PID-reuse MISMATCH. actual=$($Snapshot.overall)" }
   Assert-DeploymentAttestationIdentity -Snapshot $Snapshot
   [void](Assert-ApiWebExact -Snapshot $Snapshot -ExpectedApiPid $ExpectedApiPid -ExpectedWebPid $ExpectedWebPid)
   $broker = Get-AttestationComponent -Snapshot $Snapshot -Name 'lifecycle-broker'
@@ -201,6 +296,7 @@ function Assert-PostflightAttestation($Snapshot, [int]$ExpectedApiPid, [int]$Exp
   }
   Write-Host 'PHASE7C_BROKER_RECONCILE_BROKER_ATTESTATION=EXACT_MATCH'
   Assert-InactiveAttestations -Snapshot $Snapshot
+  Write-Host 'PHASE7C_BROKER_RECONCILE_POSTFLIGHT_EFFECTIVE_OVERALL=STALE'
 }
 
 function Assert-LifecycleStoppedState($State, [string]$Stage) {
@@ -217,7 +313,6 @@ function Assert-LifecycleStoppedState($State, [string]$Stage) {
 function Get-SafetySnapshot([string]$Stage) {
   $mode = Invoke-ControlGet '/api/v1/phase7c/bot-mode'
   if ([string]$mode.state.mode -ne 'PAUSE') { throw "$Stage requires BOT_MODE=PAUSE. actual=$($mode.state.mode)" }
-
   $arm = Invoke-ControlGet '/api/v1/phase7c-live-arm-control/capability'
   if ([string]$arm.accountMode -ne 'LIVE' -or [string]$arm.liveArmStatus -ne 'DISARMED' -or [bool]$arm.liveExecutionArmed) {
     throw "$Stage requires LIVE ARM=DISARMED and liveExecutionArmed=false."
