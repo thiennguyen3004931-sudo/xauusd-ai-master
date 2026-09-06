@@ -176,10 +176,19 @@ if ($null -eq $transitionAst) {
 }
 
 $transitionSource = $transitionAst.Extent.Text
+if ($transitionSource.IndexOf('Assert-DeploymentAttestationIdentity -Snapshot $Snapshot', [System.StringComparison]::Ordinal) -lt 0) {
+  throw 'RED: stopped transition helper must retain the accepted deployment identity guard.'
+}
+
 & {
   param([string]$FunctionSource)
   Set-StrictMode -Version Latest
 
+  # The deployment guard is tested as a separate production helper and is required above by exact AST literal.
+  # This behavior harness isolates only the broker transition classifier while retaining the dependency boundary.
+  function Assert-DeploymentAttestationIdentity($Snapshot) {
+    if ($null -eq $Snapshot) { throw 'Deployment evidence missing.' }
+  }
   function Get-AttestationComponent($Snapshot, [string]$Name) {
     $matches = @($Snapshot.components | Where-Object { [string]$_.component -eq $Name })
     if ($matches.Count -ne 1) { throw "Expected one component named $Name." }
