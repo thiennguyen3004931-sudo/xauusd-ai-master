@@ -118,7 +118,7 @@ function Assert-ApiWebExact($Snapshot, [Nullable[int]]$ExpectedApiPid, [Nullable
   return [pscustomobject]@{ api = $api; web = $web }
 }
 
-function Assert-PreflightAttestation($Snapshot) {
+function Assert-DeploymentAttestationIdentity($Snapshot) {
   if ($null -eq $Snapshot.deployment) { throw 'Runtime-source API deployment snapshot is missing.' }
   if ([string]$Snapshot.deployment.deploymentId -ne $ExpectedDeploymentId -or
       [string]$Snapshot.deployment.sourceCommit -ne $ExpectedCommit -or
@@ -127,6 +127,10 @@ function Assert-PreflightAttestation($Snapshot) {
       -not [bool]$Snapshot.deployment.worktreeClean) {
     throw 'Runtime-source API deployment identity differs from the accepted deployment.'
   }
+}
+
+function Assert-PreflightAttestation($Snapshot) {
+  Assert-DeploymentAttestationIdentity -Snapshot $Snapshot
   if ([string]$Snapshot.overall -ne 'MISMATCH') { throw "Preflight attestation overall must be MISMATCH. actual=$($Snapshot.overall)" }
   $apiWeb = Assert-ApiWebExact -Snapshot $Snapshot -ExpectedApiPid $null -ExpectedWebPid $null
   Write-Host 'PHASE7C_BROKER_RECONCILE_API_ATTESTATION=EXACT_MATCH'
@@ -153,50 +157,40 @@ function Assert-PreflightAttestation($Snapshot) {
   }
 }
 
-function Assert-TransitionAttestation($Snapshot, [int]$ExpectedApiPid, [int]$ExpectedWebPid) {
+function Assert-StoppedTransitionAttestation($Snapshot, [int]$ExpectedApiPid, [int]$ExpectedWebPid, [int]$ExpectedBrokerPid) {
+  Assert-DeploymentAttestationIdentity -Snapshot $Snapshot
   [void](Assert-ApiWebExact -Snapshot $Snapshot -ExpectedApiPid $ExpectedApiPid -ExpectedWebPid $ExpectedWebPid)
-  $broker = Get-AttestationComponent -Snapshot $Snapshot -Name 'lifecycle-broker'
-  if ([string]$broker.verdict -ne 'STALE' -or $broker.alive -ne $false) {
-    throw "Stopped transition requires lifecycle-broker STALE/dead. verdict=$($broker.verdict) alive=$($broker.alive)"
-  }
   Assert-InactiveAttestations -Snapshot $Snapshot
-}
 
-function Wait-StoppedBrokerAttestation([int]$ExpectedApiPid, [int]$ExpectedWebPid, [int]$Seconds) {
-  $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
-  $allowedReasons = @('SOURCE_COMMIT_MISMATCH', 'SOURCE_TREE_MISMATCH', 'DEPLOYMENT_ID_MISMATCH')
-  do {
-    $snapshot = Invoke-ControlGet '/api/v1/phase7c/runtime-source-attestation'
-    [void](Assert-ApiWebExact -Snapshot $snapshot -ExpectedApiPid $ExpectedApiPid -ExpectedWebPid $ExpectedWebPid)
-    Assert-InactiveAttestations -Snapshot $snapshot
+  $broker = Get-AttestationComponent -Snapshot $Snapshot -Name 'lifecycle-broker'
+  if ([int]$broker.pid -ne $ExpectedBrokerPid) {
+    throw "Stopped transition broker PID changed. expected=$ExpectedBrokerPid actual=$($broker.pid)"
+  }
 
-    $broker = Get-AttestationComponent -Snapshot $snapshot -Name 'lifecycle-broker'
-    if ([string]$broker.verdict -eq 'STALE' -and $broker.alive -eq $false) {
-      return $snapshot
+  if ([string]$broker.verdict -eq 'STALE' -and $broker.alive -eq $false) {
+    return 'STALE_DEAD'
+  }
+
+  if ([string]$broker.verdict -eq 'MISMATCH' -and $broker.alive -eq $true) {
+    $allowedReasons = @('SOURCE_COMMIT_MISMATCH', 'SOURCE_TREE_MISMATCH', 'DEPLOYMENT_ID_MISMATCH')
+    $reasons = @($broker.reasonCodes)
+    if ($reasons.Count -eq 0) {
+      throw 'Stopped transition live MISMATCH must retain at least one provenance reason.'
     }
-
-    if ([string]$broker.verdict -eq 'MISMATCH' -and $broker.alive -eq $true) {
-      $reasons = @($broker.reasonCodes)
-      if ($reasons.Count -eq 0) {
-        throw 'Stopped transition live MISMATCH must retain at least one provenance reason while converging.'
+    foreach ($reason in $reasons) {
+      if ([string]$reason -notin $allowedReasons) {
+        throw "Stopped transition contains a non-provenance mismatch reason. reason=$reason"
       }
-      foreach ($reason in $reasons) {
-        if ([string]$reason -notin $allowedReasons) {
-          throw "Stopped transition contains a non-provenance mismatch reason; convergence wait blocked. reason=$reason"
-        }
-      }
-      Start-Sleep -Milliseconds 250
-      continue
     }
+    return 'API_LIVENESS_LAG'
+  }
 
-    throw "Stopped transition produced an unexpected lifecycle-broker attestation state. verdict=$($broker.verdict) alive=$($broker.alive) reasons=$(@($broker.reasonCodes) -join ',')"
-  } while ([DateTime]::UtcNow -lt $deadline)
-
-  throw 'Timed out waiting for stopped lifecycle-broker attestation to converge to STALE/dead.'
+  throw "Stopped transition produced an unexpected lifecycle-broker attestation state. verdict=$($broker.verdict) alive=$($broker.alive) reasons=$(@($broker.reasonCodes) -join ',')"
 }
 
 function Assert-PostflightAttestation($Snapshot, [int]$ExpectedApiPid, [int]$ExpectedWebPid, [int]$NewBrokerPid) {
   if ([string]$Snapshot.overall -ne 'STALE') { throw "Postflight attestation overall must be STALE. actual=$($Snapshot.overall)" }
+  Assert-DeploymentAttestationIdentity -Snapshot $Snapshot
   [void](Assert-ApiWebExact -Snapshot $Snapshot -ExpectedApiPid $ExpectedApiPid -ExpectedWebPid $ExpectedWebPid)
   $broker = Get-AttestationComponent -Snapshot $Snapshot -Name 'lifecycle-broker'
   if ([string]$broker.verdict -ne 'EXACT_MATCH' -or $broker.alive -ne $true -or [int]$broker.pid -ne $NewBrokerPid) {
@@ -336,6 +330,53 @@ function Wait-TaskQuiescedAndPreviousBrokerExit([int]$PreviousBrokerPid) {
   throw "Canonical Scheduled Task/broker did not quiesce after stop. previousPid=$PreviousBrokerPid"
 }
 
+function Assert-StoppedLocalGeneration($Task, $Generation, [int]$PreviousBrokerPid) {
+  $processCount = Get-Phase7CCanonicalTaskProcessCount -Task $Task
+  $instanceCount = Get-Phase7CRunningTaskInstanceCount -Name $TaskName
+  $oldPidAlive = $null -ne (Get-Process -Id $PreviousBrokerPid -ErrorAction SilentlyContinue)
+  if ([string]$Task.State -in @('Running', 'Queued') -or
+      $processCount -ne 0 -or $instanceCount -ne 0 -or $oldPidAlive -or
+      [string]$Generation.statusReadState -ne 'OK' -or
+      [string]$Generation.heartbeatReadState -ne 'OK' -or
+      -not [bool]$Generation.brokerStatusPidMatch -or
+      [int]$Generation.statusBrokerPid -ne $PreviousBrokerPid -or
+      [bool]$Generation.brokerProcessAlive -or
+      [string]$Generation.startupRunnerLockState -notin @('MISSING', 'RELEASED')) {
+    throw "Stopped local broker proof changed before START. taskState=$($Task.State) processCount=$processCount instanceCount=$instanceCount oldPidAlive=$oldPidAlive brokerAlive=$($Generation.brokerProcessAlive) lock=$($Generation.startupRunnerLockState)"
+  }
+}
+
+function Test-StoppedMidpointEligible(
+  $Task,
+  $Generation,
+  $BrokerAttestation,
+  $Deployment,
+  [string]$RunnerSha256,
+  [int]$CanonicalProcessCount,
+  [int]$RunningTaskInstanceCount
+) {
+  if ($null -eq $Task -or $null -eq $Generation -or $null -eq $BrokerAttestation -or $null -eq $Deployment) { return $false }
+  if ([string]$Task.State -in @('Running', 'Queued')) { return $false }
+  if ($CanonicalProcessCount -ne 0 -or $RunningTaskInstanceCount -ne 0) { return $false }
+  if ([string]$Generation.statusReadState -ne 'OK' -or
+      [string]$Generation.heartbeatReadState -ne 'OK' -or
+      -not [bool]$Generation.brokerStatusPidMatch -or
+      [bool]$Generation.brokerProcessAlive -or
+      [bool]$Generation.brokerHeartbeatFresh -or
+      [string]$Generation.startupRunnerLockState -notin @('MISSING', 'RELEASED') -or
+      [int]$Generation.statusBrokerPid -le 0) { return $false }
+  if ([string]$BrokerAttestation.component -ne 'lifecycle-broker' -or
+      [int]$BrokerAttestation.pid -ne [int]$Generation.statusBrokerPid -or
+      [string]$BrokerAttestation.launcherSha256 -ne $RunnerSha256 -or
+      [string]$BrokerAttestation.configFingerprint -ne [string]$Deployment.configFingerprint) { return $false }
+
+  $provenanceDiff =
+    [string]$BrokerAttestation.deploymentId -ne [string]$Deployment.deploymentId -or
+    [string]$BrokerAttestation.sourceCommit -ne [string]$Deployment.sourceCommit -or
+    [string]$BrokerAttestation.sourceTree -ne [string]$Deployment.sourceTree
+  return [bool]$provenanceDiff
+}
+
 function Wait-NewBrokerGeneration([int]$PreviousBrokerPid, [int]$Seconds) {
   $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
   do {
@@ -422,9 +463,7 @@ if ([string]$deployment.deploymentId -ne $ExpectedDeploymentId -or
 Write-Host 'PHASE7C_BROKER_RECONCILE_DEPLOYMENT_GUARD=PASS'
 
 $preSafety = Get-SafetySnapshot -Stage 'PREFLIGHT'
-$preAttestation = Assert-PreflightAttestation -Snapshot $preSafety.attestation
-$apiPidBefore = [int]$preAttestation.apiPid
-$webPidBefore = [int]$preAttestation.webPid
+Assert-DeploymentAttestationIdentity -Snapshot $preSafety.attestation
 $bridgePidBefore = [int]$preSafety.bridgePid
 $bridgeSessionBefore = [string]$preSafety.bridgeSessionId
 
@@ -432,36 +471,90 @@ Import-Module ScheduledTasks -ErrorAction Stop
 $runnerPath = Get-Phase7CExecutorTaskRunnerPath -ProjectRoot $ProjectRoot
 $trustedRunnerSha256 = Get-Phase7CTrustedGitFileSha256 -ProjectRoot $ProjectRoot -Path $runnerPath
 $taskBefore = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-if ([string]$taskBefore.State -ne 'Running') { throw "Canonical Scheduled Task must be Running before broker recycle. actual=$($taskBefore.State)" }
 Assert-CanonicalTask -Task $taskBefore -RunnerPath $runnerPath -RunnerSha256 $trustedRunnerSha256
-
 $generationBefore = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $WorkDir
-if ([string]$generationBefore.statusReadState -ne 'OK' -or
-    [string]$generationBefore.heartbeatReadState -ne 'OK' -or
-    -not [bool]$generationBefore.brokerStatusPidMatch -or
-    -not [bool]$generationBefore.brokerProcessAlive -or
-    -not [bool]$generationBefore.brokerHeartbeatFresh -or
-    [string]$generationBefore.startupRunnerLockState -ne 'HELD') {
-  throw 'Current lifecycle-broker generation is not a proven healthy singleton; reconciliation blocked.'
-}
-$previousBrokerPid = [int]$generationBefore.statusBrokerPid
-if ($previousBrokerPid -le 0 -or $previousBrokerPid -ne [int]$preAttestation.brokerPid) {
-  throw 'Current lifecycle-broker PID does not match attestation/runtime-generation evidence.'
-}
-Write-Host 'PHASE7C_BROKER_RECONCILE_BROKER_HEARTBEAT_FRESH=TRUE'
-Write-Host 'PHASE7C_BROKER_RECONCILE_STARTUP_RUNNER_LOCK=HELD'
 
-# Mutation boundary: stop/start only the already-proven canonical SYSTEM Scheduled Task.
-Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-Wait-TaskQuiescedAndPreviousBrokerExit -PreviousBrokerPid $previousBrokerPid
-Write-Host "PHASE7C_BROKER_RECONCILE_BROKER_PREVIOUS_PID_EXIT=PASS|PREVIOUS_PID=$previousBrokerPid"
+$rawBrokerAttestationPath = Join-Path $WorkDir 'phase7c-source-attestation\components\lifecycle-broker.json'
+$rawBrokerAttestation = Read-JsonFile -Path $rawBrokerAttestationPath -Label 'Lifecycle broker component attestation'
 
-$afterStopSafety = Get-SafetySnapshot -Stage 'AFTER_STOP'
-Assert-StableExternalIdentity -Snapshot $afterStopSafety -ExpectedBridgeSessionId $bridgeSessionBefore -ExpectedBridgePid $bridgePidBefore
-$afterStopAttestation = Wait-StoppedBrokerAttestation -ExpectedApiPid $apiPidBefore -ExpectedWebPid $webPidBefore -Seconds $TimeoutSeconds
-Assert-TransitionAttestation -Snapshot $afterStopAttestation -ExpectedApiPid $apiPidBefore -ExpectedWebPid $webPidBefore
-$taskStopped = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-Assert-CanonicalTask -Task $taskStopped -RunnerPath $runnerPath -RunnerSha256 $trustedRunnerSha256
+$apiPidBefore = 0
+$webPidBefore = 0
+$previousBrokerPid = 0
+$entryMode = ''
+
+if ([string]$taskBefore.State -eq 'Running') {
+  $preAttestation = Assert-PreflightAttestation -Snapshot $preSafety.attestation
+  $apiPidBefore = [int]$preAttestation.apiPid
+  $webPidBefore = [int]$preAttestation.webPid
+
+  if ([string]$generationBefore.statusReadState -ne 'OK' -or
+      [string]$generationBefore.heartbeatReadState -ne 'OK' -or
+      -not [bool]$generationBefore.brokerStatusPidMatch -or
+      -not [bool]$generationBefore.brokerProcessAlive -or
+      -not [bool]$generationBefore.brokerHeartbeatFresh -or
+      [string]$generationBefore.startupRunnerLockState -ne 'HELD') {
+    throw 'Current lifecycle-broker generation is not a proven healthy singleton; reconciliation blocked.'
+  }
+  $previousBrokerPid = [int]$generationBefore.statusBrokerPid
+  if ($previousBrokerPid -le 0 -or $previousBrokerPid -ne [int]$preAttestation.brokerPid) {
+    throw 'Current lifecycle-broker PID does not match attestation/runtime-generation evidence.'
+  }
+  Write-Host 'PHASE7C_BROKER_RECONCILE_ENTRY=RUNNING_MISMATCH'
+  Write-Host 'PHASE7C_BROKER_RECONCILE_BROKER_HEARTBEAT_FRESH=TRUE'
+  Write-Host 'PHASE7C_BROKER_RECONCILE_STARTUP_RUNNER_LOCK=HELD'
+
+  # Mutation boundary: stop/start only the already-proven canonical SYSTEM Scheduled Task.
+  Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+  Wait-TaskQuiescedAndPreviousBrokerExit -PreviousBrokerPid $previousBrokerPid
+  Write-Host "PHASE7C_BROKER_RECONCILE_BROKER_PREVIOUS_PID_EXIT=PASS|PREVIOUS_PID=$previousBrokerPid"
+
+  $afterStopSafety = Get-SafetySnapshot -Stage 'AFTER_STOP'
+  Assert-StableExternalIdentity -Snapshot $afterStopSafety -ExpectedBridgeSessionId $bridgeSessionBefore -ExpectedBridgePid $bridgePidBefore
+  $transition = Assert-StoppedTransitionAttestation -Snapshot $afterStopSafety.attestation -ExpectedApiPid $apiPidBefore -ExpectedWebPid $webPidBefore -ExpectedBrokerPid $previousBrokerPid
+  Write-Host "PHASE7C_BROKER_RECONCILE_STOPPED_TRANSITION=$transition"
+
+  $taskStopped = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+  Assert-CanonicalTask -Task $taskStopped -RunnerPath $runnerPath -RunnerSha256 $trustedRunnerSha256
+  $stoppedGeneration = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $WorkDir
+  Assert-StoppedLocalGeneration -Task $taskStopped -Generation $stoppedGeneration -PreviousBrokerPid $previousBrokerPid
+  $entryMode = 'RUNNING_MISMATCH'
+} else {
+  $processCount = Get-Phase7CCanonicalTaskProcessCount -Task $taskBefore
+  $instanceCount = Get-Phase7CRunningTaskInstanceCount -Name $TaskName
+  if (-not (Test-StoppedMidpointEligible -Task $taskBefore -Generation $generationBefore -BrokerAttestation $rawBrokerAttestation -Deployment $deployment -RunnerSha256 $trustedRunnerSha256 -CanonicalProcessCount $processCount -RunningTaskInstanceCount $instanceCount)) {
+    throw "Canonical Scheduled Task is neither a healthy running provenance-mismatch broker nor the strict stopped midpoint tuple. taskState=$($taskBefore.State)"
+  }
+
+  $previousBrokerPid = [int]$generationBefore.statusBrokerPid
+  $apiWeb = Assert-ApiWebExact -Snapshot $preSafety.attestation -ExpectedApiPid $null -ExpectedWebPid $null
+  $apiPidBefore = [int]$apiWeb.api.pid
+  $webPidBefore = [int]$apiWeb.web.pid
+  $transition = Assert-StoppedTransitionAttestation -Snapshot $preSafety.attestation -ExpectedApiPid $apiPidBefore -ExpectedWebPid $webPidBefore -ExpectedBrokerPid $previousBrokerPid
+  Write-Host 'PHASE7C_BROKER_RECONCILE_ENTRY=MIDPOINT_STOPPED'
+  Write-Host "PHASE7C_BROKER_RECONCILE_STOPPED_TRANSITION=$transition"
+  Write-Host "PHASE7C_BROKER_RECONCILE_BROKER_PREVIOUS_PID_EXIT=PASS|PREVIOUS_PID=$previousBrokerPid"
+  $entryMode = 'MIDPOINT_STOPPED'
+}
+
+# Re-prove the complete stopped/flat envelope and local broker-dead tuple immediately before START.
+$beforeStartSafety = Get-SafetySnapshot -Stage 'BEFORE_START'
+Assert-StableExternalIdentity -Snapshot $beforeStartSafety -ExpectedBridgeSessionId $bridgeSessionBefore -ExpectedBridgePid $bridgePidBefore
+$beforeStartTransition = Assert-StoppedTransitionAttestation -Snapshot $beforeStartSafety.attestation -ExpectedApiPid $apiPidBefore -ExpectedWebPid $webPidBefore -ExpectedBrokerPid $previousBrokerPid
+Write-Host "PHASE7C_BROKER_RECONCILE_STOPPED_TRANSITION=$beforeStartTransition"
+$beforeStartTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+Assert-CanonicalTask -Task $beforeStartTask -RunnerPath $runnerPath -RunnerSha256 $trustedRunnerSha256
+$beforeStartGeneration = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $WorkDir
+Assert-StoppedLocalGeneration -Task $beforeStartTask -Generation $beforeStartGeneration -PreviousBrokerPid $previousBrokerPid
+
+if ($entryMode -eq 'MIDPOINT_STOPPED') {
+  $beforeStartRawBrokerAttestation = Read-JsonFile -Path $rawBrokerAttestationPath -Label 'Lifecycle broker component attestation'
+  $beforeStartProcessCount = Get-Phase7CCanonicalTaskProcessCount -Task $beforeStartTask
+  $beforeStartInstanceCount = Get-Phase7CRunningTaskInstanceCount -Name $TaskName
+  if (-not (Test-StoppedMidpointEligible -Task $beforeStartTask -Generation $beforeStartGeneration -BrokerAttestation $beforeStartRawBrokerAttestation -Deployment $deployment -RunnerSha256 $trustedRunnerSha256 -CanonicalProcessCount $beforeStartProcessCount -RunningTaskInstanceCount $beforeStartInstanceCount)) {
+    throw 'Stopped midpoint evidence changed during immediate pre-START reproof.'
+  }
+  Write-Host 'PHASE7C_BROKER_RECONCILE_MIDPOINT_REPROOF=PASS'
+}
 
 Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 $newBrokerPid = Wait-NewBrokerGeneration -PreviousBrokerPid $previousBrokerPid -Seconds $TimeoutSeconds
@@ -471,7 +564,7 @@ if ($newBrokerPid -le 0) {
   $orphanGeneration = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $WorkDir
   $orphanSafety = Get-SafetySnapshot -Stage 'ORPHAN_QUEUED'
   Assert-StableExternalIdentity -Snapshot $orphanSafety -ExpectedBridgeSessionId $bridgeSessionBefore -ExpectedBridgePid $bridgePidBefore
-  Assert-TransitionAttestation -Snapshot $orphanSafety.attestation -ExpectedApiPid $apiPidBefore -ExpectedWebPid $webPidBefore
+  [void](Assert-StoppedTransitionAttestation -Snapshot $orphanSafety.attestation -ExpectedApiPid $apiPidBefore -ExpectedWebPid $webPidBefore -ExpectedBrokerPid $previousBrokerPid)
 
   if (-not (Test-OrphanQueuedEligible -Task $orphanTask -Generation $orphanGeneration -RunnerPath $runnerPath -RunnerSha256 $trustedRunnerSha256)) {
     throw "Canonical task restart did not produce a fresh broker and does not match the bounded orphan-Queued recovery tuple. taskState=$($orphanTask.State)"
@@ -505,7 +598,7 @@ if ($newBrokerPid -le 0) {
 
   $retrySafety = Get-SafetySnapshot -Stage 'ORPHAN_RETRY'
   Assert-StableExternalIdentity -Snapshot $retrySafety -ExpectedBridgeSessionId $bridgeSessionBefore -ExpectedBridgePid $bridgePidBefore
-  Assert-TransitionAttestation -Snapshot $retrySafety.attestation -ExpectedApiPid $apiPidBefore -ExpectedWebPid $webPidBefore
+  [void](Assert-StoppedTransitionAttestation -Snapshot $retrySafety.attestation -ExpectedApiPid $apiPidBefore -ExpectedWebPid $webPidBefore -ExpectedBrokerPid $previousBrokerPid)
   $retryTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
   Assert-CanonicalTask -Task $retryTask -RunnerPath $runnerPath -RunnerSha256 $trustedRunnerSha256
 
