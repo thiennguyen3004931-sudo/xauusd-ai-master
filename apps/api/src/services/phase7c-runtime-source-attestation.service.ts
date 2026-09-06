@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -65,6 +66,8 @@ export interface Phase7CRuntimeSourceComponentEvaluationInput {
   currentPid: number | null;
   currentPidAlive: boolean | null;
   attestedPidAlive: boolean | null;
+  currentPidIdentityMatches?: boolean | null;
+  attestedPidIdentityMatches?: boolean | null;
   expectedLauncherSha256: string | null;
   evidenceErrors: string[];
 }
@@ -108,6 +111,7 @@ export interface Phase7CRuntimeSourceAttestationDeps {
   readUtf8: (file: string) => string;
   sha256File: (file: string) => string;
   isPidAlive: (pid: number) => boolean;
+  matchesPidIdentity: (pid: number, launcher: string) => boolean | null;
 }
 
 const componentDefinitions: readonly {
@@ -158,16 +162,44 @@ export function fingerprintPhase7CRuntimeSourceConfig(
   return `sha256:${digest}`;
 }
 
+function effectiveComponentAlive(
+  pidAlive: boolean | null,
+  identityMatches: boolean | null | undefined,
+): boolean | null {
+  if (pidAlive === false) return false;
+  if (pidAlive !== true) return null;
+  if (identityMatches === false) return false;
+  if (identityMatches === null) return null;
+  return true;
+}
+
+function attestedInactiveReason(
+  input: Phase7CRuntimeSourceComponentEvaluationInput,
+): string {
+  if (input.attestedPidAlive === true && input.attestedPidIdentityMatches === false) {
+    return "ATTESTED_PID_IDENTITY_MISMATCH";
+  }
+  return "ATTESTED_PID_DEAD";
+}
+
 function componentResult(
   input: Phase7CRuntimeSourceComponentEvaluationInput,
   verdict: Phase7CRuntimeSourceVerdict,
   reasonCodes: string[],
 ): Phase7CRuntimeSourceComponentResult {
+  const currentAlive = effectiveComponentAlive(
+    input.currentPidAlive,
+    input.currentPidIdentityMatches,
+  );
+  const attestedAlive = effectiveComponentAlive(
+    input.attestedPidAlive,
+    input.attestedPidIdentityMatches,
+  );
   return {
     component: input.component,
     verdict,
     pid: input.currentPid ?? input.attestation?.pid ?? null,
-    alive: input.currentPidAlive ?? input.attestedPidAlive ?? null,
+    alive: currentAlive ?? attestedAlive ?? null,
     sourceCommit: input.attestation?.sourceCommit ?? null,
     deploymentId: input.attestation?.deploymentId ?? null,
     reasonCodes,
@@ -181,23 +213,31 @@ export function evaluatePhase7CRuntimeSourceComponent(
     return componentResult(input, "UNKNOWN", ["EVIDENCE_MISSING"]);
   }
 
+  const currentProcessAlive = effectiveComponentAlive(
+    input.currentPidAlive,
+    input.currentPidIdentityMatches,
+  );
+  const attestedProcessAlive = effectiveComponentAlive(
+    input.attestedPidAlive,
+    input.attestedPidIdentityMatches,
+  );
   const inactiveEvidenceErrors = input.evidenceErrors.filter(
     (code) => code !== "CURRENT_PID_MISSING",
   );
   const noLiveCurrentProcess =
-    input.currentPidAlive === false ||
-    (input.currentPid === null && input.currentPidAlive !== true);
+    currentProcessAlive === false ||
+    (input.currentPid === null && currentProcessAlive !== true);
   if (
     noLiveCurrentProcess &&
-    input.attestedPidAlive === false &&
+    attestedProcessAlive === false &&
     inactiveEvidenceErrors.length === 0
   ) {
     return componentResult(
       input,
       "STALE",
       input.currentPid === null
-        ? ["CURRENT_PID_MISSING", "ATTESTED_PID_DEAD"]
-        : ["ATTESTED_PID_DEAD"],
+        ? ["CURRENT_PID_MISSING", attestedInactiveReason(input)]
+        : [attestedInactiveReason(input)],
     );
   }
 
@@ -225,7 +265,7 @@ export function evaluatePhase7CRuntimeSourceComponent(
   }
   if (
     input.currentPid !== null &&
-    input.currentPidAlive === true &&
+    currentProcessAlive === true &&
     input.currentPid !== input.attestation.pid
   ) {
     mismatchReasons.push("PID_MISMATCH");
@@ -242,26 +282,38 @@ export function evaluatePhase7CRuntimeSourceComponent(
   }
 
   if (input.currentPid === null) {
-    if (input.attestedPidAlive === false) {
-      return componentResult(input, "STALE", ["CURRENT_PID_MISSING", "ATTESTED_PID_DEAD"]);
+    if (attestedProcessAlive === false) {
+      return componentResult(
+        input,
+        "STALE",
+        ["CURRENT_PID_MISSING", attestedInactiveReason(input)],
+      );
     }
     return componentResult(input, "UNKNOWN", ["CURRENT_PID_MISSING"]);
   }
 
   if (input.currentPid !== input.attestation.pid) {
-    if (input.currentPidAlive === true) {
+    if (currentProcessAlive === true) {
       return componentResult(input, "MISMATCH", ["PID_MISMATCH"]);
     }
-    if (input.attestedPidAlive === false) {
-      return componentResult(input, "STALE", ["ATTESTED_PID_DEAD"]);
+    if (attestedProcessAlive === false) {
+      return componentResult(input, "STALE", [attestedInactiveReason(input)]);
     }
     return componentResult(input, "UNKNOWN", ["EVIDENCE_INVALID"]);
   }
 
-  if (input.currentPidAlive === false || input.attestedPidAlive === false) {
-    return componentResult(input, "STALE", ["ATTESTED_PID_DEAD"]);
+  if (currentProcessAlive === false || attestedProcessAlive === false) {
+    const reasonCodes: string[] = [];
+    if (input.currentPidAlive === true && input.currentPidIdentityMatches === false) {
+      reasonCodes.push("CURRENT_PID_IDENTITY_MISMATCH");
+    }
+    if (attestedProcessAlive === false) {
+      reasonCodes.push(attestedInactiveReason(input));
+    }
+    if (reasonCodes.length === 0) reasonCodes.push("ATTESTED_PID_DEAD");
+    return componentResult(input, "STALE", reasonCodes);
   }
-  if (input.currentPidAlive !== true || input.attestedPidAlive !== true) {
+  if (currentProcessAlive !== true || attestedProcessAlive !== true) {
     return componentResult(input, "UNKNOWN", ["EVIDENCE_MISSING"]);
   }
 
@@ -269,6 +321,7 @@ export function evaluatePhase7CRuntimeSourceComponent(
     "DEPLOYMENT_MATCH",
     "PID_MATCH",
     "PROCESS_ALIVE",
+    "PROCESS_IDENTITY_MATCH",
     "LAUNCHER_HASH_MATCH",
   ]);
 }
@@ -301,6 +354,59 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
+function createWindowsPidIdentityMatcher(): (pid: number, launcher: string) => boolean | null {
+  let loaded = false;
+  let identities = new Map<number, { name: string; commandLine: string }>();
+
+  const load = (): void => {
+    if (loaded) return;
+    loaded = true;
+    if (process.platform !== "win32") return;
+
+    const command = [
+      "$ErrorActionPreference='Stop'",
+      "$rows=@(Get-CimInstance Win32_Process -ErrorAction Stop | Select-Object ProcessId,Name,CommandLine)",
+      "ConvertTo-Json -InputObject $rows -Compress -Depth 3",
+    ].join("; ");
+    const raw = execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command],
+      {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: 5000,
+        maxBuffer: 4 * 1024 * 1024,
+      },
+    ).trim();
+    const parsed = raw ? JSON.parse(raw) : [];
+    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    identities = new Map();
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      const item = row as Record<string, unknown>;
+      const pid = Number(item.ProcessId);
+      if (!Number.isInteger(pid) || pid <= 0) continue;
+      identities.set(pid, {
+        name: typeof item.Name === "string" ? item.Name : "",
+        commandLine: typeof item.CommandLine === "string" ? item.CommandLine : "",
+      });
+    }
+  };
+
+  return (pid: number, launcher: string): boolean | null => {
+    if (!Number.isInteger(pid) || pid <= 0) return false;
+    load();
+    if (process.platform !== "win32") return null;
+    const identity = identities.get(pid);
+    if (!identity) return false;
+    const name = identity.name.trim().toLowerCase();
+    const commandLine = identity.commandLine.trim().toLowerCase();
+    if (!name || !commandLine) return null;
+    const powershell = name === "powershell.exe" || name === "pwsh.exe";
+    return powershell && commandLine.includes(launcher.trim().toLowerCase());
+  };
+}
+
 function defaultRuntimeRoot(): string {
   const explicitRuntimeRoot = process.env.PHASE7C_RUNTIME_ROOT?.trim();
   if (explicitRuntimeRoot) return resolve(explicitRuntimeRoot);
@@ -316,6 +422,8 @@ function defaultProjectRoot(): string {
 }
 
 function resolveDeps(overrides: Partial<Phase7CRuntimeSourceAttestationDeps> = {}): Phase7CRuntimeSourceAttestationDeps {
+  const matchesPidIdentity = overrides.matchesPidIdentity
+    ?? (overrides.isPidAlive ? (() => true) : createWindowsPidIdentityMatcher());
   return {
     runtimeRoot: overrides.runtimeRoot ?? defaultRuntimeRoot(),
     projectRoot: overrides.projectRoot ?? defaultProjectRoot(),
@@ -324,6 +432,7 @@ function resolveDeps(overrides: Partial<Phase7CRuntimeSourceAttestationDeps> = {
     readUtf8: overrides.readUtf8 ?? ((file) => readFileSync(file, "utf8")),
     sha256File: overrides.sha256File ?? sha256File,
     isPidAlive: overrides.isPidAlive ?? isPidAlive,
+    matchesPidIdentity,
   };
 }
 
@@ -408,7 +517,25 @@ function safeAlive(
   try {
     return deps.isPidAlive(pid);
   } catch {
-    errors.push("PID_LIVENESS_UNAVAILABLE");
+    if (!errors.includes("PID_LIVENESS_UNAVAILABLE")) errors.push("PID_LIVENESS_UNAVAILABLE");
+    return null;
+  }
+}
+
+function safeIdentityMatch(
+  deps: Phase7CRuntimeSourceAttestationDeps,
+  pid: number | null,
+  pidAlive: boolean | null,
+  launcher: string,
+  errors: string[],
+): boolean | null {
+  if (pid === null) return null;
+  if (pidAlive === false) return false;
+  if (pidAlive !== true) return null;
+  try {
+    return deps.matchesPidIdentity(pid, launcher);
+  } catch {
+    if (!errors.includes("PID_IDENTITY_UNAVAILABLE")) errors.push("PID_IDENTITY_UNAVAILABLE");
     return null;
   }
 }
@@ -470,6 +597,35 @@ export function getPhase7CRuntimeSourceAttestationSnapshot(
 
     const currentPidAlive = safeAlive(deps, currentPid, errors);
     const attestedPidAlive = safeAlive(deps, attestation?.pid ?? null, errors);
+    let currentPidIdentityMatches: boolean | null;
+    let attestedPidIdentityMatches: boolean | null;
+    if (component === "api") {
+      currentPidIdentityMatches = currentPidAlive === true ? true : currentPidAlive;
+      if (!attestation) {
+        attestedPidIdentityMatches = null;
+      } else if (attestedPidAlive === false) {
+        attestedPidIdentityMatches = false;
+      } else if (attestedPidAlive !== true) {
+        attestedPidIdentityMatches = null;
+      } else {
+        attestedPidIdentityMatches = attestation.pid === deps.apiPid;
+      }
+    } else {
+      currentPidIdentityMatches = safeIdentityMatch(
+        deps,
+        currentPid,
+        currentPidAlive,
+        launcher,
+        errors,
+      );
+      attestedPidIdentityMatches = safeIdentityMatch(
+        deps,
+        attestation?.pid ?? null,
+        attestedPidAlive,
+        launcher,
+        errors,
+      );
+    }
     const expectedLauncherSha256 = expectedLauncherHash(deps, launcher, errors);
 
     return evaluatePhase7CRuntimeSourceComponent({
@@ -479,6 +635,8 @@ export function getPhase7CRuntimeSourceAttestationSnapshot(
       currentPid,
       currentPidAlive,
       attestedPidAlive,
+      currentPidIdentityMatches,
+      attestedPidIdentityMatches,
       expectedLauncherSha256,
       evidenceErrors: errors,
     });
