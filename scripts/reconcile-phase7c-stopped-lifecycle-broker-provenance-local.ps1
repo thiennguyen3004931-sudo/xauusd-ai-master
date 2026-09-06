@@ -95,38 +95,12 @@ function Get-AttestationComponent($Snapshot, [string]$Name) {
 }
 
 function Get-InactiveComponentProcessContract([string]$Name) {
-  switch ($Name) {
-    'supervisor' {
-      return [pscustomobject]@{
-        pidFile = Join-Path $WorkDir 'phase7c-executors\supervisor.pid'
-        commandLineMarkers = @('run-phase7c-executors-local.ps1')
-      }
-    }
-    'trend' {
-      return [pscustomobject]@{
-        pidFile = Join-Path $WorkDir 'phase7c-executors\trend.pid'
-        commandLineMarkers = @('run-phase7c-trend-controller-local.ps1', 'run-phase7c-trend-account-mode.mjs', 'run-phase7c-trend-controller.mjs')
-      }
-    }
-    'sideway' {
-      return [pscustomobject]@{
-        pidFile = Join-Path $WorkDir 'phase7c-executors\sideway.pid'
-        commandLineMarkers = @('run-phase7c-sideway-controller-local.ps1', 'run-phase7c-sideway-locked.mjs', 'run-phase7c-sideway-account-mode.mjs')
-      }
-    }
-    'telegram' {
-      return [pscustomobject]@{
-        pidFile = Join-Path $WorkDir 'phase7c-executors\telegram-mode.pid'
-        commandLineMarkers = @('run-phase7c-telegram-mode-controller-local.ps1', 'run-phase7c-telegram-mode-controller.mjs')
-      }
-    }
-    'regime-notifier' {
-      return [pscustomobject]@{
-        pidFile = Join-Path $WorkDir 'phase7c-executors\regime-notifier.pid'
-        commandLineMarkers = @('run-phase7c-regime-notifier-local.ps1', 'run-phase7c-regime-notifier.mjs')
-      }
-    }
-    default { throw "Unsupported inactive component process contract: $Name" }
+  if ($Name -ne 'regime-notifier') {
+    throw "PID-reuse normalization is restricted to regime-notifier. component=$Name"
+  }
+  return [pscustomobject]@{
+    pidFile = Join-Path $WorkDir 'phase7c-executors\regime-notifier.pid'
+    commandLineMarkers = @('run-phase7c-regime-notifier-local.ps1', 'run-phase7c-regime-notifier.mjs')
   }
 }
 
@@ -135,6 +109,10 @@ function Resolve-InactiveAttestationState($Component, [string]$Name) {
 
   if ([string]$Component.verdict -eq 'STALE' -and $Component.alive -eq $false) {
     return 'STALE_DEAD'
+  }
+
+  if ($Name -ne 'regime-notifier') {
+    throw "Only regime-notifier is eligible for PID-reuse normalization. component=$Name verdict=$($Component.verdict) alive=$($Component.alive)"
   }
 
   if ([string]$Component.verdict -ne 'MISMATCH' -or $Component.alive -ne $true -or [int]$Component.pid -le 0) {
@@ -191,9 +169,15 @@ function Resolve-InactiveAttestationState($Component, [string]$Name) {
 function Assert-InactiveAttestations($Snapshot) {
   foreach ($name in @('supervisor', 'trend', 'sideway', 'telegram', 'regime-notifier')) {
     $component = Get-AttestationComponent -Snapshot $Snapshot -Name $name
-    $state = Resolve-InactiveAttestationState -Component $component -Name $name
-    if ([string]$state -notin @('STALE_DEAD', 'PID_REUSED_UNRELATED')) {
-      throw "Inactive component produced an unexpected effective state. component=$name state=$state"
+    if ($name -eq 'regime-notifier') {
+      $state = Resolve-InactiveAttestationState -Component $component -Name $name
+      if ([string]$state -notin @('STALE_DEAD', 'PID_REUSED_UNRELATED')) {
+        throw "Regime notifier produced an unexpected effective state. state=$state"
+      }
+      continue
+    }
+    if ([string]$component.verdict -ne 'STALE' -or $component.alive -ne $false) {
+      throw "Inactive component must remain STALE/dead. component=$name verdict=$($component.verdict) alive=$($component.alive)"
     }
   }
   Write-Host 'PHASE7C_BROKER_RECONCILE_INACTIVE_ATTESTATIONS=STALE_DEAD'
@@ -302,7 +286,7 @@ function Assert-PostflightAttestation($Snapshot, [int]$ExpectedApiPid, [int]$Exp
 function Assert-LifecycleStoppedState($State, [string]$Stage) {
   if ($null -eq $State) { throw "$Stage lifecycle state is missing." }
   if ([bool]$State.running -or [bool]$State.ready) { throw "$Stage requires lifecycle running=false and ready=false." }
-  if ($null -eq $State.processes) { throw "$Stage lifecycle process map is unavailable." }
+  if ($null -eq $State.processes) { throw "$Stage requires lifecycle process map." }
   $alive = @()
   foreach ($property in @($State.processes.PSObject.Properties)) {
     if ($null -ne $property.Value -and [bool]$property.Value.alive) { $alive += [string]$property.Name }
@@ -313,6 +297,7 @@ function Assert-LifecycleStoppedState($State, [string]$Stage) {
 function Get-SafetySnapshot([string]$Stage) {
   $mode = Invoke-ControlGet '/api/v1/phase7c/bot-mode'
   if ([string]$mode.state.mode -ne 'PAUSE') { throw "$Stage requires BOT_MODE=PAUSE. actual=$($mode.state.mode)" }
+
   $arm = Invoke-ControlGet '/api/v1/phase7c-live-arm-control/capability'
   if ([string]$arm.accountMode -ne 'LIVE' -or [string]$arm.liveArmStatus -ne 'DISARMED' -or [bool]$arm.liveExecutionArmed) {
     throw "$Stage requires LIVE ARM=DISARMED and liveExecutionArmed=false."
