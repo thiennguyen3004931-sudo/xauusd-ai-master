@@ -160,6 +160,48 @@ if ($stopIndex -lt 0 -or $startIndex -le $stopIndex) {
   throw 'RED: canonical Scheduled Task START must occur after STOP.'
 }
 
+# Regression: after Windows reports the old PID exited and the startup lock released, the API
+# attestation can still report the just-dead broker as MISMATCH/alive for a short transition window.
+# The reconciliation must bounded-wait for the read-only attestation to converge to STALE/dead,
+# while failing closed immediately for API/Web drift, inactive-component drift, UNKNOWN evidence,
+# or any broker mismatch reason outside the already-approved provenance-only tuple.
+$waitStoppedAst = $ast.Find({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'Wait-StoppedBrokerAttestation'
+}, $true)
+if ($null -eq $waitStoppedAst) {
+  throw 'RED: stopped-broker attestation convergence helper is missing.'
+}
+
+$waitStoppedSource = $waitStoppedAst.Extent.Text
+foreach ($literal in @(
+  '[DateTime]::UtcNow.AddSeconds($Seconds)',
+  "Invoke-ControlGet '/api/v1/phase7c/runtime-source-attestation'",
+  'Assert-ApiWebExact',
+  'Assert-InactiveAttestations',
+  '[string]$broker.verdict -eq ''STALE''',
+  '$broker.alive -eq $false',
+  '[string]$broker.verdict -eq ''MISMATCH''',
+  '$broker.alive -eq $true',
+  'SOURCE_COMMIT_MISMATCH',
+  'SOURCE_TREE_MISMATCH',
+  'DEPLOYMENT_ID_MISMATCH',
+  'Start-Sleep -Milliseconds 250',
+  'Timed out waiting for stopped lifecycle-broker attestation to converge to STALE/dead.'
+)) {
+  if ($waitStoppedSource.IndexOf($literal, [System.StringComparison]::Ordinal) -lt 0) {
+    throw "RED: stopped-broker attestation convergence contract missing=$literal"
+  }
+}
+
+$waitCallLiteral = 'Wait-StoppedBrokerAttestation -ExpectedApiPid $apiPidBefore -ExpectedWebPid $webPidBefore -Seconds $TimeoutSeconds'
+Assert-ContainsLiteral $waitCallLiteral 'Stopped-broker attestation convergence call'
+$waitCallIndex = $source.IndexOf($waitCallLiteral, [System.StringComparison]::Ordinal)
+if ($waitCallIndex -le $stopIndex -or $waitCallIndex -ge $startIndex) {
+  throw 'RED: stopped-broker attestation convergence must occur after STOP and before START.'
+}
+
 # Postflight must prove the broker is exact at the accepted deployment and everything else stayed stopped/unchanged.
 foreach ($literal in @(
   'BROKER_ATTESTATION=EXACT_MATCH',
