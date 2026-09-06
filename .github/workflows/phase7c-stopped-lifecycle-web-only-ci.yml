@@ -5,6 +5,8 @@ on:
     branches:
       - fix/phase7c-stopped-lifecycle-web-only
   pull_request:
+    branches:
+      - main
     paths:
       - 'scripts/initialize-phase7c-runtime-source-deployment-local.ps1'
       - 'scripts/deploy-phase7c-stopped-lifecycle-web-only-local.ps1'
@@ -12,9 +14,13 @@ on:
       - 'scripts/test-phase7c-stopped-lifecycle-web-only-source.ps1'
       - '.github/workflows/phase7c-stopped-lifecycle-web-only-ci.yml'
 
+permissions:
+  contents: read
+
 jobs:
   source-contracts:
     runs-on: windows-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Provenance-only initializer source contract
@@ -23,3 +29,21 @@ jobs:
       - name: Stopped-lifecycle Web-only source contract
         shell: pwsh
         run: ./scripts/test-phase7c-stopped-lifecycle-web-only-source.ps1
+
+  regression-contracts:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Strict dashboard safe-deploy source regression
+        shell: pwsh
+        run: ./scripts/test-phase7c-dashboard-safe-deploy-source.ps1
+      - name: Existing stopped-lifecycle pre-Web generation regression
+        shell: pwsh
+        run: ./scripts/test-phase7c-stopped-lifecycle-preweb-generation-source.ps1
+      - name: Web Job Object cleanup regression - PowerShell 7
+        shell: pwsh
+        run: ./scripts/test-phase7b-web-job-object-cleanup-local.ps1
+      - name: Web Job Object cleanup regression - Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/test-phase7b-web-job-object-cleanup-local.ps1
