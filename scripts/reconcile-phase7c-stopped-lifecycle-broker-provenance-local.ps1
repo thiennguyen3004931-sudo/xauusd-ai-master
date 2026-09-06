@@ -113,8 +113,8 @@ function Assert-ApiWebExact($Snapshot, [Nullable[int]]$ExpectedApiPid, [Nullable
   if ([string]$web.verdict -ne 'EXACT_MATCH' -or $web.alive -ne $true -or [int]$web.pid -le 0) {
     throw "Web attestation must be active EXACT_MATCH. verdict=$($web.verdict) alive=$($web.alive) pid=$($web.pid)"
   }
-  if ($ExpectedApiPid.HasValue -and [int]$api.pid -ne $ExpectedApiPid.Value) { throw 'API PID changed during broker-only reconciliation.' }
-  if ($ExpectedWebPid.HasValue -and [int]$web.pid -ne $ExpectedWebPid.Value) { throw 'Web PID changed during broker-only reconciliation.' }
+  if ($null -ne $ExpectedApiPid -and [int]$api.pid -ne [int]$ExpectedApiPid) { throw 'API PID changed during broker-only reconciliation.' }
+  if ($null -ne $ExpectedWebPid -and [int]$web.pid -ne [int]$ExpectedWebPid) { throw 'Web PID changed during broker-only reconciliation.' }
   return [pscustomobject]@{ api = $api; web = $web }
 }
 
