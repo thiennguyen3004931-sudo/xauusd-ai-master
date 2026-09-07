@@ -260,3 +260,83 @@ function Write-Phase7CRuntimeSourceComponentAttestation {
   Write-Phase7CRuntimeSourceAtomicJson -Path $path -Value $record
   return $record
 }
+
+function Get-Phase7CRuntimeSourceGenerationAttestationStatus {
+  param(
+    [Parameter(Mandatory = $true)] [string]$RuntimeRoot,
+    [Parameter(Mandatory = $true)] $TargetDeployment
+  )
+
+  if (-not (Test-Phase7CRuntimeSourceDeploymentManifest -Manifest $TargetDeployment)) {
+    throw "TargetDeployment failed runtime source V1 validation."
+  }
+
+  $canonicalComponents = @('api','lifecycle-broker','supervisor','trend','sideway','telegram','regime-notifier')
+  $mismatchComponents = New-Object 'System.Collections.Generic.List[string]'
+  $reasonCodes = New-Object 'System.Collections.Generic.List[string]'
+  $componentsDir = Join-Path ([System.IO.Path]::GetFullPath($RuntimeRoot)) 'phase7c-source-attestation\components'
+
+  foreach ($component in $canonicalComponents) {
+    $componentReasons = New-Object 'System.Collections.Generic.List[string]'
+    $path = Join-Path $componentsDir ($component + '.json')
+    $attestation = $null
+
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+      [void]$componentReasons.Add('EVIDENCE_MISSING')
+    } else {
+      try {
+        $attestation = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+      } catch {
+        [void]$componentReasons.Add('EVIDENCE_INVALID')
+      }
+    }
+
+    if ($null -ne $attestation) {
+      $requiredProperties = @('version','component','deploymentId','sourceCommit','sourceTree','configFingerprint')
+      $missingRequiredProperty = $false
+      foreach ($name in $requiredProperties) {
+        if ($null -eq $attestation.PSObject.Properties[$name]) {
+          $missingRequiredProperty = $true
+          break
+        }
+      }
+
+      if ($missingRequiredProperty -or [int]$attestation.version -ne 1) {
+        [void]$componentReasons.Add('EVIDENCE_INVALID')
+      } else {
+        if ([string]$attestation.component -ne $component) {
+          [void]$componentReasons.Add('COMPONENT_MISMATCH')
+        }
+        if ([string]$attestation.sourceCommit -ne [string]$TargetDeployment.sourceCommit) {
+          [void]$componentReasons.Add('SOURCE_COMMIT_MISMATCH')
+        }
+        if ([string]$attestation.sourceTree -ne [string]$TargetDeployment.sourceTree) {
+          [void]$componentReasons.Add('SOURCE_TREE_MISMATCH')
+        }
+        if ([string]$attestation.deploymentId -ne [string]$TargetDeployment.deploymentId) {
+          [void]$componentReasons.Add('DEPLOYMENT_ID_MISMATCH')
+        }
+        if ([string]$attestation.configFingerprint -ne [string]$TargetDeployment.configFingerprint) {
+          [void]$componentReasons.Add('CONFIG_FINGERPRINT_MISMATCH')
+        }
+      }
+    }
+
+    if ($componentReasons.Count -gt 0) {
+      [void]$mismatchComponents.Add($component)
+      foreach ($reason in $componentReasons) {
+        if (-not $reasonCodes.Contains($reason)) {
+          [void]$reasonCodes.Add($reason)
+        }
+      }
+    }
+  }
+
+  return [pscustomobject][ordered]@{
+    version = 1
+    exactMatch = $mismatchComponents.Count -eq 0
+    canonicalComponents = @($canonicalComponents)
+    mismatchComponents = @($mismatchComponents)
+    reasonCodes = @($reasonCodes)
+  }
+}
