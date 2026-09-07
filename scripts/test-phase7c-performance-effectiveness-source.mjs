@@ -8,19 +8,24 @@ function read(path) {
 
 const routePath = "apps/api/src/routes/phase7c-performance-effectiveness.route.ts";
 const servicePath = "apps/api/src/services/phase7c-performance-effectiveness.service.ts";
+const coreServicePath = "apps/api/src/services/phase7c-performance-effectiveness-core.service.ts";
 const appPath = "apps/api/src/app.ts";
 const typesPath = "apps/web/src/phase7c-performance-effectiveness-types.ts";
 const apiPath = "apps/web/src/phase7c-performance-effectiveness-api.ts";
 const cardPath = "apps/web/src/ui/Phase7CPerformanceEffectivenessCard.tsx";
 const shellPath = "apps/web/src/pages/Phase7CControlCenterShellPage.tsx";
+const workflowPath = ".github/workflows/phase7c-performance-effectiveness-ci.yml";
 
 const route = read(routePath);
-const service = read(servicePath);
+const serviceWrapper = read(servicePath);
+const serviceCore = read(coreServicePath);
+const service = `${serviceWrapper}\n${serviceCore}`;
 const app = read(appPath);
 const types = read(typesPath);
 const api = read(apiPath);
 const card = read(cardPath);
 const shell = read(shellPath);
+const workflow = read(workflowPath);
 
 assert.match(route, /router\.get\("\/"/);
 assert.doesNotMatch(route, /router\.(post|put|patch|delete)\s*\(/i);
@@ -57,6 +62,8 @@ assert.doesNotMatch(card, /method:\s*"(POST|PUT|PATCH|DELETE)"/);
 
 assert.match(shell, /Phase7CPerformanceEffectivenessCard/);
 
+assert.match(serviceWrapper, /phase7c-performance-effectiveness-core\.service/);
+assert.match(serviceWrapper, /runPhase7CSingleFlight/);
 assert.match(service, /runtimeMutation:\s*false/);
 assert.match(service, /strategyMutation:\s*false/);
 assert.match(service, /riskMutation:\s*false/);
@@ -69,6 +76,9 @@ assert.match(service, /liveTestOrder:\s*false/);
 assert.match(service, /givebackPrice:\s*10/);
 assert.doesNotMatch(service, /givebackPrice:\s*strategy\s*===\s*"TREND"\s*\?\s*6\s*:\s*4/);
 assert.doesNotMatch(service, /fetch\([^\n]+\{[^}]*method:\s*"(POST|PUT|PATCH|DELETE)"/is);
+
+assert.match(workflow, /apps\/api\/src\/services\/phase7c-performance-effectiveness-core\.service\.ts/);
+assert.match(workflow, /apps\/api\/src\/services\/phase7c-single-flight\.ts/);
 
 console.log("P3_PERFORMANCE_EFFECTIVENESS_SOURCE_TEST=PASS");
 console.log("P3_API=GET_ONLY_LOCALHOST");

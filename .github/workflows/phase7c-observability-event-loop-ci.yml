@@ -5,7 +5,9 @@ on:
     paths:
       - "apps/api/src/services/phase7c-decision-monitor.service.ts"
       - "apps/api/src/services/phase7c-performance-intelligence.service.ts"
+      - "apps/api/src/services/phase7c-performance-intelligence-core.service.ts"
       - "apps/api/src/services/phase7c-performance-effectiveness.service.ts"
+      - "apps/api/src/services/phase7c-performance-effectiveness-core.service.ts"
       - "apps/api/src/services/phase7c-single-flight.ts"
       - "scripts/test-phase7c-observability-event-loop-source.mjs"
       - "scripts/phase7c-observability-event-loop.test.ts"

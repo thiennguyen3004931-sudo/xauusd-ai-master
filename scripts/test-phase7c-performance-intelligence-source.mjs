@@ -4,6 +4,7 @@ import process from "node:process";
 
 const root = process.cwd();
 const servicePath = path.join(root, "apps/api/src/services/phase7c-performance-intelligence.service.ts");
+const coreServicePath = path.join(root, "apps/api/src/services/phase7c-performance-intelligence-core.service.ts");
 const correlationServicePath = path.join(root, "apps/api/src/services/phase7c-performance-correlation.service.ts");
 const schemaPath = path.join(root, "apps/api/src/contracts/phase7c-performance-correlation.schema.ts");
 const routePath = path.join(root, "apps/api/src/routes/phase7c-performance-intelligence.route.ts");
@@ -28,7 +29,8 @@ function mustNotContain(text, needle, label) {
 }
 
 for (const [filePath, label] of [
-  [servicePath, "service"],
+  [servicePath, "service wrapper"],
+  [coreServicePath, "service core"],
   [correlationServicePath, "correlation service"],
   [schemaPath, "correlation schema"],
   [routePath, "route"],
@@ -42,7 +44,9 @@ for (const [filePath, label] of [
   if (!fs.existsSync(filePath)) fail(`${label} file missing`);
 }
 
-const service = fs.readFileSync(servicePath, "utf8");
+const serviceWrapper = fs.readFileSync(servicePath, "utf8");
+const serviceCore = fs.readFileSync(coreServicePath, "utf8");
+const service = `${serviceWrapper}\n${serviceCore}`;
 const correlationService = fs.readFileSync(correlationServicePath, "utf8");
 const schema = fs.readFileSync(schemaPath, "utf8");
 const route = fs.readFileSync(routePath, "utf8");
@@ -53,6 +57,8 @@ const webCard = fs.readFileSync(webCardPath, "utf8");
 const webShell = fs.readFileSync(webShellPath, "utf8");
 const workflow = fs.readFileSync(workflowPath, "utf8");
 
+mustContain(serviceWrapper, 'phase7c-performance-intelligence-core.service', "service wrapper");
+mustContain(serviceWrapper, 'runPhase7CSingleFlight', "service wrapper");
 mustContain(service, 'getMt5PerformanceSnapshot', "service");
 mustContain(service, 'EXACT', "service");
 mustContain(service, 'AMBIGUOUS', "service");
@@ -72,7 +78,6 @@ mustContain(correlationService, 'runtimeMutation: false', "correlation service")
 mustContain(correlationService, 'candidatePositionCount', "correlation service");
 mustContain(correlationService, 'no timestamp or price proximity matching is introduced', "correlation service");
 
-// Canonical decision audit path contract: executor decision streams are account-aware.
 mustContain(service, 'decisionAuditRoot', "service");
 mustContain(service, '"phase7c-executors", "decision-observability"', "service");
 mustContain(service, 'accountMode.toLowerCase()', "service");
@@ -81,20 +86,17 @@ mustContain(service, '"sideway-decisions.jsonl"', "service");
 mustNotContain(service, 'phase7b-live-forward-decision-audit.jsonl', "service");
 mustNotContain(service, 'phase7c-sideway-decision-observability.jsonl', "service");
 
-// Canonical normalized decision records persist entry mode and rule checks.
 mustContain(service, '"entryState"', "service");
 mustContain(service, 'record.conditions', "service");
 mustContain(service, 'status === "PASS"', "service");
 mustContain(service, 'status === "FAIL"', "service");
 
-// Correlation is explicit-ID only; never infer by timestamp/price proximity.
 mustContain(service, 'EXPLICIT_IDENTITY_GRAPH', "service");
 mustContain(service, '"POSITION"', "service");
 mustContain(service, '"ORDER"', "service");
 mustContain(service, '"SIGNAL"', "service");
 mustContain(service, 'no timestamp or price proximity matching is used', "service");
 
-// Canonical versioned row schema is explicit and fail-closed.
 mustContain(schema, 'phase7c-performance-correlation-v1', "schema");
 mustContain(schema, 'Phase7CPerformanceCorrelationRow', "schema");
 mustContain(schema, 'candidatePositionCount', "schema");
@@ -126,6 +128,8 @@ mustContain(webCard, 'READ ONLY', "web card");
 mustContain(webCard, 'refetchInterval: 15000', "web card");
 mustContain(webShell, 'Phase7CPerformanceIntelligenceCard', "web shell");
 
+mustContain(workflow, 'apps/api/src/services/phase7c-performance-intelligence-core.service.ts', "workflow");
+mustContain(workflow, 'apps/api/src/services/phase7c-single-flight.ts', "workflow");
 mustContain(workflow, 'apps/web/src/ui/Phase7CPerformanceIntelligenceCard.tsx', "workflow");
 mustContain(workflow, 'scripts/phase7c-performance-correlation-schema.test.ts', "workflow");
 mustContain(workflow, 'Build web dependency graph', "workflow");

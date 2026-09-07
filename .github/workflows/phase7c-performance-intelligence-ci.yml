@@ -5,6 +5,8 @@ on:
     paths:
       - "apps/api/src/contracts/phase7c-performance-correlation.schema.ts"
       - "apps/api/src/services/phase7c-performance-intelligence.service.ts"
+      - "apps/api/src/services/phase7c-performance-intelligence-core.service.ts"
+      - "apps/api/src/services/phase7c-single-flight.ts"
       - "apps/api/src/services/phase7c-performance-correlation.service.ts"
       - "apps/api/src/routes/phase7c-performance-intelligence.route.ts"
       - "apps/api/src/app.ts"
