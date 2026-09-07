@@ -74,6 +74,13 @@ Assert-Literal $armService 'schtasks.exe' 'scheduled task invocation'
 Assert-Literal $armService 'ARM_LIVE' 'ARM API action'
 Assert-Literal $armService 'DISARM_LIVE' 'DISARM API action'
 Assert-NotContains $armService '/v1/orders' 'API service must not call broker order endpoint directly'
+# LIVE A -> LIVE B must fail closed in Web preflight before the elevated task is queued.
+# The authoritative PowerShell arm script already checks MT5_LOGIN/server/MT5_ALLOWED_LOGINS;
+# Web must additionally require the canonical durable LIVE authorization so a changed broker
+# identity cannot present canArm=true while the canonical profile is still bound to LIVE A.
+Assert-Literal $armService 'getPhase7CLiveAuthorizationStatus' 'ARM preflight reads canonical LIVE authorization'
+Assert-Literal $armService 'liveAuthorizationValid' 'ARM preflight exposes durable authorization gate'
+Assert-Contains $armService 'liveAuthorizationValid:\s*liveAuthorization\?\.valid\s*===\s*true' 'ARM preflight requires valid canonical LIVE authorization'
 Assert-Literal $armRoute 'LIVE ARM control is restricted to localhost.' 'localhost ARM API guard'
 Assert-Literal $armRoute '/preflight' 'ARM preflight endpoint'
 Assert-Literal $armRoute '/execute' 'ARM execute endpoint'

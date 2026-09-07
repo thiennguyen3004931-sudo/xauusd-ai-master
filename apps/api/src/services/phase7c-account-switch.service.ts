@@ -137,6 +137,11 @@ function readStatus(): Phase7CAccountSwitchStatus | null {
   return readJson<Phase7CAccountSwitchStatus>(statusPath());
 }
 
+function noSwitchRunning(): boolean {
+  const status = readStatus();
+  return !status || status.status !== "RUNNING" || Date.now() - status.updatedAt > REQUEST_RUNNING_STALE_MS;
+}
+
 function cleanupExpiredTokens(): void {
   const now = Date.now();
   for (const [token, item] of preflightTokens.entries()) {
@@ -172,6 +177,48 @@ export async function getPhase7CAccountSwitchCapability() {
   };
 }
 
+export async function getPhase7CSameModeAccountChangeReadiness() {
+  const account = getPhase7CAccountModeState();
+  const currentMode = account.accountMode as SwitchTarget;
+  const lifecycle = getPhase7CLifecycleRuntimeStatus();
+  const telemetry = await getMt5Telemetry("XAUUSD");
+  const strategy = strategySafety(currentMode);
+  const openPositions = telemetry.positions.length;
+  const brokerExpected = currentMode === "LIVE" ? "real" : "demo";
+  const brokerMatches = telemetry.reachable && telemetry.health?.accountMode === brokerExpected;
+  const currentArmFile = armFilePresent();
+  const liveDisarmed = currentMode !== "LIVE" || !currentArmFile;
+
+  const checks = {
+    accountStateValid: account.valid,
+    botPaused: lifecycle.mode.mode === "PAUSE",
+    runtimeReady: lifecycle.ready,
+    bridgeMatchesSelectedAccount: brokerMatches,
+    zeroXauusdPositions: openPositions === 0,
+    noTrendManagedTicket: !strategy.trendManaged,
+    noSidewayManagedTicket: !strategy.sidewayManaged,
+    noTrendPendingPullback: !strategy.trendPending,
+    noSidewayPendingEntry: !strategy.sidewayPending,
+    noExecutionLock: !strategy.executionLock,
+    liveDisarmed,
+    noSwitchRunning: noSwitchRunning(),
+  };
+
+  return {
+    approved: Object.values(checks).every(Boolean),
+    currentMode,
+    currentBotMode: lifecycle.mode.mode,
+    accountLogin: telemetry.accountLogin,
+    server: telemetry.health?.server ?? null,
+    openXauusdPositions: openPositions,
+    liveArmFilePresent: currentArmFile,
+    checks,
+    note: currentMode === "LIVE"
+      ? "Đổi login LIVE cùng loại chỉ được chuẩn bị khi PAUSE + DISARMED + flat. Đăng nhập tài khoản mới trực tiếp trong MT5; Web chỉ xác minh read-only và không tự ARM/AUTO."
+      : "Đổi login DEMO cùng loại chỉ được chuẩn bị khi PAUSE + flat. Đăng nhập tài khoản mới trực tiếp trong MT5; Web chỉ xác minh read-only và không tự AUTO.",
+  };
+}
+
 async function evaluateSwitch(targetMode: SwitchTarget) {
   const account = getPhase7CAccountModeState();
   const currentMode = account.accountMode as SwitchTarget;
@@ -187,10 +234,7 @@ async function evaluateSwitch(targetMode: SwitchTarget) {
   const pause = lifecycle.mode.mode === "PAUSE";
   const runtimeReady = lifecycle.ready;
   const noOpenPositions = openPositions === 0;
-  const noManagedOrPending = strategy.flatStrategyState;
   const demoToLiveArmSafe = !(currentMode === "DEMO" && currentArmFile);
-  const status = readStatus();
-  const noSwitchRunning = !status || status.status !== "RUNNING" || Date.now() - status.updatedAt > REQUEST_RUNNING_STALE_MS;
 
   const checks = {
     taskInstalled,
@@ -206,7 +250,7 @@ async function evaluateSwitch(targetMode: SwitchTarget) {
     noSidewayPendingEntry: !strategy.sidewayPending,
     noExecutionLock: !strategy.executionLock,
     demoToLiveArmSafe,
-    noSwitchRunning,
+    noSwitchRunning: noSwitchRunning(),
   };
   const approved = Object.values(checks).every(Boolean);
 

@@ -212,6 +212,7 @@ export interface Mt5TelemetrySnapshot {
   message: string;
   latencyMs: number | null;
   bridgeBaseUrl: string;
+  accountLogin: number | null;
   health: Mt5TelemetryHealth | null;
   quote: Mt5TelemetryQuote | null;
   spec: Mt5TelemetrySpec | null;

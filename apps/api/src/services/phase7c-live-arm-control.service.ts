@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { accountModeAllowsBroker, getPhase7CAccountModeState } from "./phase7c-account-mode.service";
 import { getPhase7CLifecycleRuntimeStatus } from "./phase7c-lifecycle.service";
+import { getPhase7CLiveAuthorizationStatus } from "./phase7c-live-authorization.service";
 import { getMt5Telemetry } from "./mt5.service";
 
 const execFileAsync = promisify(execFile);
@@ -98,6 +99,9 @@ async function evaluate(action: Phase7CLiveArmAction) {
   const account = getPhase7CAccountModeState();
   const lifecycle = getPhase7CLifecycleRuntimeStatus();
   const telemetry = await getMt5Telemetry("XAUUSD");
+  const liveAuthorization = action === "ARM_LIVE"
+    ? getPhase7CLiveAuthorizationStatus(telemetry.health?.server ?? null, telemetry.accountLogin)
+    : null;
   const installed = await taskInstalled();
   const armStatus = telemetry.health?.liveArmStatus ?? "DISARMED";
   const armed = telemetry.health?.liveExecutionArmed === true && armStatus === "ARMED";
@@ -129,6 +133,7 @@ async function evaluate(action: Phase7CLiveArmAction) {
   const checks = action === "ARM_LIVE"
     ? {
         ...commonChecks,
+        liveAuthorizationValid: liveAuthorization?.valid === true,
         runtimeReady: lifecycle.ready === true,
         tradingEnabled: telemetry.health?.tradingEnabled === true,
         terminalTradeAllowed: telemetry.health?.terminalTradeAllowed === true,
