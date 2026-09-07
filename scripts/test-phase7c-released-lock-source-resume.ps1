@@ -47,6 +47,8 @@ $required = @(
   '[Parameter(Mandatory = $true)] [string]$TargetCommit',
   '[Parameter(Mandatory = $true)] [string]$ExpectedRemoteMainCommit',
   '[Parameter(Mandatory = $true)] [string]$ExpectedHelperBlobSha1',
+  '[Parameter(Mandatory = $true)] [AllowEmptyString()] [string]$ExpectedBridgeSessionId',
+  '[Parameter(Mandatory = $true)] [AllowEmptyString()] [string]$ExpectedBrokerPid',
   'PHASE7C_RELEASED_LOCK_SOURCE_RESUME_HELPER_FILE_PROVENANCE=PASS',
   'git hash-object',
   'git status --porcelain',
@@ -93,6 +95,14 @@ $required = @(
 foreach ($token in $required) {
   Assert-True ($source.Contains($token)) "RED: released-lock source resume contract missing: $token"
 }
+
+# Initial preflight deliberately has no prior Bridge session or broker PID yet. The
+# snapshot helper must therefore explicitly allow empty string sentinels; otherwise
+# PowerShell mandatory-string binding fails before any safety probe can run.
+Assert-True ($source.Contains("-ExpectedBridgeSessionId ''")) `
+  'Initial released-lock preflight must use an empty Bridge-session sentinel.'
+Assert-True ($source.Contains("-ExpectedBrokerPid ''")) `
+  'Initial released-lock preflight must use an empty broker-PID sentinel.'
 
 # Source-only transition must prove the guarded runner is byte-identical across
 # current and target so the already-running canonical SYSTEM task remains trusted.
