@@ -7,6 +7,7 @@ on:
       - fix/phase7c-generation-reconciliation-failclosed-resume
       - fix/phase7c-resume-reuse-exact-broker
       - feat/phase7c-production-source-transition-rollout
+      - fix/phase7c-stop-before-disarm
     paths:
       - 'scripts/reconcile-phase7c-runtime-source-generation-local.ps1'
       - 'scripts/resume-phase7c-runtime-source-generation-reconciliation-local.ps1'
@@ -14,6 +15,7 @@ on:
       - 'scripts/rollout-phase7c-production-source-transition-local.ps1'
       - 'scripts/test-phase7c-runtime-source-generation-reconciliation-source.ps1'
       - 'scripts/test-phase7c-production-source-transition-rollout-source.ps1'
+      - 'scripts/test-phase7c-stop-before-disarm-source.ps1'
       - '.github/workflows/phase7c-runtime-source-generation-reconciliation-ci.yml'
   pull_request:
     paths:
@@ -23,6 +25,7 @@ on:
       - 'scripts/rollout-phase7c-production-source-transition-local.ps1'
       - 'scripts/test-phase7c-runtime-source-generation-reconciliation-source.ps1'
       - 'scripts/test-phase7c-production-source-transition-rollout-source.ps1'
+      - 'scripts/test-phase7c-stop-before-disarm-source.ps1'
       - '.github/workflows/phase7c-runtime-source-generation-reconciliation-ci.yml'
 
 permissions:
@@ -50,6 +53,14 @@ jobs:
       - name: Production source transition rollout contract - Windows PowerShell 5.1
         shell: powershell
         run: ./scripts/test-phase7c-production-source-transition-rollout-source.ps1
+
+      - name: STOP before DISARM contract - PowerShell 7
+        shell: pwsh
+        run: ./scripts/test-phase7c-stop-before-disarm-source.ps1
+
+      - name: STOP before DISARM contract - Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/test-phase7c-stop-before-disarm-source.ps1
 
       - name: Parse helpers - PowerShell 7
         shell: pwsh
