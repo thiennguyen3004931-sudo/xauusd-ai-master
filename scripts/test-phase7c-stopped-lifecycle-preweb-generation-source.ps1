@@ -140,4 +140,31 @@ Assert-True (-not $orphanSection.Contains('Register-ScheduledTask')) `
 Assert-True (-not $orphanSection.Contains('Restart-Service')) `
   'Orphan queue recovery must never restart Task Scheduler service.'
 
+# Production reproduction 2026-09-07: after an exact HEALTHY source transition,
+# lifecycle STOP succeeded while the canonical SYSTEM broker remained alive/fresh
+# and PID-matched, but the startup-runner lock was RELEASED. This must NOT be treated
+# as healthy. A bounded repair is allowed only when one canonical task process and one
+# Scheduler instance both bind the broker PID, the broker launcher SHA matches the
+# trusted Git runner, and the ordinary PAUSE/DISARMED/Bridge/flat guards remain true.
+$releasedLockRequired = @(
+  'function Get-Phase7CCanonicalTaskProcessIds',
+  'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RELEASED_LOCK=ELIGIBLE_REPAIR_REQUIRED',
+  '$preWebCanonicalProcessIds.Count -eq 1',
+  '$preWebRunningInstanceCount -eq 1',
+  '[int]$preWebCanonicalProcessIds[0] -eq [int]$preWebRuntimeGeneration.statusBrokerPid',
+  '[string]$preWebRuntimeGeneration.startupRunnerLockState -in @(''MISSING'', ''RELEASED'')',
+  '$preWebExpectedLauncherSha256 = ''sha256:'' + $trustedRunnerSha256.ToLowerInvariant()',
+  '[string]$preWebBrokerAttestation.component -eq ''lifecycle-broker''',
+  '[int]$preWebBrokerAttestation.pid -eq [int]$preWebRuntimeGeneration.statusBrokerPid',
+  '$preWebAttestedLauncherSha256 -eq $preWebExpectedLauncherSha256',
+  'Assert-PauseDisarmed -Stage "GENERATION_PRE_WEB_RELEASED_LOCK"',
+  'Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "GENERATION_PRE_WEB_RELEASED_LOCK"',
+  'Assert-FlatBroker -Stage "GENERATION_PRE_WEB_RELEASED_LOCK"'
+)
+foreach ($literal in $releasedLockRequired) {
+  Assert-True ($recovery.Contains($literal)) "RED: released-lock stopped-lifecycle recovery contract missing: $literal"
+}
+Assert-True (-not $recovery.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RELEASED_LOCK=HEALTHY')) `
+  'Released startup lock must never be normalized to healthy generation state.'
+
 Write-Host "PHASE7C_STOPPED_LIFECYCLE_PREWEB_GENERATION_SOURCE_TEST=PASS"
