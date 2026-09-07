@@ -260,3 +260,123 @@ function Write-Phase7CRuntimeSourceComponentAttestation {
   Write-Phase7CRuntimeSourceAtomicJson -Path $path -Value $record
   return $record
 }
+
+function Get-Phase7CRuntimeSourceGenerationAttestationStatus {
+  param(
+    [Parameter(Mandatory = $true)] [string]$RuntimeRoot,
+    [Parameter(Mandatory = $true)] $TargetDeployment
+  )
+
+  if (-not (Test-Phase7CRuntimeSourceDeploymentManifest -Manifest $TargetDeployment)) {
+    throw "TargetDeployment failed runtime source V1 validation."
+  }
+
+  $canonicalComponents = @('api','lifecycle-broker','supervisor','trend','sideway','telegram','regime-notifier')
+  $mismatchComponents = New-Object 'System.Collections.Generic.List[string]'
+  $reasonCodes = New-Object 'System.Collections.Generic.List[string]'
+  $componentsDir = Join-Path ([System.IO.Path]::GetFullPath($RuntimeRoot)) 'phase7c-source-attestation\components'
+
+  foreach ($component in $canonicalComponents) {
+    $componentReasons = New-Object 'System.Collections.Generic.List[string]'
+    $path = Join-Path $componentsDir ($component + '.json')
+    $attestation = $null
+    $attestationUsable = $false
+
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+      try {
+        $attestation = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $requiredProperties = @('version','component','deploymentId','sourceCommit','sourceTree')
+        $attestationUsable = $true
+        foreach ($name in $requiredProperties) {
+          if ($null -eq $attestation.PSObject.Properties[$name]) {
+            $attestationUsable = $false
+            break
+          }
+        }
+        if ($attestationUsable -and ([int]$attestation.version -ne 1 -or [string]$attestation.component -ne $component)) {
+          $attestationUsable = $false
+        }
+      } catch {
+        $attestationUsable = $false
+      }
+    }
+
+    if (-not $attestationUsable) {
+      [void]$componentReasons.Add('ATTESTATION_MISSING')
+    } else {
+      if (-not [string]::Equals([string]$attestation.deploymentId, [string]$TargetDeployment.deploymentId, [System.StringComparison]::OrdinalIgnoreCase)) {
+        [void]$componentReasons.Add('DEPLOYMENT_ID_MISMATCH')
+      }
+      if (-not [string]::Equals([string]$attestation.sourceCommit, [string]$TargetDeployment.sourceCommit, [System.StringComparison]::OrdinalIgnoreCase)) {
+        [void]$componentReasons.Add('SOURCE_COMMIT_MISMATCH')
+      }
+      if (-not [string]::Equals([string]$attestation.sourceTree, [string]$TargetDeployment.sourceTree, [System.StringComparison]::OrdinalIgnoreCase)) {
+        [void]$componentReasons.Add('SOURCE_TREE_MISMATCH')
+      }
+    }
+
+    if ($componentReasons.Count -gt 0) {
+      [void]$mismatchComponents.Add($component)
+      foreach ($reason in $componentReasons) {
+        if (-not $reasonCodes.Contains($reason)) {
+          [void]$reasonCodes.Add($reason)
+        }
+      }
+    }
+  }
+
+  return [pscustomobject][ordered]@{
+    version = 1
+    exactMatch = $mismatchComponents.Count -eq 0
+    canonicalComponents = @($canonicalComponents)
+    mismatchComponents = @($mismatchComponents)
+    reasonCodes = @($reasonCodes)
+  }
+}
+
+function Get-Phase7CRuntimeSourceGenerationReloadDecision {
+  param(
+    [Parameter(Mandatory = $true)] [string]$RuntimeRoot,
+    $PreviousDeployment,
+    [Parameter(Mandatory = $true)] $TargetDeployment
+  )
+
+  if (-not (Test-Phase7CRuntimeSourceDeploymentManifest -Manifest $TargetDeployment)) {
+    throw "TargetDeployment failed runtime source V1 validation."
+  }
+
+  $previousDeploymentId = ""
+  if ($null -ne $PreviousDeployment -and $null -ne $PreviousDeployment.PSObject.Properties['deploymentId']) {
+    $previousDeploymentId = ([string]$PreviousDeployment.deploymentId).Trim()
+  }
+  $deploymentIdChanged = `
+    [string]::IsNullOrWhiteSpace($previousDeploymentId) -or `
+    -not [string]::Equals(
+      $previousDeploymentId,
+      [string]$TargetDeployment.deploymentId,
+      [System.StringComparison]::OrdinalIgnoreCase
+    )
+
+  $attestationStatus = Get-Phase7CRuntimeSourceGenerationAttestationStatus `
+    -RuntimeRoot $RuntimeRoot `
+    -TargetDeployment $TargetDeployment
+
+  $reloadReasons = New-Object 'System.Collections.Generic.List[string]'
+  if ($deploymentIdChanged) {
+    [void]$reloadReasons.Add('DEPLOYMENT_ID_CHANGED')
+  }
+  if (-not [bool]$attestationStatus.exactMatch) {
+    [void]$reloadReasons.Add('CANONICAL_COMPONENT_ATTESTATION_MISMATCH')
+  }
+
+  return [pscustomobject][ordered]@{
+    version = 1
+    reloadRequired = $deploymentIdChanged -or -not [bool]$attestationStatus.exactMatch
+    deploymentIdChanged = [bool]$deploymentIdChanged
+    attestationExactMatch = [bool]$attestationStatus.exactMatch
+    canonicalComponents = @($attestationStatus.canonicalComponents)
+    mismatchComponents = @($attestationStatus.mismatchComponents)
+    reasonCodes = @($attestationStatus.reasonCodes)
+    reloadReasons = @($reloadReasons)
+  }
+}
