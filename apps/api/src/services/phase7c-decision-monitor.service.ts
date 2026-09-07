@@ -1,5 +1,12 @@
 import { canonicalHoldReason } from "../../../../scripts/phase7c-hold-observability.mjs";
-import { existsSync, readFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+} from "node:fs";
 import { resolve } from "node:path";
 import type { Mt5TelemetrySnapshot } from "./mt5.service";
 import { getMt5Telemetry } from "./mt5.service";
@@ -181,11 +188,22 @@ function runtimeRoot(): string {
 }
 
 function readJsonlTail(file: string, limit: number): DecisionAuditRecord[] {
+  const maxBytes = 2 * 1024 * 1024;
+  let fd: number | null = null;
   try {
-    const buffer = readFileSync(file);
-    const maxBytes = 2 * 1024 * 1024;
-    const start = Math.max(0, buffer.length - maxBytes);
-    const text = buffer.subarray(start).toString("utf8");
+    fd = openSync(file, "r");
+    const fileSize = fstatSync(fd).size;
+    const start = Math.max(0, fileSize - maxBytes);
+    const bytesToRead = Math.max(0, fileSize - start);
+    const buffer = Buffer.allocUnsafe(bytesToRead);
+    let offset = 0;
+    while (offset < bytesToRead) {
+      const bytesRead = readSync(fd, buffer, offset, bytesToRead - offset, start + offset);
+      if (bytesRead <= 0) break;
+      offset += bytesRead;
+    }
+
+    const text = buffer.subarray(0, offset).toString("utf8");
     const rows: DecisionAuditRecord[] = [];
     for (const line of text.split(/\r?\n/).filter(Boolean)) {
       try {
@@ -198,12 +216,20 @@ function readJsonlTail(file: string, limit: number): DecisionAuditRecord[] {
           rows.push({ ...value, timestamp: Number(value.timestamp) });
         }
       } catch {
-        // The first line can be partial when only a file tail was read.
+        // The first line can be partial when only a bounded file tail was read.
       }
     }
     return rows.slice(-limit);
   } catch {
     return [];
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        // Read-only observability remains fail-closed on close errors.
+      }
+    }
   }
 }
 
