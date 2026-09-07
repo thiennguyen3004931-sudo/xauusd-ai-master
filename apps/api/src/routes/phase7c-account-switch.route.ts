@@ -19,7 +19,7 @@ function isLoopbackRequest(req: Request): boolean {
 }
 
 function rejectNonLocal(req: Request, res: Response): boolean {
-  if (isLoopbackRequest(req, res)) return false;
+  if (isLoopbackRequest(req)) return false;
   res.status(403).json({ error: "Account switching is restricted to localhost." });
   return true;
 }
