@@ -477,14 +477,25 @@ $deployment = Initialize-Phase7CRuntimeSourceDeployment `
   -SourceTree $sourceTree `
   -Branch main `
   -ConfigIdentity $attestationConfigIdentity
-$runtimeSourceGenerationReloadRequired = `
-  $null -eq $previousDeployment -or `
-  [string]$previousDeployment.deploymentId -ne [string]$deployment.deploymentId
+$runtimeSourceGenerationDecision = Get-Phase7CRuntimeSourceGenerationReloadDecision `
+  -RuntimeRoot $WorkDir `
+  -PreviousDeployment $previousDeployment `
+  -TargetDeployment $deployment
+$runtimeSourceGenerationReloadRequired = [bool]$runtimeSourceGenerationDecision.reloadRequired
 if ($runtimeSourceGenerationReloadRequired) {
   Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD=REQUIRED"
 } else {
   Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD=NOT_REQUIRED"
 }
+$runtimeSourceGenerationReloadReasons = @($runtimeSourceGenerationDecision.reloadReasons)
+$runtimeSourceGenerationMismatchComponents = @($runtimeSourceGenerationDecision.mismatchComponents)
+$runtimeSourceGenerationMismatchReasons = @($runtimeSourceGenerationDecision.reasonCodes)
+$runtimeSourceGenerationReloadReasonText = if ($runtimeSourceGenerationReloadReasons.Count -eq 0) { "NONE" } else { $runtimeSourceGenerationReloadReasons -join ',' }
+$runtimeSourceGenerationMismatchComponentText = if ($runtimeSourceGenerationMismatchComponents.Count -eq 0) { "NONE" } else { $runtimeSourceGenerationMismatchComponents -join ',' }
+$runtimeSourceGenerationMismatchReasonText = if ($runtimeSourceGenerationMismatchReasons.Count -eq 0) { "NONE" } else { $runtimeSourceGenerationMismatchReasons -join ',' }
+Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD_REASONS=$runtimeSourceGenerationReloadReasonText"
+Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_MISMATCH_COMPONENTS=$runtimeSourceGenerationMismatchComponentText"
+Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_MISMATCH_REASONS=$runtimeSourceGenerationMismatchReasonText"
 Write-Host "PHASE7C_RUNTIME_SOURCE_DEPLOYMENT_ID=$($deployment.deploymentId)"
 Write-Host "PHASE7C_RUNTIME_SOURCE_COMMIT=$($deployment.sourceCommit)"
 Write-Host "PHASE7C_RUNTIME_SOURCE_TREE=$($deployment.sourceTree)"
@@ -1263,6 +1274,16 @@ if ($runtimeSourceGenerationReloadRequired -and -not $taskRepairRequired) {
   Assert-PauseDisarmed -Stage "FINAL"
   Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "FINAL"
   Assert-FlatBroker -Stage "FINAL"
+
+  $finalRuntimeSourceGenerationStatus = Get-Phase7CRuntimeSourceGenerationAttestationStatus `
+    -RuntimeRoot $WorkDir `
+    -TargetDeployment $deployment
+  if (-not [bool]$finalRuntimeSourceGenerationStatus.exactMatch) {
+    $finalMismatchComponents = @($finalRuntimeSourceGenerationStatus.mismatchComponents) -join ','
+    $finalMismatchReasons = @($finalRuntimeSourceGenerationStatus.reasonCodes) -join ','
+    throw "FINAL runtime source attestation mismatch. components=$finalMismatchComponents reasons=$finalMismatchReasons"
+  }
+  Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_FINAL_SOURCE_ATTESTATION=EXACT"
 
   Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_STATUS=PASS"
   Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_FINAL_MODE=PAUSE"
