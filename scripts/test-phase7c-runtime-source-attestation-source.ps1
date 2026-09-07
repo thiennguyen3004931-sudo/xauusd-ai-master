@@ -108,6 +108,43 @@ try {
   Assert-True (Test-Path -LiteralPath $componentPath -PathType Leaf) "component attestation missing"
   [void](Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json)
   [void](Get-Content -LiteralPath $componentPath -Raw | ConvertFrom-Json)
+
+  # Regression: a target deployment manifest with six exact components and one stale
+  # lifecycle broker must force source-generation reload even when deploymentId is unchanged.
+  $canonicalComponents = @('api','lifecycle-broker','supervisor','trend','sideway','telegram','regime-notifier')
+  $processId = 20000
+  foreach ($componentName in $canonicalComponents) {
+    $processId++
+    [void](Write-Phase7CRuntimeSourceComponentAttestation `
+      -RuntimeRoot $runtimeRoot `
+      -Component $componentName `
+      -ProcessId $processId `
+      -LauncherPath $launcher `
+      -ConfigIdentity $changedIdentity)
+  }
+
+  $exactGeneration = Get-Phase7CRuntimeSourceGenerationAttestationStatus `
+    -RuntimeRoot $runtimeRoot `
+    -TargetDeployment $third
+  Assert-True ([bool]$exactGeneration.exactMatch) "Exact seven-component target generation must be exact"
+  Assert-True (@($exactGeneration.mismatchComponents).Count -eq 0) "Exact generation must not report mismatched components"
+
+  $brokerPath = Join-Path $runtimeRoot "phase7c-source-attestation\components\lifecycle-broker.json"
+  $staleBroker = Get-Content -LiteralPath $brokerPath -Raw | ConvertFrom-Json
+  $staleBroker.sourceCommit = "b09131f906fd710c44071bf2e59f227672887e23"
+  Assert-True ([string]$staleBroker.deploymentId -eq [string]$third.deploymentId) "Regression fixture must keep target deploymentId"
+  [System.IO.File]::WriteAllText(
+    $brokerPath,
+    ($staleBroker | ConvertTo-Json -Depth 8 -Compress),
+    (New-Object System.Text.UTF8Encoding($false))
+  )
+
+  $staleGeneration = Get-Phase7CRuntimeSourceGenerationAttestationStatus `
+    -RuntimeRoot $runtimeRoot `
+    -TargetDeployment $third
+  Assert-True (-not [bool]$staleGeneration.exactMatch) "Same deploymentId plus stale broker source must require generation reload"
+  Assert-True (@($staleGeneration.mismatchComponents) -contains 'lifecycle-broker') "Stale broker must be identified as the mismatched canonical component"
+  Assert-True (@($staleGeneration.reasonCodes) -contains 'SOURCE_COMMIT_MISMATCH') "Stale broker source commit mismatch must remain observable"
 } finally {
   Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
