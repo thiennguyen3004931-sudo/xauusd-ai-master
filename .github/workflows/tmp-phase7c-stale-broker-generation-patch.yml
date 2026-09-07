@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   patch-and-self-remove:
-    if: github.event.head_commit.message == 'chore: apply bounded recovery generation wiring'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout branch
@@ -20,8 +19,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply exact bounded source patch
-        shell: python
+        shell: bash
         run: |
+          python - <<'PY'
           from pathlib import Path
 
           path = Path('scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1')
@@ -100,6 +100,7 @@ jobs:
               raise SystemExit(f'expected exactly one final safety block, found {text.count(old_final)}')
           text = text.replace(old_final, new_final, 1)
           path.write_text(text, encoding='utf-8', newline='')
+          PY
 
       - name: Commit bounded patch and remove temporary workflow
         shell: bash
@@ -110,6 +111,9 @@ jobs:
           git rm .github/workflows/tmp-phase7c-stale-broker-generation-patch.yml
           git add scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1
           git diff --cached --check
-          git diff --cached --exit-code --quiet && { echo "No patch produced"; exit 1; } || true
+          if git diff --cached --exit-code --quiet; then
+            echo "No patch produced"
+            exit 1
+          fi
           git commit -m "fix: reconcile stale canonical source generation"
           git push origin HEAD:fix/phase7c-stale-broker-generation-reconciliation
