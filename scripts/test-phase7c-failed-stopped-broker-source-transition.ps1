@@ -42,14 +42,17 @@ foreach ($forbidden in @(
     'Stop-ScheduledTask',
     'ARM_LIVE',
     'DISARM_LIVE',
+    'Invoke-ApiPost',
+    '-Method Post',
     '/lifecycle/start',
     '/lifecycle/stop',
-    'recover-phase7c-runtime-ready-stable-deploy-local.ps1',
-    '/v1/order',
-    '/v1/position'
+    'recover-phase7c-runtime-ready-stable-deploy-local.ps1'
 )) {
     Assert-False ($helperSource -match [regex]::Escape($forbidden)) "Source-transition helper must not contain forbidden runtime mutation token: $forbidden"
 }
+Assert-True ($helperSource -match [regex]::Escape('/v1/orders?symbol=XAUUSD')) 'Source-transition helper must verify pending XAUUSD orders read-only.'
+Assert-True ($helperSource -match [regex]::Escape('/v1/positions?symbol=XAUUSD')) 'Source-transition helper must verify XAUUSD positions read-only.'
+Assert-True ($helperSource -match 'HTTP_METHODS=GET_ONLY') 'Source-transition helper must attest GET-only HTTP behavior.'
 Assert-True ($helperSource -match 'merge\s+--ff-only') 'Source-transition helper must use exact git merge --ff-only.'
 Assert-True ($helperSource -match 'FAILED_STOPPED_BROKER') 'Helper must explicitly identify FAILED_STOPPED_BROKER state.'
 Assert-True ($helperSource -match 'FINAL_MODE=PAUSE') 'Helper must attest final PAUSE mode.'
