@@ -42,7 +42,7 @@ if (!/maxBytes\s*=\s*2\s*\*\s*1024\s*\*\s*1024/.test(decisionTail)) {
 }
 
 const parseAuditMatch = performanceIntelligence.match(
-  /function parseAuditSource\([^]*?\n}\n\nclass IdentifierUnion/,
+  /(?:async\s+)?function parseAuditSource\([^]*?\n}\n\nclass IdentifierUnion/,
 );
 if (!parseAuditMatch) fail("performance intelligence parseAuditSource function not found");
 const parseAuditSource = parseAuditMatch[0];
