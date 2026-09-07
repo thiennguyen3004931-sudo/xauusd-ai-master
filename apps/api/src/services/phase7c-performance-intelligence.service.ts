@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import path from "node:path";
+import * as readline from "node:readline";
 import {
   getMt5PerformanceSnapshot,
   type Mt5PerformanceTrade,
@@ -308,31 +309,40 @@ function relativeRuntimePath(absolutePath: string): string {
   return path.relative(runtimeRoot(), absolutePath).split(path.sep).join("/");
 }
 
-function parseAuditSource(strategy: Strategy, root: string, fileName: string): ParsedAuditSource {
+async function parseAuditSource(
+  strategy: Strategy,
+  root: string,
+  fileName: string,
+): Promise<ParsedAuditSource> {
   const absolutePath = path.resolve(root, fileName);
   const relativePath = relativeRuntimePath(absolutePath);
   if (!existsSync(absolutePath)) {
     return { strategy, relativePath, available: false, parsedRows: 0, malformedRows: 0, events: [] };
   }
 
-  const lines = readFileSync(absolutePath, "utf8").split(/\r?\n/).filter((line) => line.trim());
   const events: ParsedAuditEvent[] = [];
   let malformedRows = 0;
+  let index = 0;
+  const input = createReadStream(absolutePath, { encoding: "utf8" });
+  const lines = readline.createInterface({ input, crlfDelay: Infinity });
 
-  lines.forEach((line, index) => {
+  for await (const line of lines) {
+    if (!line.trim()) continue;
+    const eventIndex = index;
+    index += 1;
     try {
       const parsed = JSON.parse(line) as unknown;
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         malformedRows += 1;
-        return;
+        continue;
       }
       const raw = parsed as RawEvent;
       const eventName = eventNameOf(raw);
       const rules = ruleEvidence(raw);
       events.push({
         raw,
-        index,
-        eventId: eventIdOf(raw, strategy, index, eventName),
+        index: eventIndex,
+        eventId: eventIdOf(raw, strategy, eventIndex, eventName),
         eventName,
         identifiers: identifiersOf(raw, eventName),
         passedRules: rules.passed,
@@ -343,7 +353,7 @@ function parseAuditSource(strategy: Strategy, root: string, fileName: string): P
     } catch {
       malformedRows += 1;
     }
-  });
+  }
 
   return {
     strategy,
@@ -520,8 +530,10 @@ function aggregateEntryTypes(trades: readonly Phase7CPerformanceIntelligenceTrad
 export async function getPhase7CPerformanceIntelligence(days = 90, symbol = "XAUUSD") {
   const performance = await getMt5PerformanceSnapshot(days, symbol);
   const auditRoot = decisionAuditRoot(performance.account.accountMode);
-  const auditSources = AUDIT_SOURCES.map((source) =>
-    parseAuditSource(source.strategy, auditRoot, source.fileName),
+  const auditSources = await Promise.all(
+    AUDIT_SOURCES.map((source) =>
+      parseAuditSource(source.strategy, auditRoot, source.fileName),
+    ),
   );
   const systemTrades = performance.trades.filter(
     (trade) => trade.ownership === "SYSTEM" && (trade.strategy === "TREND" || trade.strategy === "SIDEWAY"),
@@ -674,5 +686,6 @@ export const __test = {
   addCanonicalEntryConditions,
   entryTypeOf,
   identifiersOf,
+  parseAuditSource,
   ruleEvidence,
 };
