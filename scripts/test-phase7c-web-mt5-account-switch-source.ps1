@@ -15,9 +15,6 @@ $files = @{
   shell = Join-Path $ProjectRoot "apps\web\src\pages\Phase7CControlCenterShellPage.tsx"
 }
 
-function Assert-True([bool]$Value, [string]$Message) {
-  if (-not $Value) { throw $Message }
-}
 function Assert-Literal([string]$Source, [string]$Text, [string]$Label) {
   if ($Source.IndexOf($Text, [System.StringComparison]::Ordinal) -lt 0) {
     throw "Missing MT5 account-switch literal: $Label"
@@ -55,8 +52,7 @@ Assert-Literal $service 'finalBotMode: "PAUSE"' 'switch final mode policy'
 Assert-Literal $service 'finalLiveArmStatus: "DISARMED"' 'switch final LIVE ARM policy'
 Assert-Literal $service 'armAfterLiveSwitch: false' 'no automatic ARM after switch'
 
-# Same-mode login change must receive a server-side read-only readiness gate that
-# reuses managed/pending/execution-lock checks and requires LIVE to be DISARMED.
+# Same-mode login preparation remains read-only and guarded.
 Assert-Literal $service 'getPhase7CSameModeAccountChangeReadiness' 'same-mode readiness service'
 Assert-Literal $route 'router.get("/same-mode-readiness"' 'same-mode readiness GET route'
 Assert-Literal $service 'noTrendManagedTicket' 'same-mode Trend managed guard'
@@ -66,16 +62,15 @@ Assert-Literal $service 'noSidewayPendingEntry' 'same-mode Sideway pending guard
 Assert-Literal $service 'noExecutionLock' 'same-mode execution lock guard'
 Assert-Literal $service 'liveDisarmed' 'same-mode LIVE DISARM guard'
 
-# LIVE A -> LIVE B must fail closed after bridge identity changes. The current
-# canonical account-switch path has no same-mode writer for MT5_LOGIN / allowed
-# logins / LIVE risk-profile binding, so bridge identity alone can never mean verified.
-Assert-Literal $service 'canonicalProfileExact: currentMode !== "LIVE"' 'LIVE same-mode canonical profile fail-closed marker'
-Assert-Literal $webTypes 'canonicalProfileExact: boolean' 'canonical profile exact response type'
+# LIVE A -> LIVE B is detect-only until a separate canonical profile-rebind workflow exists.
+# Bridge login change alone must never become a verified LIVE account.
 Assert-Literal $helper 'liveSameModeVerificationRequiresCanonicalProfile: true' 'LIVE verification policy'
-Assert-Literal $helper 'readiness.canonicalProfileExact' 'same-mode verification requires canonical profile exact'
+Assert-Literal $helper 'getSameModeMt5AccountVerificationState' 'verification state classifier'
 Assert-Literal $helper 'IDENTITY_CHANGED_BUT_CANONICAL_PROFILE_UNVERIFIED' 'unverified identity state'
-Assert-Literal $card 'IDENTITY_CHANGED_BUT_CANONICAL_PROFILE_UNVERIFIED' 'card unverified identity state'
-Assert-Literal $card 'canonical profile' 'card canonical profile guidance'
+Assert-Literal $helper 'if (baseline.accountMode === "LIVE")' 'LIVE detect-only branch'
+Assert-Literal $helper 'getSameModeMt5AccountVerificationState(input) === "VERIFIED"' 'verified boolean delegates to state classifier'
+Assert-Literal $card 'IDENTITY_CHANGED_BUT_CANONICAL_PROFILE_UNVERIFIED' 'card unverified LIVE identity state'
+Assert-Contains $card 'canonical profile|canonical.*profile' 'card canonical profile guidance'
 
 # Telemetry exposes account login only as a sanitized top-level identity while nested
 # health explicitly strips the login. Web types must follow that exact boundary.
