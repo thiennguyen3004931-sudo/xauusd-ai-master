@@ -277,7 +277,7 @@ Assert-True ($recoveryText.Contains('Get-Phase7CRuntimeSourceGenerationReloadDec
 Assert-True ($recoveryText.Contains('$runtimeSourceGenerationReloadRequired = [bool]$runtimeSourceGenerationDecision.reloadRequired')) "recovery must use the canonical reload decision result"
 Assert-True ($recoveryText.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD_REASONS=')) "recovery must audit generation reload reasons"
 Assert-True ($recoveryText.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_MISMATCH_COMPONENTS=')) "recovery must audit mismatched canonical components"
-Assert-True (-not $recoveryText.Contains("$runtimeSourceGenerationReloadRequired = ```n  `$null -eq `$previousDeployment -or ```n  [string]`$previousDeployment.deploymentId -ne [string]`$deployment.deploymentId")) "recovery must not retain deploymentId-only generation reload decision"
+Assert-True (-not $recoveryText.Contains('$null -eq $previousDeployment -or')) "recovery must not retain deploymentId-only generation reload decision"
 
 $webGitIndex = $webText.IndexOf('PHASE7C_WEB_UI_DEPLOY_GIT_CLEAN=PASS', [System.StringComparison]::Ordinal)
 $webManifestIndex = $webText.IndexOf('Initialize-Phase7CRuntimeSourceDeployment', [System.StringComparison]::Ordinal)
