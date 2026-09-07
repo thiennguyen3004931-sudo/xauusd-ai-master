@@ -11,6 +11,10 @@ const performanceIntelligencePath = path.join(
   root,
   "apps/api/src/services/phase7c-performance-intelligence.service.ts",
 );
+const performanceEffectivenessPath = path.join(
+  root,
+  "apps/api/src/services/phase7c-performance-effectiveness.service.ts",
+);
 
 function fail(message) {
   console.error(`PHASE7C_OBSERVABILITY_EVENT_LOOP_SOURCE_CONTRACT=FAIL ${message}`);
@@ -20,12 +24,14 @@ function fail(message) {
 for (const [filePath, label] of [
   [decisionMonitorPath, "decision monitor"],
   [performanceIntelligencePath, "performance intelligence"],
+  [performanceEffectivenessPath, "performance effectiveness"],
 ]) {
   if (!fs.existsSync(filePath)) fail(`${label} source missing`);
 }
 
 const decisionMonitor = fs.readFileSync(decisionMonitorPath, "utf8");
 const performanceIntelligence = fs.readFileSync(performanceIntelligencePath, "utf8");
+const performanceEffectiveness = fs.readFileSync(performanceEffectivenessPath, "utf8");
 
 const decisionTailMatch = decisionMonitor.match(
   /function readJsonlTail\([^]*?\n}\n\nfunction decisionAuditRoot/,
@@ -59,8 +65,24 @@ if (!/createReadStream|readline\.createInterface/.test(parseAuditSource)) {
   fail("performance intelligence audit parser must stream JSONL instead of buffering the whole file");
 }
 
+if (!/runPhase7CSingleFlight/.test(performanceIntelligence)) {
+  fail("P2 performance intelligence must coalesce identical concurrent work with single-flight");
+}
+
+if (!/runPhase7CSingleFlight/.test(performanceEffectiveness)) {
+  fail("P3 performance effectiveness must coalesce identical concurrent work with single-flight");
+}
+
+if (!/new\s+Map<string,\s*Promise<unknown>>\s*\(\s*\)/.test(performanceIntelligence)) {
+  fail("P2 performance intelligence in-flight registry missing");
+}
+
+if (!/new\s+Map<string,\s*Promise<unknown>>\s*\(\s*\)/.test(performanceEffectiveness)) {
+  fail("P3 performance effectiveness in-flight registry missing");
+}
+
 if (/sendOrder|modifyPosition|closePosition|phase7CBotModeService\.set/.test(
-  `${decisionMonitor}\n${performanceIntelligence}`,
+  `${decisionMonitor}\n${performanceIntelligence}\n${performanceEffectiveness}`,
 )) {
   fail("observability source contains forbidden trading/mode mutation pattern");
 }
@@ -68,6 +90,9 @@ if (/sendOrder|modifyPosition|closePosition|phase7CBotModeService\.set/.test(
 console.log("PHASE7C_OBSERVABILITY_EVENT_LOOP_SOURCE_CONTRACT=PASS");
 console.log("DECISION_MONITOR_JSONL_TAIL=BOUNDED");
 console.log("PERFORMANCE_INTELLIGENCE_JSONL=ASYNC_STREAMING");
+console.log("P2_SINGLE_FLIGHT=ENFORCED");
+console.log("P3_SINGLE_FLIGHT=ENFORCED");
+console.log("RESULT_CACHE=NONE");
 console.log("STRATEGY_MUTATION=NONE");
 console.log("RISK_MUTATION=NONE");
 console.log("MODE_MUTATION=NONE");
