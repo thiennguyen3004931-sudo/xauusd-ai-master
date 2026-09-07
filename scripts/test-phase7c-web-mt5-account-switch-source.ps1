@@ -66,6 +66,17 @@ Assert-Literal $service 'noSidewayPendingEntry' 'same-mode Sideway pending guard
 Assert-Literal $service 'noExecutionLock' 'same-mode execution lock guard'
 Assert-Literal $service 'liveDisarmed' 'same-mode LIVE DISARM guard'
 
+# LIVE A -> LIVE B must fail closed after bridge identity changes. The current
+# canonical account-switch path has no same-mode writer for MT5_LOGIN / allowed
+# logins / LIVE risk-profile binding, so bridge identity alone can never mean verified.
+Assert-Literal $service 'canonicalProfileExact: currentMode !== "LIVE"' 'LIVE same-mode canonical profile fail-closed marker'
+Assert-Literal $webTypes 'canonicalProfileExact: boolean' 'canonical profile exact response type'
+Assert-Literal $helper 'liveSameModeVerificationRequiresCanonicalProfile: true' 'LIVE verification policy'
+Assert-Literal $helper 'readiness.canonicalProfileExact' 'same-mode verification requires canonical profile exact'
+Assert-Literal $helper 'IDENTITY_CHANGED_BUT_CANONICAL_PROFILE_UNVERIFIED' 'unverified identity state'
+Assert-Literal $card 'IDENTITY_CHANGED_BUT_CANONICAL_PROFILE_UNVERIFIED' 'card unverified identity state'
+Assert-Literal $card 'canonical profile' 'card canonical profile guidance'
+
 # Telemetry exposes account login only as a sanitized top-level identity while nested
 # health explicitly strips the login. Web types must follow that exact boundary.
 Assert-Literal $telemetryService 'const { accountLogin: _accountLogin, ...safe } = health;' 'nested health strips account login'
