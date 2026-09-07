@@ -66,9 +66,10 @@ Assert-Literal $service 'noSidewayPendingEntry' 'same-mode Sideway pending guard
 Assert-Literal $service 'noExecutionLock' 'same-mode execution lock guard'
 Assert-Literal $service 'liveDisarmed' 'same-mode LIVE DISARM guard'
 
-# Telemetry already has a sanitized top-level account login; Web must type it there
-# rather than depending on the nested health object which intentionally strips login.
-Assert-Literal $telemetryService 'accountLogin: Number.isFinite(accountLogin) ? accountLogin : null' 'sanitized top-level account login'
+# Telemetry exposes account login only as a sanitized top-level identity while nested
+# health explicitly strips the login. Web types must follow that exact boundary.
+Assert-Literal $telemetryService 'const { accountLogin: _accountLogin, ...safe } = health;' 'nested health strips account login'
+Assert-Literal $telemetryService 'accountLogin: health.accountLogin ?? null' 'sanitized top-level account login'
 Assert-Contains $telemetryTypes 'export interface Mt5TelemetrySnapshot\s*\{[\s\S]*?accountLogin\??:\s*number\s*\|\s*null' 'top-level telemetry accountLogin type'
 
 # Web API is typed and centralised instead of duplicating raw account-switch fetches.
