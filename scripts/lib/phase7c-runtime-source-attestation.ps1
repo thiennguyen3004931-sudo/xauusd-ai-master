@@ -229,6 +229,70 @@ function Initialize-Phase7CRuntimeSourceDeployment {
   return $manifest
 }
 
+function Get-Phase7CRuntimeSourceComponentDeploymentStatus {
+  param(
+    [Parameter(Mandatory = $true)] $Attestation,
+    [Parameter(Mandatory = $true)] $Deployment,
+    [Parameter(Mandatory = $true)]
+    [ValidateSet('api','lifecycle-broker','supervisor','trend','sideway','telegram','regime-notifier')]
+    [string]$ExpectedComponent
+  )
+
+  if ($null -eq $Attestation) { throw "Runtime source component attestation is required." }
+  if (-not (Test-Phase7CRuntimeSourceDeploymentManifest -Manifest $Deployment)) {
+    throw "Runtime source deployment failed V1 validation before component comparison."
+  }
+  foreach ($name in @('version','component','deploymentId','sourceCommit','sourceTree','pid','startedAt','launcherSha256','configFingerprint')) {
+    if ($null -eq $Attestation.PSObject.Properties[$name]) {
+      throw "Runtime source component attestation is missing required V1 field: $name"
+    }
+  }
+  if ([int]$Attestation.version -ne 1) { throw "Runtime source component attestation version must be 1." }
+  if ([string]$Attestation.component -ne $ExpectedComponent) {
+    throw "Runtime source component attestation component mismatch. expected=$ExpectedComponent actual=$($Attestation.component)"
+  }
+  if ([string]$Attestation.deploymentId -notmatch '^[0-9a-f]{32}$') { throw "Runtime source component attestation deploymentId is invalid." }
+  if ([string]$Attestation.sourceCommit -notmatch '^[0-9a-f]{40}$') { throw "Runtime source component attestation sourceCommit is invalid." }
+  if ([string]$Attestation.sourceTree -notmatch '^[0-9a-f]{40}$') { throw "Runtime source component attestation sourceTree is invalid." }
+  if ([int]$Attestation.pid -le 0) { throw "Runtime source component attestation pid must be positive." }
+  if ([long]$Attestation.startedAt -le 0) { throw "Runtime source component attestation startedAt must be positive." }
+  if ([string]$Attestation.launcherSha256 -notmatch '^sha256:[0-9a-f]{64}$') { throw "Runtime source component attestation launcherSha256 is invalid." }
+  if ([string]$Attestation.configFingerprint -notmatch '^sha256:[0-9a-f]{64}$') { throw "Runtime source component attestation configFingerprint is invalid." }
+
+  $matchesDeployment = `
+    [string]$Attestation.deploymentId -eq [string]$Deployment.deploymentId -and `
+    [string]$Attestation.sourceCommit -eq [string]$Deployment.sourceCommit -and `
+    [string]$Attestation.sourceTree -eq [string]$Deployment.sourceTree -and `
+    [string]$Attestation.configFingerprint -eq [string]$Deployment.configFingerprint
+
+  if ($matchesDeployment) { return 'MATCH' }
+  return 'MISMATCH'
+}
+
+function Get-Phase7CRuntimeSourceGenerationReloadDecision {
+  param(
+    [Parameter(Mandatory = $true)] [bool]$DeploymentChanged,
+    [Parameter(Mandatory = $true)] [ValidateSet('MATCH','MISMATCH')] [string]$LifecycleBrokerSourceStatus
+  )
+
+  if ($DeploymentChanged) {
+    return [pscustomobject][ordered]@{
+      reloadRequired = $true
+      reason = 'DEPLOYMENT_CHANGED'
+    }
+  }
+  if ($LifecycleBrokerSourceStatus -eq 'MISMATCH') {
+    return [pscustomobject][ordered]@{
+      reloadRequired = $true
+      reason = 'LIFECYCLE_BROKER_SOURCE_MISMATCH'
+    }
+  }
+  return [pscustomobject][ordered]@{
+    reloadRequired = $false
+    reason = 'NOT_REQUIRED'
+  }
+}
+
 function Write-Phase7CRuntimeSourceComponentAttestation {
   param(
     [Parameter(Mandatory = $true)] [string]$RuntimeRoot,

@@ -477,14 +477,32 @@ $deployment = Initialize-Phase7CRuntimeSourceDeployment `
   -SourceTree $sourceTree `
   -Branch main `
   -ConfigIdentity $attestationConfigIdentity
-$runtimeSourceGenerationReloadRequired = `
+$deploymentChanged = `
   $null -eq $previousDeployment -or `
   [string]$previousDeployment.deploymentId -ne [string]$deployment.deploymentId
+
+$lifecycleBrokerSourceStatus = 'MATCH'
+if (-not $deploymentChanged) {
+  $lifecycleBrokerAttestationPath = Join-Path $WorkDir "phase7c-source-attestation\components\lifecycle-broker.json"
+  $lifecycleBrokerAttestation = Read-JsonFile `
+    -Path $lifecycleBrokerAttestationPath `
+    -Label "Lifecycle broker source attestation before generation reload decision"
+  $lifecycleBrokerSourceStatus = Get-Phase7CRuntimeSourceComponentDeploymentStatus `
+    -Attestation $lifecycleBrokerAttestation `
+    -Deployment $deployment `
+    -ExpectedComponent 'lifecycle-broker'
+}
+
+$runtimeSourceReloadDecision = Get-Phase7CRuntimeSourceGenerationReloadDecision `
+  -DeploymentChanged $deploymentChanged `
+  -LifecycleBrokerSourceStatus $lifecycleBrokerSourceStatus
+$runtimeSourceGenerationReloadRequired = [bool]$runtimeSourceReloadDecision.reloadRequired
 if ($runtimeSourceGenerationReloadRequired) {
   Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD=REQUIRED"
 } else {
   Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD=NOT_REQUIRED"
 }
+Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD_REASON=$($runtimeSourceReloadDecision.reason)"
 Write-Host "PHASE7C_RUNTIME_SOURCE_DEPLOYMENT_ID=$($deployment.deploymentId)"
 Write-Host "PHASE7C_RUNTIME_SOURCE_COMMIT=$($deployment.sourceCommit)"
 Write-Host "PHASE7C_RUNTIME_SOURCE_TREE=$($deployment.sourceTree)"

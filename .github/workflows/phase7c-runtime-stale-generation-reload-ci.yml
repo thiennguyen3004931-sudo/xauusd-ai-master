@@ -1,0 +1,35 @@
+name: Phase7C Runtime Stale Generation Reload CI
+
+on:
+  push:
+    branches:
+      - fix/phase7c-runtime-stale-generation-reload
+    paths:
+      - "scripts/lib/phase7c-runtime-source-attestation.ps1"
+      - "scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1"
+      - "scripts/test-phase7c-runtime-stale-generation-reload-local.ps1"
+      - ".github/workflows/phase7c-runtime-stale-generation-reload-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "scripts/lib/phase7c-runtime-source-attestation.ps1"
+      - "scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1"
+      - "scripts/test-phase7c-runtime-stale-generation-reload-local.ps1"
+      - ".github/workflows/phase7c-runtime-stale-generation-reload-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  stale-generation-contract-windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stale generation reload contract - PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-runtime-stale-generation-reload-local.ps1
+      - name: Stale generation reload contract - Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-runtime-stale-generation-reload-local.ps1
