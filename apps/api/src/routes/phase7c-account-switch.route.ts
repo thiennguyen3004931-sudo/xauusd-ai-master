@@ -3,6 +3,7 @@ import {
   createPhase7CAccountSwitchPreflight,
   getPhase7CAccountSwitchCapability,
   getPhase7CAccountSwitchStatus,
+  getPhase7CSameModeAccountChangeReadiness,
   isPhase7CAccountSwitchTarget,
   submitPhase7CAccountSwitch,
 } from "../services/phase7c-account-switch.service";
@@ -18,7 +19,7 @@ function isLoopbackRequest(req: Request): boolean {
 }
 
 function rejectNonLocal(req: Request, res: Response): boolean {
-  if (isLoopbackRequest(req)) return false;
+  if (isLoopbackRequest(req, res)) return false;
   res.status(403).json({ error: "Account switching is restricted to localhost." });
   return true;
 }
@@ -30,6 +31,16 @@ router.get("/capability", async (req: Request, res: Response) => {
     res.json(await getPhase7CAccountSwitchCapability());
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : "Could not inspect account switch capability." });
+  }
+});
+
+router.get("/same-mode-readiness", async (req: Request, res: Response) => {
+  if (rejectNonLocal(req, res)) return;
+  res.setHeader("cache-control", "no-store");
+  try {
+    res.json(await getPhase7CSameModeAccountChangeReadiness());
+  } catch (error) {
+    res.status(503).json({ error: error instanceof Error ? error.message : "Could not inspect same-mode account-change readiness." });
   }
 });
 
