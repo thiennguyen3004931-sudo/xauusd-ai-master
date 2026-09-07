@@ -22,6 +22,7 @@ import {
 } from "../phase7c-account-switch-api";
 import {
   captureMt5AccountIdentity,
+  getSameModeMt5AccountVerificationState,
   hasMt5AccountIdentityChanged,
   isSameModeMt5AccountVerified,
   maskMt5AccountLogin,
@@ -168,11 +169,18 @@ export function Phase7CAccountSwitchCard() {
   const readiness = sameModeReadinessQuery.data;
   const currentIdentity = captureMt5AccountIdentity(telemetryQuery.data);
   const sameModeIdentityChanged = hasMt5AccountIdentityChanged(sameModeBaseline, currentIdentity);
+  const sameModeVerificationState = getSameModeMt5AccountVerificationState({
+    baseline: sameModeBaseline,
+    telemetry: telemetryQuery.data,
+    readiness,
+  });
   const sameModeVerified = isSameModeMt5AccountVerified({
     baseline: sameModeBaseline,
     telemetry: telemetryQuery.data,
     readiness,
   });
+  const canonicalProfileUnverified =
+    sameModeVerificationState === "IDENTITY_CHANGED_BUT_CANONICAL_PROFILE_UNVERIFIED";
   const canPrepareSameMode = Boolean(
     readiness?.approved &&
       currentIdentity.accountLogin &&
@@ -201,7 +209,7 @@ export function Phase7CAccountSwitchCard() {
             <Typography variant="overline" color="warning.main" fontWeight={950}>ĐỔI TÀI KHOẢN MT5</Typography>
             <Typography variant="h5" fontWeight={950}>Guarded account switch · không lưu thông tin đăng nhập</Typography>
             <Typography variant="body2" color="text.secondary" mt={0.8}>
-              DEMO ↔ LIVE dùng elevated guarded task. Đổi login cùng loại được chuẩn bị trên Web nhưng thao tác đăng nhập thực hiện trực tiếp trong MT5; Web chỉ xác minh read-only sau đó. Account switch không cấp quyền AUTO và không gửi order.
+              DEMO ↔ LIVE dùng elevated guarded task. Đổi login cùng loại được chuẩn bị trên Web nhưng thao tác đăng nhập thực hiện trực tiếp trong MT5. LIVE A → LIVE B chỉ được phát hiện read-only cho đến khi canonical profile được rebind/xác minh bằng workflow riêng. Account switch không cấp quyền AUTO và không gửi order.
             </Typography>
           </Box>
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="flex-start">
@@ -328,7 +336,7 @@ export function Phase7CAccountSwitchCard() {
         <Box mt={2} sx={{ p: 2, borderRadius: 3, border: "1px solid", borderColor: readiness?.approved ? "success.main" : "divider" }}>
           <Typography variant="overline" color="secondary" fontWeight={950}>B. ĐỔI LOGIN CÙNG LOẠI · {currentMode} → {currentMode}</Typography>
           <Typography variant="body2" color="text.secondary" mt={0.5}>
-            Ví dụ LIVE A → LIVE B. Web không nhận thông tin đăng nhập. Khi readiness PASS, bạn bấm chuẩn bị rồi tự đăng nhập tài khoản mới trong MT5; Web theo dõi login/server/account mode để xác minh.
+            Ví dụ LIVE A → LIVE B. Web không nhận thông tin đăng nhập. Khi readiness PASS, bạn bấm chuẩn bị rồi tự đăng nhập tài khoản mới trong MT5. Với LIVE, bridge login thay đổi chỉ là bước phát hiện; canonical profile vẫn phải được rebind/xác minh riêng trước khi ARM/AUTO lại.
           </Typography>
 
           {readiness && (
@@ -359,9 +367,13 @@ export function Phase7CAccountSwitchCard() {
             </Button>
           ) : (
             <Stack spacing={1.3} mt={1.8}>
-              <Alert severity={sameModeVerified ? "success" : sameModeIdentityChanged ? "warning" : "info"}>
+              <Alert severity={sameModeVerified ? "success" : canonicalProfileUnverified ? "error" : sameModeIdentityChanged ? "warning" : "info"}>
                 <Typography fontWeight={950}>
-                  {sameModeVerified ? "TÀI KHOẢN MỚI ĐÃ XÁC MINH" : "ĐANG CHỜ BẠN ĐĂNG NHẬP TÀI KHOẢN MỚI TRONG MT5"}
+                  {sameModeVerified
+                    ? "TÀI KHOẢN MỚI ĐÃ XÁC MINH"
+                    : canonicalProfileUnverified
+                      ? "LOGIN LIVE MỚI ĐÃ PHÁT HIỆN · CANONICAL PROFILE CHƯA XÁC MINH"
+                      : "ĐANG CHỜ BẠN ĐĂNG NHẬP TÀI KHOẢN MỚI TRONG MT5"}
                 </Typography>
                 <Typography variant="body2" mt={0.5}>
                   Cũ: {identityLabel(sameModeBaseline)}
@@ -370,11 +382,17 @@ export function Phase7CAccountSwitchCard() {
                   Hiện tại: {identityLabel(currentIdentity)}
                 </Typography>
                 <Typography variant="body2" mt={0.5}>
-                  Login changed: <b>{sameModeIdentityChanged ? "YES" : "NO"}</b> · readiness: <b>{readiness?.approved ? "PASS" : "BLOCKED"}</b>
+                  Login changed: <b>{sameModeIdentityChanged ? "YES" : "NO"}</b> · readiness: <b>{readiness?.approved ? "PASS" : "BLOCKED"}</b> · verification: <b>{sameModeVerificationState}</b>
                 </Typography>
               </Alert>
 
-              {!sameModeVerified && (
+              {canonicalProfileUnverified && (
+                <Alert severity="error">
+                  IDENTITY_CHANGED_BUT_CANONICAL_PROFILE_UNVERIFIED: MT5 đã thấy login LIVE mới, nhưng Web không có canonical writer để rebind MT5_LOGIN / MT5_ALLOWED_LOGINS / LIVE risk profile. Không ARM và không bật AUTO lại từ trạng thái này. Cần một workflow rebind canonical riêng rồi mới chạy production acceptance cho account mới.
+                </Alert>
+              )}
+
+              {!sameModeVerified && !canonicalProfileUnverified && (
                 <Typography variant="body2" color="text.secondary">
                   Mở MT5 và đăng nhập tài khoản {currentMode} khác. Giữ bot PAUSE; nếu là LIVE thì quyền giao dịch phải tiếp tục tắt. Web sẽ tự đọc lại sau mỗi 2 giây.
                 </Typography>
@@ -398,7 +416,7 @@ export function Phase7CAccountSwitchCard() {
         </Box>
 
         <Typography variant="caption" color="text.secondary" display="block" mt={2.2} sx={{ lineHeight: 1.7 }}>
-          Safety policy: credential input {SAME_MODE_ACCOUNT_CHANGE_POLICY.credentialInput}; login cùng loại chỉ thực hiện thủ công trong MT5. Account switch không gửi order, không đổi lot/risk, không tự cấp lại quyền giao dịch và không tự bật AUTO.
+          Safety policy: credential input {SAME_MODE_ACCOUNT_CHANGE_POLICY.credentialInput}; login cùng loại chỉ thực hiện thủ công trong MT5. LIVE same-mode verification yêu cầu canonical profile workflow riêng; card này chỉ detect login mới. Account switch không gửi order, không đổi lot/risk, không tự cấp lại quyền giao dịch và không tự bật AUTO.
         </Typography>
       </CardContent>
     </Card>
