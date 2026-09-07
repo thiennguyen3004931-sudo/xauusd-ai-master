@@ -8,6 +8,7 @@ on:
       - fix/phase7c-resume-reuse-exact-broker
       - feat/phase7c-production-source-transition-rollout
       - fix/phase7c-stop-before-disarm
+      - fix/phase7c-production-readonly-preflight
     paths:
       - 'scripts/reconcile-phase7c-runtime-source-generation-local.ps1'
       - 'scripts/resume-phase7c-runtime-source-generation-reconciliation-local.ps1'
@@ -16,6 +17,7 @@ on:
       - 'scripts/test-phase7c-runtime-source-generation-reconciliation-source.ps1'
       - 'scripts/test-phase7c-production-source-transition-rollout-source.ps1'
       - 'scripts/test-phase7c-stop-before-disarm-source.ps1'
+      - 'scripts/test-phase7c-production-readonly-preflight-source.ps1'
       - '.github/workflows/phase7c-runtime-source-generation-reconciliation-ci.yml'
   pull_request:
     paths:
@@ -26,6 +28,7 @@ on:
       - 'scripts/test-phase7c-runtime-source-generation-reconciliation-source.ps1'
       - 'scripts/test-phase7c-production-source-transition-rollout-source.ps1'
       - 'scripts/test-phase7c-stop-before-disarm-source.ps1'
+      - 'scripts/test-phase7c-production-readonly-preflight-source.ps1'
       - '.github/workflows/phase7c-runtime-source-generation-reconciliation-ci.yml'
 
 permissions:
@@ -61,6 +64,14 @@ jobs:
       - name: STOP before DISARM contract - Windows PowerShell 5.1
         shell: powershell
         run: ./scripts/test-phase7c-stop-before-disarm-source.ps1
+
+      - name: Production read-only preflight contract - PowerShell 7
+        shell: pwsh
+        run: ./scripts/test-phase7c-production-readonly-preflight-source.ps1
+
+      - name: Production read-only preflight contract - Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/test-phase7c-production-readonly-preflight-source.ps1
 
       - name: Parse helpers - PowerShell 7
         shell: pwsh
