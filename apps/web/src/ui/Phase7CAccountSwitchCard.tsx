@@ -201,7 +201,7 @@ export function Phase7CAccountSwitchCard() {
             <Typography variant="overline" color="warning.main" fontWeight={950}>ĐỔI TÀI KHOẢN MT5</Typography>
             <Typography variant="h5" fontWeight={950}>Guarded account switch · không lưu thông tin đăng nhập</Typography>
             <Typography variant="body2" color="text.secondary" mt={0.8}>
-              DEMO ↔ LIVE dùng elevated guarded task. Đổi login cùng loại được chuẩn bị trên Web nhưng thao tác đăng nhập thực hiện trực tiếp trong MT5; Web chỉ xác minh read-only sau đó.
+              DEMO ↔ LIVE dùng elevated guarded task. Đổi login cùng loại được chuẩn bị trên Web nhưng thao tác đăng nhập thực hiện trực tiếp trong MT5; Web chỉ xác minh read-only sau đó. Account switch không cấp quyền AUTO và không gửi order.
             </Typography>
           </Box>
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="flex-start">
