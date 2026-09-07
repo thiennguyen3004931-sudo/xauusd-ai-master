@@ -51,13 +51,13 @@ Require-InOrder -Text $runtimeMutationBlock -Label 'normal runtime mutation must
     "Assert-Arm -Expected 'DISARMED' -Stage 'POST_DISARM'"
 )
 
-if ($runtimeMutationBlock -notmatch "Assert-Arm\s+-Expected\s+\$ExpectedInitialArm\s+-Stage\s+['\"]POST_LIFECYCLE_STOP_PRE_DISARM['\"]") {
+if ($runtimeMutationBlock -notmatch 'Assert-Arm\s+-Expected\s+\$ExpectedInitialArm\s+-Stage\s+[''"]POST_LIFECYCLE_STOP_PRE_DISARM[''"]') {
     throw 'Healthy STOP must prove the original ARM state is unchanged before DISARM.'
 }
-if ($runtimeMutationBlock -notmatch "Assert-OrphanQueuedRuntimeState\s+-Stage\s+['\"]PRE_DISARM['\"]") {
+if ($runtimeMutationBlock -notmatch 'Assert-OrphanQueuedRuntimeState\s+-Stage\s+[''"]PRE_DISARM[''"]') {
     throw 'ORPHAN_QUEUED resume must prove lifecycle is already stopped before DISARM.'
 }
-if ($runtimeMutationBlock -notmatch "Assert-StoppedLifecycleRuntimeState[^\r\n]*-Stage\s+['\"]PRE_DISARM['\"]") {
+if ($runtimeMutationBlock -notmatch 'Assert-StoppedLifecycleRuntimeState[^\r\n]*-Stage\s+[''"]PRE_DISARM[''"]') {
     throw 'STOPPED_LIFECYCLE resume must prove lifecycle is already stopped before DISARM.'
 }
 
