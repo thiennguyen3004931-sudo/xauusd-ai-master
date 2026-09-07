@@ -70,6 +70,8 @@ foreach ($required in @(
     'TASK_LAST_RESULT=',
     'BROKER_READY=',
     'BROKER_PID=',
+    'ACCOUNT_MODE=',
+    'BRIDGE_HEALTHY=',
     'CLASSIFICATION=',
     'BLOCKED_BY='
 )) {
@@ -110,8 +112,13 @@ $base = @{
     LocalHeadDiffersFromTarget = $true
     Mode = 'PAUSE'
     Arm = 'DISARMED'
+    AccountMode = 'LIVE'
+    AccountModeValid = $true
+    BridgeHealthy = $true
+    BridgeLiveReal = $true
     LifecycleRunning = $false
     LifecycleReady = $false
+    BrokerReady = $false
     AliveExecutorCount = 0
     Positions = 0
     PendingOrders = 0
@@ -147,8 +154,13 @@ $negativeCases = @(
     @{ Label = 'source transition must still be needed'; Override = @{ LocalHeadDiffersFromTarget = $false } },
     @{ Label = 'mode PAUSE'; Override = @{ Mode = 'AUTO' } },
     @{ Label = 'ARM DISARMED'; Override = @{ Arm = 'ARMED' } },
+    @{ Label = 'account LIVE'; Override = @{ AccountMode = 'DEMO' } },
+    @{ Label = 'account valid'; Override = @{ AccountModeValid = $false } },
+    @{ Label = 'bridge healthy'; Override = @{ BridgeHealthy = $false } },
+    @{ Label = 'bridge LIVE real'; Override = @{ BridgeLiveReal = $false } },
     @{ Label = 'lifecycle stopped'; Override = @{ LifecycleRunning = $true } },
     @{ Label = 'runtime not ready'; Override = @{ LifecycleReady = $true } },
+    @{ Label = 'broker not ready'; Override = @{ BrokerReady = $true } },
     @{ Label = 'zero executors'; Override = @{ AliveExecutorCount = 1 } },
     @{ Label = 'zero positions'; Override = @{ Positions = 1 } },
     @{ Label = 'zero orders'; Override = @{ PendingOrders = 1 } },
