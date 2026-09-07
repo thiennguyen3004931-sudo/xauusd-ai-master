@@ -676,18 +676,16 @@ if ($runtimeSourceGenerationReloadRequired -and -not $taskRepairRequired) {
     [bool]$preWebRuntimeGeneration.brokerHeartbeatFresh -and `
     [string]$preWebRuntimeGeneration.startupRunnerLockState -eq 'HELD'
 
-  $preWebCanonicalProcessIds = @(Get-Phase7CCanonicalTaskProcessIds -Task $preWebTask)
-  $preWebRunningInstanceCount = Get-Phase7CRunningTaskInstanceCount -Name $TaskName
+  $preWebCanonicalProcessIds = @()
+  $preWebRunningInstanceCount = -1
   $preWebExpectedLauncherSha256 = 'sha256:' + $trustedRunnerSha256.ToLowerInvariant()
   $preWebBrokerAttestationPath = Join-Path $WorkDir "phase7c-source-attestation\components\lifecycle-broker.json"
-  $preWebBrokerAttestation = Read-JsonFile -Path $preWebBrokerAttestationPath -Label "Lifecycle broker source attestation before pre-Web generation reload"
-  $preWebAttestedLauncherSha256 = ([string]$preWebBrokerAttestation.launcherSha256).Trim().ToLowerInvariant()
-  $preWebReleasedOwnership = Test-Phase7CExecutorTaskActionOwnership `
-    -Actions $preWebTask.Actions `
-    -ExpectedRunnerPath $runnerPath `
-    -ExpectedRunnerSha256 $trustedRunnerSha256
-  $preWebReleasedDrift = @(Get-Phase7CExecutorTaskDrift -Task $preWebTask)
-  $preWebReleasedLockRepairEligible = `
+  $preWebBrokerAttestation = $null
+  $preWebAttestedLauncherSha256 = ''
+  $preWebReleasedOwnership = $null
+  $preWebReleasedDrift = @('UNREAD')
+  $preWebReleasedLockRepairEligible = $false
+  $preWebReleasedLockCandidate = `
     $preWebLifecycleStopped -and `
     [string]$preWebTask.State -eq 'Running' -and `
     [string]$preWebRuntimeGeneration.statusReadState -eq 'OK' -and `
@@ -695,18 +693,35 @@ if ($runtimeSourceGenerationReloadRequired -and -not $taskRepairRequired) {
     [bool]$preWebRuntimeGeneration.brokerStatusPidMatch -and `
     [bool]$preWebRuntimeGeneration.brokerProcessAlive -and `
     [bool]$preWebRuntimeGeneration.brokerHeartbeatFresh -and `
-    [string]$preWebRuntimeGeneration.startupRunnerLockState -in @('MISSING', 'RELEASED') -and `
-    $preWebCanonicalProcessIds.Count -eq 1 -and `
-    $preWebRunningInstanceCount -eq 1 -and `
-    [int]$preWebCanonicalProcessIds[0] -eq [int]$preWebRuntimeGeneration.statusBrokerPid -and `
-    [string]$preWebBrokerAttestation.component -eq 'lifecycle-broker' -and `
-    [int]$preWebBrokerAttestation.pid -eq [int]$preWebRuntimeGeneration.statusBrokerPid -and `
-    $preWebAttestedLauncherSha256 -eq $preWebExpectedLauncherSha256 -and `
-    [bool]$preWebReleasedOwnership.owned -and `
-    [bool]$preWebReleasedOwnership.canonical -and `
-    -not [bool]$preWebReleasedOwnership.repairRequired -and `
-    $preWebReleasedDrift.Count -eq 0 -and `
-    (Test-Phase7CSystemTaskPrincipal $preWebTask.Principal)
+    [string]$preWebRuntimeGeneration.startupRunnerLockState -in @('MISSING', 'RELEASED')
+
+  if ($preWebReleasedLockCandidate) {
+    try {
+      $preWebCanonicalProcessIds = @(Get-Phase7CCanonicalTaskProcessIds -Task $preWebTask)
+      $preWebRunningInstanceCount = Get-Phase7CRunningTaskInstanceCount -Name $TaskName
+      $preWebBrokerAttestation = Read-JsonFile -Path $preWebBrokerAttestationPath -Label "Lifecycle broker source attestation before pre-Web generation reload"
+      $preWebAttestedLauncherSha256 = ([string]$preWebBrokerAttestation.launcherSha256).Trim().ToLowerInvariant()
+      $preWebReleasedOwnership = Test-Phase7CExecutorTaskActionOwnership `
+        -Actions $preWebTask.Actions `
+        -ExpectedRunnerPath $runnerPath `
+        -ExpectedRunnerSha256 $trustedRunnerSha256
+      $preWebReleasedDrift = @(Get-Phase7CExecutorTaskDrift -Task $preWebTask)
+      $preWebReleasedLockRepairEligible = `
+        $preWebCanonicalProcessIds.Count -eq 1 -and `
+        $preWebRunningInstanceCount -eq 1 -and `
+        [int]$preWebCanonicalProcessIds[0] -eq [int]$preWebRuntimeGeneration.statusBrokerPid -and `
+        [string]$preWebBrokerAttestation.component -eq 'lifecycle-broker' -and `
+        [int]$preWebBrokerAttestation.pid -eq [int]$preWebRuntimeGeneration.statusBrokerPid -and `
+        $preWebAttestedLauncherSha256 -eq $preWebExpectedLauncherSha256 -and `
+        [bool]$preWebReleasedOwnership.owned -and `
+        [bool]$preWebReleasedOwnership.canonical -and `
+        -not [bool]$preWebReleasedOwnership.repairRequired -and `
+        $preWebReleasedDrift.Count -eq 0 -and `
+        (Test-Phase7CSystemTaskPrincipal $preWebTask.Principal)
+    } catch {
+      $preWebReleasedLockRepairEligible = $false
+    }
+  }
 
   $preWebGenerationEligible = $preWebHealthyGenerationEligible -or $preWebReleasedLockRepairEligible
 
