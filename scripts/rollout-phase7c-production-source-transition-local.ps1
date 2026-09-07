@@ -566,10 +566,29 @@ Write-Host "PHASE7C_PRODUCTION_SOURCE_TRANSITION_PREFLIGHT_ARM=$ExpectedInitialA
 Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_ORDER_MUTATION=NONE'
 Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_POSITION_MUTATION=NONE'
 Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_LIVE_TEST_ORDER=NONE'
+Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_MUTATION_ORDER=STOP_THEN_DISARM'
 
 $mutationStarted = $false
 try {
     $mutationStarted = $true
+
+    if ($ExpectedInitialRuntimeState -eq 'HEALTHY') {
+        [void](Invoke-ApiPost '/api/v1/phase7c/lifecycle/stop' @{})
+        Wait-LifecycleStopped
+        Assert-Pause -Stage 'POST_LIFECYCLE_STOP_PRE_DISARM'
+        Assert-Arm -Expected $ExpectedInitialArm -Stage 'POST_LIFECYCLE_STOP_PRE_DISARM'
+        Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage 'POST_LIFECYCLE_STOP_PRE_DISARM'
+        Assert-FlatBroker -Stage 'POST_LIFECYCLE_STOP_PRE_DISARM'
+        Assert-CanonicalTask -Stage 'POST_LIFECYCLE_STOP_PRE_DISARM'
+        Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_LIFECYCLE_STOP=PASS'
+    } elseif ($ExpectedInitialRuntimeState -eq 'ORPHAN_QUEUED') {
+        [void](Assert-OrphanQueuedRuntimeState -Stage 'PRE_DISARM')
+        Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_LIFECYCLE_STOP=SKIPPED_ALREADY_STOPPED'
+    } elseif ($ExpectedInitialRuntimeState -eq 'STOPPED_LIFECYCLE') {
+        [void](Assert-StoppedLifecycleRuntimeState -ExpectedCommit $ExpectedCurrentCommit -ExpectedTree $currentTree -Stage 'PRE_DISARM')
+        Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_STOPPED_LIFECYCLE_LIFECYCLE_STOP=SKIPPED_ALREADY_STOPPED'
+    }
+
     if ($ExpectedInitialArm -eq 'ARMED') {
         Invoke-LiveArmAction -Action 'DISARM_LIVE'
         Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_DISARM=PASS'
@@ -580,22 +599,13 @@ try {
     Assert-Pause -Stage 'POST_DISARM'
     Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage 'POST_DISARM'
     Assert-FlatBroker -Stage 'POST_DISARM'
-
     if ($ExpectedInitialRuntimeState -eq 'HEALTHY') {
-        [void](Invoke-ApiPost '/api/v1/phase7c/lifecycle/stop' @{})
         Wait-LifecycleStopped
-        Assert-Pause -Stage 'POST_LIFECYCLE_STOP'
-        Assert-Arm -Expected 'DISARMED' -Stage 'POST_LIFECYCLE_STOP'
-        Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage 'POST_LIFECYCLE_STOP'
-        Assert-FlatBroker -Stage 'POST_LIFECYCLE_STOP'
-        Assert-CanonicalTask -Stage 'POST_LIFECYCLE_STOP'
-        Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_LIFECYCLE_STOP=PASS'
+        Assert-CanonicalTask -Stage 'POST_DISARM'
     } elseif ($ExpectedInitialRuntimeState -eq 'ORPHAN_QUEUED') {
         [void](Assert-OrphanQueuedRuntimeState -Stage 'POST_DISARM')
-        Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_LIFECYCLE_STOP=SKIPPED_ALREADY_STOPPED'
     } elseif ($ExpectedInitialRuntimeState -eq 'STOPPED_LIFECYCLE') {
         [void](Assert-StoppedLifecycleRuntimeState -ExpectedCommit $ExpectedCurrentCommit -ExpectedTree $currentTree -Stage 'POST_DISARM')
-        Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_STOPPED_LIFECYCLE_LIFECYCLE_STOP=SKIPPED_ALREADY_STOPPED'
     }
 
     Push-Location $ProjectRoot
@@ -674,17 +684,25 @@ try {
     Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_ORDER_MUTATION=NONE'
     Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_POSITION_MUTATION=NONE'
     Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_LIVE_TEST_ORDER=NONE'
+    Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_MUTATION_ORDER=STOP_THEN_DISARM'
     Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_STATUS=PASS'
 } catch {
     $failure = $_
     if ($mutationStarted) {
-        Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_FAIL_CLOSED=PAUSE_DISARMED_BEST_EFFORT'
+        Write-Host 'PHASE7C_PRODUCTION_SOURCE_TRANSITION_FAIL_CLOSED=PAUSE_STOP_DISARMED_BEST_EFFORT'
         try {
             $mode = Invoke-ApiGet '/api/v1/phase7c/bot-mode'
             if ([string]$mode.state.mode -ne 'PAUSE') {
                 [void](Invoke-ApiPost '/api/v1/phase7c/bot-mode' @{ mode = 'PAUSE'; source = 'production-source-transition-failclosed' })
             }
         } catch { Write-Warning "Fail-closed PAUSE best effort failed: $($_.Exception.Message)" }
+        try {
+            $lifecycle = Invoke-ApiGet '/api/v1/phase7c/lifecycle'
+            if ([bool]$lifecycle.running -or (Test-LifecycleHasAliveProcess -State $lifecycle)) {
+                [void](Invoke-ApiPost '/api/v1/phase7c/lifecycle/stop' @{})
+                Wait-LifecycleStopped
+            }
+        } catch { Write-Warning "Fail-closed STOP best effort failed: $($_.Exception.Message)" }
         try {
             $arm = Get-ArmCapability
             if ([string]$arm.liveArmStatus -ne 'DISARMED' -or [bool]$arm.liveExecutionArmed) { Invoke-LiveArmAction -Action 'DISARM_LIVE' }
