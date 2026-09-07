@@ -1,0 +1,45 @@
+name: Temporary Phase7C strict-mode test fix
+
+on:
+  push:
+    branches:
+      - fix/phase7c-stale-broker-generation-reconciliation
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-self-remove:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/phase7c-stale-broker-generation-reconciliation
+          fetch-depth: 0
+
+      - name: Apply exact test-only replacement
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/test-phase7c-runtime-source-attestation-source.ps1')
+          text = path.read_text(encoding='utf-8')
+          old = '''Assert-True (-not $recoveryText.Contains("$runtimeSourceGenerationReloadRequired = ```n  `$null -eq `$previousDeployment -or ```n  [string]`$previousDeployment.deploymentId -ne [string]`$deployment.deploymentId")) "recovery must not retain deploymentId-only generation reload decision"'''
+          new = '''Assert-True (-not $recoveryText.Contains('$null -eq $previousDeployment -or')) "recovery must not retain deploymentId-only generation reload decision"'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one strict-mode-unsafe assertion, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8', newline='')
+          PY
+
+      - name: Commit test fix and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/tmp-phase7c-static-test-fix.yml
+          git add scripts/test-phase7c-runtime-source-attestation-source.ps1
+          git diff --cached --check
+          git commit -m "test: make generation decision assertion strict-mode safe"
+          git push origin HEAD:fix/phase7c-stale-broker-generation-reconciliation
