@@ -179,8 +179,8 @@ function Read-BridgeArray([string]$Path) {
 
 function Get-ReleasedLockSafetySnapshot {
   param(
-    [Parameter(Mandatory = $true)] [string]$ExpectedBridgeSessionId,
-    [Parameter(Mandatory = $true)] [string]$ExpectedBrokerPid,
+    [Parameter(Mandatory = $true)] [AllowEmptyString()] [string]$ExpectedBridgeSessionId,
+    [Parameter(Mandatory = $true)] [AllowEmptyString()] [string]$ExpectedBrokerPid,
     [Parameter(Mandatory = $true)] [string]$ExpectedDeploymentId,
     [Parameter(Mandatory = $true)] [string]$ExpectedDeploymentCommit,
     [Parameter(Mandatory = $true)] [string]$ExpectedDeploymentTree
