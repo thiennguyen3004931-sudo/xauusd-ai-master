@@ -37,12 +37,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Event-loop semantic regressions
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-observability-event-loop.test.ts
+
       - name: Observability event-loop source contract
         run: node scripts/test-phase7c-observability-event-loop-source.mjs
 
       - name: Build API dependency graph
         run: pnpm --filter @xauusd/api... build
-
-      - name: Event-loop semantic regressions
-        if: ${{ hashFiles('scripts/phase7c-observability-event-loop.test.ts') != '' }}
-        run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-observability-event-loop.test.ts
