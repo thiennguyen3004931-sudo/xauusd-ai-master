@@ -1,0 +1,165 @@
+name: Phase7C Apply Stale Generation Patch
+
+on:
+  push:
+    branches:
+      - fix/phase7c-runtime-stale-generation-reload
+    paths:
+      - ".github/workflows/phase7c-apply-stale-generation-patch.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/phase7c-runtime-stale-generation-reload
+          fetch-depth: 0
+
+      - name: Apply bounded source patch
+        shell: python {0}
+        run: |
+          from pathlib import Path
+
+          helper_path = Path('scripts/lib/phase7c-runtime-source-attestation.ps1')
+          recovery_path = Path('scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1')
+
+          helper = helper_path.read_text(encoding='utf-8')
+          marker = "function Write-Phase7CRuntimeSourceComponentAttestation {"
+          if marker not in helper:
+              raise SystemExit('helper insertion marker missing')
+          if 'function Get-Phase7CRuntimeSourceComponentDeploymentStatus {' in helper:
+              raise SystemExit('helper patch already present unexpectedly')
+
+          helper_insert = r'''function Get-Phase7CRuntimeSourceComponentDeploymentStatus {
+            param(
+              [Parameter(Mandatory = $true)] $Attestation,
+              [Parameter(Mandatory = $true)] $Deployment,
+              [Parameter(Mandatory = $true)]
+              [ValidateSet('api','lifecycle-broker','supervisor','trend','sideway','telegram','regime-notifier')]
+              [string]$ExpectedComponent
+            )
+
+            if ($null -eq $Attestation) { throw "Runtime source component attestation is required." }
+            if (-not (Test-Phase7CRuntimeSourceDeploymentManifest -Manifest $Deployment)) {
+              throw "Runtime source deployment failed V1 validation before component comparison."
+            }
+            foreach ($name in @('version','component','deploymentId','sourceCommit','sourceTree','pid','startedAt','launcherSha256','configFingerprint')) {
+              if ($null -eq $Attestation.PSObject.Properties[$name]) {
+                throw "Runtime source component attestation is missing required V1 field: $name"
+              }
+            }
+            if ([int]$Attestation.version -ne 1) { throw "Runtime source component attestation version must be 1." }
+            if ([string]$Attestation.component -ne $ExpectedComponent) {
+              throw "Runtime source component attestation component mismatch. expected=$ExpectedComponent actual=$($Attestation.component)"
+            }
+            if ([string]$Attestation.deploymentId -notmatch '^[0-9a-f]{32}$') { throw "Runtime source component attestation deploymentId is invalid." }
+            if ([string]$Attestation.sourceCommit -notmatch '^[0-9a-f]{40}$') { throw "Runtime source component attestation sourceCommit is invalid." }
+            if ([string]$Attestation.sourceTree -notmatch '^[0-9a-f]{40}$') { throw "Runtime source component attestation sourceTree is invalid." }
+            if ([int]$Attestation.pid -le 0) { throw "Runtime source component attestation pid must be positive." }
+            if ([long]$Attestation.startedAt -le 0) { throw "Runtime source component attestation startedAt must be positive." }
+            if ([string]$Attestation.launcherSha256 -notmatch '^sha256:[0-9a-f]{64}$') { throw "Runtime source component attestation launcherSha256 is invalid." }
+            if ([string]$Attestation.configFingerprint -notmatch '^sha256:[0-9a-f]{64}$') { throw "Runtime source component attestation configFingerprint is invalid." }
+
+            $matchesDeployment = `
+              [string]$Attestation.deploymentId -eq [string]$Deployment.deploymentId -and `
+              [string]$Attestation.sourceCommit -eq [string]$Deployment.sourceCommit -and `
+              [string]$Attestation.sourceTree -eq [string]$Deployment.sourceTree -and `
+              [string]$Attestation.configFingerprint -eq [string]$Deployment.configFingerprint
+
+            if ($matchesDeployment) { return 'MATCH' }
+            return 'MISMATCH'
+          }
+
+          function Get-Phase7CRuntimeSourceGenerationReloadDecision {
+            param(
+              [Parameter(Mandatory = $true)] [bool]$DeploymentChanged,
+              [Parameter(Mandatory = $true)] [ValidateSet('MATCH','MISMATCH')] [string]$LifecycleBrokerSourceStatus
+            )
+
+            if ($DeploymentChanged) {
+              return [pscustomobject][ordered]@{
+                reloadRequired = $true
+                reason = 'DEPLOYMENT_CHANGED'
+              }
+            }
+            if ($LifecycleBrokerSourceStatus -eq 'MISMATCH') {
+              return [pscustomobject][ordered]@{
+                reloadRequired = $true
+                reason = 'LIFECYCLE_BROKER_SOURCE_MISMATCH'
+              }
+            }
+            return [pscustomobject][ordered]@{
+              reloadRequired = $false
+              reason = 'NOT_REQUIRED'
+            }
+          }
+
+          '''
+          helper = helper.replace(marker, helper_insert + marker, 1)
+          helper_path.write_text(helper, encoding='utf-8', newline='\n')
+
+          recovery = recovery_path.read_text(encoding='utf-8')
+          old = r'''$runtimeSourceGenerationReloadRequired = `
+            $null -eq $previousDeployment -or `
+            [string]$previousDeployment.deploymentId -ne [string]$deployment.deploymentId
+          if ($runtimeSourceGenerationReloadRequired) {
+            Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD=REQUIRED"
+          } else {
+            Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD=NOT_REQUIRED"
+          }'''
+          new = r'''$deploymentChanged = `
+            $null -eq $previousDeployment -or `
+            [string]$previousDeployment.deploymentId -ne [string]$deployment.deploymentId
+
+          $lifecycleBrokerSourceStatus = 'MATCH'
+          if (-not $deploymentChanged) {
+            $lifecycleBrokerAttestationPath = Join-Path $WorkDir "phase7c-source-attestation\components\lifecycle-broker.json"
+            $lifecycleBrokerAttestation = Read-JsonFile `
+              -Path $lifecycleBrokerAttestationPath `
+              -Label "Lifecycle broker source attestation before generation reload decision"
+            $lifecycleBrokerSourceStatus = Get-Phase7CRuntimeSourceComponentDeploymentStatus `
+              -Attestation $lifecycleBrokerAttestation `
+              -Deployment $deployment `
+              -ExpectedComponent 'lifecycle-broker'
+          }
+
+          $runtimeSourceReloadDecision = Get-Phase7CRuntimeSourceGenerationReloadDecision `
+            -DeploymentChanged $deploymentChanged `
+            -LifecycleBrokerSourceStatus $lifecycleBrokerSourceStatus
+          $runtimeSourceGenerationReloadRequired = [bool]$runtimeSourceReloadDecision.reloadRequired
+          if ($runtimeSourceGenerationReloadRequired) {
+            Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD=REQUIRED"
+          } else {
+            Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD=NOT_REQUIRED"
+          }
+          Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD_REASON=$($runtimeSourceReloadDecision.reason)"'''
+          if recovery.count(old) != 1:
+              raise SystemExit(f'expected exactly one recovery decision block, found {recovery.count(old)}')
+          recovery = recovery.replace(old, new, 1)
+          recovery_path.write_text(recovery, encoding='utf-8', newline='\n')
+
+      - name: Verify stale generation reload contract - PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7c-runtime-stale-generation-reload-local.ps1
+
+      - name: Verify stale generation reload contract - Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7c-runtime-stale-generation-reload-local.ps1
+
+      - name: Commit bounded source patch
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/lib/phase7c-runtime-source-attestation.ps1 scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1
+          git diff --cached --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
+          git commit -m "fix(phase7c): reload stale lifecycle broker generation"
+          if ($LASTEXITCODE -ne 0) { throw 'git commit failed' }
+          git push origin HEAD:fix/phase7c-runtime-stale-generation-reload
+          if ($LASTEXITCODE -ne 0) { throw 'git push failed' }
