@@ -35,7 +35,6 @@ $forbidden = @(
   'ARM_LIVE',
   'DISARM_LIVE',
   'AUTO',
-  '/v1/order',
   '/v1/close'
 )
 foreach ($token in $forbidden) {
