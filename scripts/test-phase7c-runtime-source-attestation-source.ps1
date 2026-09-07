@@ -109,8 +109,9 @@ try {
   [void](Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json)
   [void](Get-Content -LiteralPath $componentPath -Raw | ConvertFrom-Json)
 
-  # Regression: a target deployment manifest with six exact components and one stale
-  # lifecycle broker must force source-generation reload even when deploymentId is unchanged.
+  # Generation reload decision regression contract. Identity is deploymentId +
+  # sourceCommit + sourceTree for every canonical SYSTEM component; PID changes alone
+  # must never classify a source-generation mismatch.
   $canonicalComponents = @('api','lifecycle-broker','supervisor','trend','sideway','telegram','regime-notifier')
   $processId = 20000
   foreach ($componentName in $canonicalComponents) {
@@ -123,28 +124,119 @@ try {
       -ConfigIdentity $changedIdentity)
   }
 
-  $exactGeneration = Get-Phase7CRuntimeSourceGenerationAttestationStatus `
+  # CASE_2: same deployment + all seven exact => no reload.
+  $exactDecision = Get-Phase7CRuntimeSourceGenerationReloadDecision `
     -RuntimeRoot $runtimeRoot `
+    -PreviousDeployment $third `
     -TargetDeployment $third
-  Assert-True ([bool]$exactGeneration.exactMatch) "Exact seven-component target generation must be exact"
-  Assert-True (@($exactGeneration.mismatchComponents).Count -eq 0) "Exact generation must not report mismatched components"
+  Assert-True (-not [bool]$exactDecision.reloadRequired) "CASE_2 exact target generation must not require reload"
+  Assert-True (-not [bool]$exactDecision.deploymentIdChanged) "CASE_2 deploymentId must remain unchanged"
+  Assert-True ([bool]$exactDecision.attestationExactMatch) "CASE_2 all canonical component attestations must be exact"
+  Assert-True (@($exactDecision.mismatchComponents).Count -eq 0) "CASE_2 must not report mismatched components"
 
+  # CASE_1: same target deploymentId but stale lifecycle-broker source => reload.
   $brokerPath = Join-Path $runtimeRoot "phase7c-source-attestation\components\lifecycle-broker.json"
   $staleBroker = Get-Content -LiteralPath $brokerPath -Raw | ConvertFrom-Json
   $staleBroker.sourceCommit = "b09131f906fd710c44071bf2e59f227672887e23"
-  Assert-True ([string]$staleBroker.deploymentId -eq [string]$third.deploymentId) "Regression fixture must keep target deploymentId"
+  Assert-True ([string]$staleBroker.deploymentId -eq [string]$third.deploymentId) "CASE_1 fixture must retain target deploymentId"
   [System.IO.File]::WriteAllText(
     $brokerPath,
     ($staleBroker | ConvertTo-Json -Depth 8 -Compress),
     (New-Object System.Text.UTF8Encoding($false))
   )
-
-  $staleGeneration = Get-Phase7CRuntimeSourceGenerationAttestationStatus `
+  $staleDecision = Get-Phase7CRuntimeSourceGenerationReloadDecision `
     -RuntimeRoot $runtimeRoot `
+    -PreviousDeployment $third `
     -TargetDeployment $third
-  Assert-True (-not [bool]$staleGeneration.exactMatch) "Same deploymentId plus stale broker source must require generation reload"
-  Assert-True (@($staleGeneration.mismatchComponents) -contains 'lifecycle-broker') "Stale broker must be identified as the mismatched canonical component"
-  Assert-True (@($staleGeneration.reasonCodes) -contains 'SOURCE_COMMIT_MISMATCH') "Stale broker source commit mismatch must remain observable"
+  Assert-True ([bool]$staleDecision.reloadRequired) "CASE_1 stale lifecycle broker must require generation reload"
+  Assert-True (-not [bool]$staleDecision.deploymentIdChanged) "CASE_1 must prove deploymentId itself did not change"
+  Assert-True (@($staleDecision.mismatchComponents) -contains 'lifecycle-broker') "CASE_1 must identify lifecycle-broker mismatch"
+  Assert-True (@($staleDecision.reasonCodes) -contains 'SOURCE_COMMIT_MISMATCH') "CASE_1 must expose SOURCE_COMMIT_MISMATCH"
+
+  # Restore exact broker, then prove PID-only churn is not source-generation drift.
+  [void](Write-Phase7CRuntimeSourceComponentAttestation `
+    -RuntimeRoot $runtimeRoot `
+    -Component lifecycle-broker `
+    -ProcessId 29999 `
+    -LauncherPath $launcher `
+    -ConfigIdentity $changedIdentity)
+  $pidOnlyDecision = Get-Phase7CRuntimeSourceGenerationReloadDecision `
+    -RuntimeRoot $runtimeRoot `
+    -PreviousDeployment $third `
+    -TargetDeployment $third
+  Assert-True (-not [bool]$pidOnlyDecision.reloadRequired) "PID-only change must not require source-generation reload"
+  Assert-True ([bool]$pidOnlyDecision.attestationExactMatch) "PID-only change must retain exact source identity"
+
+  # CASE_3: missing canonical component attestation => reload fail-closed.
+  $sidewayPath = Join-Path $runtimeRoot "phase7c-source-attestation\components\sideway.json"
+  Remove-Item -LiteralPath $sidewayPath -Force
+  $missingDecision = Get-Phase7CRuntimeSourceGenerationReloadDecision `
+    -RuntimeRoot $runtimeRoot `
+    -PreviousDeployment $third `
+    -TargetDeployment $third
+  Assert-True ([bool]$missingDecision.reloadRequired) "CASE_3 missing canonical attestation must require reload"
+  Assert-True (@($missingDecision.mismatchComponents) -contains 'sideway') "CASE_3 must identify the missing canonical component"
+  Assert-True (@($missingDecision.reasonCodes) -contains 'ATTESTATION_MISSING') "CASE_3 must expose ATTESTATION_MISSING"
+  [void](Write-Phase7CRuntimeSourceComponentAttestation `
+    -RuntimeRoot $runtimeRoot `
+    -Component sideway `
+    -ProcessId 30001 `
+    -LauncherPath $launcher `
+    -ConfigIdentity $changedIdentity)
+
+  # Explicitly lock the remaining canonical mismatch reason codes.
+  $telegramPath = Join-Path $runtimeRoot "phase7c-source-attestation\components\telegram.json"
+  $telegramMismatch = Get-Content -LiteralPath $telegramPath -Raw | ConvertFrom-Json
+  $telegramMismatch.deploymentId = "11111111111111111111111111111111"
+  [System.IO.File]::WriteAllText($telegramPath, ($telegramMismatch | ConvertTo-Json -Depth 8 -Compress), (New-Object System.Text.UTF8Encoding($false)))
+  $componentDeploymentMismatchDecision = Get-Phase7CRuntimeSourceGenerationReloadDecision `
+    -RuntimeRoot $runtimeRoot `
+    -PreviousDeployment $third `
+    -TargetDeployment $third
+  Assert-True ([bool]$componentDeploymentMismatchDecision.reloadRequired) "Component deploymentId mismatch must require reload"
+  Assert-True (@($componentDeploymentMismatchDecision.reasonCodes) -contains 'DEPLOYMENT_ID_MISMATCH') "Component mismatch must expose DEPLOYMENT_ID_MISMATCH"
+  [void](Write-Phase7CRuntimeSourceComponentAttestation `
+    -RuntimeRoot $runtimeRoot `
+    -Component telegram `
+    -ProcessId 30002 `
+    -LauncherPath $launcher `
+    -ConfigIdentity $changedIdentity)
+
+  $trendPath = Join-Path $runtimeRoot "phase7c-source-attestation\components\trend.json"
+  $treeMismatch = Get-Content -LiteralPath $trendPath -Raw | ConvertFrom-Json
+  $treeMismatch.sourceTree = "2222222222222222222222222222222222222222"
+  [System.IO.File]::WriteAllText($trendPath, ($treeMismatch | ConvertTo-Json -Depth 8 -Compress), (New-Object System.Text.UTF8Encoding($false)))
+  $treeMismatchDecision = Get-Phase7CRuntimeSourceGenerationReloadDecision `
+    -RuntimeRoot $runtimeRoot `
+    -PreviousDeployment $third `
+    -TargetDeployment $third
+  Assert-True ([bool]$treeMismatchDecision.reloadRequired) "Source tree mismatch must require reload"
+  Assert-True (@($treeMismatchDecision.reasonCodes) -contains 'SOURCE_TREE_MISMATCH') "Tree mismatch must expose SOURCE_TREE_MISMATCH"
+  [void](Write-Phase7CRuntimeSourceComponentAttestation `
+    -RuntimeRoot $runtimeRoot `
+    -Component trend `
+    -ProcessId 30003 `
+    -LauncherPath $launcher `
+    -ConfigIdentity $changedIdentity)
+
+  # CASE_4: previous deploymentId differs => reload even with all target attestations exact.
+  $previousDifferentDeployment = [pscustomobject][ordered]@{
+    version = 1
+    deploymentId = "33333333333333333333333333333333"
+    sourceCommit = [string]$third.sourceCommit
+    sourceTree = [string]$third.sourceTree
+    branch = 'main'
+    worktreeClean = $true
+    createdAt = [long]$third.createdAt
+    configFingerprint = [string]$third.configFingerprint
+  }
+  $changedDeploymentDecision = Get-Phase7CRuntimeSourceGenerationReloadDecision `
+    -RuntimeRoot $runtimeRoot `
+    -PreviousDeployment $previousDifferentDeployment `
+    -TargetDeployment $third
+  Assert-True ([bool]$changedDeploymentDecision.reloadRequired) "CASE_4 changed deploymentId must require reload"
+  Assert-True ([bool]$changedDeploymentDecision.deploymentIdChanged) "CASE_4 must report deploymentIdChanged"
+  Assert-True ([bool]$changedDeploymentDecision.attestationExactMatch) "CASE_4 target component attestations remain exact"
 } finally {
   Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -178,6 +270,14 @@ $recoveryManifestIndex = $recoveryText.IndexOf('Initialize-Phase7CRuntimeSourceD
 $recoveryMutationIndex = $recoveryText.IndexOf('$mutationStarted = $false', [System.StringComparison]::Ordinal)
 Assert-True ($recoveryGitIndex -ge 0 -and $recoveryManifestIndex -gt $recoveryGitIndex) "RED Task2: recovery manifest must follow exact Git guard"
 Assert-True ($recoveryMutationIndex -gt $recoveryManifestIndex) "RED Task2: recovery manifest must exist before recovery mutation gate"
+
+# Stale canonical component identity must participate in the generation reload decision
+# before the recovery mutation gate. The old deploymentId-only expression is forbidden.
+Assert-True ($recoveryText.Contains('Get-Phase7CRuntimeSourceGenerationReloadDecision')) "recovery must classify deployment and canonical component attestation identity together"
+Assert-True ($recoveryText.Contains('$runtimeSourceGenerationReloadRequired = [bool]$runtimeSourceGenerationDecision.reloadRequired')) "recovery must use the canonical reload decision result"
+Assert-True ($recoveryText.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_RELOAD_REASONS=')) "recovery must audit generation reload reasons"
+Assert-True ($recoveryText.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_SOURCE_GENERATION_MISMATCH_COMPONENTS=')) "recovery must audit mismatched canonical components"
+Assert-True (-not $recoveryText.Contains("$runtimeSourceGenerationReloadRequired = ```n  `$null -eq `$previousDeployment -or ```n  [string]`$previousDeployment.deploymentId -ne [string]`$deployment.deploymentId")) "recovery must not retain deploymentId-only generation reload decision"
 
 $webGitIndex = $webText.IndexOf('PHASE7C_WEB_UI_DEPLOY_GIT_CLEAN=PASS', [System.StringComparison]::Ordinal)
 $webManifestIndex = $webText.IndexOf('Initialize-Phase7CRuntimeSourceDeployment', [System.StringComparison]::Ordinal)
