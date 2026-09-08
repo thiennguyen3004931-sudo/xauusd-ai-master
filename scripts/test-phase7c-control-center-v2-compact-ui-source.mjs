@@ -14,14 +14,16 @@ function requireText(source, needle, label) {
   if (!source.includes(needle)) throw new Error(`${label}: missing ${needle}`);
 }
 
-// Shell: one operator status bar, critical controls in two columns, intelligence detail cards preserved but collapsed.
+// Shell: one operator status bar, critical controls in two columns, old operational/intelligence surfaces preserved but collapsed.
 requireText(shell, "Phase7COperatorStatusBar", "operator status import");
 requireText(shell, "<Phase7COperatorStatusBar />", "operator status render");
 requireText(shell, "<Grid container spacing={2}>", "critical two-column grid");
 requireText(shell, "<Phase7CExecutionAuthorizationCard />", "execution authorization preserved");
 requireText(shell, "<Phase7CAccountSwitchCard />", "account switch preserved");
-requireText(shell, "<Phase7CControlCenterCompactSection />", "compact decision/control summary render");
+requireText(shell, "<Phase7CControlCenterCompactSection", "compact decision/control summary render");
 requireText(shell, "<Phase7CIntelligenceSummaryCard />", "intelligence compact summary render");
+requireText(shell, "const [showOperationalDetails, setShowOperationalDetails] = useState(false);", "operational controls collapsed by default");
+requireText(shell, "showOperationalDetails ? <Phase7CControlCenterPage /> : null", "legacy operational control visibility gate");
 requireText(shell, "const [showIntelligenceDetails, setShowIntelligenceDetails] = useState(false);", "intelligence collapsed by default");
 requireText(shell, "showIntelligenceDetails ? (", "intelligence detail visibility gate");
 requireText(shell, "<Phase7CPerformanceIntelligenceCard />", "performance intelligence detail preserved");
@@ -39,21 +41,22 @@ requireText(status, 'label={`POSITIONS ${positions}`}', "position status");
 requireText(status, 'label={`SOURCE ${sourceVerdict}`}', "runtime source status");
 requireText(status, "accountLogin", "account login summary");
 
-// Execution authorization: diagnostics collapsed by default.
-requireText(execution, "const [showArmChecks, setShowArmChecks] = useState(false);", "ARM details collapsed by default");
-requireText(execution, "showArmChecks &&", "ARM detail visibility gate");
+// Execution authorization: ARM diagnostics collapsed without changing canonical ARM/AUTO safety flow.
+requireText(execution, "const [armDetailsOpen, setArmDetailsOpen] = useState(false);", "ARM details collapsed by default");
+requireText(execution, "armDetailsOpen ? (", "ARM detail visibility gate");
 requireText(execution, "Xem chi tiết", "execution detail expand action");
 requireText(execution, "Ẩn chi tiết", "execution detail collapse action");
 requireText(execution, "Lý do:", "execution first blocker summary");
+requireText(execution, "const showAutoActivationDiagnostics = !isAutoActive;", "AUTO active diagnostics safety gate preserved");
 
-// Primary control surface: compact decision first, lot/lifecycle summary second, legacy controls preserved on demand.
-requireText(compact, "const [showOperationalDetails, setShowOperationalDetails] = useState(false);", "operational details collapsed by default");
+// Primary control summary: decision first, lot/lifecycle summary second, legacy controls delegated to shell.
 requireText(compact, "Quyết định hiện tại", "decision promoted to compact surface");
 requireText(compact, "Lot / Fixed TP", "lot and fixed TP summary");
 requireText(compact, "Bot / Lifecycle", "bot lifecycle summary");
 requireText(compact, "Mở điều khiển chi tiết", "legacy control expand action");
 requireText(compact, "Ẩn điều khiển chi tiết", "legacy control collapse action");
-requireText(compact, "showOperationalDetails ? <Phase7CControlCenterPage /> : null", "legacy control visibility gate");
+requireText(compact, "detailsOpen", "compact detail state supplied by shell");
+requireText(compact, "onToggleDetails", "compact detail action supplied by shell");
 
 // Intelligence on Control Center becomes summary-first with navigation to the dedicated performance page.
 requireText(intelligence, "Intelligence & hiệu suất", "intelligence summary title");
