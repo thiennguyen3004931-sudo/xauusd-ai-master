@@ -66,7 +66,17 @@ $requiredEvidence = @(
     'TASK_DRIFT=',
     'RUNTIME_SOURCE_OVERALL=',
     'RECOVERY_MUTATION_ALLOWED=',
-    'BLOCKED_BY='
+    'BLOCKED_BY=',
+    'ENDPOINT_BOT_MODE=',
+    'ENDPOINT_LIFECYCLE=',
+    'ENDPOINT_ARM_CAPABILITY=',
+    'ENDPOINT_SAME_MODE_READINESS=',
+    'ENDPOINT_ACCOUNT_SWITCH_STATUS=',
+    'ENDPOINT_LIVE_ARM_STATUS=',
+    'ENDPOINT_RUNTIME_SOURCE_ATTESTATION=',
+    'ENDPOINT_BRIDGE_HEALTH=',
+    'ENDPOINT_BRIDGE_POSITIONS=',
+    'ENDPOINT_BRIDGE_ORDERS='
 )
 foreach ($marker in $requiredEvidence) {
     if (-not $source.Contains($marker)) { throw "Missing production preflight evidence output: $marker" }
@@ -107,6 +117,26 @@ if ($source -notmatch '(?i)bridgeAccountIdentityMatch') {
 }
 if ($source -notmatch '(?i)accountEnvFileBindingValid') {
     throw 'Selected account-state envFile must be bound to the executor task config envFile.'
+}
+
+# A production probe must survive a stale API generation that does not expose
+# one or more newer GET routes. Missing/unreachable evidence is BLOCKED evidence,
+# not a reason to crash before printing the rest of the read-only snapshot.
+foreach ($functionName in @('Get-HttpStatusCode','Invoke-ControlApiGetEvidence','Invoke-BridgeGetEvidence','Read-BridgeArrayEvidence')) {
+    if ($source -notmatch ("(?m)^function\s+{0}\b" -f [regex]::Escape($functionName))) {
+        throw "Missing non-throwing read-only evidence wrapper: $functionName"
+    }
+}
+foreach ($gateMarker in @('CONTROL_API_EVIDENCE_AMBIGUOUS','BRIDGE_EXPOSURE_EVIDENCE_AMBIGUOUS')) {
+    if (-not $source.Contains($gateMarker)) {
+        throw "Route-missing/unreachable evidence must fail closed. Missing gate=$gateMarker"
+    }
+}
+if ($source -match '(?m)^function\s+Invoke-ApiGet\b') {
+    throw 'Mandatory control API evidence must not use the old throwing Invoke-ApiGet wrapper.'
+}
+if ($source -notmatch '(?i)HTTP_404') {
+    throw 'Endpoint evidence must distinguish HTTP_404 route absence from successful reads.'
 }
 
 $forbiddenCommands = @(
