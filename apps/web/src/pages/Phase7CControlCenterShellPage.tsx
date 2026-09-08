@@ -1,10 +1,10 @@
 import { Grid, Stack } from "@mui/material";
 import { Phase7CAccountSwitchCard } from "../ui/Phase7CAccountSwitchCard";
+import { Phase7CControlCenterCompactSection } from "../ui/Phase7CControlCenterCompactSection";
 import { Phase7CExecutionAuthorizationCard } from "../ui/Phase7CExecutionAuthorizationCard";
 import { Phase7CIntelligenceSummaryCard } from "../ui/Phase7CIntelligenceSummaryCard";
 import { Phase7COperatorStatusBar } from "../ui/Phase7COperatorStatusBar";
 import { Phase7CRuntimeSourceAttestationCard } from "../ui/Phase7CRuntimeSourceAttestationCard";
-import { Phase7CControlCenterPage } from "./Phase7CControlCenterPage";
 
 export function Phase7CControlCenterShellPage() {
   return (
@@ -20,7 +20,7 @@ export function Phase7CControlCenterShellPage() {
         </Grid>
       </Grid>
 
-      <Phase7CControlCenterPage />
+      <Phase7CControlCenterCompactSection />
       <Phase7CIntelligenceSummaryCard />
       <Phase7CRuntimeSourceAttestationCard />
     </Stack>
