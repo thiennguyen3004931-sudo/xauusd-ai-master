@@ -89,6 +89,7 @@ export function Phase7CAccountSwitchCard() {
   const [confirmation, setConfirmation] = useState("");
   const [requestId, setRequestId] = useState<string | null>(null);
   const [sameModeBaseline, setSameModeBaseline] = useState<Mt5AccountIdentity | null>(null);
+  const [sameModeDetailsOpen, setSameModeDetailsOpen] = useState(false);
 
   const capabilityQuery = useQuery({
     queryKey: ["phase7c-account-switch-capability"],
@@ -167,6 +168,15 @@ export function Phase7CAccountSwitchCard() {
 
   const checkRows = useMemo(() => Object.entries(preflight?.checks ?? {}), [preflight]);
   const readiness = sameModeReadinessQuery.data;
+  const firstBlockedReadiness = useMemo(
+    () => Object.entries(readiness?.checks ?? {}).find(([, passed]) => passed === false) ?? null,
+    [readiness],
+  );
+  const readinessReason = firstBlockedReadiness
+    ? CHECK_LABELS[firstBlockedReadiness[0]] ?? firstBlockedReadiness[0]
+    : readiness?.approved
+      ? "Tất cả điều kiện đã đạt"
+      : "Đang chờ dữ liệu readiness";
   const currentIdentity = captureMt5AccountIdentity(telemetryQuery.data);
   const sameModeIdentityChanged = hasMt5AccountIdentityChanged(sameModeBaseline, currentIdentity);
   const sameModeVerificationState = getSameModeMt5AccountVerificationState({
@@ -203,13 +213,13 @@ export function Phase7CAccountSwitchCard() {
 
   return (
     <Card variant="outlined" sx={{ borderRadius: 4, borderColor: "warning.main" }}>
-      <CardContent sx={{ p: { xs: 2, md: 3 } }}>
-        <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" gap={2}>
+      <CardContent sx={{ p: { xs: 2, md: 2.5 } }}>
+        <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" gap={1.5}>
           <Box>
             <Typography variant="overline" color="warning.main" fontWeight={950}>ĐỔI TÀI KHOẢN MT5</Typography>
             <Typography variant="h5" fontWeight={950}>Guarded account switch · không lưu thông tin đăng nhập</Typography>
-            <Typography variant="body2" color="text.secondary" mt={0.8}>
-              DEMO ↔ LIVE dùng elevated guarded task. Đổi login cùng loại được chuẩn bị trên Web nhưng thao tác đăng nhập thực hiện trực tiếp trong MT5. LIVE A → LIVE B chỉ được phát hiện read-only cho đến khi canonical profile được rebind/xác minh bằng workflow riêng. Account switch không cấp quyền AUTO và không gửi order.
+            <Typography variant="body2" color="text.secondary" mt={0.6}>
+              DEMO ↔ LIVE dùng guarded task. Đổi login cùng loại thực hiện trực tiếp trong MT5; Web chỉ xác minh readiness và identity. Account switch không cấp quyền AUTO và không gửi order.
             </Typography>
           </Box>
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="flex-start">
@@ -219,31 +229,31 @@ export function Phase7CAccountSwitchCard() {
           </Stack>
         </Stack>
 
-        <Divider sx={{ my: 2.5 }} />
+        <Divider sx={{ my: 2 }} />
 
         {capabilityQuery.isError && (
-          <Alert severity="error" sx={{ mb: 2 }}>
+          <Alert severity="error" sx={{ mb: 1.5 }}>
             Không đọc được account-switch capability: {capabilityQuery.error instanceof Error ? capabilityQuery.error.message : "lỗi không xác định"}
           </Alert>
         )}
         {sameModeReadinessQuery.isError && (
-          <Alert severity="error" sx={{ mb: 2 }}>
+          <Alert severity="error" sx={{ mb: 1.5 }}>
             Không đọc được readiness đổi login cùng loại: {sameModeReadinessQuery.error instanceof Error ? sameModeReadinessQuery.error.message : "lỗi không xác định"}
           </Alert>
         )}
         {capabilityQuery.data && !capabilityQuery.data.taskInstalled && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
+          <Alert severity="warning" sx={{ mb: 1.5 }}>
             Elevated task chuyển DEMO/LIVE chưa được đăng ký. Chạy một lần bằng PowerShell Administrator: <b>scripts/register-phase7c-account-switch-task-local.ps1 -WorkDir .runtime</b>. Web không fallback sang đường kém an toàn hơn.
           </Alert>
         )}
         {capabilityQuery.data?.currentBotMode !== "PAUSE" && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
+          <Alert severity="warning" sx={{ mb: 1.5 }}>
             Mọi loại đổi tài khoản đều bị khóa vì bot đang <b>{capabilityQuery.data?.currentBotMode}</b>. Hãy đưa bot về PAUSE trước.
           </Alert>
         )}
-        {pauseMutation.isError && <Alert severity="error" sx={{ mb: 2 }}>{pauseMutation.error instanceof Error ? pauseMutation.error.message : "Không chuyển được PAUSE."}</Alert>}
-        {preflightMutation.isError && <Alert severity="error" sx={{ mb: 2 }}>{preflightMutation.error instanceof Error ? preflightMutation.error.message : "Preflight thất bại."}</Alert>}
-        {executeMutation.isError && <Alert severity="error" sx={{ mb: 2 }}>{executeMutation.error instanceof Error ? executeMutation.error.message : "Switch bị từ chối."}</Alert>}
+        {pauseMutation.isError && <Alert severity="error" sx={{ mb: 1.5 }}>{pauseMutation.error instanceof Error ? pauseMutation.error.message : "Không chuyển được PAUSE."}</Alert>}
+        {preflightMutation.isError && <Alert severity="error" sx={{ mb: 1.5 }}>{preflightMutation.error instanceof Error ? preflightMutation.error.message : "Preflight thất bại."}</Alert>}
+        {executeMutation.isError && <Alert severity="error" sx={{ mb: 1.5 }}>{executeMutation.error instanceof Error ? executeMutation.error.message : "Switch bị từ chối."}</Alert>}
 
         <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
           <Button
@@ -259,9 +269,9 @@ export function Phase7CAccountSwitchCard() {
           </Button>
         </Stack>
 
-        <Box mt={3} sx={{ p: 2, borderRadius: 3, border: "1px solid", borderColor: "divider" }}>
+        <Box mt={2} sx={{ p: 1.5, borderRadius: 3, border: "1px solid", borderColor: "divider" }}>
           <Typography variant="overline" color="primary" fontWeight={950}>A. CHUYỂN DEMO ↔ LIVE</Typography>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} mt={1}>
+          <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} mt={0.8}>
             <Button
               variant="contained"
               disabled={preflightMutation.isPending || switchRunning || !capabilityQuery.data?.taskInstalled || capabilityQuery.data?.currentBotMode !== "PAUSE"}
@@ -273,8 +283,8 @@ export function Phase7CAccountSwitchCard() {
           </Stack>
 
           {preflight && (
-            <Box mt={2}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1} mb={1.5}>
+            <Box mt={1.5}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1} mb={1.2}>
                 <Typography fontWeight={950}>Kết quả preflight</Typography>
                 <Chip label={preflight.approved ? "PASS" : "BLOCKED"} color={preflight.approved ? "success" : "error"} size="small" sx={{ fontWeight: 950 }} />
               </Stack>
@@ -288,7 +298,7 @@ export function Phase7CAccountSwitchCard() {
               </Stack>
 
               {preflight.approved && (
-                <Stack spacing={1.5} mt={2}>
+                <Stack spacing={1.5} mt={1.5}>
                   <Typography variant="body2">
                     Nhập chính xác <b>{requiredConfirmation}</b>. Token preflight ngắn hạn và runtime được kiểm tra lại ngay trước switch.
                   </Typography>
@@ -318,7 +328,7 @@ export function Phase7CAccountSwitchCard() {
           )}
 
           {requestId && (
-            <Box mt={2}>
+            <Box mt={1.5}>
               <Alert severity={status?.status === "PASS" ? "success" : status?.status === "FAIL" ? "error" : "info"}>
                 <Typography fontWeight={950}>Account switch: {status?.status ?? "RUNNING"} · {status?.phase ?? "QUEUED"}</Typography>
                 <Typography variant="body2" mt={0.5}>{status?.message ?? "Elevated task đang xử lý. Không đóng API/MT5 trong lúc switch."}</Typography>
@@ -327,31 +337,57 @@ export function Phase7CAccountSwitchCard() {
                 )}
               </Alert>
               {switchDone && (
-                <Button variant="outlined" onClick={resetAfterDone} sx={{ mt: 1.5, fontWeight: 900 }}>Nạp lại trạng thái</Button>
+                <Button variant="outlined" onClick={resetAfterDone} sx={{ mt: 1.2, fontWeight: 900 }}>Nạp lại trạng thái</Button>
               )}
             </Box>
           )}
         </Box>
 
-        <Box mt={2} sx={{ p: 2, borderRadius: 3, border: "1px solid", borderColor: readiness?.approved ? "success.main" : "divider" }}>
+        <Box mt={1.5} sx={{ p: 1.5, borderRadius: 3, border: "1px solid", borderColor: readiness?.approved ? "success.main" : "divider" }}>
           <Typography variant="overline" color="secondary" fontWeight={950}>B. ĐỔI LOGIN CÙNG LOẠI · {currentMode} → {currentMode}</Typography>
-          <Typography variant="body2" color="text.secondary" mt={0.5}>
-            Ví dụ LIVE A → LIVE B. Web không nhận thông tin đăng nhập. Khi readiness PASS, bạn bấm chuẩn bị rồi tự đăng nhập tài khoản mới trong MT5. Với LIVE, bridge login thay đổi chỉ là bước phát hiện; canonical profile vẫn phải được rebind/xác minh riêng trước khi ARM/AUTO lại.
+          <Typography variant="body2" color="text.secondary" mt={0.35}>
+            Đổi login {currentMode} cùng loại thực hiện trực tiếp trong MT5. Web chỉ chuẩn bị và xác minh account identity; không nhận credential.
+            {currentMode === "LIVE" && " LIVE → LIVE cần rebind/xác minh canonical profile riêng trước khi ARM/AUTO lại."}
           </Typography>
 
           {readiness && (
-            <Box mt={1.5}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1} mb={1.2}>
-                <Typography fontWeight={900}>Readiness cùng loại</Typography>
-                <Chip label={readiness.approved ? "PASS" : "BLOCKED"} color={readiness.approved ? "success" : "error"} size="small" />
+            <Box mt={1.2}>
+              <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "center" }} gap={1}>
+                <Box>
+                  <Typography fontWeight={900}>Readiness cùng loại</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Lý do: <b>{readinessReason}</b>
+                  </Typography>
+                </Box>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Chip
+                    label={readiness.approved ? "SẴN SÀNG" : "BỊ CHẶN"}
+                    color={readiness.approved ? "success" : "error"}
+                    size="small"
+                    sx={{ fontWeight: 900 }}
+                  />
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => setSameModeDetailsOpen((open) => !open)}
+                    sx={{ fontWeight: 900 }}
+                  >
+                    {sameModeDetailsOpen ? "Ẩn chi tiết" : "Xem chi tiết"}
+                  </Button>
+                </Stack>
               </Stack>
-              <CheckRows checks={readiness.checks} />
+
+              {sameModeDetailsOpen && (
+                <Box mt={1.2} pt={1.2} sx={{ borderTop: "1px solid", borderColor: "divider" }}>
+                  <CheckRows checks={readiness.checks} />
+                </Box>
+              )}
             </Box>
           )}
 
           {currentMode === "LIVE" && readiness?.checks.liveDisarmed === false && (
-            <Alert severity="warning" sx={{ mt: 1.5 }}>
-              Trước khi đổi login LIVE, hãy tắt quyền giao dịch LIVE ở thẻ Quyền thực thi phía trên. Card này không tự thay đổi quyền giao dịch.
+            <Alert severity="warning" sx={{ mt: 1.2 }}>
+              LIVE → LIVE yêu cầu PAUSE + DISARMED + flat trước khi đổi login.
             </Alert>
           )}
 
@@ -361,12 +397,12 @@ export function Phase7CAccountSwitchCard() {
               color="secondary"
               disabled={!canPrepareSameMode}
               onClick={startSameModeChange}
-              sx={{ mt: 1.8, fontWeight: 950 }}
+              sx={{ mt: 1.4, fontWeight: 950 }}
             >
               Chuẩn bị đổi login MT5
             </Button>
           ) : (
-            <Stack spacing={1.3} mt={1.8}>
+            <Stack spacing={1.3} mt={1.4}>
               <Alert severity={sameModeVerified ? "success" : canonicalProfileUnverified ? "error" : sameModeIdentityChanged ? "warning" : "info"}>
                 <Typography fontWeight={950}>
                   {sameModeVerified
@@ -415,8 +451,8 @@ export function Phase7CAccountSwitchCard() {
           )}
         </Box>
 
-        <Typography variant="caption" color="text.secondary" display="block" mt={2.2} sx={{ lineHeight: 1.7 }}>
-          Safety policy: credential input {SAME_MODE_ACCOUNT_CHANGE_POLICY.credentialInput}; login cùng loại chỉ thực hiện thủ công trong MT5. LIVE same-mode verification yêu cầu canonical profile workflow riêng; card này chỉ detect login mới. Account switch không gửi order, không đổi lot/risk, không tự cấp lại quyền giao dịch và không tự bật AUTO.
+        <Typography variant="caption" color="text.secondary" display="block" mt={1.5} sx={{ lineHeight: 1.5 }}>
+          Credential input: {SAME_MODE_ACCOUNT_CHANGE_POLICY.credentialInput} · không gửi order · không đổi lot/risk · không tự ARM/AUTO.
         </Typography>
       </CardContent>
     </Card>
