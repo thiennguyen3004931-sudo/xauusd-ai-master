@@ -168,11 +168,35 @@ if ($ControlApiUrl -notmatch '^https?://(127\.0\.0\.1|localhost|\[?::1\]?):\d+$'
 }
 $WorkDir = Resolve-ConfigPath ([string]$config.workDir)
 $EnvFile = Resolve-ConfigPath ([string]$config.envFile)
-$RuntimeRoot = Split-Path -Parent $WorkDir
+$configAccountMode = ([string]$config.accountMode).Trim().ToUpperInvariant()
 
-$envInfo = Assert-Phase7CAccountEnv -EnvFile $EnvFile -AccountMode ([string]$config.accountMode) -RequireTrading
+# Mirror the API runtimeRoot() precedence exactly: PHASE7C_RUNTIME_ROOT,
+# then parent(PHASE7B_DEMO_WORK_DIR), then <project>/.runtime. The API runs
+# from the canonical project root under the Phase7C task topology.
+$runtimeRootOverride = ([string](Get-Phase7CEnvValue $EnvFile 'PHASE7C_RUNTIME_ROOT')).Trim()
+$demoWorkDirOverride = ([string](Get-Phase7CEnvValue $EnvFile 'PHASE7B_DEMO_WORK_DIR')).Trim()
+if (-not [string]::IsNullOrWhiteSpace($runtimeRootOverride)) {
+    $RuntimeRoot = Resolve-ConfigPath $runtimeRootOverride
+} elseif (-not [string]::IsNullOrWhiteSpace($demoWorkDirOverride)) {
+    $RuntimeRoot = Split-Path -Parent (Resolve-ConfigPath $demoWorkDirOverride)
+} else {
+    $RuntimeRoot = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot '.runtime'))
+}
+
+# This probe must still run while PAUSE/DISARMED even if trading is disabled;
+# RequireTrading is intentionally not used. Account/env shape remains validated.
+$envInfo = Assert-Phase7CAccountEnv -EnvFile $EnvFile -AccountMode $configAccountMode
 $BridgeBase = "http://$($envInfo.bridgeHost):$($envInfo.bridgePort)"
 $BridgeHeaders = @{ 'x-mt5-api-key' = $envInfo.apiKey }
+
+$canonicalLoginRaw = ([string](Get-Phase7CEnvValue $EnvFile 'MT5_LOGIN')).Trim()
+$canonicalLogin = 0L
+$canonicalLoginValid = [long]::TryParse($canonicalLoginRaw, [ref]$canonicalLogin) -and $canonicalLogin -gt 0
+$canonicalServer = ([string](Get-Phase7CEnvValue $EnvFile 'MT5_SERVER')).Trim()
+$canonicalServerValid = -not [string]::IsNullOrWhiteSpace($canonicalServer)
+if (-not $canonicalLoginValid -or -not $canonicalServerValid) {
+    Add-Blocked 'CANONICAL_ACCOUNT_IDENTITY_INVALID'
+}
 
 $modeSnapshot = Invoke-ApiGet '/api/v1/phase7c/bot-mode'
 $lifecycle = Invoke-ApiGet '/api/v1/phase7c/lifecycle'
@@ -189,13 +213,18 @@ $botMode = [string]$modeSnapshot.state.mode
 $arm = [string]$armSnapshot.liveArmStatus
 $lifecycleRunning = [bool]$lifecycle.running
 $lifecycleReady = [bool]$lifecycle.ready
-$accountMode = [string]$lifecycle.accountMode.accountMode
+$accountMode = ([string]$lifecycle.accountMode.accountMode).Trim().ToUpperInvariant()
 $accountModeValid = [bool]$lifecycle.accountMode.valid
 $accountLogin = Format-Nullable $sameMode.accountLogin
 $accountServer = Format-Nullable $sameMode.server
+$brokerLogin = 0L
+$brokerLoginValid = [long]::TryParse(([string]$sameMode.accountLogin).Trim(), [ref]$brokerLogin) -and $brokerLogin -gt 0
+$brokerServer = ([string]$sameMode.server).Trim()
 $bridgeHealthy = [bool]$bridgeHealth.connected -and [string]$bridgeHealth.status -eq 'ok'
 $expectedBrokerMode = if ($accountMode -eq 'LIVE') { 'real' } elseif ($accountMode -eq 'DEMO') { 'demo' } else { 'invalid' }
-$bridgeAccountMatches = $bridgeHealthy -and [string]$bridgeHealth.accountMode -eq $expectedBrokerMode -and [bool]$sameMode.checks.bridgeMatchesSelectedAccount
+$bridgeAccountModeMatch = $bridgeHealthy -and [string]$bridgeHealth.accountMode -eq $expectedBrokerMode -and [bool]$sameMode.checks.bridgeMatchesSelectedAccount
+$bridgeAccountIdentityMatch = $bridgeAccountModeMatch -and $canonicalLoginValid -and $canonicalServerValid -and $brokerLoginValid -and `
+    $brokerLogin -eq $canonicalLogin -and [string]::Equals($brokerServer, $canonicalServer, [System.StringComparison]::OrdinalIgnoreCase)
 
 $liveAuthorizationValid = $true
 $liveAuthorizationOutput = 'NOT_APPLICABLE'
@@ -215,8 +244,9 @@ $unresolvedMutatingRequests = [int]([bool]$accountSwitchUnresolved) + [int]([boo
 if ($botMode -ne [string]$lifecycle.mode.mode) { Add-Blocked 'MODE_SNAPSHOT_DIVERGENCE' }
 if ($arm -notin @('ARMED','DISARMED')) { Add-Blocked 'ARM_STATE_INVALID' }
 if (-not $accountModeValid -or $accountMode -notin @('DEMO','LIVE')) { Add-Blocked 'ACCOUNT_MODE_INVALID' }
+if ($accountMode -ne $configAccountMode) { Add-Blocked 'ACCOUNT_MODE_CONFIG_DIVERGENCE' }
 if (-not $bridgeHealthy) { Add-Blocked 'BRIDGE_NOT_HEALTHY' }
-if (-not $bridgeAccountMatches) { Add-Blocked 'BRIDGE_ACCOUNT_IDENTITY_MISMATCH' }
+if (-not $bridgeAccountIdentityMatch) { Add-Blocked 'BRIDGE_ACCOUNT_IDENTITY_MISMATCH' }
 if ($positions.Count -ne [int]$armSnapshot.openXauusdPositions -or $positions.Count -ne [int]$sameMode.openXauusdPositions) {
     Add-Blocked 'POSITION_COUNT_DIVERGENCE'
 }
@@ -299,9 +329,9 @@ if ($arm -ne 'DISARMED' -or [bool]$armSnapshot.liveExecutionArmed) { Add-Mutatio
 if ($positions.Count -ne 0) { Add-MutationGateReason 'XAUUSD_POSITIONS_NONZERO' }
 if ($pendingOrders.Count -ne 0) { Add-MutationGateReason 'XAUUSD_PENDING_ORDERS_NONZERO' }
 if ($unresolvedMutatingRequests -ne 0) { Add-MutationGateReason 'UNRESOLVED_MUTATING_REQUESTS' }
-if (-not $accountModeValid) { Add-MutationGateReason 'ACCOUNT_MODE_INVALID' }
+if (-not $accountModeValid -or $accountMode -ne $configAccountMode) { Add-MutationGateReason 'ACCOUNT_MODE_INVALID_OR_DIVERGED' }
 if (-not $bridgeHealthy) { Add-MutationGateReason 'BRIDGE_NOT_HEALTHY' }
-if (-not $bridgeAccountMatches) { Add-MutationGateReason 'ACCOUNT_IDENTITY_MISMATCH' }
+if (-not $bridgeAccountIdentityMatch) { Add-MutationGateReason 'ACCOUNT_IDENTITY_MISMATCH' }
 if (-not $liveAuthorizationValid) { Add-MutationGateReason 'LIVE_AUTHORIZATION_INVALID' }
 if (-not $taskOwnershipCanonical) { Add-MutationGateReason 'TASK_OWNERSHIP_OR_DRIFT' }
 if (-not $deploymentReadable -or -not $componentEvidenceUsable) { Add-MutationGateReason 'RUNTIME_SOURCE_EVIDENCE_AMBIGUOUS' }
@@ -323,6 +353,8 @@ if ($classification -eq 'RECOVERY_BLOCKED') {
 $blockedBy = if ($blocked.Count -eq 0) { 'NONE' } else { @($blocked) -join '|' }
 $taskDriftOutput = if ($taskDrift.Count -eq 0) { 'NONE' } else { @($taskDrift) -join '|' }
 $nonExactOutput = if ($nonExactComponents.Count -eq 0) { 'NONE' } else { @($nonExactComponents) -join '|' }
+$canonicalLoginOutput = if ($canonicalLoginValid) { [string]$canonicalLogin } else { 'UNAVAILABLE' }
+$canonicalServerOutput = if ($canonicalServerValid) { $canonicalServer } else { 'UNAVAILABLE' }
 
 Write-Host "EXPECTED_MAIN=$ExpectedMainCommit"
 Write-Host "LOCAL_BRANCH=$localBranch"
@@ -341,11 +373,15 @@ Write-Host "LIFECYCLE_READY=$lifecycleReady"
 Write-Host "XAUUSD_POSITIONS=$($positions.Count)"
 Write-Host "XAUUSD_PENDING_ORDERS=$($pendingOrders.Count)"
 Write-Host "UNRESOLVED_MUTATING_REQUESTS=$unresolvedMutatingRequests"
+Write-Host "RUNTIME_ROOT=$RuntimeRoot"
 Write-Host "ACCOUNT_MODE=$accountMode"
 Write-Host "ACCOUNT_LOGIN=$accountLogin"
 Write-Host "ACCOUNT_SERVER=$accountServer"
+Write-Host "CANONICAL_ACCOUNT_LOGIN=$canonicalLoginOutput"
+Write-Host "CANONICAL_ACCOUNT_SERVER=$canonicalServerOutput"
 Write-Host "BRIDGE_HEALTHY=$bridgeHealthy"
-Write-Host "BRIDGE_ACCOUNT_MATCH=$bridgeAccountMatches"
+Write-Host "BRIDGE_ACCOUNT_MODE_MATCH=$bridgeAccountModeMatch"
+Write-Host "BRIDGE_ACCOUNT_IDENTITY_MATCH=$bridgeAccountIdentityMatch"
 Write-Host "LIVE_AUTHORIZATION_VALID=$liveAuthorizationOutput"
 Write-Host "TASK_OWNERSHIP=$(if ($taskOwnershipCanonical) { 'CANONICAL_SYSTEM' } else { 'NOT_CANONICAL' })"
 Write-Host "TASK_DRIFT=$taskDriftOutput"
