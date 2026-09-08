@@ -201,8 +201,8 @@ if (-not $canonicalLoginValid -or -not $canonicalServerValid) {
 $modeSnapshot = Invoke-ApiGet '/api/v1/phase7c/bot-mode'
 $lifecycle = Invoke-ApiGet '/api/v1/phase7c/lifecycle'
 $armSnapshot = Invoke-ApiGet '/api/v1/phase7c-live-arm-control/capability'
-$sameMode = Invoke-ApiGet '/api/v1/phase7c/account-switch/same-mode-readiness'
-$accountSwitchStatus = Invoke-ApiGetOptional '/api/v1/phase7c/account-switch/status'
+$sameMode = Invoke-ApiGet '/api/v1/phase7c-account-switch/same-mode-readiness'
+$accountSwitchStatus = Invoke-ApiGetOptional '/api/v1/phase7c-account-switch/status'
 $liveArmStatus = Invoke-ApiGetOptional '/api/v1/phase7c-live-arm-control/status'
 $runtimeSource = Invoke-ApiGet '/api/v1/phase7c/runtime-source-attestation'
 $bridgeHealth = Get-BridgeHealth
