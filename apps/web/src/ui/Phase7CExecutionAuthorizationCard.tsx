@@ -229,6 +229,11 @@ export function Phase7CExecutionAuthorizationCard() {
                 EXECUTION AUTHORIZATION
               </Typography>
               <Typography variant="h6" fontWeight={950}>Ủy quyền giao dịch</Typography>
+              {accountMode === "DEMO" ? (
+                <Typography variant="caption" color="text.secondary">
+                  DEMO chỉ dùng AUTO safety guard; không có thao tác ủy quyền LIVE.
+                </Typography>
+              ) : null}
             </Box>
             <Stack direction="row" spacing={0.7} useFlexGap flexWrap="wrap" justifyContent="flex-end">
               {accountMode === "LIVE" ? (
@@ -274,7 +279,7 @@ export function Phase7CExecutionAuthorizationCard() {
                       onClick={() => armPreflightMutation.mutate()}
                       sx={{ fontWeight: 900 }}
                     >
-                      {armPreflightMutation.isPending ? "ĐANG KIỂM TRA..." : "Kiểm tra ARM"}
+                      {armPreflightMutation.isPending ? "ĐANG KIỂM TRA..." : "KIỂM TRA ĐIỀU KIỆN ARM LIVE"}
                     </Button>
                   ) : null}
                   <Button
