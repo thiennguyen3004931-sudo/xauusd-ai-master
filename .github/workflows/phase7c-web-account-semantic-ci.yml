@@ -13,8 +13,12 @@ on:
       - "apps/web/src/pages/Phase7BDemoPage.tsx"
       - "apps/web/src/pages/Phase7BOpsPage.tsx"
       - "apps/web/src/pages/Phase7BPatternCheckPage.tsx"
+      - "apps/web/src/pages/Phase7CControlCenterPage.tsx"
+      - "apps/web/src/pages/Phase7CControlCenterShellPage.tsx"
       - "apps/web/src/ui/Phase7CAccountSwitchCard.tsx"
       - "apps/web/src/ui/Phase7CExecutionAuthorizationCard.tsx"
+      - "apps/web/src/ui/Phase7COperatorStatusBar.tsx"
+      - "apps/web/src/ui/Phase7CIntelligenceSummaryCard.tsx"
       - "mt5/XAUUSD_AI_Master_Decision_Panel.mq5"
       - "apps/web/src/phase7c-panel-status.ts"
       - "apps/web/src/types.ts"
@@ -22,6 +26,7 @@ on:
       - "apps/web/src/ui/StatusChip.tsx"
       - "scripts/test-phase7c-web-account-semantic-source.mjs"
       - "scripts/test-phase7c-account-switch-compact-ui-source.mjs"
+      - "scripts/test-phase7c-control-center-v2-compact-ui-source.mjs"
       - ".github/workflows/phase7c-web-account-semantic-ci.yml"
 
 permissions:
@@ -55,6 +60,9 @@ jobs:
 
       - name: Compact account-switch UI source assertions
         run: node scripts/test-phase7c-account-switch-compact-ui-source.mjs
+
+      - name: Control Center V2 compact UI source assertions
+        run: node scripts/test-phase7c-control-center-v2-compact-ui-source.mjs
 
       - name: Build API dependency graph
         run: pnpm --filter @xauusd/api... build
