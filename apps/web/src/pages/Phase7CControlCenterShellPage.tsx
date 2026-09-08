@@ -10,8 +10,10 @@ import { Phase7CPerformanceEffectivenessCard } from "../ui/Phase7CPerformanceEff
 import { Phase7CPerformanceIntelligenceCard } from "../ui/Phase7CPerformanceIntelligenceCard";
 import { Phase7CRecommendationIntelligenceCard } from "../ui/Phase7CRecommendationIntelligenceCard";
 import { Phase7CRuntimeSourceAttestationCard } from "../ui/Phase7CRuntimeSourceAttestationCard";
+import { Phase7CControlCenterPage } from "./Phase7CControlCenterPage";
 
 export function Phase7CControlCenterShellPage() {
+  const [showOperationalDetails, setShowOperationalDetails] = useState(false);
   const [showIntelligenceDetails, setShowIntelligenceDetails] = useState(false);
 
   return (
@@ -27,7 +29,12 @@ export function Phase7CControlCenterShellPage() {
         </Grid>
       </Grid>
 
-      <Phase7CControlCenterCompactSection />
+      <Phase7CControlCenterCompactSection
+        detailsOpen={showOperationalDetails}
+        onToggleDetails={() => setShowOperationalDetails((value) => !value)}
+      />
+      {showOperationalDetails ? <Phase7CControlCenterPage /> : null}
+
       <Phase7CIntelligenceSummaryCard />
       <Button
         size="small"
@@ -45,6 +52,7 @@ export function Phase7CControlCenterShellPage() {
           <Phase7CRecommendationIntelligenceCard />
         </Stack>
       ) : null}
+
       <Phase7CRuntimeSourceAttestationCard />
     </Stack>
   );
