@@ -1,3 +1,4 @@
+import dns from "node:dns";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
@@ -7,6 +8,8 @@ import {
   telegramModeForCallback,
   telegramModeForCommand,
 } from "./phase7c-telegram-mode-logic.mjs";
+
+dns.setDefaultResultOrder("ipv4first");
 
 const fallbackToken = requiredEnv("ZIQ_TELEGRAM_BOT_TOKEN");
 const fallbackChatId = requiredEnv("ZIQ_TELEGRAM_CHAT_ID");
