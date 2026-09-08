@@ -1,0 +1,66 @@
+import fs from "node:fs";
+import path from "node:path";
+
+const root = process.cwd();
+const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8");
+
+const shell = read("apps/web/src/pages/Phase7CControlCenterShellPage.tsx");
+const execution = read("apps/web/src/ui/Phase7CExecutionAuthorizationCard.tsx");
+const compact = read("apps/web/src/ui/Phase7CControlCenterCompactSection.tsx");
+const status = read("apps/web/src/ui/Phase7COperatorStatusBar.tsx");
+const intelligence = read("apps/web/src/ui/Phase7CIntelligenceSummaryCard.tsx");
+
+function requireText(source, needle, label) {
+  if (!source.includes(needle)) throw new Error(`${label}: missing ${needle}`);
+}
+
+// Shell: one operator status bar, critical controls in two columns, old operational/intelligence surfaces preserved but collapsed.
+requireText(shell, "Phase7COperatorStatusBar", "operator status import");
+requireText(shell, "<Phase7COperatorStatusBar />", "operator status render");
+requireText(shell, "<Grid container spacing={2}>", "critical two-column grid");
+requireText(shell, "<Phase7CExecutionAuthorizationCard />", "execution authorization preserved");
+requireText(shell, "<Phase7CAccountSwitchCard />", "account switch preserved");
+requireText(shell, "<Phase7CControlCenterCompactSection", "compact decision/control summary render");
+requireText(shell, "<Phase7CIntelligenceSummaryCard />", "intelligence compact summary render");
+requireText(shell, "const [showOperationalDetails, setShowOperationalDetails] = useState(false);", "operational controls collapsed by default");
+requireText(shell, "showOperationalDetails ? <Phase7CControlCenterPage /> : null", "legacy operational control visibility gate");
+requireText(shell, "const [showIntelligenceDetails, setShowIntelligenceDetails] = useState(false);", "intelligence collapsed by default");
+requireText(shell, "showIntelligenceDetails ? (", "intelligence detail visibility gate");
+requireText(shell, "<Phase7CPerformanceIntelligenceCard />", "performance intelligence detail preserved");
+requireText(shell, "<Phase7CPerformanceEffectivenessCard />", "performance effectiveness detail preserved");
+requireText(shell, "<Phase7CCounterfactualIntelligenceCard />", "counterfactual detail preserved");
+requireText(shell, "<Phase7CRecommendationIntelligenceCard />", "recommendation detail preserved");
+requireText(shell, "Mở Intelligence chi tiết", "intelligence expand action");
+requireText(shell, "Ẩn Intelligence chi tiết", "intelligence collapse action");
+
+// Operator bar: one glance status for account/runtime/trading/source.
+requireText(status, 'label={`ACCOUNT ${accountMode}`}', "account status");
+requireText(status, 'label={`BOT ${botMode}`}', "bot mode status");
+requireText(status, 'label={armed ? "ARMED" : "DISARMED"}', "arm status");
+requireText(status, 'label={`POSITIONS ${positions}`}', "position status");
+requireText(status, 'label={`SOURCE ${sourceVerdict}`}', "runtime source status");
+requireText(status, "accountLogin", "account login summary");
+
+// Execution authorization: ARM diagnostics collapsed without changing canonical ARM/AUTO safety flow.
+requireText(execution, "const [armDetailsOpen, setArmDetailsOpen] = useState(false);", "ARM details collapsed by default");
+requireText(execution, "armDetailsOpen ? (", "ARM detail visibility gate");
+requireText(execution, "Xem chi tiết", "execution detail expand action");
+requireText(execution, "Ẩn chi tiết", "execution detail collapse action");
+requireText(execution, "Lý do:", "execution first blocker summary");
+requireText(execution, "const showAutoActivationDiagnostics = !isAutoActive;", "AUTO active diagnostics safety gate preserved");
+
+// Primary control summary: decision first, lot/lifecycle summary second, legacy controls delegated to shell.
+requireText(compact, "Quyết định hiện tại", "decision promoted to compact surface");
+requireText(compact, "Lot / Fixed TP", "lot and fixed TP summary");
+requireText(compact, "Bot / Lifecycle", "bot lifecycle summary");
+requireText(compact, "Mở điều khiển chi tiết", "legacy control expand action");
+requireText(compact, "Ẩn điều khiển chi tiết", "legacy control collapse action");
+requireText(compact, "detailsOpen", "compact detail state supplied by shell");
+requireText(compact, "onToggleDetails", "compact detail action supplied by shell");
+
+// Intelligence on Control Center becomes summary-first with navigation to the dedicated performance page.
+requireText(intelligence, "Intelligence & hiệu suất", "intelligence summary title");
+requireText(intelligence, 'to="/performance"', "performance navigation");
+requireText(intelligence, "Mở Hiệu suất", "performance action");
+
+console.log("PHASE7C_CONTROL_CENTER_V2_COMPACT_UI_SOURCE_TEST=PASS");
