@@ -13,11 +13,8 @@ const intelligence = read("apps/web/src/ui/Phase7CIntelligenceSummaryCard.tsx");
 function requireText(source, needle, label) {
   if (!source.includes(needle)) throw new Error(`${label}: missing ${needle}`);
 }
-function forbidText(source, needle, label) {
-  if (source.includes(needle)) throw new Error(`${label}: obsolete text/structure still present: ${needle}`);
-}
 
-// Shell: one operator status bar, critical controls in two columns, intelligence details removed from the operator page.
+// Shell: one operator status bar, critical controls in two columns, intelligence detail cards preserved but collapsed.
 requireText(shell, "Phase7COperatorStatusBar", "operator status import");
 requireText(shell, "<Phase7COperatorStatusBar />", "operator status render");
 requireText(shell, "<Grid container spacing={2}>", "critical two-column grid");
@@ -25,10 +22,14 @@ requireText(shell, "<Phase7CExecutionAuthorizationCard />", "execution authoriza
 requireText(shell, "<Phase7CAccountSwitchCard />", "account switch preserved");
 requireText(shell, "<Phase7CControlCenterCompactSection />", "compact decision/control summary render");
 requireText(shell, "<Phase7CIntelligenceSummaryCard />", "intelligence compact summary render");
-forbidText(shell, "Phase7CPerformanceIntelligenceCard", "detailed performance intelligence removed from shell");
-forbidText(shell, "Phase7CPerformanceEffectivenessCard", "detailed effectiveness removed from shell");
-forbidText(shell, "Phase7CCounterfactualIntelligenceCard", "detailed counterfactual removed from shell");
-forbidText(shell, "Phase7CRecommendationIntelligenceCard", "detailed recommendation removed from shell");
+requireText(shell, "const [showIntelligenceDetails, setShowIntelligenceDetails] = useState(false);", "intelligence collapsed by default");
+requireText(shell, "showIntelligenceDetails ? (", "intelligence detail visibility gate");
+requireText(shell, "<Phase7CPerformanceIntelligenceCard />", "performance intelligence detail preserved");
+requireText(shell, "<Phase7CPerformanceEffectivenessCard />", "performance effectiveness detail preserved");
+requireText(shell, "<Phase7CCounterfactualIntelligenceCard />", "counterfactual detail preserved");
+requireText(shell, "<Phase7CRecommendationIntelligenceCard />", "recommendation detail preserved");
+requireText(shell, "Mở Intelligence chi tiết", "intelligence expand action");
+requireText(shell, "Ẩn Intelligence chi tiết", "intelligence collapse action");
 
 // Operator bar: one glance status for account/runtime/trading/source.
 requireText(status, 'label={`ACCOUNT ${accountMode}`}', "account status");
@@ -54,7 +55,7 @@ requireText(compact, "Mở điều khiển chi tiết", "legacy control expand a
 requireText(compact, "Ẩn điều khiển chi tiết", "legacy control collapse action");
 requireText(compact, "showOperationalDetails ? <Phase7CControlCenterPage /> : null", "legacy control visibility gate");
 
-// Intelligence on Control Center becomes summary-only with navigation to the dedicated performance page.
+// Intelligence on Control Center becomes summary-first with navigation to the dedicated performance page.
 requireText(intelligence, "Intelligence & hiệu suất", "intelligence summary title");
 requireText(intelligence, 'to="/performance"', "performance navigation");
 requireText(intelligence, "Mở Hiệu suất", "performance action");
