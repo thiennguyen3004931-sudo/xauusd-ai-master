@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { Button, Grid, Stack } from "@mui/material";
-import { Phase7CAccountSwitchCard } from "../ui/Phase7CAccountSwitchCard";
+import { Button, Stack } from "@mui/material";
 import { Phase7CControlCenterCompactSection } from "../ui/Phase7CControlCenterCompactSection";
 import { Phase7CCounterfactualIntelligenceCard } from "../ui/Phase7CCounterfactualIntelligenceCard";
 import { Phase7CExecutionAuthorizationCard } from "../ui/Phase7CExecutionAuthorizationCard";
@@ -20,14 +19,7 @@ export function Phase7CControlCenterShellPage() {
     <Stack spacing={2}>
       <Phase7COperatorStatusBar />
 
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12, xl: 6 }}>
-          <Phase7CExecutionAuthorizationCard />
-        </Grid>
-        <Grid size={{ xs: 12, xl: 6 }}>
-          <Phase7CAccountSwitchCard />
-        </Grid>
-      </Grid>
+      <Phase7CExecutionAuthorizationCard />
 
       <Phase7CControlCenterCompactSection
         detailsOpen={showOperationalDetails}

@@ -1,18 +1,26 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Alert,
   Box,
   Button,
   Card,
   CardContent,
   Chip,
+  FormControlLabel,
   Grid,
   Stack,
+  Switch,
+  TextField,
   Typography,
 } from "@mui/material";
 import {
   getPhase7CDecisionMonitor,
   getPhase7CLifecycle,
   getPhase7CLotSettings,
+  runPhase7CLifecycleAction,
+  setPhase7CBotMode,
+  setPhase7CLotSettings,
 } from "../api";
 
 function price(value: number | null | undefined) {
@@ -26,6 +34,11 @@ function money(value: number | null | undefined, currency = "USD") {
     currency,
     maximumFractionDigits: 2,
   }).format(Number(value));
+}
+
+function friendlyError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message || "Chưa thực hiện được thao tác.";
 }
 
 function SummaryMetric({ label, value }: { label: string; value: string }) {
@@ -44,6 +57,7 @@ export function Phase7CControlCenterCompactSection({
   detailsOpen: boolean;
   onToggleDetails: () => void;
 }) {
+  const queryClient = useQueryClient();
   const lifecycle = useQuery({
     queryKey: ["phase7c-lifecycle"],
     queryFn: getPhase7CLifecycle,
@@ -62,6 +76,67 @@ export function Phase7CControlCenterCompactSection({
     queryFn: getPhase7CLotSettings,
     refetchInterval: 5_000,
     retry: false,
+  });
+
+  const lifecycleAction = useMutation({
+    mutationFn: runPhase7CLifecycleAction,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["phase7c-lifecycle"] }),
+        queryClient.invalidateQueries({ queryKey: ["phase7c-decision-monitor"] }),
+        queryClient.invalidateQueries({ queryKey: ["phase7c-lot-settings"] }),
+      ]);
+    },
+  });
+  const botModeAction = useMutation({
+    mutationFn: () => setPhase7CBotMode("PAUSE"),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["phase7c-lifecycle"] }),
+        queryClient.invalidateQueries({ queryKey: ["phase7c-decision-monitor"] }),
+        queryClient.invalidateQueries({ queryKey: ["phase7c-auto-activation-status"] }),
+      ]);
+    },
+  });
+
+  const configuredTrendLot = lotSettings.data?.state.trendFixedLot ?? 0.03;
+  const configuredSidewayRisk = lotSettings.data?.state.sidewayRiskPercent ?? 0.25;
+  const configuredSidewayMaxLot = lotSettings.data?.state.sidewayMaxLot ?? 0.03;
+  const configuredTrendFixedTpEnabled = lotSettings.data?.state.trendFixedTpEnabled ?? false;
+  const configuredTrendFixedTpDistance = lotSettings.data?.state.trendFixedTpDistance ?? 0;
+  const configuredSidewayFixedTpEnabled = lotSettings.data?.state.sidewayFixedTpEnabled ?? false;
+  const configuredSidewayFixedTpDistance = lotSettings.data?.state.sidewayFixedTpDistance ?? 0;
+
+  const [fixedTpDraft, setFixedTpDraft] = useState<{
+    trendFixedTpEnabled: boolean;
+    trendFixedTpDistance: number;
+    sidewayFixedTpEnabled: boolean;
+    sidewayFixedTpDistance: number;
+  } | null>(null);
+  const trendFixedTpEnabled = fixedTpDraft?.trendFixedTpEnabled ?? configuredTrendFixedTpEnabled;
+  const trendFixedTpDistance = fixedTpDraft?.trendFixedTpDistance ?? configuredTrendFixedTpDistance;
+  const sidewayFixedTpEnabled = fixedTpDraft?.sidewayFixedTpEnabled ?? configuredSidewayFixedTpEnabled;
+  const sidewayFixedTpDistance = fixedTpDraft?.sidewayFixedTpDistance ?? configuredSidewayFixedTpDistance;
+  const updateFixedTpDraft = (patch: Partial<NonNullable<typeof fixedTpDraft>>) => {
+    setFixedTpDraft((current) => ({
+      trendFixedTpEnabled: current?.trendFixedTpEnabled ?? configuredTrendFixedTpEnabled,
+      trendFixedTpDistance: current?.trendFixedTpDistance ?? configuredTrendFixedTpDistance,
+      sidewayFixedTpEnabled: current?.sidewayFixedTpEnabled ?? configuredSidewayFixedTpEnabled,
+      sidewayFixedTpDistance: current?.sidewayFixedTpDistance ?? configuredSidewayFixedTpDistance,
+      ...patch,
+    }));
+  };
+
+  const saveLotSettings = useMutation({
+    mutationFn: setPhase7CLotSettings,
+    onSuccess: async () => {
+      setFixedTpDraft(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["phase7c-lot-settings"] }),
+        queryClient.invalidateQueries({ queryKey: ["phase7c-decision-monitor"] }),
+        queryClient.invalidateQueries({ queryKey: ["phase7c-lifecycle"] }),
+      ]);
+    },
   });
 
   const lifecycleData = lifecycle.data;
@@ -86,16 +161,199 @@ export function Phase7CControlCenterCompactSection({
       ? "Bot đang PAUSE; không mở kế hoạch giao dịch mới."
       : preTrade?.decisionReason ?? "Chưa có setup hợp lệ; tiếp tục chờ tín hiệu.";
 
-  const trendLot = lotSettings.data?.state.trendFixedLot ?? 0.03;
-  const sidewayRisk = lotSettings.data?.state.sidewayRiskPercent ?? 0.25;
-  const sidewayMaxLot = lotSettings.data?.state.sidewayMaxLot ?? 0.03;
-  const trendFixedTpEnabled = lotSettings.data?.state.trendFixedTpEnabled ?? false;
-  const trendFixedTpDistance = lotSettings.data?.state.trendFixedTpDistance ?? 0;
-  const sidewayFixedTpEnabled = lotSettings.data?.state.sidewayFixedTpEnabled ?? false;
-  const sidewayFixedTpDistance = lotSettings.data?.state.sidewayFixedTpDistance ?? 0;
+  const bridgeReady = lifecycleData?.bridge.reachable === true;
+  const brokerModeSupported = lifecycleData?.bridge.accountMode === "demo" || lifecycleData?.bridge.accountMode === "real";
+  const openPositions = lifecycleData?.bridge.openXauusdPositions ?? 0;
+  const canPause = lifecycleData?.controlEnabled === true && mode !== "PAUSE";
+  const canChangeFixedTp =
+    mode === "PAUSE" &&
+    bridgeReady &&
+    brokerModeSupported &&
+    openPositions === 0;
 
   return (
     <Stack spacing={1.5}>
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12, lg: 6 }}>
+          <Card variant="outlined" sx={{ borderRadius: 3, height: "100%" }}>
+            <CardContent sx={{ p: { xs: 1.7, md: 2 } }}>
+              <Stack spacing={1.5}>
+                <Stack direction="row" justifyContent="space-between" gap={1} alignItems="center">
+                  <Box>
+                    <Typography variant="h6" fontWeight={950}>Điều khiển Bot</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Dùng đúng lifecycle canonical; Bật/Khôi phục luôn kết thúc ở PAUSE và không tự bật AUTO.
+                    </Typography>
+                  </Box>
+                  <Chip
+                    label={lifecycleData?.ready ? "SẴN SÀNG" : lifecycleData?.running ? "ĐANG KHỞI ĐỘNG" : "ĐÃ DỪNG"}
+                    size="small"
+                    color={lifecycleData?.ready ? "success" : lifecycleData?.running ? "warning" : "default"}
+                  />
+                </Stack>
+
+                <Stack direction="row" spacing={0.7} useFlexGap flexWrap="wrap">
+                  <Chip size="small" label={`MODE ${mode}`} variant="outlined" />
+                  <Chip size="small" label={bridgeReady ? "MT5 ĐÃ KẾT NỐI" : "MT5 OFFLINE"} color={bridgeReady ? "success" : "warning"} variant="outlined" />
+                  <Chip size="small" label={lifecycleData?.telegramReady ? "TELEGRAM SẴN SÀNG" : "TELEGRAM OFFLINE"} color={lifecycleData?.telegramReady ? "success" : "default"} variant="outlined" />
+                  <Chip size="small" label={`POSITIONS ${openPositions}`} variant="outlined" />
+                </Stack>
+
+                <Grid container spacing={1}>
+                  <Grid size={{ xs: 12, sm: 4 }}>
+                    <Button
+                      fullWidth
+                      variant="contained"
+                      color="success"
+                      disabled={
+                        lifecycleAction.isPending || lifecycleData?.actionInProgress || lifecycleData?.ready ||
+                        !lifecycleData?.controlEnabled || !bridgeReady || !brokerModeSupported ||
+                        lifecycleData?.bridge.tradingEnabled !== true ||
+                        lifecycleData?.bridge.terminalTradeAllowed !== true ||
+                        lifecycleData?.bridge.expertTradeAllowed !== true ||
+                        openPositions > 0 || !lifecycleData?.telegramConfigured
+                      }
+                      onClick={() => lifecycleAction.mutate("start")}
+                      sx={{ fontWeight: 950 }}
+                    >
+                      {lifecycleAction.isPending && lifecycleAction.variables === "start"
+                        ? "ĐANG BẬT..."
+                        : lifecycleData?.running ? "KHÔI PHỤC BOT" : "BẬT BOT"}
+                    </Button>
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 4 }}>
+                    <Button
+                      fullWidth
+                      variant="outlined"
+                      color="warning"
+                      disabled={!canPause || botModeAction.isPending}
+                      onClick={() => botModeAction.mutate()}
+                      sx={{ fontWeight: 950 }}
+                    >
+                      {botModeAction.isPending ? "ĐANG PAUSE..." : "TẠM DỪNG"}
+                    </Button>
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 4 }}>
+                    <Button
+                      fullWidth
+                      variant="outlined"
+                      color="error"
+                      disabled={
+                        lifecycleAction.isPending || lifecycleData?.actionInProgress || !lifecycleData?.running ||
+                        !lifecycleData?.controlEnabled || openPositions > 0
+                      }
+                      onClick={() => lifecycleAction.mutate("stop")}
+                      sx={{ fontWeight: 950 }}
+                    >
+                      {lifecycleAction.isPending && lifecycleAction.variables === "stop" ? "ĐANG TẮT..." : "TẮT BOT"}
+                    </Button>
+                  </Grid>
+                </Grid>
+
+                {openPositions > 0 ? (
+                  <Alert severity="info" sx={{ py: 0.4 }}>
+                    Đang có vị thế XAUUSD: TẮT BOT bị khóa; TẠM DỪNG mode vẫn khả dụng để executor tiếp tục quản lý lệnh.
+                  </Alert>
+                ) : null}
+                {lifecycleAction.error ? <Alert severity="error" sx={{ py: 0.4 }}>{friendlyError(lifecycleAction.error)}</Alert> : null}
+                {botModeAction.error ? <Alert severity="error" sx={{ py: 0.4 }}>{friendlyError(botModeAction.error)}</Alert> : null}
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid size={{ xs: 12, lg: 6 }}>
+          <Card variant="outlined" sx={{ borderRadius: 3, height: "100%" }}>
+            <CardContent sx={{ p: { xs: 1.7, md: 2 } }}>
+              <Stack spacing={1.3}>
+                <Stack direction="row" justifyContent="space-between" gap={1} alignItems="center">
+                  <Box>
+                    <Typography variant="h6" fontWeight={950}>Lot / Fixed TP</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Chỉnh Fixed TP ngay tại Trung tâm điều khiển; Lot/Risk được gửi lại nguyên giá trị canonical hiện hành.
+                    </Typography>
+                  </Box>
+                  <Chip label="CONFIG" size="small" variant="outlined" />
+                </Stack>
+
+                <Stack direction="row" spacing={0.7} useFlexGap flexWrap="wrap">
+                  <Chip size="small" label={`TREND LOT ${configuredTrendLot.toFixed(2)}`} variant="outlined" />
+                  <Chip size="small" label={`SIDEWAY ${configuredSidewayRisk.toFixed(2)}% / ${configuredSidewayMaxLot.toFixed(2)}`} variant="outlined" />
+                </Stack>
+
+                <Grid container spacing={1.2}>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <Box sx={{ p: 1.2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
+                      <FormControlLabel
+                        control={<Switch checked={trendFixedTpEnabled} onChange={(event) => updateFixedTpDraft({ trendFixedTpEnabled: event.target.checked })} />}
+                        label="Trend Fixed TP"
+                      />
+                      <TextField
+                        fullWidth
+                        size="small"
+                        type="number"
+                        label="Trend Fixed TP distance"
+                        value={trendFixedTpDistance}
+                        disabled={!trendFixedTpEnabled}
+                        onChange={(event) => updateFixedTpDraft({ trendFixedTpDistance: Number(event.target.value) })}
+                        slotProps={{ htmlInput: { min: 0, step: 0.01 } }}
+                      />
+                    </Box>
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <Box sx={{ p: 1.2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
+                      <FormControlLabel
+                        control={<Switch checked={sidewayFixedTpEnabled} onChange={(event) => updateFixedTpDraft({ sidewayFixedTpEnabled: event.target.checked })} />}
+                        label="Sideway Fixed TP"
+                      />
+                      <TextField
+                        fullWidth
+                        size="small"
+                        type="number"
+                        label="Sideway Fixed TP distance"
+                        value={sidewayFixedTpDistance}
+                        disabled={!sidewayFixedTpEnabled}
+                        onChange={(event) => updateFixedTpDraft({ sidewayFixedTpDistance: Number(event.target.value) })}
+                        slotProps={{ htmlInput: { min: 0, step: 0.01 } }}
+                      />
+                    </Box>
+                  </Grid>
+                </Grid>
+
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
+                  <Button
+                    variant="contained"
+                    disabled={!canChangeFixedTp || saveLotSettings.isPending || !lotSettings.data}
+                    onClick={() => saveLotSettings.mutate({
+                      trendFixedLot: configuredTrendLot,
+                      sidewayRiskPercent: configuredSidewayRisk,
+                      sidewayMaxLot: configuredSidewayMaxLot,
+                      trendFixedTpEnabled,
+                      trendFixedTpDistance,
+                      sidewayFixedTpEnabled,
+                      sidewayFixedTpDistance,
+                    })}
+                    sx={{ fontWeight: 950 }}
+                  >
+                    {saveLotSettings.isPending ? "ĐANG LƯU..." : "Lưu cấu hình Fixed TP"}
+                  </Button>
+                  <Typography variant="caption" color="text.secondary">
+                    Chỉ lưu khi PAUSE, MT5 hợp lệ và XAUUSD positions = 0.
+                  </Typography>
+                </Stack>
+
+                {saveLotSettings.error ? <Alert severity="error" sx={{ py: 0.4 }}>{friendlyError(saveLotSettings.error)}</Alert> : null}
+                {lotSettings.data?.restartRequired ? (
+                  <Alert severity="warning" sx={{ py: 0.4 }}>
+                    Cấu hình đã lưu nhưng chưa active. Giữ PAUSE rồi bấm KHÔI PHỤC BOT để nạp cấu hình mới.
+                  </Alert>
+                ) : null}
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
       <Card variant="outlined" sx={{ borderRadius: 3 }}>
         <CardContent sx={{ p: { xs: 1.7, md: 2 } }}>
           <Stack spacing={1.6}>
@@ -128,60 +386,11 @@ export function Phase7CControlCenterCompactSection({
               <Grid size={{ xs: 6, sm: 4, lg: 2 }}><SummaryMetric label="TP" value={price(displayedTp)} /></Grid>
               <Grid size={{ xs: 6, sm: 4, lg: 2 }}><SummaryMetric label="Lot" value={displayedLot === null || displayedLot === undefined ? "—" : Number(displayedLot).toFixed(2)} /></Grid>
               <Grid size={{ xs: 6, sm: 4, lg: 2 }}><SummaryMetric label="P/L" value={money(displayedPnl, currency)} /></Grid>
-              <Grid size={{ xs: 6, sm: 4, lg: 2 }}><SummaryMetric label="Positions" value={String(lifecycleData?.bridge.openXauusdPositions ?? "—")} /></Grid>
+              <Grid size={{ xs: 6, sm: 4, lg: 2 }}><SummaryMetric label="Positions" value={String(openPositions)} /></Grid>
             </Grid>
           </Stack>
         </CardContent>
       </Card>
-
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <Card variant="outlined" sx={{ borderRadius: 3, height: "100%" }}>
-            <CardContent sx={{ p: 1.7 }}>
-              <Stack direction="row" justifyContent="space-between" gap={1} alignItems="center">
-                <Box>
-                  <Typography fontWeight={950}>Lot / Fixed TP</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Cấu hình hiện hành; chỉnh sửa vẫn nằm trong Điều khiển chi tiết để giữ nguyên safety guard.
-                  </Typography>
-                </Box>
-                <Chip label="CONFIG" size="small" variant="outlined" />
-              </Stack>
-              <Stack direction="row" spacing={0.7} useFlexGap flexWrap="wrap" sx={{ mt: 1.2 }}>
-                <Chip size="small" label={`TREND LOT ${trendLot.toFixed(2)}`} variant="outlined" />
-                <Chip size="small" label={`SIDEWAY ${sidewayRisk.toFixed(2)}% / ${sidewayMaxLot.toFixed(2)}`} variant="outlined" />
-                <Chip size="small" label={`TREND TP ${trendFixedTpEnabled ? trendFixedTpDistance.toFixed(2) : "OFF"}`} variant="outlined" />
-                <Chip size="small" label={`SIDEWAY TP ${sidewayFixedTpEnabled ? sidewayFixedTpDistance.toFixed(2) : "OFF"}`} variant="outlined" />
-              </Stack>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <Card variant="outlined" sx={{ borderRadius: 3, height: "100%" }}>
-            <CardContent sx={{ p: 1.7 }}>
-              <Stack direction="row" justifyContent="space-between" gap={1} alignItems="center">
-                <Box>
-                  <Typography fontWeight={950}>Bot / Lifecycle</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Trạng thái nhanh; Start/Stop/Pause đầy đủ nằm trong Điều khiển chi tiết.
-                  </Typography>
-                </Box>
-                <Chip
-                  label={lifecycleData?.ready ? "READY" : lifecycleData?.running ? "STARTING" : "STOPPED"}
-                  size="small"
-                  color={lifecycleData?.ready ? "success" : lifecycleData?.running ? "warning" : "default"}
-                />
-              </Stack>
-              <Stack direction="row" spacing={0.7} useFlexGap flexWrap="wrap" sx={{ mt: 1.2 }}>
-                <Chip size="small" label={`MODE ${mode}`} variant="outlined" />
-                <Chip size="small" label={lifecycleData?.bridge.reachable ? "MT5 CONNECTED" : "MT5 OFFLINE"} color={lifecycleData?.bridge.reachable ? "success" : "warning"} variant="outlined" />
-                <Chip size="small" label={lifecycleData?.telegramReady ? "TELEGRAM READY" : "TELEGRAM OFFLINE"} color={lifecycleData?.telegramReady ? "success" : "default"} variant="outlined" />
-              </Stack>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
     </Stack>
   );
 }
