@@ -5,6 +5,7 @@ const root = process.cwd();
 const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8");
 
 const shell = read("apps/web/src/pages/Phase7CControlCenterShellPage.tsx");
+const accountRisk = read("apps/web/src/pages/Phase7CAccountRiskPage.tsx");
 const execution = read("apps/web/src/ui/Phase7CExecutionAuthorizationCard.tsx");
 const compact = read("apps/web/src/ui/Phase7CControlCenterCompactSection.tsx");
 const status = read("apps/web/src/ui/Phase7COperatorStatusBar.tsx");
@@ -14,15 +15,20 @@ function requireText(source, needle, label) {
   if (!source.includes(needle)) throw new Error(`${label}: missing ${needle}`);
 }
 
-// Shell: one operator status bar, critical controls in two columns, old operational/intelligence surfaces preserved but collapsed.
+function forbidText(source, needle, label) {
+  if (source.includes(needle)) throw new Error(`${label}: forbidden ${needle}`);
+}
+
+// Shell: account switching belongs only to Account & Risk; Control Center focuses on trading operations.
 requireText(shell, "Phase7COperatorStatusBar", "operator status import");
 requireText(shell, "<Phase7COperatorStatusBar />", "operator status render");
-requireText(shell, "<Grid container spacing={2}>", "critical two-column grid");
 requireText(shell, "<Phase7CExecutionAuthorizationCard />", "execution authorization preserved");
-requireText(shell, "<Phase7CAccountSwitchCard />", "account switch preserved");
-requireText(shell, "<Phase7CControlCenterCompactSection", "compact decision/control summary render");
+forbidText(shell, "Phase7CAccountSwitchCard", "duplicate account switch removed from Control Center");
+requireText(accountRisk, "Phase7CAccountSwitchCard", "account switch remains in Account & Risk");
+requireText(accountRisk, "<Phase7CAccountSwitchCard />", "account switch remains rendered in Account & Risk");
+requireText(shell, "<Phase7CControlCenterCompactSection", "compact decision/control surface render");
 requireText(shell, "<Phase7CIntelligenceSummaryCard />", "intelligence compact summary render");
-requireText(shell, "const [showOperationalDetails, setShowOperationalDetails] = useState(false);", "operational controls collapsed by default");
+requireText(shell, "const [showOperationalDetails, setShowOperationalDetails] = useState(false);", "operational details collapsed by default");
 requireText(shell, "showOperationalDetails ? <Phase7CControlCenterPage /> : null", "legacy operational control visibility gate");
 requireText(shell, "const [showIntelligenceDetails, setShowIntelligenceDetails] = useState(false);", "intelligence collapsed by default");
 requireText(shell, "showIntelligenceDetails ? (", "intelligence detail visibility gate");
@@ -49,16 +55,31 @@ requireText(execution, "Ẩn chi tiết", "execution detail collapse action");
 requireText(execution, "Lý do:", "execution first blocker summary");
 requireText(execution, "const showAutoActivationDiagnostics = !isAutoActive;", "AUTO active diagnostics safety gate preserved");
 
-// Primary control summary: decision first, lot/lifecycle summary second, legacy controls delegated to shell.
+// Primary Control Center surface: decision summary plus directly usable canonical Bot and Fixed TP controls.
 requireText(compact, "Quyết định hiện tại", "decision promoted to compact surface");
-requireText(compact, "Lot / Fixed TP", "lot and fixed TP summary");
-requireText(compact, "Bot / Lifecycle", "bot lifecycle summary");
-requireText(compact, "Mở điều khiển chi tiết", "legacy control expand action");
-requireText(compact, "Ẩn điều khiển chi tiết", "legacy control collapse action");
+requireText(compact, "Điều khiển Bot", "bot control card visible");
+requireText(compact, "BẬT BOT", "start bot action visible");
+requireText(compact, "TẠM DỪNG", "pause bot action visible");
+requireText(compact, "TẮT BOT", "stop bot action visible");
+requireText(compact, 'lifecycleAction.mutate("start")', "canonical lifecycle start path reused");
+requireText(compact, 'lifecycleAction.mutate("stop")', "canonical lifecycle stop path reused");
+requireText(compact, 'setPhase7CBotMode("PAUSE")', "canonical PAUSE path reused");
+requireText(compact, "Lot / Fixed TP", "lot and fixed TP card visible");
+requireText(compact, "Trend Fixed TP", "trend Fixed TP editor visible");
+requireText(compact, "Sideway Fixed TP", "sideway Fixed TP editor visible");
+requireText(compact, "Lưu cấu hình Fixed TP", "Fixed TP save action visible");
+requireText(compact, "setPhase7CLotSettings", "canonical lot settings path reused");
+requireText(compact, "const canChangeFixedTp =", "Fixed TP safety gate preserved");
+requireText(compact, "mode === \"PAUSE\"", "Fixed TP requires PAUSE");
+requireText(compact, "openXauusdPositions", "position safety checks preserved");
+forbidText(compact, "chỉnh sửa vẫn nằm trong Điều khiển chi tiết", "Fixed TP no longer summary-only");
+forbidText(compact, "Start/Stop/Pause đầy đủ nằm trong Điều khiển chi tiết", "bot controls no longer summary-only");
+requireText(compact, "Mở điều khiển chi tiết", "legacy detail expand action retained");
+requireText(compact, "Ẩn điều khiển chi tiết", "legacy detail collapse action retained");
 requireText(compact, "detailsOpen", "compact detail state supplied by shell");
 requireText(compact, "onToggleDetails", "compact detail action supplied by shell");
 
-// Intelligence on Control Center becomes summary-first with navigation to the dedicated performance page.
+// Intelligence on Control Center remains summary-first with navigation to the dedicated performance page.
 requireText(intelligence, "Intelligence & hiệu suất", "intelligence summary title");
 requireText(intelligence, 'to="/performance"', "performance navigation");
 requireText(intelligence, "Mở Hiệu suất", "performance action");
