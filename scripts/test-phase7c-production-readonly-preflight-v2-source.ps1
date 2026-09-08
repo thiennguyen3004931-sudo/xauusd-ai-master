@@ -59,6 +59,7 @@ $requiredEvidence = @(
     'ACCOUNT_SERVER=',
     'CANONICAL_ACCOUNT_LOGIN=',
     'CANONICAL_ACCOUNT_SERVER=',
+    'ACCOUNT_ENV_FILE_BINDING_VALID=',
     'BRIDGE_ACCOUNT_IDENTITY_MATCH=',
     'LIVE_AUTHORIZATION_VALID=',
     'TASK_OWNERSHIP=',
@@ -103,6 +104,9 @@ foreach ($identityEnvMarker in @('MT5_LOGIN','MT5_SERVER')) {
 }
 if ($source -notmatch '(?i)bridgeAccountIdentityMatch') {
     throw 'Exact broker login/server identity comparison is required.'
+}
+if ($source -notmatch '(?i)accountEnvFileBindingValid') {
+    throw 'Selected account-state envFile must be bound to the executor task config envFile.'
 }
 
 $forbiddenCommands = @(
