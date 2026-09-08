@@ -21,6 +21,7 @@ on:
       - "apps/web/src/ui/DashboardLayout.tsx"
       - "apps/web/src/ui/StatusChip.tsx"
       - "scripts/test-phase7c-web-account-semantic-source.mjs"
+      - "scripts/test-phase7c-account-switch-compact-ui-source.mjs"
       - ".github/workflows/phase7c-web-account-semantic-ci.yml"
 
 permissions:
@@ -51,6 +52,9 @@ jobs:
 
       - name: Account-aware semantic source assertions
         run: node scripts/test-phase7c-web-account-semantic-source.mjs
+
+      - name: Compact account-switch UI source assertions
+        run: node scripts/test-phase7c-account-switch-compact-ui-source.mjs
 
       - name: Build API dependency graph
         run: pnpm --filter @xauusd/api... build
