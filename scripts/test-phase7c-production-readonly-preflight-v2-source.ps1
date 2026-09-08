@@ -53,9 +53,13 @@ $requiredEvidence = @(
     'XAUUSD_POSITIONS=',
     'XAUUSD_PENDING_ORDERS=',
     'UNRESOLVED_MUTATING_REQUESTS=',
+    'RUNTIME_ROOT=',
     'ACCOUNT_MODE=',
     'ACCOUNT_LOGIN=',
     'ACCOUNT_SERVER=',
+    'CANONICAL_ACCOUNT_LOGIN=',
+    'CANONICAL_ACCOUNT_SERVER=',
+    'BRIDGE_ACCOUNT_IDENTITY_MATCH=',
     'LIVE_AUTHORIZATION_VALID=',
     'TASK_OWNERSHIP=',
     'TASK_DRIFT=',
@@ -85,6 +89,20 @@ foreach ($endpoint in $requiredEndpoints) {
 $componentNames = @('api','web','supervisor','trend','sideway','telegram','regime-notifier','lifecycle-broker')
 foreach ($component in $componentNames) {
     if (-not $source.Contains($component)) { throw "Missing runtime-source component coverage: $component" }
+}
+
+foreach ($runtimeRootMarker in @('PHASE7C_RUNTIME_ROOT','PHASE7B_DEMO_WORK_DIR')) {
+    if (-not $source.Contains($runtimeRootMarker)) {
+        throw "Runtime-root resolution must mirror API precedence. Missing=$runtimeRootMarker"
+    }
+}
+foreach ($identityEnvMarker in @('MT5_LOGIN','MT5_SERVER')) {
+    if (-not $source.Contains($identityEnvMarker)) {
+        throw "Exact canonical account identity must be read from the selected account env. Missing=$identityEnvMarker"
+    }
+}
+if ($source -notmatch '(?i)bridgeAccountIdentityMatch') {
+    throw 'Exact broker login/server identity comparison is required.'
 }
 
 $forbiddenCommands = @(
