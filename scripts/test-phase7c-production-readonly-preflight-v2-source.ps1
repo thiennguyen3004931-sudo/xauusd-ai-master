@@ -76,8 +76,8 @@ $requiredEndpoints = @(
     '/api/v1/phase7c/bot-mode',
     '/api/v1/phase7c/lifecycle',
     '/api/v1/phase7c-live-arm-control/capability',
-    '/api/v1/phase7c/account-switch/same-mode-readiness',
-    '/api/v1/phase7c/account-switch/status',
+    '/api/v1/phase7c-account-switch/same-mode-readiness',
+    '/api/v1/phase7c-account-switch/status',
     '/api/v1/phase7c-live-arm-control/status',
     '/api/v1/phase7c/runtime-source-attestation',
     '/v1/positions?symbol=XAUUSD',
@@ -85,6 +85,14 @@ $requiredEndpoints = @(
 )
 foreach ($endpoint in $requiredEndpoints) {
     if (-not $source.Contains($endpoint)) { throw "Missing required GET-only evidence endpoint: $endpoint" }
+}
+
+$forbiddenLegacyEndpoints = @(
+    '/api/v1/phase7c/account-switch/same-mode-readiness',
+    '/api/v1/phase7c/account-switch/status'
+)
+foreach ($endpoint in $forbiddenLegacyEndpoints) {
+    if ($source.Contains($endpoint)) { throw "Production preflight contains invalid account-switch route namespace: $endpoint" }
 }
 
 $componentNames = @('api','web','supervisor','trend','sideway','telegram','regime-notifier','lifecycle-broker')
