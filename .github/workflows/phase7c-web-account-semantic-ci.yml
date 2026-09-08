@@ -16,6 +16,7 @@ on:
       - "apps/web/src/pages/Phase7CControlCenterPage.tsx"
       - "apps/web/src/pages/Phase7CControlCenterShellPage.tsx"
       - "apps/web/src/ui/Phase7CAccountSwitchCard.tsx"
+      - "apps/web/src/ui/Phase7CControlCenterCompactSection.tsx"
       - "apps/web/src/ui/Phase7CExecutionAuthorizationCard.tsx"
       - "apps/web/src/ui/Phase7COperatorStatusBar.tsx"
       - "apps/web/src/ui/Phase7CIntelligenceSummaryCard.tsx"
