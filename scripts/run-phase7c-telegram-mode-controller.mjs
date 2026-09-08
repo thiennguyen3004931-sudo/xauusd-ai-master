@@ -1,4 +1,5 @@
 import dns from "node:dns";
+import net from "node:net";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
@@ -10,6 +11,7 @@ import {
 } from "./phase7c-telegram-mode-logic.mjs";
 
 dns.setDefaultResultOrder("ipv4first");
+net.setDefaultAutoSelectFamily(false);
 
 const fallbackToken = requiredEnv("ZIQ_TELEGRAM_BOT_TOKEN");
 const fallbackChatId = requiredEnv("ZIQ_TELEGRAM_CHAT_ID");
