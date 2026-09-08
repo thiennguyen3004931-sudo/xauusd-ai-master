@@ -12,7 +12,8 @@ $files = @{
   telemetryTypes = Join-Path $ProjectRoot "apps\web\src\types.ts"
   helper = Join-Path $ProjectRoot "apps\web\src\phase7c-account-switch.ts"
   card = Join-Path $ProjectRoot "apps\web\src\ui\Phase7CAccountSwitchCard.tsx"
-  shell = Join-Path $ProjectRoot "apps\web\src\pages\Phase7CControlCenterShellPage.tsx"
+  accountRisk = Join-Path $ProjectRoot "apps\web\src\pages\Phase7CAccountRiskPage.tsx"
+  controlCenterShell = Join-Path $ProjectRoot "apps\web\src\pages\Phase7CControlCenterShellPage.tsx"
 }
 
 function Assert-Literal([string]$Source, [string]$Text, [string]$Label) {
@@ -41,7 +42,8 @@ $webTypes = Get-Content -LiteralPath $files.webTypes -Raw
 $telemetryTypes = Get-Content -LiteralPath $files.telemetryTypes -Raw
 $helper = Get-Content -LiteralPath $files.helper -Raw
 $card = Get-Content -LiteralPath $files.card -Raw
-$shell = Get-Content -LiteralPath $files.shell -Raw
+$accountRisk = Get-Content -LiteralPath $files.accountRisk -Raw
+$controlCenterShell = Get-Content -LiteralPath $files.controlCenterShell -Raw
 
 # Canonical DEMO <-> LIVE account switching stays on the existing guarded service.
 Assert-Literal $route 'router.get("/capability"' 'capability endpoint'
@@ -97,9 +99,10 @@ Assert-Literal $helper 'manualLoginInMt5: true' 'manual MT5 login policy'
 Assert-Literal $helper 'autoArmAfterVerification: false' 'no auto ARM policy'
 Assert-Literal $helper 'autoAutoAfterVerification: false' 'no auto AUTO policy'
 
-# The card must be visible in Control Center and expose a guided manual-login flow.
-Assert-Literal $shell 'Phase7CAccountSwitchCard' 'Control Center account-switch import'
-Assert-Literal $shell '<Phase7CAccountSwitchCard />' 'Control Center account-switch render'
+# Account switching belongs to Account & Risk only; Control Center must not duplicate it.
+Assert-Literal $accountRisk 'Phase7CAccountSwitchCard' 'Account & Risk account-switch import'
+Assert-Literal $accountRisk '<Phase7CAccountSwitchCard />' 'Account & Risk account-switch render'
+Assert-NotContains $controlCenterShell 'Phase7CAccountSwitchCard' 'Control Center duplicate account-switch card'
 Assert-Literal $card 'getPhase7CSameModeAccountChangeReadiness' 'card same-mode readiness query'
 Assert-Literal $card 'getMt5Telemetry' 'card MT5 identity polling'
 Assert-Literal $card 'captureMt5AccountIdentity' 'card baseline identity capture'
