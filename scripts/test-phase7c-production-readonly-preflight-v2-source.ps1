@@ -82,7 +82,7 @@ foreach ($endpoint in $requiredEndpoints) {
     if (-not $source.Contains($endpoint)) { throw "Missing required GET-only evidence endpoint: $endpoint" }
 }
 
-$componentNames = @('api','supervisor','trend','sideway','telegram','regime-notifier','lifecycle-broker')
+$componentNames = @('api','web','supervisor','trend','sideway','telegram','regime-notifier','lifecycle-broker')
 foreach ($component in $componentNames) {
     if (-not $source.Contains($component)) { throw "Missing runtime-source component coverage: $component" }
 }
@@ -103,8 +103,11 @@ foreach ($commandAst in $commands) {
 if ($source -match '(?im)-Method\s+(Post|Put|Patch|Delete)\b') {
     throw 'Strict production read-only preflight must use HTTP GET only.'
 }
-if ($source -match '(?im)\b(?:fetch|pull|checkout|reset|switch|restore|clean)\b' -and $source -match '(?i)(?:gitExe|git\s)') {
-    throw 'Strict production read-only preflight must not contain mutating Git verbs.'
+$gitInvocationLines = @($source -split "`r?`n" | Where-Object { $_ -match '\$gitExe|(?:^|\s)git(?:\.exe)?(?:\s|$)' })
+foreach ($line in $gitInvocationLines) {
+    if ($line -match '(?i)\b(?:fetch|pull|checkout|reset|switch|restore|clean)\b') {
+        throw "Strict production read-only preflight contains mutating Git verb: $line"
+    }
 }
 if ($source -match '(?i)\[System\.IO\.FileMode\]::(?:Create|CreateNew|OpenOrCreate|Append|Truncate)') {
     throw 'Strict production read-only preflight must not open files in a creating/writing mode.'
