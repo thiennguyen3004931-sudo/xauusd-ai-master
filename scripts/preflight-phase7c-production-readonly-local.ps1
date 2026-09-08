@@ -215,6 +215,19 @@ $lifecycleRunning = [bool]$lifecycle.running
 $lifecycleReady = [bool]$lifecycle.ready
 $accountMode = ([string]$lifecycle.accountMode.accountMode).Trim().ToUpperInvariant()
 $accountModeValid = [bool]$lifecycle.accountMode.valid
+$accountStateSource = ([string]$lifecycle.accountMode.source).Trim().ToUpperInvariant()
+$selectedEnvFileRaw = ([string]$lifecycle.accountMode.envFile).Trim()
+$accountEnvFileBindingValid = $false
+if ($accountStateSource -eq 'LEGACY_DEMO_DEFAULT' -and $accountMode -eq 'DEMO' -and [string]::IsNullOrWhiteSpace($selectedEnvFileRaw)) {
+    $accountEnvFileBindingValid = $true
+} elseif (-not [string]::IsNullOrWhiteSpace($selectedEnvFileRaw)) {
+    try {
+        $selectedEnvFile = [System.IO.Path]::GetFullPath($selectedEnvFileRaw)
+        $accountEnvFileBindingValid = [string]::Equals($selectedEnvFile, $EnvFile, [System.StringComparison]::OrdinalIgnoreCase)
+    } catch {
+        $accountEnvFileBindingValid = $false
+    }
+}
 $accountLogin = Format-Nullable $sameMode.accountLogin
 $accountServer = Format-Nullable $sameMode.server
 $brokerLogin = 0L
@@ -245,6 +258,7 @@ if ($botMode -ne [string]$lifecycle.mode.mode) { Add-Blocked 'MODE_SNAPSHOT_DIVE
 if ($arm -notin @('ARMED','DISARMED')) { Add-Blocked 'ARM_STATE_INVALID' }
 if (-not $accountModeValid -or $accountMode -notin @('DEMO','LIVE')) { Add-Blocked 'ACCOUNT_MODE_INVALID' }
 if ($accountMode -ne $configAccountMode) { Add-Blocked 'ACCOUNT_MODE_CONFIG_DIVERGENCE' }
+if (-not $accountEnvFileBindingValid) { Add-Blocked 'ACCOUNT_ENV_FILE_BINDING_MISMATCH' }
 if (-not $bridgeHealthy) { Add-Blocked 'BRIDGE_NOT_HEALTHY' }
 if (-not $bridgeAccountIdentityMatch) { Add-Blocked 'BRIDGE_ACCOUNT_IDENTITY_MISMATCH' }
 if ($positions.Count -ne [int]$armSnapshot.openXauusdPositions -or $positions.Count -ne [int]$sameMode.openXauusdPositions) {
@@ -330,6 +344,7 @@ if ($positions.Count -ne 0) { Add-MutationGateReason 'XAUUSD_POSITIONS_NONZERO' 
 if ($pendingOrders.Count -ne 0) { Add-MutationGateReason 'XAUUSD_PENDING_ORDERS_NONZERO' }
 if ($unresolvedMutatingRequests -ne 0) { Add-MutationGateReason 'UNRESOLVED_MUTATING_REQUESTS' }
 if (-not $accountModeValid -or $accountMode -ne $configAccountMode) { Add-MutationGateReason 'ACCOUNT_MODE_INVALID_OR_DIVERGED' }
+if (-not $accountEnvFileBindingValid) { Add-MutationGateReason 'ACCOUNT_ENV_FILE_BINDING_MISMATCH' }
 if (-not $bridgeHealthy) { Add-MutationGateReason 'BRIDGE_NOT_HEALTHY' }
 if (-not $bridgeAccountIdentityMatch) { Add-MutationGateReason 'ACCOUNT_IDENTITY_MISMATCH' }
 if (-not $liveAuthorizationValid) { Add-MutationGateReason 'LIVE_AUTHORIZATION_INVALID' }
@@ -379,6 +394,7 @@ Write-Host "ACCOUNT_LOGIN=$accountLogin"
 Write-Host "ACCOUNT_SERVER=$accountServer"
 Write-Host "CANONICAL_ACCOUNT_LOGIN=$canonicalLoginOutput"
 Write-Host "CANONICAL_ACCOUNT_SERVER=$canonicalServerOutput"
+Write-Host "ACCOUNT_ENV_FILE_BINDING_VALID=$accountEnvFileBindingValid"
 Write-Host "BRIDGE_HEALTHY=$bridgeHealthy"
 Write-Host "BRIDGE_ACCOUNT_MODE_MATCH=$bridgeAccountModeMatch"
 Write-Host "BRIDGE_ACCOUNT_IDENTITY_MATCH=$bridgeAccountIdentityMatch"
