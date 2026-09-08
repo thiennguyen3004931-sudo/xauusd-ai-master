@@ -6,7 +6,7 @@ const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8");
 
 const shell = read("apps/web/src/pages/Phase7CControlCenterShellPage.tsx");
 const execution = read("apps/web/src/ui/Phase7CExecutionAuthorizationCard.tsx");
-const control = read("apps/web/src/pages/Phase7CControlCenterPage.tsx");
+const compact = read("apps/web/src/ui/Phase7CControlCenterCompactSection.tsx");
 const status = read("apps/web/src/ui/Phase7COperatorStatusBar.tsx");
 const intelligence = read("apps/web/src/ui/Phase7CIntelligenceSummaryCard.tsx");
 
@@ -23,6 +23,7 @@ requireText(shell, "<Phase7COperatorStatusBar />", "operator status render");
 requireText(shell, "<Grid container spacing={2}>", "critical two-column grid");
 requireText(shell, "<Phase7CExecutionAuthorizationCard />", "execution authorization preserved");
 requireText(shell, "<Phase7CAccountSwitchCard />", "account switch preserved");
+requireText(shell, "<Phase7CControlCenterCompactSection />", "compact decision/control summary render");
 requireText(shell, "<Phase7CIntelligenceSummaryCard />", "intelligence compact summary render");
 forbidText(shell, "Phase7CPerformanceIntelligenceCard", "detailed performance intelligence removed from shell");
 forbidText(shell, "Phase7CPerformanceEffectivenessCard", "detailed effectiveness removed from shell");
@@ -44,14 +45,14 @@ requireText(execution, "Xem chi tiết", "execution detail expand action");
 requireText(execution, "Ẩn chi tiết", "execution detail collapse action");
 requireText(execution, "Lý do:", "execution first blocker summary");
 
-// Control Center: remove permanent verbose policy copy from the primary operator surface.
-forbidText(
-  control,
-  "BẬT BOT chỉ khởi động/khôi phục executors và luôn kết thúc ở PAUSE. AUTO không còn được bật từ lifecycle hay Telegram; chỉ nút BẬT AUTO trên Web mới có quyền kích hoạt AUTO sau khi toàn bộ cổng an toàn đạt.",
-  "verbose lifecycle policy",
-);
-requireText(control, "Xem chính sách vận hành", "on-demand lifecycle policy action");
-requireText(control, "Quyết định hiện tại · Web đồng bộ panel MT5", "decision monitor preserved");
+// Primary control surface: compact decision first, lot/lifecycle summary second, legacy controls preserved on demand.
+requireText(compact, "const [showOperationalDetails, setShowOperationalDetails] = useState(false);", "operational details collapsed by default");
+requireText(compact, "Quyết định hiện tại", "decision promoted to compact surface");
+requireText(compact, "Lot / Fixed TP", "lot and fixed TP summary");
+requireText(compact, "Bot / Lifecycle", "bot lifecycle summary");
+requireText(compact, "Mở điều khiển chi tiết", "legacy control expand action");
+requireText(compact, "Ẩn điều khiển chi tiết", "legacy control collapse action");
+requireText(compact, "showOperationalDetails ? <Phase7CControlCenterPage /> : null", "legacy control visibility gate");
 
 // Intelligence on Control Center becomes summary-only with navigation to the dedicated performance page.
 requireText(intelligence, "Intelligence & hiệu suất", "intelligence summary title");
