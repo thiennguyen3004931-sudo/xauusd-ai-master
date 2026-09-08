@@ -76,7 +76,7 @@ export function Phase7CExecutionAuthorizationCard() {
   const queryClient = useQueryClient();
   const [armRequestId, setArmRequestId] = useState<string | null>(null);
   const [armPreflight, setArmPreflight] = useState<Phase7CLiveArmPreflight | null>(null);
-  const [showArmChecks, setShowArmChecks] = useState(false);
+  const [armDetailsOpen, setArmDetailsOpen] = useState(false);
   const [showAutoChecks, setShowAutoChecks] = useState(false);
 
   const capability = useQuery({
@@ -97,7 +97,7 @@ export function Phase7CExecutionAuthorizationCard() {
     mutationFn: () => createPhase7CLiveArmPreflight("ARM_LIVE"),
     onMutate: () => {
       setArmPreflight(null);
-      setShowArmChecks(false);
+      setArmDetailsOpen(false);
     },
     onSuccess: (result) => setArmPreflight(result),
   });
@@ -132,7 +132,7 @@ export function Phase7CExecutionAuthorizationCard() {
     onSuccess: (result) => {
       setArmRequestId(result.requestId);
       setArmPreflight(null);
-      setShowArmChecks(false);
+      setArmDetailsOpen(false);
     },
   });
 
@@ -163,7 +163,7 @@ export function Phase7CExecutionAuthorizationCard() {
     queueMicrotask(() => {
       setArmRequestId(null);
       setArmPreflight(null);
-      setShowArmChecks(false);
+      setArmDetailsOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["phase7c-live-arm-control-capability"] });
       void queryClient.invalidateQueries({ queryKey: ["phase7c-auto-activation-status"] });
       void queryClient.invalidateQueries({ queryKey: ["phase7c-lifecycle"] });
@@ -173,6 +173,7 @@ export function Phase7CExecutionAuthorizationCard() {
   const accountMode = capability.data?.accountMode ?? autoStatus.data?.accountMode ?? "DEMO";
   const botMode = autoStatus.data?.botMode ?? capability.data?.botMode ?? "—";
   const isAutoActive = botMode === "AUTO";
+  const showAutoActivationDiagnostics = !isAutoActive;
   const autoStatusLabel = isAutoActive
     ? "ĐANG HOẠT ĐỘNG"
     : autoStatus.data?.approved
@@ -180,8 +181,8 @@ export function Phase7CExecutionAuthorizationCard() {
       : "BLOCKED";
   const armed = capability.data?.liveExecutionArmed === true;
   const canAttemptAuto = !isAutoActive && !autoMutation.isPending;
-  const armChecks = armPreflight?.checks ?? capability.data?.armChecks;
-  const armCount = checkCount(armChecks);
+  const armCapabilityCount = checkCount(capability.data?.armChecks);
+  const armPreflightCount = checkCount(armPreflight?.checks);
   const armBlockedBy = armPreflight?.blockedBy ?? capability.data?.armBlockedBy ?? [];
   const armReason = armed
     ? "LIVE đã ARMED cho bridge session hiện tại"
@@ -264,7 +265,11 @@ export function Phase7CExecutionAuthorizationCard() {
                   <Stack direction="row" spacing={0.7} alignItems="center" useFlexGap flexWrap="wrap">
                     <Typography fontWeight={950}>LIVE ARM</Typography>
                     <Chip label={armed ? "ARMED" : armPreflight?.approved ? "READY" : "BLOCKED"} color={armed || armPreflight?.approved ? "success" : "warning"} size="small" />
-                    <Chip label={`${armCount.passed}/${armCount.total} đạt`} size="small" variant="outlined" />
+                    {armPreflight ? (
+                      <Chip label={`${armPreflightCount.passed}/${armPreflightCount.total} đạt`} size="small" variant="outlined" />
+                    ) : (
+                      <Chip label={`${armCapabilityCount.passed}/${armCapabilityCount.total} đạt`} size="small" variant="outlined" />
+                    )}
                   </Stack>
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.45 }}>
                     Lý do: {armReason}
@@ -292,17 +297,17 @@ export function Phase7CExecutionAuthorizationCard() {
                   >
                     {armMutation.isPending ? "ĐANG XỬ LÝ..." : armed ? "DISARM LIVE" : "ARM LIVE"}
                   </Button>
-                  <Button size="small" variant="text" onClick={() => setShowArmChecks((value) => !value)} sx={{ fontWeight: 900 }}>
-                    {showArmChecks ? "Ẩn chi tiết" : "Xem chi tiết"}
+                  <Button size="small" variant="text" onClick={() => setArmDetailsOpen((value) => !value)} sx={{ fontWeight: 900 }}>
+                    {armDetailsOpen ? "Ẩn chi tiết" : "Xem chi tiết"}
                   </Button>
                 </Stack>
               </Stack>
 
-              {showArmChecks && (
+              {armDetailsOpen ? (
                 <Box mt={1.1} pt={1.1} sx={{ borderTop: "1px solid rgba(148,163,184,.14)" }}>
-                  <CheckRows entries={armCount.entries} />
+                  <CheckRows entries={armPreflight ? armPreflightCount.entries : armCapabilityCount.entries} />
                 </Box>
-              )}
+              ) : null}
             </Box>
           ) : null}
 
@@ -312,16 +317,23 @@ export function Phase7CExecutionAuthorizationCard() {
                 <Stack direction="row" spacing={0.7} alignItems="center" useFlexGap flexWrap="wrap">
                   <Typography fontWeight={950}>AUTO</Typography>
                   <Chip label={autoStatusLabel} color={isAutoActive || autoStatus.data?.approved ? "success" : "warning"} size="small" />
-                  {!isAutoActive ? <Chip label={`${autoCount.passed}/${autoCount.total} đạt`} size="small" variant="outlined" /> : null}
+                  {showAutoActivationDiagnostics ? (
+                    <Chip label={`${autoCount.passed}/${autoCount.total} đạt`} size="small" variant="outlined" />
+                  ) : null}
                 </Stack>
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.45 }}>
                   Lý do: {autoReason}
                 </Typography>
+                {showAutoActivationDiagnostics && autoBlockedBy.length ? (
+                  <Typography variant="caption" color="warning.main" sx={{ display: "block", mt: 0.3 }}>
+                    Đang khóa bởi: {autoBlockedBy.map((key) => CHECK_LABELS[key] ?? key).join(" · ")}
+                  </Typography>
+                ) : null}
               </Box>
               <Stack direction="row" spacing={0.7} useFlexGap flexWrap="wrap">
-                {!isAutoActive ? (
+                {showAutoActivationDiagnostics ? (
                   <Button size="small" variant="text" onClick={() => setShowAutoChecks((value) => !value)} sx={{ fontWeight: 900 }}>
-                    {showAutoChecks ? "Ẩn chi tiết" : "Xem chi tiết"}
+                    {showAutoChecks ? "Ẩn chi tiết tự động" : "Chi tiết tự động"}
                   </Button>
                 ) : null}
                 <Button
@@ -330,14 +342,20 @@ export function Phase7CExecutionAuthorizationCard() {
                   color="primary"
                   disabled={!canAttemptAuto}
                   onClick={() => autoMutation.mutate()}
-                  sx={{ fontWeight: 950, minWidth: 130 }}
+                  sx={{ fontWeight: 950, minWidth: 150 }}
                 >
-                  {isAutoActive ? "AUTO ĐANG BẬT" : autoMutation.isPending ? "ĐANG KIỂM TRA..." : "BẬT AUTO"}
+                  {isAutoActive
+                    ? "Tự động đang bật"
+                    : autoMutation.isPending
+                      ? "Đang kiểm tra..."
+                      : accountMode === "LIVE"
+                        ? "Bật tự động Live"
+                        : "Bật tự động Demo"}
                 </Button>
               </Stack>
             </Stack>
 
-            {!isAutoActive && showAutoChecks ? (
+            {showAutoActivationDiagnostics && showAutoChecks ? (
               <Box mt={1.1} pt={1.1} sx={{ borderTop: "1px solid rgba(148,163,184,.14)" }}>
                 <CheckRows entries={autoCount.entries} />
               </Box>
