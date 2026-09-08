@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Box,
@@ -15,7 +14,6 @@ import {
   getPhase7CLifecycle,
   getPhase7CLotSettings,
 } from "../api";
-import { Phase7CControlCenterPage } from "../pages/Phase7CControlCenterPage";
 
 function price(value: number | null | undefined) {
   return Number.isFinite(value) ? Number(value).toFixed(2) : "—";
@@ -39,9 +37,13 @@ function SummaryMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function Phase7CControlCenterCompactSection() {
-  const [showOperationalDetails, setShowOperationalDetails] = useState(false);
-
+export function Phase7CControlCenterCompactSection({
+  detailsOpen,
+  onToggleDetails,
+}: {
+  detailsOpen: boolean;
+  onToggleDetails: () => void;
+}) {
   const lifecycle = useQuery({
     queryKey: ["phase7c-lifecycle"],
     queryFn: getPhase7CLifecycle,
@@ -112,10 +114,11 @@ export function Phase7CControlCenterCompactSection() {
               <Button
                 size="small"
                 variant="outlined"
-                onClick={() => setShowOperationalDetails((value) => !value)}
+                aria-expanded={detailsOpen}
+                onClick={onToggleDetails}
                 sx={{ fontWeight: 900, whiteSpace: "nowrap" }}
               >
-                {showOperationalDetails ? "Ẩn điều khiển chi tiết" : "Mở điều khiển chi tiết"}
+                {detailsOpen ? "Ẩn điều khiển chi tiết" : "Mở điều khiển chi tiết"}
               </Button>
             </Stack>
 
@@ -179,8 +182,6 @@ export function Phase7CControlCenterCompactSection() {
           </Card>
         </Grid>
       </Grid>
-
-      {showOperationalDetails ? <Phase7CControlCenterPage /> : null}
     </Stack>
   );
 }
