@@ -31,6 +31,15 @@ requireText("ui?.entryChecks?.sideway", "V3 must use canonical Sideway entry dia
 requireText("ui?.setup", "V3 must use canonical setup data.");
 requireText("ui?.position", "V3 must use canonical position data.");
 
+assert.ok(
+  !/const\s+activeStrategy\s*=\s*sidewayActive\s*\?\s*"SIDEWAY"\s*:\s*"TREND"/s.test(source),
+  "V3 must not silently default an unknown effective strategy to TREND.",
+);
+assert.ok(
+  /const\s+activeStrategy\s*=\s*normalizedStrategy\.includes\("TREND"\)[\s\S]*?normalizedStrategy\.includes\("SIDEWAY"\)[\s\S]*?:\s*"—";/s.test(source),
+  "V3 must preserve an explicit unknown strategy instead of inferring TREND/SIDEWAY.",
+);
+
 forbidText('method: "POST"', "Signal UI V3 page must remain read-only.");
 forbidText("method: 'POST'", "Signal UI V3 page must remain read-only.");
 forbidText('method: "PUT"', "Signal UI V3 page must remain read-only.");
