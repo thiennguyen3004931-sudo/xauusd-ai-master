@@ -357,7 +357,6 @@ try {
   if ($LASTEXITCODE -ne 0 -or $branch -ne "main") {
     throw "Runtime-ready stable recovery deploy requires branch main. actual=$branch"
   }
-
   $dirty = @(& $gitExe status --porcelain)
   if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) {
     throw "Runtime-ready stable recovery deploy requires a clean worktree."
@@ -667,13 +666,141 @@ if ($taskBatterySettingsRepairRequired) {
 }
 
 # Strict dashboard deploy requires live executor PID files and strict Telegram
-# verification. If the new deployment identity was created while lifecycle is already
-# STOPPED with zero executors, restore a fresh canonical SYSTEM generation and stable
-# READY lifecycle first rather than weakening dashboard safety.
+# verification. If the new deployment identity requires a generation reload while the
+# lifecycle is RUNNING+READY with a proven canonical SYSTEM broker but a RELEASED or
+# MISSING singleton lock, quiesce the lifecycle first. The unchanged stopped-lifecycle
+# path below then performs the exact Scheduled Task restart and restores HELD before
+# lifecycle start and strict Web/API verification.
 if ($runtimeSourceGenerationReloadRequired -and -not $taskRepairRequired) {
   $preWebRuntimeGeneration = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $WorkDir
   $preWebLifecycle = Invoke-ApiGet "/api/v1/phase7c/lifecycle"
   $preWebTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+  $preWebExpectedLauncherSha256 = 'sha256:' + $trustedRunnerSha256.ToLowerInvariant()
+  $preWebBrokerAttestationPath = Join-Path $WorkDir "phase7c-source-attestation\components\lifecycle-broker.json"
+
+  $preWebLifecycleRunningReady = `
+    [bool]$preWebLifecycle.running -and `
+    [bool]$preWebLifecycle.ready -and `
+    [string]$preWebLifecycle.mode.mode -eq 'PAUSE' -and `
+    [string]$preWebLifecycle.accountMode.accountMode -eq 'LIVE' -and `
+    [bool]$preWebLifecycle.accountMode.valid
+  $preWebRunningReleasedLockObserved = `
+    $preWebLifecycleRunningReady -and `
+    [string]$preWebRuntimeGeneration.startupRunnerLockState -in @('MISSING', 'RELEASED')
+  $preWebRunningReleasedLockCandidate = `
+    $preWebRunningReleasedLockObserved -and `
+    [string]$preWebTask.State -eq 'Running' -and `
+    [string]$preWebRuntimeGeneration.statusReadState -eq 'OK' -and `
+    [string]$preWebRuntimeGeneration.heartbeatReadState -eq 'OK' -and `
+    [bool]$preWebRuntimeGeneration.brokerStatusPidMatch -and `
+    [bool]$preWebRuntimeGeneration.brokerProcessAlive -and `
+    [bool]$preWebRuntimeGeneration.brokerHeartbeatFresh
+
+  $preWebRunningCanonicalProcessIds = @()
+  $preWebRunningInstanceCount = -1
+  $preWebRunningBrokerAttestation = $null
+  $preWebRunningAttestedLauncherSha256 = ''
+  $preWebRunningOwnership = $null
+  $preWebRunningDrift = @('UNREAD')
+  $preWebRunningReleasedLockRepairEligible = $false
+  if ($preWebRunningReleasedLockCandidate) {
+    try {
+      $preWebRunningCanonicalProcessIds = @(Get-Phase7CCanonicalTaskProcessIds -Task $preWebTask)
+      $preWebRunningInstanceCount = Get-Phase7CRunningTaskInstanceCount -Name $TaskName
+      $preWebRunningBrokerAttestation = Read-JsonFile -Path $preWebBrokerAttestationPath -Label "Lifecycle broker source attestation before RUNNING+READY released-lock quiesce"
+      $preWebRunningAttestedLauncherSha256 = ([string]$preWebRunningBrokerAttestation.launcherSha256).Trim().ToLowerInvariant()
+      $preWebRunningOwnership = Test-Phase7CExecutorTaskActionOwnership `
+        -Actions $preWebTask.Actions `
+        -ExpectedRunnerPath $runnerPath `
+        -ExpectedRunnerSha256 $trustedRunnerSha256
+      $preWebRunningDrift = @(Get-Phase7CExecutorTaskDrift -Task $preWebTask)
+      $preWebRunningReleasedLockRepairEligible = `
+        $preWebRunningCanonicalProcessIds.Count -eq 1 -and `
+        $preWebRunningInstanceCount -eq 1 -and `
+        [int]$preWebRunningCanonicalProcessIds[0] -eq [int]$preWebRuntimeGeneration.statusBrokerPid -and `
+        [string]$preWebRunningBrokerAttestation.component -eq 'lifecycle-broker' -and `
+        [int]$preWebRunningBrokerAttestation.pid -eq [int]$preWebRuntimeGeneration.statusBrokerPid -and `
+        $preWebRunningAttestedLauncherSha256 -eq $preWebExpectedLauncherSha256 -and `
+        [bool]$preWebRunningOwnership.owned -and `
+        [bool]$preWebRunningOwnership.canonical -and `
+        -not [bool]$preWebRunningOwnership.repairRequired -and `
+        $preWebRunningDrift.Count -eq 0 -and `
+        (Test-Phase7CSystemTaskPrincipal $preWebTask.Principal)
+    } catch {
+      $preWebRunningReleasedLockRepairEligible = $false
+    }
+  }
+
+  if ($preWebRunningReleasedLockObserved) {
+    if (-not $preWebRunningReleasedLockRepairEligible) {
+      throw "RUNNING+READY lifecycle with RELEASED/MISSING startup lock requires an exact canonical SYSTEM broker tuple before lifecycle quiesce. taskState=$($preWebTask.State) brokerAlive=$($preWebRuntimeGeneration.brokerProcessAlive) heartbeatFresh=$($preWebRuntimeGeneration.brokerHeartbeatFresh) lock=$($preWebRuntimeGeneration.startupRunnerLockState) canonicalProcesses=$($preWebRunningCanonicalProcessIds.Count) taskInstances=$preWebRunningInstanceCount"
+    }
+
+    Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK=ELIGIBLE_QUIESCE_REQUIRED"
+    Assert-PauseDisarmed -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK"
+    Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK"
+    Assert-FlatBroker -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK"
+
+    # Re-prove the exact RUNNING+READY abnormal singleton tuple immediately before
+    # the canonical lifecycle mutation. Any evidence change fails closed before stop.
+    $preWebTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    $preWebRuntimeGeneration = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $WorkDir
+    $preWebLifecycle = Invoke-ApiGet "/api/v1/phase7c/lifecycle"
+    $preWebRunningCanonicalProcessIds = @(Get-Phase7CCanonicalTaskProcessIds -Task $preWebTask)
+    $preWebRunningInstanceCount = Get-Phase7CRunningTaskInstanceCount -Name $TaskName
+    $preWebRunningBrokerAttestation = Read-JsonFile -Path $preWebBrokerAttestationPath -Label "Lifecycle broker source attestation during RUNNING+READY released-lock safety recheck"
+    $preWebRunningAttestedLauncherSha256 = ([string]$preWebRunningBrokerAttestation.launcherSha256).Trim().ToLowerInvariant()
+    $preWebRunningOwnership = Test-Phase7CExecutorTaskActionOwnership `
+      -Actions $preWebTask.Actions `
+      -ExpectedRunnerPath $runnerPath `
+      -ExpectedRunnerSha256 $trustedRunnerSha256
+    $preWebRunningDrift = @(Get-Phase7CExecutorTaskDrift -Task $preWebTask)
+    $preWebRunningReleasedLockStillEligible = `
+      [bool]$preWebLifecycle.running -and `
+      [bool]$preWebLifecycle.ready -and `
+      [string]$preWebLifecycle.mode.mode -eq 'PAUSE' -and `
+      [string]$preWebLifecycle.accountMode.accountMode -eq 'LIVE' -and `
+      [bool]$preWebLifecycle.accountMode.valid -and `
+      [string]$preWebTask.State -eq 'Running' -and `
+      [string]$preWebRuntimeGeneration.statusReadState -eq 'OK' -and `
+      [string]$preWebRuntimeGeneration.heartbeatReadState -eq 'OK' -and `
+      [bool]$preWebRuntimeGeneration.brokerStatusPidMatch -and `
+      [bool]$preWebRuntimeGeneration.brokerProcessAlive -and `
+      [bool]$preWebRuntimeGeneration.brokerHeartbeatFresh -and `
+      [string]$preWebRuntimeGeneration.startupRunnerLockState -in @('MISSING', 'RELEASED') -and `
+      $preWebRunningCanonicalProcessIds.Count -eq 1 -and `
+      $preWebRunningInstanceCount -eq 1 -and `
+      [int]$preWebRunningCanonicalProcessIds[0] -eq [int]$preWebRuntimeGeneration.statusBrokerPid -and `
+      [string]$preWebRunningBrokerAttestation.component -eq 'lifecycle-broker' -and `
+      [int]$preWebRunningBrokerAttestation.pid -eq [int]$preWebRuntimeGeneration.statusBrokerPid -and `
+      $preWebRunningAttestedLauncherSha256 -eq $preWebExpectedLauncherSha256 -and `
+      [bool]$preWebRunningOwnership.owned -and `
+      [bool]$preWebRunningOwnership.canonical -and `
+      -not [bool]$preWebRunningOwnership.repairRequired -and `
+      $preWebRunningDrift.Count -eq 0 -and `
+      (Test-Phase7CSystemTaskPrincipal $preWebTask.Principal)
+    if (-not $preWebRunningReleasedLockStillEligible) {
+      throw "RUNNING+READY released-lock canonical broker tuple changed during safety recheck; lifecycle stop blocked."
+    }
+
+    Assert-PauseDisarmed -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK"
+    Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK"
+    Assert-FlatBroker -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK"
+    [void](Invoke-ApiPost "/api/v1/phase7c/lifecycle/stop" @{})
+    Wait-LifecycleStopped
+    Assert-LifecycleExecutorsStopped -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK_POST_STOP"
+    Assert-PauseDisarmed -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK_POST_STOP"
+    Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK_POST_STOP"
+    Assert-FlatBroker -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK_POST_STOP"
+    Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK_LIFECYCLE_STOP=PASS"
+
+    # Re-snapshot after lifecycle quiesce; the existing stopped-lifecycle proof below
+    # must independently re-authorize the exact Scheduled Task generation restart.
+    $preWebRuntimeGeneration = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $WorkDir
+    $preWebLifecycle = Invoke-ApiGet "/api/v1/phase7c/lifecycle"
+    $preWebTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+  }
+
   $preWebLifecycleStopped = `
     -not [bool]$preWebLifecycle.running -and `
     -not (Test-Phase7CLifecycleHasAliveProcess -State $preWebLifecycle)
@@ -689,8 +816,6 @@ if ($runtimeSourceGenerationReloadRequired -and -not $taskRepairRequired) {
 
   $preWebCanonicalProcessIds = @()
   $preWebRunningInstanceCount = -1
-  $preWebExpectedLauncherSha256 = 'sha256:' + $trustedRunnerSha256.ToLowerInvariant()
-  $preWebBrokerAttestationPath = Join-Path $WorkDir "phase7c-source-attestation\components\lifecycle-broker.json"
   $preWebBrokerAttestation = $null
   $preWebAttestedLauncherSha256 = ''
   $preWebReleasedOwnership = $null

@@ -167,4 +167,54 @@ foreach ($literal in $releasedLockRequired) {
 Assert-True (-not $recovery.Contains('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RELEASED_LOCK=HEALTHY')) `
   'Released startup lock must never be normalized to healthy generation state.'
 
+# Production reproduction 2026-09-09: generation reload can be required while the
+# lifecycle is still RUNNING+READY and the exact canonical SYSTEM broker/task tuple is
+# alive/fresh/PID-matched but the startup-runner singleton lock is RELEASED or MISSING.
+# The recovery must quiesce the lifecycle first, prove executors stopped, then enter
+# the existing stopped-lifecycle released-lock repair. It must never weaken the lock
+# verifier, kill a process directly, or mutate the singleton lock by hand.
+$runningReleasedRequired = @(
+  '$preWebRunningReleasedLockCandidate',
+  '$preWebRunningReleasedLockRepairEligible',
+  'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK=ELIGIBLE_QUIESCE_REQUIRED',
+  '$preWebRunningCanonicalProcessIds.Count -eq 1',
+  '$preWebRunningInstanceCount -eq 1',
+  '[int]$preWebRunningCanonicalProcessIds[0] -eq [int]$preWebRuntimeGeneration.statusBrokerPid',
+  '[string]$preWebRuntimeGeneration.startupRunnerLockState -in @(''MISSING'', ''RELEASED'')',
+  'Assert-PauseDisarmed -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK"',
+  'Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK"',
+  'Assert-FlatBroker -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK"',
+  '[void](Invoke-ApiPost "/api/v1/phase7c/lifecycle/stop" @{})',
+  'Wait-LifecycleStopped',
+  'Assert-LifecycleExecutorsStopped -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK_POST_STOP"',
+  'Assert-PauseDisarmed -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK_POST_STOP"',
+  'Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK_POST_STOP"',
+  'Assert-FlatBroker -Stage "GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK_POST_STOP"',
+  'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK_LIFECYCLE_STOP=PASS'
+)
+foreach ($literal in $runningReleasedRequired) {
+  Assert-True ($recovery.Contains($literal)) "RED: running+ready released-lock quiesce contract missing: $literal"
+}
+
+$runningReleasedEligible = 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK=ELIGIBLE_QUIESCE_REQUIRED'
+$runningReleasedStopped = 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK_LIFECYCLE_STOP=PASS'
+$stoppedReleasedEligible = 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RELEASED_LOCK=ELIGIBLE_REPAIR_REQUIRED'
+$runningReleasedEligibleIndex = $recovery.IndexOf($runningReleasedEligible, [System.StringComparison]::Ordinal)
+$runningReleasedStoppedIndex = $recovery.IndexOf($runningReleasedStopped, [System.StringComparison]::Ordinal)
+$stoppedReleasedEligibleIndex = $recovery.IndexOf($stoppedReleasedEligible, [System.StringComparison]::Ordinal)
+
+Assert-True ($runningReleasedEligibleIndex -ge 0) 'RUNNING+READY released-lock recovery must expose exact quiesce eligibility.'
+Assert-True ($runningReleasedStoppedIndex -gt $runningReleasedEligibleIndex) 'Lifecycle STOP proof must occur after RUNNING+READY released-lock eligibility.'
+Assert-True ($stoppedReleasedEligibleIndex -gt $runningReleasedStoppedIndex) 'Existing stopped-lifecycle released-lock repair must be entered only after lifecycle STOP is proven.'
+
+$runningReleasedSection = $recovery.Substring($runningReleasedEligibleIndex, $stoppedReleasedEligibleIndex - $runningReleasedEligibleIndex)
+Assert-True (-not $runningReleasedSection.Contains('Stop-Process')) `
+  'RUNNING+READY released-lock recovery must never kill a process directly.'
+Assert-True (-not $runningReleasedSection.Contains('Remove-Item')) `
+  'RUNNING+READY released-lock recovery must never delete the singleton lock manually.'
+Assert-True (-not $runningReleasedSection.Contains('Set-Content')) `
+  'RUNNING+READY released-lock recovery must never rewrite the singleton lock manually.'
+Assert-True (-not $recovery.Contains('GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK=HEALTHY')) `
+  'RUNNING+READY RELEASED/MISSING startup lock must never be normalized to healthy.'
+
 Write-Host "PHASE7C_STOPPED_LIFECYCLE_PREWEB_GENERATION_SOURCE_TEST=PASS"
