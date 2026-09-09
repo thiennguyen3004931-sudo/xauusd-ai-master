@@ -11,6 +11,7 @@ import {
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { LoadingState, ErrorState } from "../ui/PageState";
+import { Phase7COperatorStatusBar } from "../ui/Phase7COperatorStatusBar";
 import {
   clean,
   compactReason,
@@ -23,14 +24,14 @@ import {
   type Phase7CUiGate,
 } from "../phase7c-panel-status";
 
-function asRecord(value: unknown): Record<string, any> {
-  return value && typeof value === "object" ? (value as Record<string, any>) : {};
+function asRecord(input: unknown): Record<string, any> {
+  return input && typeof input === "object" ? (input as Record<string, any>) : {};
 }
 
 function PanelCard({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
   return (
     <Card variant="outlined" sx={{ height: "100%", borderRadius: 4, bgcolor: "rgba(7,14,25,.72)" }}>
-      <CardContent sx={{ p: 2.6 }}>
+      <CardContent sx={{ p: { xs: 2, md: 2.6 } }}>
         <Typography variant="h6" fontWeight={950}>{title}</Typography>
         <Typography variant="body2" color="text.secondary" mt={0.5}>{subtitle}</Typography>
         <Box mt={1.8}>{children}</Box>
@@ -79,51 +80,85 @@ function entryCheckTone(status: Phase7CEntryCheck["status"]): "success" | "error
 }
 
 function entryCheckLabel(status: Phase7CEntryCheck["status"]) {
-  if (status === "PASS") return "PASS";
-  if (status === "FAIL") return "FAIL";
-  if (status === "BLOCKED") return "BLOCKED";
-  return "WAIT";
+  if (status === "PASS") return "ĐẠT";
+  if (status === "FAIL") return "KHÔNG ĐẠT";
+  if (status === "BLOCKED") return "BỊ CHẶN";
+  return "ĐANG CHỜ";
 }
 
-function EntryCheckList({ checks }: { checks: Phase7CEntryCheck[] }) {
+function EntryPipeline({ checks }: { checks: Phase7CEntryCheck[] }) {
   if (checks.length === 0) {
-    return <Typography variant="body2" color="text.secondary">Chưa có diagnostics structured.</Typography>;
+    return <Alert severity="warning" variant="outlined">Engine chưa trả diagnostics structured cho strategy đang hoạt động.</Alert>;
   }
+
+  const firstOpen = checks.findIndex((check) => check.status !== "PASS");
 
   return (
     <Stack spacing={1}>
-      {checks.map((check) => (
-        <Box
-          key={check.code}
-          sx={{
-            px: 1.3,
-            py: 1,
-            borderRadius: 2.2,
-            border: "1px solid rgba(148,163,184,.10)",
-            bgcolor: "rgba(15,23,42,.34)",
-          }}
-        >
-          <Stack direction="row" justifyContent="space-between" gap={1.5} alignItems="flex-start">
-            <Box sx={{ minWidth: 0 }}>
-              <Typography variant="body2" fontWeight={900}>{check.label}</Typography>
-              <Typography variant="caption" color="text.secondary" display="block" mt={0.25}>
-                Hiện tại: {check.actual} · Yêu cầu: {check.required}
-              </Typography>
-              <Typography variant="caption" color="text.secondary" display="block" mt={0.25}>
-                {check.reason}
-              </Typography>
-            </Box>
-            <Chip
-              label={entryCheckLabel(check.status)}
-              size="small"
-              color={entryCheckTone(check.status)}
-              variant={check.status === "PASS" ? "outlined" : "filled"}
-              sx={{ fontWeight: 950, minWidth: 74 }}
-            />
-          </Stack>
-        </Box>
-      ))}
+      {checks.map((check, index) => {
+        const isCurrent = firstOpen === index;
+        return (
+          <Box
+            key={check.code}
+            sx={{
+              px: 1.4,
+              py: 1.1,
+              borderRadius: 2.4,
+              border: isCurrent ? "1px solid rgba(245,158,11,.50)" : "1px solid rgba(148,163,184,.10)",
+              bgcolor: isCurrent ? "rgba(245,158,11,.07)" : "rgba(15,23,42,.34)",
+            }}
+          >
+            <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" gap={1} alignItems={{ sm: "center" }}>
+              <Box sx={{ minWidth: 0 }}>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography variant="body2" color="text.secondary" fontWeight={900}>{index + 1}</Typography>
+                  <Typography variant="body2" fontWeight={950}>{check.label}</Typography>
+                  {isCurrent ? <Chip label="BƯỚC HIỆN TẠI" size="small" color="warning" variant="outlined" sx={{ fontWeight: 900 }} /> : null}
+                </Stack>
+                <Typography variant="caption" color="text.secondary" display="block" mt={0.35}>
+                  {check.reason}
+                </Typography>
+              </Box>
+              <Chip
+                label={entryCheckLabel(check.status)}
+                size="small"
+                color={entryCheckTone(check.status)}
+                variant={check.status === "PASS" ? "outlined" : "filled"}
+                sx={{ fontWeight: 950, minWidth: 94, alignSelf: { xs: "flex-start", sm: "center" } }}
+              />
+            </Stack>
+          </Box>
+        );
+      })}
     </Stack>
+  );
+}
+
+function TechnicalEntryChecks({ title, checks }: { title: string; checks: Phase7CEntryCheck[] }) {
+  return (
+    <Box>
+      <Typography variant="subtitle2" fontWeight={950} mb={0.8}>{title}</Typography>
+      {checks.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">Chưa có diagnostics structured.</Typography>
+      ) : (
+        <Stack spacing={0.8}>
+          {checks.map((check) => (
+            <Box key={check.code} sx={{ px: 1.2, py: 0.9, borderRadius: 2, bgcolor: "rgba(15,23,42,.30)" }}>
+              <Stack direction="row" justifyContent="space-between" gap={1}>
+                <Typography variant="body2" fontWeight={900}>{check.code} · {check.label}</Typography>
+                <Typography variant="body2" fontWeight={900} color={`${entryCheckTone(check.status)}.main`}>
+                  {entryCheckLabel(check.status)}
+                </Typography>
+              </Stack>
+              <Typography variant="caption" color="text.secondary" display="block">
+                Actual: {check.actual} · Required: {check.required}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" display="block">{check.reason}</Typography>
+            </Box>
+          ))}
+        </Stack>
+      )}
+    </Box>
   );
 }
 
@@ -131,9 +166,15 @@ function ContractLine({ children }: { children: ReactNode }) {
   return <Typography variant="body2" color="text.secondary" lineHeight={1.55}>• {children}</Typography>;
 }
 
+function uiStateLabel(uiState: "WAITING" | "SETUP_READY" | "MANAGING") {
+  if (uiState === "SETUP_READY") return "SETUP ĐÃ ĐƯỢC DUYỆT";
+  if (uiState === "MANAGING") return "ĐANG QUẢN LÝ LỆNH LIVE";
+  return "ĐANG CHỜ TÍN HIỆU";
+}
+
 export function Phase7BPatternCheckPage() {
   const query = useQuery({
-    queryKey: ["phase7c-web-status-signal-v6-semantic"],
+    queryKey: ["phase7c-web-status-signal-v7-operator-flow"],
     queryFn: fetchPhase7CWebStatus,
     refetchInterval: 3_000,
     retry: false,
@@ -176,24 +217,38 @@ export function Phase7BPatternCheckPage() {
   const position = ui?.position;
   const trendChecks = ui?.entryChecks?.trend ?? [];
   const sidewayChecks = ui?.entryChecks?.sideway ?? [];
-  const currentReasonTitle = uiState === "WAITING" ? "LÝ DO CHƯA VÀO LỆNH" : uiState === "SETUP_READY" ? "LÝ DO SETUP ĐƯỢC DUYỆT" : "LÝ DO LỆNH ĐANG ĐƯỢC QUẢN LÝ";
+  const normalizedStrategy = strategy.toUpperCase();
+  const sidewayActive = normalizedStrategy.includes("SIDEWAY") || (!normalizedStrategy.includes("TREND") && ui?.gates.sideway === "ALLOWED");
+  const activeStrategy = sidewayActive ? "SIDEWAY" : "TREND";
+  const inactiveStrategy = sidewayActive ? "TREND" : "SIDEWAY";
+  const activeChecks = sidewayActive ? sidewayChecks : trendChecks;
+  const activeGate = sidewayActive ? ui?.gates.sideway : ui?.gates.trend;
+  const inactiveGate = sidewayActive ? ui?.gates.trend : ui?.gates.sideway;
+  const operatorSide = clean(position?.side ?? setup?.side ?? raw(panel, "side"), "Chưa xác định");
+  const operatorLot = clean(position?.volume ?? setup?.finalLot ?? raw(panel, "finalLot"), "—");
+
+  const currentReasonTitle = uiState === "WAITING"
+    ? "LÝ DO CHƯA VÀO LỆNH"
+    : uiState === "SETUP_READY"
+      ? "LÝ DO SETUP ĐƯỢC DUYỆT"
+      : "LÝ DO LỆNH ĐANG ĐƯỢC QUẢN LÝ";
   const currentReasons = uiState === "WAITING" ? waitReasons : uiState === "SETUP_READY" ? entryReasons : holdReasons;
 
   return (
-    <Stack spacing={2.4}>
-      <Box sx={{ p: 2.6, borderRadius: 4, border: "1px solid rgba(0,213,255,.18)", bgcolor: "rgba(3,10,18,.82)" }}>
+    <Stack spacing={2.2}>
+      <Box sx={{ p: { xs: 2, md: 2.6 }, borderRadius: 4, border: "1px solid rgba(0,213,255,.18)", bgcolor: "rgba(3,10,18,.82)" }}>
         <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" gap={2} alignItems={{ lg: "center" }}>
           <Box>
             <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
               <Typography variant="h4" fontWeight={950}>Tín hiệu & quyết định</Typography>
-              <Chip label="SEMANTIC UI v2" size="small" color="info" variant="outlined" sx={{ fontWeight: 900 }} />
-              <Chip label={uiState} size="small" color={uiState === "WAITING" ? "warning" : "success"} sx={{ fontWeight: 900 }} />
+              <Chip label="SIGNAL UI V3" size="small" color="info" variant="outlined" sx={{ fontWeight: 950 }} />
+              <Chip label="OPERATOR DECISION FLOW" size="small" variant="outlined" sx={{ fontWeight: 900 }} />
             </Stack>
             <Typography variant="body2" color="text.secondary" mt={0.7}>
-              Hiển thị đúng gate và reason runtime. Không tự thêm MA, RSI, volume hoặc indicator khác nếu engine không trả về.
+              Ưu tiên câu trả lời vận hành: Bot đang làm gì → đang chờ gate nào → vì sao → kế hoạch/vị thế thật. Không tự thêm indicator nếu engine không trả về.
             </Typography>
           </Box>
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          <Stack direction="row" spacing={0.8} flexWrap="wrap" useFlexGap>
             <Chip label={`Mode ${activeMode}`} variant="outlined" color={activeMode === "PAUSE" ? "warning" : "success"} sx={{ fontWeight: 900 }} />
             <Chip label={`Stage ${stage}`} variant="outlined" color={stageTone(stage)} sx={{ fontWeight: 900 }} />
             <Chip label={`Regime ${regime}`} variant="outlined" color={regime === "REVERSAL" ? "warning" : "info"} sx={{ fontWeight: 900 }} />
@@ -202,81 +257,100 @@ export function Phase7BPatternCheckPage() {
         </Stack>
       </Box>
 
-      {data?.usedDirectFallback && (
+      <Phase7COperatorStatusBar />
+
+      {data?.usedDirectFallback ? (
         <Box sx={{ px: 1.6, py: 0.9, borderRadius: 2.5, border: "1px solid rgba(56,189,248,.18)", bgcolor: "rgba(56,189,248,.05)" }}>
           <Typography variant="caption" color="text.secondary">Data path: fallback trực tiếp Control API 3711; nội dung giao dịch vẫn lấy từ semantic contract.</Typography>
         </Box>
-      )}
-      {(data?.errors ?? []).length > 0 && <Alert severity="warning">Nguồn phụ chưa sẵn sàng: {(data?.errors ?? []).slice(0, 2).join(" ")}</Alert>}
+      ) : null}
+      {(data?.errors ?? []).length > 0 ? <Alert severity="warning">Nguồn phụ chưa sẵn sàng: {(data?.errors ?? []).slice(0, 2).join(" ")}</Alert> : null}
 
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <PanelCard title="UI State" subtitle="Layout giao dịch hiện hành.">
-            <Typography variant="h5" fontWeight={950}>{uiState}</Typography>
-            <Typography variant="body2" color="text.secondary" mt={0.8}>Approved: {approved ? "YES" : "NO"}</Typography>
+        <Grid size={{ xs: 12, lg: 8 }}>
+          <PanelCard title="BOT ĐANG LÀM GÌ?" subtitle="Trạng thái hành động chính từ semantic runtime, không lặp lại một card UI State/Decision riêng.">
+            <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2.2} alignItems={{ md: "center" }}>
+              <Box>
+                <Typography variant="h4" fontWeight={950} color={uiState === "WAITING" ? "warning.main" : "success.main"}>
+                  {uiStateLabel(uiState)}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" mt={0.8}>
+                  {activeMode} → {strategy} · Stage {stage} · Approved {approved ? "Có" : "Không"}
+                </Typography>
+              </Box>
+              <Grid container spacing={1} sx={{ minWidth: { md: 380 } }}>
+                <Grid size={4}><InfoRow label="Strategy" valueText={strategy} tone="info" /></Grid>
+                <Grid size={4}><InfoRow label="Direction" valueText={operatorSide} /></Grid>
+                <Grid size={4}><InfoRow label="Lot" valueText={operatorLot} /></Grid>
+              </Grid>
+            </Stack>
           </PanelCard>
         </Grid>
-        <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <PanelCard title="Regime" subtitle="Bối cảnh do classifier trả về.">
-            <Typography variant="h5" fontWeight={950}>{regime}</Typography>
-            <Typography variant="body2" color="text.secondary" mt={0.8}>Confidence {confidence}%</Typography>
-          </PanelCard>
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <PanelCard title="Decision" subtitle="Mode và strategy hiệu lực.">
-            <Typography variant="h5" fontWeight={950}>{stage}</Typography>
-            <Typography variant="body2" color="text.secondary" mt={0.8}>{activeMode} → {strategy}</Typography>
-          </PanelCard>
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-          <PanelCard title="Giá XAUUSD" subtitle="Quote hiện tại từ MT5.">
-            <Typography variant="h5" fontWeight={950}>{clean(quote.bid, "—")}</Typography>
-            <Typography variant="body2" color="text.secondary" mt={0.8}>Ask {clean(quote.ask, "—")} · Spread {clean(quote.spread, "—")}</Typography>
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <PanelCard title="THỊ TRƯỜNG & GIÁ" subtitle="Classifier + quote hiện tại từ MT5.">
+            <Stack direction="row" justifyContent="space-between" gap={2} alignItems="flex-start">
+              <Box>
+                <Typography variant="h4" fontWeight={950}>{regime}</Typography>
+                <Typography variant="body2" color="text.secondary">Confidence {confidence}% · Recommended {recommendedMode}</Typography>
+              </Box>
+              <Box textAlign="right">
+                <Typography variant="h5" fontWeight={950}>{clean(quote.bid, "—")}</Typography>
+                <Typography variant="caption" color="text.secondary" display="block">Bid</Typography>
+              </Box>
+            </Stack>
+            <InfoRow label="Ask" valueText={clean(quote.ask, "—")} />
+            <InfoRow label="Spread" valueText={clean(quote.spread, "—")} />
           </PanelCard>
         </Grid>
       </Grid>
 
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, lg: 5 }}>
-          <PanelCard title="RUNTIME GATE / FILTER" subtitle="Đây là trạng thái gate thực tế, không phải mô tả chiến lược giả định.">
-            <InfoRow label="Trend gate" valueText={gateLabel(ui?.gates.trend)} tone={gateTone(ui?.gates.trend)} />
-            <InfoRow label="Sideway gate" valueText={gateLabel(ui?.gates.sideway)} tone={gateTone(ui?.gates.sideway)} />
-            <InfoRow label="Reversal filter" valueText={ui?.gates.reversalFilter === "BLOCKING" ? "ĐANG CHẶN" : "CLEAR"} tone={ui?.gates.reversalFilter === "BLOCKING" ? "warning" : "success"} />
-            <InfoRow label="Recommended mode" valueText={recommendedMode} tone={recommendedMode === "PAUSE" ? "warning" : "default"} />
+        <Grid size={{ xs: 12, lg: 7 }}>
+          <PanelCard title="ĐANG CHỜ ĐIỀU KIỆN NÀO?" subtitle={`Pipeline ${activeStrategy} từ diagnostics canonical. Bước đầu tiên chưa PASS được đánh dấu là bước hiện tại.`}>
+            <Stack direction="row" spacing={0.8} useFlexGap flexWrap="wrap" mb={1.4}>
+              <Chip label={`${activeStrategy} · ${gateLabel(activeGate)}`} color={gateTone(activeGate)} variant="outlined" sx={{ fontWeight: 950 }} />
+              <Chip label={`Reversal filter · ${ui?.gates.reversalFilter === "BLOCKING" ? "ĐANG CHẶN" : "CLEAR"}`} color={ui?.gates.reversalFilter === "BLOCKING" ? "warning" : "success"} variant="outlined" sx={{ fontWeight: 900 }} />
+            </Stack>
+            <EntryPipeline checks={activeChecks} />
           </PanelCard>
         </Grid>
-        <Grid size={{ xs: 12, lg: 7 }}>
-          <PanelCard title={currentReasonTitle} subtitle="Ưu tiên semantic reason từ engine/decision layer.">
+        <Grid size={{ xs: 12, lg: 5 }}>
+          <PanelCard title={currentReasonTitle} subtitle="Reason người vận hành cần đọc trước; raw code/actual/required chuyển xuống Chi tiết kỹ thuật.">
             <ReasonList items={currentReasons} empty="Chưa có reason runtime để hiển thị." />
           </PanelCard>
         </Grid>
       </Grid>
 
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12, xl: 6 }}>
-          <PanelCard
-            title="TREND — ĐIỀU KIỆN ENTRY"
-            subtitle="PASS xanh · FAIL/BLOCKED đỏ · WAIT vàng. Dữ liệu read-only từ diagnostics canonical."
-          >
-            <EntryCheckList checks={trendChecks} />
-          </PanelCard>
-        </Grid>
-        <Grid size={{ xs: 12, xl: 6 }}>
-          <PanelCard
-            title="SIDEWAY — ĐIỀU KIỆN ENTRY"
-            subtitle="Theo dõi lần lượt mode/regime → range → location → M5 → final gate → Auto Lot."
-          >
-            <EntryCheckList checks={sidewayChecks} />
-          </PanelCard>
-        </Grid>
-      </Grid>
+      <PanelCard title="CHIẾN LƯỢC ĐANG HOẠT ĐỘNG" subtitle="Chỉ strategy hiệu lực được ưu tiên; strategy còn lại thu gọn theo gate hiện tại.">
+        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2} alignItems={{ md: "center" }}>
+          <Box>
+            <Typography variant="overline" color="success.main" fontWeight={950}>ACTIVE</Typography>
+            <Typography variant="h5" fontWeight={950}>{activeStrategy}</Typography>
+            <Typography variant="body2" color="text.secondary" mt={0.5}>
+              Effective strategy: {strategy} · Gate: {gateLabel(activeGate)}
+            </Typography>
+          </Box>
+          <Box sx={{ px: 1.6, py: 1.2, borderRadius: 2.5, border: "1px solid rgba(148,163,184,.12)", minWidth: { md: 310 } }}>
+            <Typography variant="overline" color="text.secondary" fontWeight={900}>KHÔNG HOẠT ĐỘNG</Typography>
+            <Typography variant="body1" fontWeight={950}>{inactiveStrategy}</Typography>
+            <Typography variant="body2" color="text.secondary">{gateLabel(inactiveGate)}</Typography>
+          </Box>
+        </Stack>
+      </PanelCard>
 
       <PanelCard
-        title={uiState === "WAITING" ? "CHƯA CÓ KẾ HOẠCH LỆNH" : uiState === "SETUP_READY" ? "KẾ HOẠCH SETUP" : "VỊ THẾ ĐANG QUẢN LÝ"}
-        subtitle={uiState === "WAITING" ? "WAITING không hiển thị Entry / SL / TP." : "Chỉ hiển thị giá trị thật từ semantic contract."}
+        title={uiState === "WAITING" ? "KẾ HOẠCH LỆNH — CHƯA ĐƯỢC DUYỆT" : uiState === "SETUP_READY" ? "KẾ HOẠCH LỆNH ĐÃ ĐƯỢC DUYỆT" : "VỊ THẾ ĐANG QUẢN LÝ"}
+        subtitle={uiState === "WAITING" ? "Không dựng Entry / SL / TP khi semantic setup chưa tồn tại." : "Chỉ hiển thị giá trị thật từ semantic contract."}
       >
         {uiState === "WAITING" ? (
-          <Alert severity="warning" variant="outlined">Bot đang chờ setup hợp lệ. Entry / Stoploss / TP được ẩn.</Alert>
+          <Stack spacing={1.2}>
+            <Alert severity="warning" variant="outlined">Bot đang chờ setup hợp lệ. Entry / Stoploss / TP chưa được engine phê duyệt nên không hiển thị giá giả định.</Alert>
+            <Grid container spacing={1.2}>
+              <Grid size={{ xs: 12, sm: 4 }}><InfoRow label="Strategy" valueText={strategy} /></Grid>
+              <Grid size={{ xs: 12, sm: 4 }}><InfoRow label="Side" valueText={operatorSide} /></Grid>
+              <Grid size={{ xs: 12, sm: 4 }}><InfoRow label="Lot hiện hành" valueText={operatorLot} /></Grid>
+            </Grid>
+          </Stack>
         ) : uiState === "SETUP_READY" ? (
           <Grid container spacing={1.5}>
             <Grid size={{ xs: 12, md: 4 }}><InfoRow label="Strategy" valueText={clean(setup?.strategy, strategy)} /></Grid>
@@ -289,50 +363,76 @@ export function Phase7BPatternCheckPage() {
             <Grid size={{ xs: 12, md: 4 }}><InfoRow label="Risk %" valueText={clean(setup?.estimatedRiskPercent, "—")} /></Grid>
           </Grid>
         ) : (
-          <Grid container spacing={1.5}>
-            <Grid size={{ xs: 12, md: 4 }}><InfoRow label="Ticket" valueText={clean(position?.ticket, "—")} /></Grid>
-            <Grid size={{ xs: 12, md: 4 }}><InfoRow label="Strategy" valueText={clean(position?.strategy, "—")} /></Grid>
-            <Grid size={{ xs: 12, md: 4 }}><InfoRow label="Side" valueText={clean(position?.side, "—")} /></Grid>
-            <Grid size={{ xs: 12, md: 4 }}><InfoRow label="Entry" valueText={clean(position?.entry, "—")} /></Grid>
-            <Grid size={{ xs: 12, md: 4 }}><InfoRow label="Current SL" valueText={clean(position?.stopLoss, "—")} tone="error" /></Grid>
-            <Grid size={{ xs: 12, md: 4 }}><InfoRow label="TP1 / TP2" valueText={`${clean(position?.tp1, "—")} / ${clean(position?.tp2, "—")}`} tone="success" /></Grid>
-          </Grid>
+          <Stack spacing={1.4}>
+            <Grid container spacing={1.5}>
+              <Grid size={{ xs: 12, md: 4 }}><InfoRow label="Ticket" valueText={clean(position?.ticket, "—")} /></Grid>
+              <Grid size={{ xs: 12, md: 4 }}><InfoRow label="Strategy" valueText={clean(position?.strategy, "—")} /></Grid>
+              <Grid size={{ xs: 12, md: 4 }}><InfoRow label="Side / Volume" valueText={`${clean(position?.side, "—")} / ${clean(position?.volume, "—")}`} /></Grid>
+              <Grid size={{ xs: 12, md: 4 }}><InfoRow label="Entry" valueText={clean(position?.entry, "—")} tone="info" /></Grid>
+              <Grid size={{ xs: 12, md: 4 }}><InfoRow label="Current SL" valueText={clean(position?.stopLoss, "—")} tone="error" /></Grid>
+              <Grid size={{ xs: 12, md: 4 }}><InfoRow label="TP1 / TP2" valueText={`${clean(position?.tp1, "—")} / ${clean(position?.tp2, "—")}`} tone="success" /></Grid>
+              <Grid size={{ xs: 12, md: 4 }}><InfoRow label="Floating P/L USD" valueText={clean(position?.floatingPnlUsd, "—")} tone="info" /></Grid>
+              <Grid size={{ xs: 12, md: 4 }}><InfoRow label="Floating P/L %" valueText={clean(position?.floatingPnlPercent, "—")} /></Grid>
+            </Grid>
+            <Alert severity="info" variant="outlined">
+              Semantic UI hiện chưa expose trạng thái riêng cho từng mốc +6 BE / +10 partial / Fastmove / M5 structure trailing; V3 không suy diễn các badge quản lý này.
+            </Alert>
+          </Stack>
         )}
       </PanelCard>
 
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12, lg: 4 }}>
-          <PanelCard title="TREND BOT — ENTRY CONTRACT" subtitle="Mô tả mức contract; indicator cụ thể chỉ được nêu khi engine trả về.">
-            <Stack spacing={0.7}>
-              <ContractLine>Regime và Mode phải cho phép Trend executor.</ContractLine>
-              <ContractLine>Signal engine phải xác nhận setup M15 hợp lệ và các filter hiện hành phải PASS.</ContractLine>
-              <ContractLine>Stoploss cấu trúc hợp lệ; vùng chuẩn 6–10 giá.</ContractLine>
-              <ContractLine>Nếu SL &gt; 10 giá: không vào đuổi, chuyển sang chờ pullback M15.</ContractLine>
-              <ContractLine>Risk, lot và safety gate phải PASS trước khi executor được phép hành động.</ContractLine>
-            </Stack>
-          </PanelCard>
-        </Grid>
-        <Grid size={{ xs: 12, lg: 4 }}>
-          <PanelCard title="SIDEWAY BOT — ENTRY CONTRACT" subtitle="Không tự thêm RSI, pin bar hoặc volume nếu runtime không xác nhận.">
-            <Stack spacing={0.7}>
-              <ContractLine>Regime và Mode phải cho phép Sideway executor.</ContractLine>
-              <ContractLine>Phải có supply/demand range hợp lệ.</ContractLine>
-              <ContractLine>Setup phản ứng tại vùng phải được engine xác nhận.</ContractLine>
-              <ContractLine>Risk calculation phải PASS và lot không vượt Sideway Max Lot.</ContractLine>
-              <ContractLine>Quản trị chuẩn: +6 → BE; +10 → chốt 1/3.</ContractLine>
-            </Stack>
-          </PanelCard>
-        </Grid>
-        <Grid size={{ xs: 12, lg: 4 }}>
-          <PanelCard title="REVERSAL FILTER" subtitle="Đây là filter bảo vệ, không gọi là Reversal Bot khi chưa có executor riêng.">
-            <Stack spacing={0.7}>
-              <ContractLine>Khi classifier xác nhận rủi ro đảo chiều mạnh, filter có thể chặn lệnh mới.</ContractLine>
-              <ContractLine>Semantic runtime quyết định trạng thái BLOCKING/CLEAR và recommended mode.</ContractLine>
-              <ContractLine>Ở trạng thái hiện tại nếu recommended = PAUSE thì executor không mở setup mới.</ContractLine>
-            </Stack>
-          </PanelCard>
-        </Grid>
-      </Grid>
+      <Card variant="outlined" sx={{ borderRadius: 4, bgcolor: "rgba(7,14,25,.58)" }}>
+        <CardContent sx={{ p: { xs: 2, md: 2.6 } }}>
+          <details>
+            <summary style={{ cursor: "pointer", fontWeight: 900 }}>
+              CHI TIẾT KỸ THUẬT — gates, raw reasons, diagnostics và strategy contract
+            </summary>
+            <Box mt={2}>
+              <Grid container spacing={2}>
+                <Grid size={{ xs: 12, lg: 4 }}>
+                  <Typography variant="subtitle1" fontWeight={950}>RUNTIME GATE / FILTER</Typography>
+                  <InfoRow label="Trend gate" valueText={gateLabel(ui?.gates.trend)} tone={gateTone(ui?.gates.trend)} />
+                  <InfoRow label="Sideway gate" valueText={gateLabel(ui?.gates.sideway)} tone={gateTone(ui?.gates.sideway)} />
+                  <InfoRow label="Reversal filter" valueText={ui?.gates.reversalFilter === "BLOCKING" ? "ĐANG CHẶN" : "CLEAR"} tone={ui?.gates.reversalFilter === "BLOCKING" ? "warning" : "success"} />
+                  <InfoRow label="Recommended mode" valueText={recommendedMode} />
+                  <Typography variant="caption" color="text.secondary" display="block" mt={1.2}>decisionReason: {clean(raw(panel, "decisionReason"), "—")}</Typography>
+                  <Typography variant="caption" color="text.secondary" display="block">entryReason: {clean(raw(panel, "entryReason"), "—")}</Typography>
+                  <Typography variant="caption" color="text.secondary" display="block">holdReason: {clean(raw(panel, "holdReason"), "—")}</Typography>
+                </Grid>
+                <Grid size={{ xs: 12, lg: 4 }}>
+                  <TechnicalEntryChecks title="TREND DIAGNOSTICS" checks={trendChecks} />
+                </Grid>
+                <Grid size={{ xs: 12, lg: 4 }}>
+                  <TechnicalEntryChecks title="SIDEWAY DIAGNOSTICS" checks={sidewayChecks} />
+                </Grid>
+              </Grid>
+
+              <Grid container spacing={2} mt={0.5}>
+                <Grid size={{ xs: 12, lg: 4 }}>
+                  <Typography variant="subtitle2" fontWeight={950} mb={0.8}>TREND CONTRACT</Typography>
+                  <ContractLine>Regime và Mode phải cho phép Trend executor.</ContractLine>
+                  <ContractLine>Signal engine phải xác nhận setup M15 hợp lệ và các filter hiện hành phải PASS.</ContractLine>
+                  <ContractLine>Stoploss cấu trúc hợp lệ; vùng chuẩn 6–10 giá.</ContractLine>
+                  <ContractLine>Nếu SL &gt; 10 giá: không vào đuổi, chuyển sang chờ pullback M15.</ContractLine>
+                </Grid>
+                <Grid size={{ xs: 12, lg: 4 }}>
+                  <Typography variant="subtitle2" fontWeight={950} mb={0.8}>SIDEWAY CONTRACT</Typography>
+                  <ContractLine>Regime và Mode phải cho phép Sideway executor.</ContractLine>
+                  <ContractLine>Phải có supply/demand range và setup phản ứng hợp lệ.</ContractLine>
+                  <ContractLine>Risk calculation phải PASS và lot không vượt Sideway Max Lot.</ContractLine>
+                  <ContractLine>Quản trị chuẩn: +6 → BE; +10 → chốt 1/3.</ContractLine>
+                </Grid>
+                <Grid size={{ xs: 12, lg: 4 }}>
+                  <Typography variant="subtitle2" fontWeight={950} mb={0.8}>REVERSAL FILTER</Typography>
+                  <ContractLine>Filter bảo vệ có thể chặn lệnh mới khi rủi ro đảo chiều mạnh.</ContractLine>
+                  <ContractLine>Semantic runtime quyết định BLOCKING/CLEAR và recommended mode.</ContractLine>
+                  <ContractLine>Trang này chỉ đọc trạng thái; không gửi lệnh hoặc mutation control.</ContractLine>
+                </Grid>
+              </Grid>
+            </Box>
+          </details>
+        </CardContent>
+      </Card>
     </Stack>
   );
 }
