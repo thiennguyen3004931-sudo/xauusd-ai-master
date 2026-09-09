@@ -48,9 +48,13 @@ requireText(decisionMonitor, "entryDiagnostics:", "decision diagnostics exposure
 requireText(decisionMonitor, "supplyDemandRange: input.regime.supplyDemandRange", "Sideway range exposure");
 
 const signalPage = read("apps/web/src/pages/Phase7BPatternCheckPage.tsx");
-requireText(signalPage, "TREND — ĐIỀU KIỆN ENTRY", "Trend entry checklist");
-requireText(signalPage, "SIDEWAY — ĐIỀU KIỆN ENTRY", "Sideway entry checklist");
-requireText(signalPage, "EntryCheckList", "entry checklist renderer");
+requireText(signalPage, "SIGNAL UI V3", "Signal UI V3 contract");
+requireText(signalPage, "ĐANG CHỜ ĐIỀU KIỆN NÀO?", "active entry pipeline");
+requireText(signalPage, "EntryPipeline", "active entry pipeline renderer");
+requireText(signalPage, "ui?.entryChecks?.trend", "Trend canonical entry diagnostics");
+requireText(signalPage, "ui?.entryChecks?.sideway", "Sideway canonical entry diagnostics");
+requireText(signalPage, "TREND DIAGNOSTICS", "Trend technical diagnostics");
+requireText(signalPage, "SIDEWAY DIAGNOSTICS", "Sideway technical diagnostics");
 
 const mt5Panel = read("mt5/XAUUSD_AI_Master_Decision_Panel.mq5");
 requireText(mt5Panel, "ĐIỀU KIỆN CHẶN ENTRY", "MT5 compact entry blocker");
