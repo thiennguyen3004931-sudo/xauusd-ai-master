@@ -18,6 +18,7 @@ on:
       - "apps/api/src/services/phase7c-ui-contract.service.ts"
       - "apps/web/src/**"
       - "scripts/phase7c-semi-entry-boundary-decision.test.mjs"
+      - "scripts/apply-phase7c-semi-task6-green.mjs"
       - "scripts/run-phase7c-trend-controller.mjs"
       - "scripts/run-phase7c-sideway-controller.mjs"
       - ".github/workflows/phase7c-semi-auto-trend-management-ci.yml"
@@ -38,12 +39,13 @@ on:
       - "apps/api/src/services/phase7c-ui-contract.service.ts"
       - "apps/web/src/**"
       - "scripts/phase7c-semi-entry-boundary-decision.test.mjs"
+      - "scripts/apply-phase7c-semi-task6-green.mjs"
       - "scripts/run-phase7c-trend-controller.mjs"
       - "scripts/run-phase7c-sideway-controller.mjs"
       - ".github/workflows/phase7c-semi-auto-trend-management-ci.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   semi-contract:
@@ -52,6 +54,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Apply guarded Task6 GREEN patch on feature push
+        if: github.event_name == 'push'
+        run: |
+          if grep -q 'function semiManualOnlyDecision' apps/api/src/services/phase7c-decision-monitor.service.ts; then
+            echo 'PHASE7C_SEMI_TASK6_PATCH=ALREADY_APPLIED'
+          else
+            node scripts/apply-phase7c-semi-task6-green.mjs
+          fi
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -96,3 +107,16 @@ jobs:
 
       - name: Build Web and dependencies
         run: pnpm build --filter=@xauusd/web...
+
+      - name: Commit verified Task6 GREEN patch
+        if: github.event_name == 'push'
+        run: |
+          if git diff --quiet -- apps/api/src/services/phase7c-decision-monitor.service.ts apps/api/src/services/phase7c-ui-contract.service.ts scripts/run-phase7c-trend-controller.mjs scripts/run-phase7c-sideway-controller.mjs; then
+            echo 'PHASE7C_SEMI_TASK6_COMMIT=NO_CHANGES'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/api/src/services/phase7c-decision-monitor.service.ts apps/api/src/services/phase7c-ui-contract.service.ts scripts/run-phase7c-trend-controller.mjs scripts/run-phase7c-sideway-controller.mjs
+          git commit -m 'feat(phase7c): enforce SEMI manual entry boundary'
+          git push origin HEAD:${GITHUB_REF_NAME}
