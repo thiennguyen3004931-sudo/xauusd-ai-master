@@ -63,6 +63,21 @@ jobs:
           else
             node scripts/apply-phase7c-semi-task6-green.mjs
           fi
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const file = 'apps/api/src/services/phase7c-ui-contract.service.ts';
+          const source = fs.readFileSync(file, 'utf8');
+          const from = '  setup: null | {\n    strategy: string;';
+          const to = '  setup: null | {\n    strategy: string | null;';
+          if (source.includes(from)) {
+            fs.writeFileSync(file, source.replace(from, to), 'utf8');
+            console.log('PATCH_OK=UI_SETUP_NULL_STRATEGY');
+          } else if (source.includes(to)) {
+            console.log('PATCH_OK=UI_SETUP_NULL_STRATEGY_ALREADY_APPLIED');
+          } else {
+            throw new Error('UI_SETUP_NULL_STRATEGY: canonical interface marker not found');
+          }
+          NODE
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
