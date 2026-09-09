@@ -82,11 +82,11 @@ jobs:
       - name: SEMI Trend management-only plan contract
         run: pnpm --filter @xauusd/api exec tsx src/services/phase7c-semi-trend-management-plan.test.ts
 
-      - name: SEMI entry boundary and decision semantics
-        run: pnpm --filter @xauusd/api exec tsx --test ../../scripts/phase7c-semi-entry-boundary-decision.test.mjs
-
       - name: Build API and dependencies for runtime integration test
         run: pnpm build --filter=@xauusd/api...
+
+      - name: SEMI entry boundary and decision semantics
+        run: pnpm --filter @xauusd/api exec tsx --test ../../scripts/phase7c-semi-entry-boundary-decision.test.mjs
 
       - name: SEMI Trend runtime ownership handoff contract
         run: pnpm --filter @xauusd/api exec tsx src/services/trend-management-runtime.semi.test.ts
