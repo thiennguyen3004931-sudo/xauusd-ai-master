@@ -66,6 +66,9 @@ jobs:
       - name: SEMI durable adoption ledger contract
         run: pnpm --filter @xauusd/api exec tsx src/services/phase7c-semi-adoption-state.test.ts
 
+      - name: SEMI broker protection executor contract
+        run: pnpm --filter @xauusd/api exec tsx src/services/phase7c-semi-protection-executor.test.ts
+
       - name: Build strategy engine and dependencies
         run: pnpm build --filter=@xauusd/strategy-engine...
 
