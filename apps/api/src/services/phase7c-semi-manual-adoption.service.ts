@@ -105,6 +105,11 @@ function isSystemComment(comment: string): boolean {
   return comment.trim().toLowerCase().startsWith(SYSTEM_COMMENT_PREFIX);
 }
 
+function approximatelyEqual(left: number, right: number, tickSize: number): boolean {
+  const epsilon = Math.max(1e-9, tickSize * 1e-8);
+  return Math.abs(left - right) <= epsilon;
+}
+
 export function evaluateSemiManualAdoption(
   input: SemiManualAdoptionInput,
 ): SemiManualAdoptionEvaluation {
@@ -191,36 +196,59 @@ export function evaluateSemiManualAdoption(
     return result("PROTECTION_BLOCKED", "QUOTE_INVALID");
   }
 
-  const rawStopLoss = input.position.side === "LONG"
+  const rawCanonicalStopLoss = input.position.side === "LONG"
     ? input.position.entry - INITIAL_STOP_DISTANCE_PRICE
     : input.position.entry + INITIAL_STOP_DISTANCE_PRICE;
-  const targetStopLoss = normalizeToTick(rawStopLoss, tickSize);
+  const canonicalStopLoss = normalizeToTick(rawCanonicalStopLoss, tickSize);
+
+  const currentStopLoss = finitePositive(input.position.stopLoss)
+    ? normalizeToTick(input.position.stopLoss, tickSize)
+    : null;
+  const currentStopIsEqualOrTighter = currentStopLoss !== null && (
+    input.position.side === "LONG"
+      ? currentStopLoss >= canonicalStopLoss
+      : currentStopLoss <= canonicalStopLoss
+  );
+  const targetStopLoss = currentStopIsEqualOrTighter
+    ? currentStopLoss!
+    : canonicalStopLoss;
+  const stopMutationRequired = currentStopLoss === null ||
+    !approximatelyEqual(currentStopLoss, targetStopLoss, tickSize);
 
   let targetTakeProfit: number | null = null;
+  let takeProfitMutationRequired = false;
   if (input.fixedTakeProfit.enabled) {
     const fixedPrice = input.fixedTakeProfit.price;
     if (!finitePositive(Number(fixedPrice))) {
       return result("PROTECTION_BLOCKED", "FIXED_TP_INVALID", targetStopLoss);
     }
     targetTakeProfit = normalizeToTick(Number(fixedPrice), tickSize);
+    const currentTakeProfit = finitePositive(input.position.takeProfit)
+      ? normalizeToTick(input.position.takeProfit, tickSize)
+      : null;
+    takeProfitMutationRequired = currentTakeProfit === null ||
+      !approximatelyEqual(currentTakeProfit, targetTakeProfit, tickSize);
   }
 
   const minimumProtectionDistance = Math.max(stopsLevelTicks, freezeLevelTicks) * tickSize;
   const epsilon = Math.max(1e-9, tickSize * 1e-8);
-  const stopDistance = input.position.side === "LONG"
-    ? input.quote.bid - targetStopLoss
-    : targetStopLoss - input.quote.ask;
 
-  if (stopDistance + epsilon < minimumProtectionDistance) {
-    return result(
-      "PROTECTION_BLOCKED",
-      "INITIAL_SL_INSIDE_BROKER_PROTECTION_DISTANCE",
-      targetStopLoss,
-      targetTakeProfit,
-    );
+  if (stopMutationRequired) {
+    const stopDistance = input.position.side === "LONG"
+      ? input.quote.bid - targetStopLoss
+      : targetStopLoss - input.quote.ask;
+
+    if (stopDistance + epsilon < minimumProtectionDistance) {
+      return result(
+        "PROTECTION_BLOCKED",
+        "INITIAL_SL_INSIDE_BROKER_PROTECTION_DISTANCE",
+        targetStopLoss,
+        targetTakeProfit,
+      );
+    }
   }
 
-  if (targetTakeProfit !== null) {
+  if (targetTakeProfit !== null && takeProfitMutationRequired) {
     const takeProfitDistance = input.position.side === "LONG"
       ? targetTakeProfit - input.quote.ask
       : input.quote.bid - targetTakeProfit;
