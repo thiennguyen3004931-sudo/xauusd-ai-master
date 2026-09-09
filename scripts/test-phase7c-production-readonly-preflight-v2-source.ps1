@@ -145,7 +145,8 @@ foreach ($name in $taskCommands) {
 }
 
 if ($source -notmatch '(?m)&\s+\$gitExe\s+rev-parse\s+HEAD\b') { throw 'Missing local HEAD read through git rev-parse.' }
-if ($source -notmatch '(?m)&\s+\$gitExe\s+rev-parse\s+HEAD\^\{tree\}') { throw 'Missing local tree read through git rev-parse HEAD^{tree}.' }
+$quotedHeadTreePattern = '(?m)&\s+\$gitExe\s+rev-parse\s+[''"]HEAD\^\{tree\}[''"]'
+if ($source -notmatch $quotedHeadTreePattern) { throw 'Local tree read must pass HEAD^{tree} as one explicitly quoted git rev-parse argument.' }
 if ($source -notmatch '(?m)&\s+\$gitExe\s+status\s+--porcelain') { throw 'Missing worktree dirty-state read.' }
 if ($source -notmatch '(?m)&\s+\$gitExe\s+ls-remote\s+--heads\s+origin\s+refs/heads/main') { throw 'Remote main must be read with git ls-remote only.' }
 
