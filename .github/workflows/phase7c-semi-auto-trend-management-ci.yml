@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/semi-auto-trend-management-20260909
+      - fix/phase7b-api-runtime-dependency-build-20260910
     paths:
       - "packages/strategy-engine/src/models/BotMode.ts"
       - "packages/execution-engine/src/**"
@@ -19,6 +20,8 @@ on:
       - "apps/web/src/**"
       - "scripts/phase7c-semi-entry-boundary-decision.test.mjs"
       - "scripts/phase7c-decision-monitor.test.mjs"
+      - "scripts/run-phase7b-api-runtime-local.ps1"
+      - "scripts/test-phase7b-api-runtime-dependency-build-source.mjs"
       - "scripts/run-phase7c-trend-controller.mjs"
       - "scripts/run-phase7c-sideway-controller.mjs"
       - ".github/workflows/phase7c-semi-auto-trend-management-ci.yml"
@@ -40,6 +43,8 @@ on:
       - "apps/web/src/**"
       - "scripts/phase7c-semi-entry-boundary-decision.test.mjs"
       - "scripts/phase7c-decision-monitor.test.mjs"
+      - "scripts/run-phase7b-api-runtime-local.ps1"
+      - "scripts/test-phase7b-api-runtime-dependency-build-source.mjs"
       - "scripts/run-phase7c-trend-controller.mjs"
       - "scripts/run-phase7c-sideway-controller.mjs"
       - ".github/workflows/phase7c-semi-auto-trend-management-ci.yml"
@@ -68,6 +73,9 @@ jobs:
 
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      - name: Phase7B API runtime dependency build source contract
+        run: node scripts/test-phase7b-api-runtime-dependency-build-source.mjs
 
       - name: SEMI bot-mode contract
         run: pnpm --filter @xauusd/api exec tsx src/services/phase7c-bot-mode.semi.test.ts
