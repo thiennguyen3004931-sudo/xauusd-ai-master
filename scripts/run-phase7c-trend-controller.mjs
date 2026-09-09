@@ -91,6 +91,16 @@ globalThis.fetch = async function phase7CTrendGate(input, init = undefined) {
 
   try {
     const decision = await evaluateTrendEntryPermission();
+    if (decision.activeMode === "SEMI") {
+      const semiDecision = {
+        ...decision,
+        allowed: false,
+        recommendedMode: null,
+        reason: "SEMI_MANUAL_ENTRY_ONLY",
+      };
+      console.warn("PHASE7C_TREND_ENTRY_BLOCKED=SEMI_MANUAL_ENTRY_ONLY|ACTIVE_SEMI");
+      return blockedResponse(semiDecision);
+    }
     if (!decision.allowed) {
       console.warn(
         `PHASE7C_TREND_ENTRY_BLOCKED=${decision.reason}|ACTIVE_${decision.activeMode}|RECOMMENDED_${decision.recommendedMode ?? "N/A"}`,
@@ -433,6 +443,15 @@ async function evaluateTrendEntryPermission() {
       activeMode,
       recommendedMode: "SIDEWAY",
       reason: "SIDEWAY_MODE_BLOCKS_TREND_ENTRY",
+    };
+  }
+
+  if (activeMode === "SEMI") {
+    return {
+      allowed: false,
+      activeMode,
+      recommendedMode: null,
+      reason: "SEMI_MANUAL_ENTRY_ONLY",
     };
   }
 

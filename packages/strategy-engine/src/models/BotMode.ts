@@ -1,1 +1,1 @@
-export type BotMode = "AUTO" | "TREND" | "SIDEWAY" | "PAUSE";
+export type BotMode = "AUTO" | "TREND" | "SIDEWAY" | "SEMI" | "PAUSE";
