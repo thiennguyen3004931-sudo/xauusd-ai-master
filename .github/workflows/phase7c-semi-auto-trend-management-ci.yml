@@ -1,0 +1,70 @@
+name: Phase7C SEMI Auto Trend Management CI
+
+on:
+  push:
+    branches:
+      - feat/semi-auto-trend-management-20260909
+    paths:
+      - "packages/strategy-engine/src/models/BotMode.ts"
+      - "apps/api/src/services/phase7c-bot-mode.service.ts"
+      - "apps/api/src/services/phase7c-bot-mode.semi.test.ts"
+      - "apps/api/src/services/phase7c-semi-*.ts"
+      - "apps/api/src/services/trend-management-runtime.service.ts"
+      - "apps/api/src/services/trend-management-runtime.semi.test.ts"
+      - "apps/api/src/services/phase7c-strategy-entry-conditions.service.ts"
+      - "apps/api/src/services/phase7c-decision-monitor.service.ts"
+      - "apps/api/src/services/phase7c-ui-contract.service.ts"
+      - "apps/web/src/**"
+      - ".github/workflows/phase7c-semi-auto-trend-management-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "packages/strategy-engine/src/models/BotMode.ts"
+      - "apps/api/src/services/phase7c-bot-mode.service.ts"
+      - "apps/api/src/services/phase7c-bot-mode.semi.test.ts"
+      - "apps/api/src/services/phase7c-semi-*.ts"
+      - "apps/api/src/services/trend-management-runtime.service.ts"
+      - "apps/api/src/services/trend-management-runtime.semi.test.ts"
+      - "apps/api/src/services/phase7c-strategy-entry-conditions.service.ts"
+      - "apps/api/src/services/phase7c-decision-monitor.service.ts"
+      - "apps/api/src/services/phase7c-ui-contract.service.ts"
+      - "apps/web/src/**"
+      - ".github/workflows/phase7c-semi-auto-trend-management-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  semi-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: SEMI bot-mode contract
+        run: pnpm exec tsx apps/api/src/services/phase7c-bot-mode.semi.test.ts
+
+      - name: Build strategy engine
+        run: pnpm --filter @xauusd/strategy-engine build
+
+      - name: Build API
+        run: pnpm --filter @xauusd/api build
+
+      - name: Build Web
+        run: pnpm --filter @xauusd/web build
