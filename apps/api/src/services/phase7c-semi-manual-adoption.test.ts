@@ -115,6 +115,44 @@ test("manual SHORT receives exact directional 6.0-price-unit initial SL", () => 
   assert.equal(result.targetStopLoss, 3606);
 });
 
+test("preserves an existing tighter LONG stop instead of loosening it to 6 price units", () => {
+  const result = evaluateSemiManualAdoption(baseInput({
+    position: { ...baseInput().position, stopLoss: 3596.27 },
+  }));
+  assert.equal(result.status, "PENDING");
+  assert.equal(result.reason, "PROTECTION_REQUIRED");
+  assert.equal(result.targetStopLoss, 3596.27);
+});
+
+test("preserves an existing tighter SHORT stop instead of loosening it to 6 price units", () => {
+  const result = evaluateSemiManualAdoption(baseInput({
+    position: {
+      ...baseInput().position,
+      side: "SHORT",
+      entry: 3600,
+      stopLoss: 3603.25,
+    },
+    openingDeal: { ...baseInput().openingDeal!, side: "SELL" },
+    quote: { bid: 3598.8, ask: 3599 },
+  }));
+  assert.equal(result.status, "PENDING");
+  assert.equal(result.targetStopLoss, 3603.25);
+});
+
+test("does not block an already tighter stop merely because the canonical 6-price stop is inside freeze distance", () => {
+  const result = evaluateSemiManualAdoption(baseInput({
+    position: { ...baseInput().position, stopLoss: 3594.03 },
+    quote: { bid: 3594.04, ask: 3594.06 },
+    spec: {
+      tickSize: 0.01,
+      stopsLevelTicks: 10,
+      freezeLevelTicks: 20,
+    },
+  }));
+  assert.equal(result.status, "PENDING");
+  assert.equal(result.targetStopLoss, 3594.03);
+});
+
 test("broker stops/freeze constraints block protection fail-closed", () => {
   const result = evaluateSemiManualAdoption(baseInput({
     quote: { bid: 3594.04, ask: 3594.06 },
