@@ -121,7 +121,7 @@ If multiple candidates, mixed ownership, missing provenance, conflicting account
 - emit a structured `SEMI_ADOPTION_BLOCKED` reason;
 - expose the block through semantic/runtime observability.
 
-## 7. Shared acquisition lock
+## 7. Shared acquisition lock and protection-first ownership
 
 Manual adoption must use the same shared execution/ownership serialization used by algorithmic entry.
 
@@ -131,11 +131,15 @@ The adoption decision sequence is:
 2. acquire shared execution lock with a SEMI-specific owner;
 3. re-read mode, account identity and open XAUUSD positions under the lock;
 4. re-validate manual provenance and uniqueness;
-5. establish durable managed ownership;
-6. reconcile initial protection;
-7. release the lock.
+5. create **provisional durable ownership** for the exact ticket with `protectionStatus=PENDING`;
+6. reconcile the canonical initial 6-price protection;
+7. on success, persist `protectionStatus=PROTECTED` and enable normal Trend management;
+8. on broker/legal failure, persist `protectionStatus=PROTECTION_BLOCKED` and restrict the runtime to protection reconciliation, exact-ticket monitoring and manual-close detection until protection is restored;
+9. release the lock.
 
-This prevents AUTO/Trend/Sideway entry and SEMI adoption from racing during mode transitions or concurrent cycles.
+The provisional durable record prevents duplicate adoption across crashes/restarts while still making the protection state truthful. A `PENDING` or `PROTECTION_BLOCKED` ticket is owned only for safety and reconciliation; it must not run normal BE/partial/FastMove/structural/Fixed-TP mutations until canonical protection is present.
+
+This prevents AUTO/Trend/Sideway entry and SEMI adoption from racing during mode transitions or concurrent cycles, and prevents the UI from claiming normal Trend management before the position is protected.
 
 ## 8. Durable managed-state model
 
@@ -147,7 +151,8 @@ Existing version-2 managed state migrates as:
 
 - `entrySource = SYSTEM`;
 - `managementStrategy = TREND` for existing Trend state;
-- algorithmic signal/pattern fields retain their current meaning.
+- algorithmic signal/pattern fields retain their current meaning;
+- `protectionStatus = PROTECTED` for existing states whose current exact-ticket stop state passes reconciliation; otherwise the runtime enters the same explicit protection-reconciliation path before normal mutations resume.
 
 Manual adopted state includes at minimum:
 
@@ -161,6 +166,7 @@ Manual adopted state includes at minimum:
 - `manualOpenedAt`;
 - `managementStartedAt`;
 - `initialStopDistance = 6`;
+- `protectionStatus = PENDING | PROTECTED | PROTECTION_BLOCKED`;
 - Fixed TP snapshot fields from the active Trend Fixed TP configuration;
 - break-even, partial, FastMove and trailing state fields reused from Trend management;
 - account/login binding;
@@ -170,7 +176,7 @@ Signal-specific fields that do not exist for a manual position must be nullable/
 
 Daily Recovery fields for `entrySource=MANUAL` are disabled/empty and must not affect exit behavior.
 
-On restart, the runtime reloads the durable manual managed state and reconciles it against the exact broker ticket/account before resuming management. It must never “rediscover” a different manual position as the old ticket.
+On restart, the runtime reloads the durable manual managed state and reconciles it against the exact broker ticket/account before resuming management. It must never “rediscover” a different manual position as the old ticket. If protection state is `PENDING` or `PROTECTION_BLOCKED`, restart resumes protection reconciliation first.
 
 ## 9. Initial Stop Loss policy
 
@@ -200,22 +206,27 @@ If the operator later loosens or removes the SL, the runtime restores the tighte
 
 If the canonical 6-price stop cannot legally be placed at adoption because of broker stop/freeze/current-market constraints, and the position does not already have an equally-or-more-protective valid SL:
 
-- mark the candidate `PROTECTION_BLOCKED`;
+- keep the exact ticket in provisional durable ownership;
+- set `protectionStatus=PROTECTION_BLOCKED`;
 - do not silently widen the SL beyond the 6-price risk limit;
 - do not force-close the position as part of this feature;
 - expose an operator-visible safety alert;
-- continue fail-closed acquisition semantics until the protection can be reconciled or the position is manually resolved.
+- do not perform normal Trend management mutations while protection is blocked;
+- retry only the canonical/tighter protection reconciliation on later guarded cycles;
+- allow exact-ticket disappearance/manual close to clear the blocked ownership safely.
 
-Implementation must define whether durable ownership is established immediately before protection reconciliation or only after reconciliation. The required invariant is stronger than that internal ordering: **there must never be a state where the UI claims normal Trend management while the runtime has neither canonical protection nor an explicit `PROTECTION_BLOCKED` state.**
+The invariant is explicit: **the UI must never claim normal Trend management unless `protectionStatus=PROTECTED`; otherwise it must show `PENDING` or `PROTECTION_BLOCKED`.**
 
 ## 10. Fixed TP
 
 SEMI uses the **same current Trend Fixed TP configuration**.
 
-- If Trend Fixed TP is enabled, calculate the target from the actual broker fill and the configured Trend distance, then reconcile the broker TP using the existing Fixed TP mechanism.
-- If Trend Fixed TP is disabled, SEMI does not invent a fixed TP.
-- A tighter/manual TP may remain subject to the existing Fixed TP contract; implementation must preserve the current Trend semantics rather than create a SEMI-only TP policy.
+- If Trend Fixed TP is enabled, calculate the canonical target from the actual broker fill and the configured Trend distance, then reconcile the broker TP to that exact target using the existing Trend Fixed TP semantics. A manually supplied different TP is not a separate SEMI override while Fixed TP is enabled.
+- If Trend Fixed TP is disabled, SEMI does not invent, place or normalize a Fixed TP merely because the position was adopted. A manual broker TP may remain in place unless another existing canonical Trend exit closes the position earlier.
+- Fixed TP reconciliation begins only after `protectionStatus=PROTECTED`.
 - Daily Recovery TP is explicitly disabled for `entrySource=MANUAL`.
+
+This keeps TP behavior deterministic: **Trend Fixed TP ON = canonical Trend target wins; Trend Fixed TP OFF = SEMI adds no new TP policy.**
 
 ## 11. Trend management parity after adoption
 
@@ -271,7 +282,10 @@ If the exact managed ticket disappears because the operator closes it manually:
 - journal `SEMI_MANUAL_POSITION_CLOSED` or the canonical managed-close event with `entrySource=MANUAL`;
 - clear durable managed state;
 - never reopen the position;
-- if mode remains SEMI, return to `WAITING_MANUAL_ENTRY` with a new activation/candidate policy that cannot accidentally re-adopt stale history.
+- if mode remains SEMI, return to `WAITING_MANUAL_ENTRY`;
+- preserve a monotonic adoption watermark so another position that predates the completed managed lifecycle cannot later be reclassified as a new SEMI candidate.
+
+A subsequent adoption requires a different eligible manual ticket with `openedAt` newer than both the current SEMI activation boundary and the completed/manual-management watermark.
 
 ### 12.2 Manual SL tightening
 
@@ -287,11 +301,12 @@ If broker SL becomes less protective than the tightest canonical managed stop:
 
 - reconcile back to the tightest canonical allowed stop;
 - emit an observable reconciliation event;
-- if broker rules temporarily prevent reconciliation, expose `PROTECTION_BLOCKED` rather than silently accepting weaker risk.
+- if broker rules temporarily prevent reconciliation, expose `PROTECTION_BLOCKED` rather than silently accepting weaker risk;
+- suspend normal Trend mutations until protection returns to `PROTECTED`.
 
 ### 12.4 Manual TP changes
 
-When Fixed TP is enabled, retain the existing Trend Fixed TP reconciliation semantics. When Fixed TP is disabled, SEMI must not create a new TP-management rule merely because the operator changed TP manually.
+When Fixed TP is enabled, retain the canonical Trend Fixed TP reconciliation target. When Fixed TP is disabled, SEMI does not create a new TP-management rule merely because the operator changed TP manually.
 
 ## 13. Mode transitions with an open manual ticket
 
@@ -320,7 +335,7 @@ Prefer an additive extension to the current semantic UI contract while retaining
 
 ### 14.1 Suggested additive position telemetry
 
-When a managed position exists, expose fields equivalent to:
+When a managed or provisionally owned position exists, expose fields equivalent to:
 
 - `entrySource: MANUAL | SYSTEM`;
 - `managementStrategy: TREND | SIDEWAY | null`;
@@ -335,11 +350,13 @@ When a managed position exists, expose fields equivalent to:
 
 Status vocabularies should be small and based on durable runtime facts, for example:
 
+- protection: `PENDING | PROTECTED | PROTECTION_BLOCKED`;
 - BE: `PENDING | APPLIED`;
 - partial: `PENDING | APPLIED | SKIPPED_BROKER_VOLUME`;
 - FastMove: `INACTIVE | ACTIVE | STRUCTURE_TAKEOVER`;
-- trailing: `WAITING | ACTIVE`;
-- protection: `PROTECTED | PROTECTION_BLOCKED`.
+- trailing: `WAITING | ACTIVE`.
+
+When protection is not `PROTECTED`, BE/partial/FastMove/trailing fields must not imply that normal management is active.
 
 ### 14.2 SEMI waiting presentation
 
@@ -359,7 +376,9 @@ When mode is SEMI and no ticket is owned:
 
 When an adopted ticket is managed:
 
-- BOT ĐANG LÀM GÌ?: `ĐANG QUẢN LÝ LỆNH TAY`;
+- BOT ĐANG LÀM GÌ?: `ĐANG QUẢN LÝ LỆNH TAY` only when `protectionStatus=PROTECTED`;
+- while `PENDING`, show `ĐANG THIẾT LẬP BẢO VỆ LỆNH TAY`;
+- while `PROTECTION_BLOCKED`, show an explicit protection-blocked alert rather than normal management;
 - Entry Source: `MANUAL`;
 - Management: `TREND`;
 - show actual ticket, side, entry, current volume, current SL and Fixed TP if present;
@@ -403,7 +422,7 @@ Existing Trend events for +6, +10, Fixed TP, FastMove, structural stop, hold and
 Decision Monitor / semantic status should make the following operator questions answerable read-only:
 
 1. Is SEMI active?
-2. Is the bot waiting for a manual position or managing one?
+2. Is the bot waiting for a manual position, establishing protection, blocked on protection, or managing one?
 3. Which ticket does it own?
 4. Was the position manual or system-created?
 5. Is the ticket protected by the canonical SL?
@@ -425,7 +444,7 @@ Examples:
 - stale mode/activation provenance -> no adoption;
 - account changed -> stop mutations for unresolved ownership and surface block;
 - execution lock busy -> retry on later cycle, no duplicate ownership;
-- broker SL reconcile rejected -> explicit protection block, no widening;
+- broker SL reconcile rejected -> explicit protection block, no widening and no normal management mutations;
 - Fixed TP reconcile rejected -> retain managed ownership, expose TP reconciliation failure under existing Trend semantics;
 - state/broker ticket mismatch -> no mutation of a different ticket;
 - restart with durable manual state -> reconcile exact ticket only.
@@ -460,8 +479,11 @@ Minimum coverage:
 - bot/Sideway/Trend/validation magic is rejected;
 - ambiguous/multiple positions block;
 - candidate is revalidated under the shared execution lock;
+- provisional exact-ticket ownership is durable before protection reconciliation;
+- `PENDING`/`PROTECTION_BLOCKED` cannot execute normal Trend management mutations;
 - exact ticket/account is persisted;
-- restart resumes the exact ticket and cannot adopt a replacement silently.
+- restart resumes the exact ticket and cannot adopt a replacement silently;
+- post-close adoption watermark prevents a stale pre-existing manual position from being adopted as a new trade.
 
 ### Initial SL
 
@@ -472,7 +494,15 @@ Minimum coverage:
 - tighter SL is preserved;
 - subsequent manual tightening is preserved;
 - subsequent loosening/removal is restored to the tightest canonical stop;
-- broker-illegal canonical stop produces `PROTECTION_BLOCKED`, never a wider stop and never an automatic close.
+- broker-illegal canonical stop produces `PROTECTION_BLOCKED`, never a wider stop and never an automatic close;
+- protection recovery transitions `PROTECTION_BLOCKED -> PROTECTED` before normal Trend mutations resume.
+
+### Fixed TP
+
+- Trend Fixed TP ON calculates target from actual manual fill and reconciles an existing different manual TP to the canonical Trend target;
+- Trend Fixed TP OFF does not invent or normalize a TP for SEMI;
+- Fixed TP reconciliation does not run before protection is `PROTECTED`;
+- Daily Recovery TP is never selected for `entrySource=MANUAL`.
 
 ### Trend management parity
 
@@ -499,6 +529,7 @@ Minimum coverage:
 - SEMI waiting renders `CHỜ BẠN VÀO LỆNH` and auto entry OFF;
 - it does not render algorithmic Trend entry checks as the manual gate;
 - managed manual ticket renders `entrySource=MANUAL`, `managementStrategy=TREND`;
+- protection `PENDING` and `PROTECTION_BLOCKED` have explicit UI states and do not masquerade as normal management;
 - BE/partial/FastMove/trailing/protection badges come only from semantic fields;
 - unknown telemetry remains unknown rather than inferred;
 - existing Signal UI V3 contracts remain green.
@@ -523,7 +554,7 @@ Exact files are resolved during the implementation plan, but the expected bounda
 - canonical bot-mode contract/API/service and its provenance;
 - Trend/Sideway mode gates;
 - MT5 bridge position read model if manual provenance fields are missing;
-- Trend durable managed-state schema and manual adoption path;
+- Trend durable managed-state schema and manual adoption/protection path;
 - shared execution lock integration;
 - semantic UI serializer / Decision Monitor observability;
 - Signal UI V3;
@@ -556,11 +587,13 @@ The feature is complete when all of the following are true:
 - a single, provably manual, new XAUUSD ticket can be adopted automatically;
 - actual manual volume is accepted without applying algorithmic entry-volume rejection;
 - canonical initial SL is 6 price units from actual fill and never loosens a tighter stop;
+- provisional ownership is explicit until 6-price protection is proven, and normal Trend management runs only under `PROTECTED`;
 - the adopted ticket runs through the canonical Trend BE, partial, FastMove, structural trailing, Fixed TP, hold/reversal/exit management;
+- Trend Fixed TP ON owns the canonical target; Trend Fixed TP OFF adds no SEMI-specific TP rule;
 - Daily Recovery is off for manual-origin positions;
 - mode transitions preserve management ownership safely;
-- manual close never causes re-entry;
-- semantic/runtime telemetry truthfully exposes ownership and management milestones;
+- manual close never causes re-entry or stale re-adoption;
+- semantic/runtime telemetry truthfully exposes ownership, protection and management milestones;
 - Signal UI V3 clearly distinguishes manual entry from Trend management;
 - AUTO, PAUSE, Sideway and existing LIVE safety contracts remain green;
 - production rollout performs no unsolicited mode/ARM/order/position mutation.
