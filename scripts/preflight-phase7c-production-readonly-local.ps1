@@ -119,7 +119,7 @@ try {
     } catch { $localHead = 'UNAVAILABLE'; Add-Blocked 'LOCAL_HEAD_UNAVAILABLE' }
 
     try {
-        $localTree = ([string](& $gitExe rev-parse HEAD^{tree})).Trim().ToLowerInvariant()
+        $localTree = ([string](& $gitExe rev-parse 'HEAD^{tree}')).Trim().ToLowerInvariant()
         if ($LASTEXITCODE -ne 0 -or $localTree -notmatch '^[0-9a-f]{40}$') { throw 'tree read failed' }
     } catch { $localTree = 'UNAVAILABLE'; Add-Blocked 'LOCAL_TREE_UNAVAILABLE' }
 
