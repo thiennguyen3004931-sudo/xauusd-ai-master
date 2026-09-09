@@ -58,7 +58,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: SEMI bot-mode contract
-        run: pnpm exec tsx apps/api/src/services/phase7c-bot-mode.semi.test.ts
+        run: pnpm --filter @xauusd/api exec tsx src/services/phase7c-bot-mode.semi.test.ts
 
       - name: Build strategy engine
         run: pnpm --filter @xauusd/strategy-engine build
