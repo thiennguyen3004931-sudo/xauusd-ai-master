@@ -78,7 +78,10 @@ jobs:
       - name: Build strategy engine and dependencies
         run: pnpm build --filter=@xauusd/strategy-engine...
 
-      - name: SEMI management-only execution-engine contract
+      - name: SEMI management-only execution-engine typecheck
+        run: pnpm --filter @xauusd/execution-engine typecheck
+
+      - name: Build execution engine and dependencies
         run: pnpm build --filter=@xauusd/execution-engine...
 
       - name: Build API and dependencies
