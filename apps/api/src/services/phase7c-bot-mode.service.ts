@@ -17,7 +17,7 @@ export interface Phase7CBotModeAuditEvent {
   pid: number;
 }
 
-const VALID_MODES: readonly BotMode[] = ["AUTO", "TREND", "SIDEWAY", "PAUSE"];
+const VALID_MODES: readonly BotMode[] = ["AUTO", "TREND", "SIDEWAY", "SEMI", "PAUSE"];
 const VALID_MODE_SET = new Set<BotMode>(VALID_MODES);
 const WEB_AUTO_SOURCE = "web-control-center";
 
