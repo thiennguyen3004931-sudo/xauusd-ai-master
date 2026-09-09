@@ -71,6 +71,9 @@ test("one broker ticket cannot be rebound to a different SEMI ownership epoch/ac
       repository.save(state({
         ownershipId: "semi:99001:1789000010000",
         activationEpochMs: 1_789_000_010_000,
+        manualOpenedAt: 1_789_000_012_000,
+        managementStartedAt: 1_789_000_012_500,
+        updatedAt: 1_789_000_012_500,
       })),
       /ownership/i,
     );
