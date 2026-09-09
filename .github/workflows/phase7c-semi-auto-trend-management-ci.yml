@@ -18,6 +18,7 @@ on:
       - "apps/api/src/services/phase7c-ui-contract.service.ts"
       - "apps/web/src/**"
       - "scripts/phase7c-semi-entry-boundary-decision.test.mjs"
+      - "scripts/phase7c-decision-monitor.test.mjs"
       - "scripts/apply-phase7c-semi-task6-green.mjs"
       - "scripts/run-phase7c-trend-controller.mjs"
       - "scripts/run-phase7c-sideway-controller.mjs"
@@ -39,13 +40,14 @@ on:
       - "apps/api/src/services/phase7c-ui-contract.service.ts"
       - "apps/web/src/**"
       - "scripts/phase7c-semi-entry-boundary-decision.test.mjs"
+      - "scripts/phase7c-decision-monitor.test.mjs"
       - "scripts/apply-phase7c-semi-task6-green.mjs"
       - "scripts/run-phase7c-trend-controller.mjs"
       - "scripts/run-phase7c-sideway-controller.mjs"
       - ".github/workflows/phase7c-semi-auto-trend-management-ci.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   semi-contract:
@@ -54,30 +56,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Apply guarded Task6 GREEN patch on feature push
-        if: github.event_name == 'push'
-        run: |
-          if grep -q 'function semiManualOnlyDecision' apps/api/src/services/phase7c-decision-monitor.service.ts; then
-            echo 'PHASE7C_SEMI_TASK6_PATCH=ALREADY_APPLIED'
-          else
-            node scripts/apply-phase7c-semi-task6-green.mjs
-          fi
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          const file = 'apps/api/src/services/phase7c-ui-contract.service.ts';
-          const source = fs.readFileSync(file, 'utf8');
-          const from = '  setup: null | {\n    strategy: string;';
-          const to = '  setup: null | {\n    strategy: string | null;';
-          if (source.includes(from)) {
-            fs.writeFileSync(file, source.replace(from, to), 'utf8');
-            console.log('PATCH_OK=UI_SETUP_NULL_STRATEGY');
-          } else if (source.includes(to)) {
-            console.log('PATCH_OK=UI_SETUP_NULL_STRATEGY_ALREADY_APPLIED');
-          } else {
-            throw new Error('UI_SETUP_NULL_STRATEGY: canonical interface marker not found');
-          }
-          NODE
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -108,11 +86,14 @@ jobs:
       - name: SEMI Trend management-only plan contract
         run: pnpm --filter @xauusd/api exec tsx src/services/phase7c-semi-trend-management-plan.test.ts
 
-      - name: Build API and dependencies for runtime integration test
+      - name: Build API and dependencies for runtime integration tests
         run: pnpm build --filter=@xauusd/api...
 
       - name: SEMI entry boundary and decision semantics
         run: pnpm --filter @xauusd/api exec tsx --test ../../scripts/phase7c-semi-entry-boundary-decision.test.mjs
+
+      - name: Decision Monitor regression
+        run: pnpm --filter @xauusd/api exec tsx --test ../../scripts/phase7c-decision-monitor.test.mjs
 
       - name: SEMI Trend runtime ownership handoff contract
         run: pnpm --filter @xauusd/api exec tsx src/services/trend-management-runtime.semi.test.ts
@@ -122,16 +103,3 @@ jobs:
 
       - name: Build Web and dependencies
         run: pnpm build --filter=@xauusd/web...
-
-      - name: Commit verified Task6 GREEN patch
-        if: github.event_name == 'push'
-        run: |
-          if git diff --quiet -- apps/api/src/services/phase7c-decision-monitor.service.ts apps/api/src/services/phase7c-ui-contract.service.ts scripts/run-phase7c-trend-controller.mjs scripts/run-phase7c-sideway-controller.mjs; then
-            echo 'PHASE7C_SEMI_TASK6_COMMIT=NO_CHANGES'
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add apps/api/src/services/phase7c-decision-monitor.service.ts apps/api/src/services/phase7c-ui-contract.service.ts scripts/run-phase7c-trend-controller.mjs scripts/run-phase7c-sideway-controller.mjs
-          git commit -m 'feat(phase7c): enforce SEMI manual entry boundary'
-          git push origin HEAD:${GITHUB_REF_NAME}
