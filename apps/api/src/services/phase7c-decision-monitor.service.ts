@@ -18,6 +18,8 @@ import {
   getPhase7CAccountModeState,
   type Phase7CAccountModeState,
 } from "./phase7c-account-mode.service";
+import type { DurableSemiAdoptionState } from "./phase7c-semi-adoption-state.service";
+import { getPhase7CSemiAdoptionStateRepository } from "./phase7c-semi-adoption-runtime.service";
 
 type Strategy = "TREND" | "SIDEWAY" | "PAUSE";
 
@@ -139,7 +141,7 @@ interface ManagedRuntimeStates {
 }
 
 export interface Phase7CPreTradeDecision {
-  strategy: Strategy;
+  strategy: Strategy | null;
   stage: string;
   approved: boolean;
   side: string | null;
@@ -266,6 +268,16 @@ function loadManagedStates(accountModeState: Phase7CAccountModeState): ManagedRu
     TREND: readManagedState(resolve(root, trendDir, "phase7b-demo-state.json")),
     SIDEWAY: readManagedState(resolve(root, sidewayDir, "phase7c-sideway-state.json")),
   };
+}
+
+async function loadSemiAdoptions(): Promise<DurableSemiAdoptionState[]> {
+  try {
+    return await getPhase7CSemiAdoptionStateRepository().listActive();
+  } catch {
+    // Decision observability must never invent SEMI ownership. An unreadable
+    // durable ledger therefore degrades to no adopted owner and stays fail-closed.
+    return [];
+  }
 }
 
 function localApiBase(): string {
@@ -495,6 +507,40 @@ function pauseDecision(
   };
 }
 
+function semiManualOnlyDecision(
+  regime: Awaited<ReturnType<typeof getPhase7CLiveRegime>>,
+  now: number,
+): Phase7CPreTradeDecision {
+  return {
+    strategy: null,
+    stage: "BLOCKED",
+    approved: false,
+    side: null,
+    setup: null,
+    confidenceScore: finite(regime.confidence),
+    confidenceLabel: null,
+    entry: null,
+    stopLoss: null,
+    stopDistance: null,
+    breakEvenPrice: null,
+    breakEvenTriggerDistance: 6,
+    tp1: null,
+    tp2: null,
+    partialTriggerDistance: 10,
+    partialFraction: "1/3",
+    rawLot: null,
+    finalLot: null,
+    lotCap: null,
+    riskTargetPercent: null,
+    estimatedRiskUsd: null,
+    estimatedRiskPercent: null,
+    limitReason: "SEMI chỉ cho phép vào lệnh thủ công; hệ thống chặn mọi system-generated new entry.",
+    decisionReason: "SEMI manual-entry-only: sau khi vị thế thủ công được xác minh và PROTECTED/MANAGED, Trend management mới được phép quản lý SL/BE/TP/FastMove.",
+    source: "PHASE7C_SEMI_MANUAL_ENTRY_ONLY",
+    updatedAt: now,
+  };
+}
+
 function cleanReason(value: string | null | undefined, fallback: string): string {
   const text = String(value ?? "").replace(/[\r\n]+/g, " ").trim();
   return text || fallback;
@@ -530,6 +576,8 @@ function positionMonitor(input: {
   telemetry: Mt5TelemetrySnapshot;
   audit: DecisionAuditRecord[];
   managedStates?: ManagedRuntimeStates;
+  semiAdoptions?: DurableSemiAdoptionState[];
+  activeMode?: string;
 }) {
   const positions = input.telemetry.positions;
   const position = positions[0] ?? null;
@@ -565,7 +613,20 @@ function positionMonitor(input: {
   const hasExactlyOnePosition = positions.length === 1;
   const trendManaged = hasExactlyOnePosition && String(states.TREND?.ticket ?? "") === ticket ? states.TREND : null;
   const sidewayManaged = hasExactlyOnePosition && String(states.SIDEWAY?.ticket ?? "") === ticket ? states.SIDEWAY : null;
-  const strategy: Strategy | null = trendManaged ? "TREND" : sidewayManaged ? "SIDEWAY" : null;
+  const semiManaged = hasExactlyOnePosition && input.activeMode === "SEMI"
+    ? input.semiAdoptions?.find((owner) =>
+      String(owner.ticket) === ticket &&
+      owner.entrySource === "MANUAL" &&
+      owner.managementStrategy === "TREND" &&
+      (owner.protectionStatus === "PROTECTED" || owner.protectionStatus === "MANAGED")) ?? null
+    : null;
+  const strategy: Strategy | null = trendManaged
+    ? "TREND"
+    : sidewayManaged
+      ? "SIDEWAY"
+      : semiManaged
+        ? "TREND"
+        : null;
   const managed = trendManaged ?? sidewayManaged;
   const ticketAudit = hasExactlyOnePosition
     ? input.audit.filter((row) => String(row.management?.ticket ?? "") === ticket)
@@ -615,7 +676,9 @@ function positionMonitor(input: {
     breakEvenApplied: Boolean(managed?.breakEvenApplied),
     partialApplied: Boolean(managed?.partialApplied),
     openedAt: finite(position.openedAt) ?? finite(managed?.openedAt),
-    entryReason: entryReason(strategy, managed, entryAudit),
+    entryReason: semiManaged
+      ? "SEMI manual entry đã được xác minh ownership; bot chỉ tiếp quản Trend management và không tạo entry mới."
+      : entryReason(strategy, managed, entryAudit),
     holdReasonCode: canonicalHoldReason(strategy, managed)?.reasonCode ?? null,
     holdReason: canonicalHoldReason(strategy, managed)?.reason
       ?? "Vị thế không thuộc state executor; cần kiểm tra thủ công, không suy đoán lý do giữ.",
@@ -629,6 +692,7 @@ export function buildPhase7CDecisionMonitor(input: {
   lots: ReturnType<typeof phase7CLotSettingsService.get>;
   audit: DecisionAuditRecord[];
   managedStates?: ManagedRuntimeStates;
+  semiAdoptions?: DurableSemiAdoptionState[];
   accountModeState?: Phase7CAccountModeState;
   now?: number;
 }) {
@@ -638,19 +702,29 @@ export function buildPhase7CDecisionMonitor(input: {
   const autoReversalCanonicalTrendEntry = input.regime.activeMode === "AUTO" &&
     input.regime.regime === "REVERSAL" &&
     canonicalTrendEligible;
+  const position = positionMonitor({
+    ...input,
+    activeMode: input.regime.activeMode,
+  });
   const requestedStrategy = input.regime.activeMode === "AUTO"
     ? autoReversalCanonicalTrendEntry
       ? "TREND"
       : input.regime.recommendedMode
     : input.regime.activeMode;
-  const effectiveStrategy: Strategy = requestedStrategy === "TREND" || requestedStrategy === "SIDEWAY"
-    ? requestedStrategy
-    : "PAUSE";
-  const preTrade = effectiveStrategy === "TREND"
-    ? trendDecision({ ...input, accountModeState, now })
-    : effectiveStrategy === "SIDEWAY"
-      ? sidewayDecision({ ...input, accountModeState, now })
-      : pauseDecision(input.regime, now);
+  const effectiveStrategy: Strategy | null = input.regime.activeMode === "SEMI"
+    ? position.state === "MANAGING" && position.strategy === "TREND"
+      ? "TREND"
+      : null
+    : requestedStrategy === "TREND" || requestedStrategy === "SIDEWAY"
+      ? requestedStrategy
+      : "PAUSE";
+  const preTrade = input.regime.activeMode === "SEMI"
+    ? semiManualOnlyDecision(input.regime, now)
+    : effectiveStrategy === "TREND"
+      ? trendDecision({ ...input, accountModeState, now })
+      : effectiveStrategy === "SIDEWAY"
+        ? sidewayDecision({ ...input, accountModeState, now })
+        : pauseDecision(input.regime, now);
 
   return {
     version: 1 as const,
@@ -674,7 +748,7 @@ export function buildPhase7CDecisionMonitor(input: {
       matchesRecommendation: input.regime.modeMatchesRecommendation,
     },
     account: safeAccount(input.telemetry),
-    position: positionMonitor(input),
+    position,
     lotSettings: input.lots,
     preTrade,
     entryDiagnostics: {
@@ -724,10 +798,11 @@ export async function getPhase7CDecisionMonitor(symbol = "XAUUSD") {
   if (pending?.mode === currentBotMode) return pending.promise;
 
   const request = (async () => {
-    const [regime, demo, telemetry] = await Promise.all([
+    const [regime, demo, telemetry, semiAdoptions] = await Promise.all([
       getPhase7CLiveRegime(symbol),
       getPhase7BDemoStatus(),
       getMt5Telemetry(symbol),
+      currentBotMode === "SEMI" ? loadSemiAdoptions() : Promise.resolve([]),
     ]);
     const value = buildPhase7CDecisionMonitor({
       regime,
@@ -736,6 +811,7 @@ export async function getPhase7CDecisionMonitor(symbol = "XAUUSD") {
       lots: phase7CLotSettingsService.get(),
       audit: loadAudit(accountModeState),
       managedStates: loadManagedStates(accountModeState),
+      semiAdoptions,
       accountModeState,
       now: Date.now(),
     });
@@ -760,6 +836,9 @@ function mt5FlatEntryReason(snapshot: ReturnType<typeof buildPhase7CDecisionMoni
   const p = snapshot.preTrade;
   if (!snapshot.safety.accountGuardValid) {
     return "Account-mode state không hợp lệ; executor phải giữ fail-closed và không mở lệnh mới.";
+  }
+  if (snapshot.mode.active === "SEMI") {
+    return "SEMI chỉ cho phép vào lệnh thủ công; bot không tạo lệnh mới. Vị thế MANUAL_SEMI chỉ được Trend management tiếp quản sau khi đã xác minh và PROTECTED/MANAGED.";
   }
   if (snapshot.mode.active === "PAUSE") {
     return "Bot đang PAUSE; không mở lệnh mới. Mở Control Center và nhấn BẬT BOT sau khi hoàn tất kiểm tra an toàn.";

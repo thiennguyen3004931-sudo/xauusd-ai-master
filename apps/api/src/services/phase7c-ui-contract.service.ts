@@ -20,7 +20,7 @@ export interface Phase7CUiContract {
   symbol: string;
   uiState: Phase7CUiState;
   mode: string;
-  effectiveStrategy: string;
+  effectiveStrategy: string | null;
   regime: string;
   confidence: number | null;
   stage: string;
@@ -53,7 +53,7 @@ export interface Phase7CUiContract {
     sidewayOn: boolean;
   };
   setup: null | {
-    strategy: string;
+    strategy: string | null;
     side: string | null;
     name: string | null;
     entry: number | null;
@@ -165,6 +165,8 @@ function autoReasons(snapshot: Snapshot): string[] {
         : `AUTO: regime ${snapshot.engine.regime}${confidence} → chọn ${recommendation}.`,
     );
     for (const reason of snapshot.engine.reasons) pushUnique(reasons, reason);
+  } else if (snapshot.mode.active === "SEMI") {
+    pushUnique(reasons, "SEMI: chỉ vào lệnh thủ công; Trend/Sideway không được tạo entry mới. MANUAL_SEMI đã PROTECTED/MANAGED được quản lý theo Trend.");
   } else {
     pushUnique(reasons, `Bot đang ở chế độ ${snapshot.mode.active}; AUTO không quyết định strategy lúc này.`);
   }

@@ -712,6 +712,23 @@ async function cycle() {
     recoveryTpDistance: dailyRecovery.tpDistance,
   });
 
+  // Re-read canonical mode at the actual submit boundary. SEMI is manual-entry-only;
+  // clearing our own durable pending marker here does not touch any broker position.
+  const submitMode = await controlGet("/api/v1/phase7c/bot-mode");
+  const submitActiveMode = String(submitMode?.state?.mode ?? "PAUSE").toUpperCase();
+  if (submitActiveMode === "SEMI") {
+    journal("ENTRY_SEMI_MODE_BLOCK", {
+      orderId,
+      side,
+      cycleMode: freshMode?.state?.mode ?? null,
+      submitMode: submitActiveMode,
+      reason: "SEMI_MANUAL_ENTRY_ONLY",
+    });
+    state.pendingEntry = null;
+    saveState();
+    return;
+  }
+
   const order = await bridgeRequest("POST", "/v1/orders", {
     symbol,
     side,
