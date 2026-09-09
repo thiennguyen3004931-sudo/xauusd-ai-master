@@ -76,20 +76,14 @@ jobs:
       - name: SEMI Trend management-only plan contract
         run: pnpm --filter @xauusd/api exec tsx src/services/phase7c-semi-trend-management-plan.test.ts
 
+      - name: Build API and dependencies for runtime integration test
+        run: pnpm build --filter=@xauusd/api...
+
       - name: SEMI Trend runtime ownership handoff contract
         run: pnpm --filter @xauusd/api exec tsx src/services/trend-management-runtime.semi.test.ts
 
-      - name: Build strategy engine and dependencies
-        run: pnpm build --filter=@xauusd/strategy-engine...
-
       - name: SEMI management-only execution-engine typecheck
         run: pnpm --filter @xauusd/execution-engine typecheck
-
-      - name: Build execution engine and dependencies
-        run: pnpm build --filter=@xauusd/execution-engine...
-
-      - name: Build API and dependencies
-        run: pnpm build --filter=@xauusd/api...
 
       - name: Build Web and dependencies
         run: pnpm build --filter=@xauusd/web...
