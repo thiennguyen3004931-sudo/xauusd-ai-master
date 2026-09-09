@@ -1,12 +1,17 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-// RED contract: account-switch prerequisites must not masquerade as current bot/ARM state.
+// Contract: account-switch prerequisites must not masquerade as current bot/ARM state.
 const sourcePath = resolve(
   process.cwd(),
   "apps/web/src/pages/Phase7CAccountRiskPage.tsx",
 );
 const source = readFileSync(sourcePath, "utf8");
+const liveArmApiPath = resolve(
+  process.cwd(),
+  "apps/web/src/phase7c-live-arm-control-api.ts",
+);
+const liveArmApi = readFileSync(liveArmApiPath, "utf8");
 
 function requireMatch(pattern, message) {
   if (!pattern.test(source)) {
@@ -23,6 +28,16 @@ function requireAbsent(pattern, message) {
 requireMatch(
   /getPhase7CLiveArmControlCapability/,
   "Account & Risk must read canonical LIVE ARM capability for the current-state summary.",
+);
+
+requireMatch(
+  /getPhase7CLifecycle/,
+  "Account & Risk must read canonical lifecycle state for the current-state summary.",
+);
+
+requireMatch(
+  /liveArmCapability\.openXauusdPositions/,
+  "Current XAUUSD position count must come from canonical LIVE ARM capability.",
 );
 
 requireMatch(
@@ -84,5 +99,17 @@ requireAbsent(
   /liveDisarmed:\s*["']LIVE đã DISARMED["']/,
   "Misleading current-state wording LIVE đã DISARMED must be removed from readiness labels.",
 );
+
+if (!/\/api\/v1\/phase7c\/live-arm-control/.test(liveArmApi)) {
+  throw new Error("LIVE ARM capability client must use the canonical local-control route.");
+}
+
+if (!/getPhase7CLiveArmControlCapability/.test(liveArmApi)) {
+  throw new Error("LIVE ARM capability client function is missing.");
+}
+
+if (/method:\s*["'](?:POST|PUT|PATCH|DELETE)["']/.test(liveArmApi)) {
+  throw new Error("Current-state LIVE ARM capability client must remain read-only.");
+}
 
 console.log("PHASE7C_ACCOUNT_RISK_READINESS_SEMANTICS=PASS");
