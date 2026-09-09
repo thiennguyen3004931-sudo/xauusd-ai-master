@@ -218,12 +218,11 @@ export function Phase7BPatternCheckPage() {
   const trendChecks = ui?.entryChecks?.trend ?? [];
   const sidewayChecks = ui?.entryChecks?.sideway ?? [];
   const normalizedStrategy = strategy.toUpperCase();
-  const sidewayActive = normalizedStrategy.includes("SIDEWAY") || (!normalizedStrategy.includes("TREND") && ui?.gates.sideway === "ALLOWED");
-  const activeStrategy = sidewayActive ? "SIDEWAY" : "TREND";
-  const inactiveStrategy = sidewayActive ? "TREND" : "SIDEWAY";
-  const activeChecks = sidewayActive ? sidewayChecks : trendChecks;
-  const activeGate = sidewayActive ? ui?.gates.sideway : ui?.gates.trend;
-  const inactiveGate = sidewayActive ? ui?.gates.trend : ui?.gates.sideway;
+  const activeStrategy = normalizedStrategy.includes("TREND") ? "TREND" : normalizedStrategy.includes("SIDEWAY") ? "SIDEWAY" : "—";
+  const inactiveStrategy = activeStrategy === "TREND" ? "SIDEWAY" : activeStrategy === "SIDEWAY" ? "TREND" : "—";
+  const activeChecks = activeStrategy === "TREND" ? trendChecks : activeStrategy === "SIDEWAY" ? sidewayChecks : [];
+  const activeGate = activeStrategy === "TREND" ? ui?.gates.trend : activeStrategy === "SIDEWAY" ? ui?.gates.sideway : undefined;
+  const inactiveGate = activeStrategy === "TREND" ? ui?.gates.sideway : activeStrategy === "SIDEWAY" ? ui?.gates.trend : undefined;
   const operatorSide = clean(position?.side ?? setup?.side ?? raw(panel, "side"), "Chưa xác định");
   const operatorLot = clean(position?.volume ?? setup?.finalLot ?? raw(panel, "finalLot"), "—");
 
@@ -324,16 +323,20 @@ export function Phase7BPatternCheckPage() {
       <PanelCard title="CHIẾN LƯỢC ĐANG HOẠT ĐỘNG" subtitle="Chỉ strategy hiệu lực được ưu tiên; strategy còn lại thu gọn theo gate hiện tại.">
         <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={2} alignItems={{ md: "center" }}>
           <Box>
-            <Typography variant="overline" color="success.main" fontWeight={950}>ACTIVE</Typography>
+            <Typography variant="overline" color={activeStrategy === "—" ? "warning.main" : "success.main"} fontWeight={950}>
+              {activeStrategy === "—" ? "CHƯA XÁC ĐỊNH" : "ACTIVE"}
+            </Typography>
             <Typography variant="h5" fontWeight={950}>{activeStrategy}</Typography>
             <Typography variant="body2" color="text.secondary" mt={0.5}>
-              Effective strategy: {strategy} · Gate: {gateLabel(activeGate)}
+              Effective strategy: {strategy} · Gate: {activeStrategy === "—" ? "CHƯA CÓ DỮ LIỆU" : gateLabel(activeGate)}
             </Typography>
           </Box>
           <Box sx={{ px: 1.6, py: 1.2, borderRadius: 2.5, border: "1px solid rgba(148,163,184,.12)", minWidth: { md: 310 } }}>
             <Typography variant="overline" color="text.secondary" fontWeight={900}>KHÔNG HOẠT ĐỘNG</Typography>
             <Typography variant="body1" fontWeight={950}>{inactiveStrategy}</Typography>
-            <Typography variant="body2" color="text.secondary">{gateLabel(inactiveGate)}</Typography>
+            <Typography variant="body2" color="text.secondary">
+              {inactiveStrategy === "—" ? "Chưa xác định từ semantic runtime" : gateLabel(inactiveGate)}
+            </Typography>
           </Box>
         </Stack>
       </PanelCard>
