@@ -39,6 +39,10 @@ import {
   getManagementStateRepository,
 } from "./management-state.service";
 
+import {
+  getPhase7CSemiAdoptionStateRepository,
+} from "./phase7c-semi-adoption-runtime.service";
+
 import type {
   DurableManagementCommand,
   IManagementStateRepository,
@@ -52,6 +56,10 @@ import {
 import {
   buildMt5OpenRiskPositions,
 } from "./mt5-portfolio-risk.service";
+
+import {
+  resolveTrendManagementOwner,
+} from "./trend-management-owner.service";
 
 const DEFAULT_SYMBOL = "XAUUSD";
 const DEFAULT_CANDLE_COUNT = 320;
@@ -106,6 +114,11 @@ export interface TrendManagementRuntimeDependencies {
       ReturnType<typeof getExecutionRepository>,
       "listOpen"
     >;
+  getSemiAdoptionStateRepository:
+    () => Pick<
+      ReturnType<typeof getPhase7CSemiAdoptionStateRepository>,
+      "listActive" | "save"
+    >;
   getManagementStateRepository:
     () => IManagementStateRepository;
   getMt5AllPositions:
@@ -131,6 +144,8 @@ export const defaultTrendManagementRuntimeDependencies:
     now: Date.now,
     getControlState,
     getExecutionRepository,
+    getSemiAdoptionStateRepository:
+      getPhase7CSemiAdoptionStateRepository,
     getManagementStateRepository,
     getMt5AllPositions,
     getMt5RealMarketData,
@@ -484,52 +499,44 @@ export function createTrendManagementRuntimeEvaluator(
 
     const repository =
       deps.getExecutionRepository();
+    const semiRepository =
+      deps.getSemiAdoptionStateRepository();
 
-    const openRecords =
-      (await repository.listOpen())
-        .filter(
-          (record) =>
-            record.strategyPlan?.order.symbol === symbol &&
-            record.strategyPlan?.selectedStrategy
-              .strategyId ===
-              "TREND_CONTINUATION",
-        );
+    const [
+      openExecutionRecords,
+      semiAdoptions,
+    ] = await Promise.all([
+      repository.listOpen(),
+      semiRepository.listActive(),
+    ]);
 
-    if (openRecords.length === 0) {
+    const ownership =
+      resolveTrendManagementOwner({
+        symbol,
+        openExecutionRecords,
+        semiAdoptions,
+      });
+
+    if (ownership.status === "NONE") {
       return result(
         "NO_POSITION",
-        "No durable system-owned TrendContinuation position is open.",
+        ownership.reason,
         generatedAt,
       );
     }
 
-    if (openRecords.length !== 1) {
+    if (ownership.status === "BLOCKED") {
       return result(
         "BLOCKED",
-        `Expected exactly one durable system-owned position; found ${openRecords.length}.`,
+        ownership.reason,
         generatedAt,
       );
     }
 
-    const record = openRecords[0]!;
-    const plan = record.strategyPlan;
-    const ticket = record.receipt?.ticket;
-
-    if (
-      !plan ||
-      !ticket ||
-      plan.management
-        .trendHoldUntilStructureBreak !== true ||
-      plan.management.trailingStop.mode !==
-        "TREND_STRUCTURE"
-    ) {
-      return result(
-        "BLOCKED",
-        "Durable execution record is not a managed TrendContinuation plan.",
-        generatedAt,
-        { ticket },
-      );
-    }
+    const owner = ownership.owner;
+    const plan = owner.plan;
+    const ticket = owner.ticket;
+    const ownerId = owner.ownerId;
 
     const [
       market,
@@ -578,7 +585,7 @@ export function createTrendManagementRuntimeEvaluator(
     if (!position) {
       return result(
         "BLOCKED",
-        "Broker ticket does not match the durable execution ticket.",
+        "Broker ticket does not match the durable management owner ticket.",
         generatedAt,
         { ticket },
       );
@@ -657,11 +664,11 @@ export function createTrendManagementRuntimeEvaluator(
 
     if (
       persisted &&
-      persisted.executionRecordId !== record.id
+      persisted.executionRecordId !== ownerId
     ) {
       return result(
         "BLOCKED",
-        "Durable management state ownership does not match execution record.",
+        "Durable management state ownership does not match selected owner.",
         generatedAt,
         {
           ticket,
@@ -714,7 +721,7 @@ export function createTrendManagementRuntimeEvaluator(
     await managementRepository
       .savePositionState({
         ticket,
-        executionRecordId: record.id,
+        executionRecordId: ownerId,
         state: stateToPersist,
         lastMarketTimestamp:
           marketTimestamp,
@@ -732,7 +739,7 @@ export function createTrendManagementRuntimeEvaluator(
       const prepared =
         await managementRepository
           .prepareCommand(
-            record.id,
+            ownerId,
             command,
             generatedAt,
           );
@@ -744,6 +751,18 @@ export function createTrendManagementRuntimeEvaluator(
           structuredClone(prepared.command),
         );
       }
+    }
+
+    if (
+      owner.kind === "MANUAL_SEMI" &&
+      owner.semiAdoption.protectionStatus === "PROTECTED"
+    ) {
+      await semiRepository.save({
+        ...owner.semiAdoption,
+        protectionStatus: "MANAGED",
+        protectionReason: "TREND_MANAGEMENT_ACTIVE",
+        updatedAt: generatedAt,
+      });
     }
 
     return result(
@@ -764,6 +783,9 @@ export function createTrendManagementRuntimeEvaluator(
         durableCommands,
         notes: [
           ...decision.notes,
+          owner.kind === "MANUAL_SEMI"
+            ? `Management owner=MANUAL_SEMI:${ownerId}.`
+            : `Management owner=SYSTEM:${ownerId}.`,
           "3E.5ZE durable preview only: commands were NOT claimed or executed.",
         ],
         decision,
