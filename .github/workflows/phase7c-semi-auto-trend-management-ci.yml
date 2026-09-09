@@ -60,6 +60,9 @@ jobs:
       - name: SEMI bot-mode contract
         run: pnpm --filter @xauusd/api exec tsx src/services/phase7c-bot-mode.semi.test.ts
 
+      - name: SEMI manual adoption contract
+        run: pnpm --filter @xauusd/api exec tsx src/services/phase7c-semi-manual-adoption.test.ts
+
       - name: Build strategy engine and dependencies
         run: pnpm build --filter=@xauusd/strategy-engine...
 
