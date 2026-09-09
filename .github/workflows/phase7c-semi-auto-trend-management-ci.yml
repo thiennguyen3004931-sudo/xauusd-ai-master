@@ -17,6 +17,9 @@ on:
       - "apps/api/src/services/phase7c-decision-monitor.service.ts"
       - "apps/api/src/services/phase7c-ui-contract.service.ts"
       - "apps/web/src/**"
+      - "scripts/phase7c-semi-entry-boundary-decision.test.mjs"
+      - "scripts/run-phase7c-trend-controller.mjs"
+      - "scripts/run-phase7c-sideway-controller.mjs"
       - ".github/workflows/phase7c-semi-auto-trend-management-ci.yml"
   pull_request:
     branches:
@@ -34,6 +37,9 @@ on:
       - "apps/api/src/services/phase7c-decision-monitor.service.ts"
       - "apps/api/src/services/phase7c-ui-contract.service.ts"
       - "apps/web/src/**"
+      - "scripts/phase7c-semi-entry-boundary-decision.test.mjs"
+      - "scripts/run-phase7c-trend-controller.mjs"
+      - "scripts/run-phase7c-sideway-controller.mjs"
       - ".github/workflows/phase7c-semi-auto-trend-management-ci.yml"
 
 permissions:
@@ -75,6 +81,9 @@ jobs:
 
       - name: SEMI Trend management-only plan contract
         run: pnpm --filter @xauusd/api exec tsx src/services/phase7c-semi-trend-management-plan.test.ts
+
+      - name: SEMI entry boundary and decision semantics
+        run: pnpm exec tsx --test scripts/phase7c-semi-entry-boundary-decision.test.mjs
 
       - name: Build API and dependencies for runtime integration test
         run: pnpm build --filter=@xauusd/api...
