@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PositionSide, type Position } from "@xauusd/types";
+import type { Position } from "@xauusd/types";
 
 import {
   createPhase7CSemiProtectionExecutor,
@@ -42,7 +42,7 @@ function position(overrides: Partial<Position> = {}): Position {
   return {
     ticket: "99001",
     symbol: "XAUUSD",
-    side: PositionSide.LONG,
+    side: "LONG" as Position["side"],
     volume: 0.12,
     entry: 3600,
     stopLoss: 0,
