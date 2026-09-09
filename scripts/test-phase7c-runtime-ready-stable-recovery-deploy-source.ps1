@@ -33,18 +33,23 @@ Assert-True ($text.Contains('requires zero XAUUSD positions')) "helper must requ
 Assert-True ($text.Contains('requires zero pending XAUUSD orders')) "helper must require zero pending XAUUSD orders"
 
 # Ordinary runtime-ready recovery still deploys Web/API before its stable probe and
-# STOP -> repair/reload -> START sequence. Separately proven stopped-lifecycle paths
-# may restore a strict executor generation before Web deploy.
+# STOP -> repair/reload -> START sequence. Separately proven pre-Web generation paths
+# may quiesce or restore runtime before Web deploy, so locate the ordinary STOP only
+# within the post-deploy recovery region rather than using the first STOP in the file.
 Assert-True ($text.Contains('deploy-phase7c-web-ui-local.ps1')) "helper must reuse canonical Web/API deploy helper"
 $deployIndex = $text.IndexOf('& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy', [System.StringComparison]::Ordinal)
 $stableProbeIndex = $text.IndexOf('$stableBeforeRecovery = Wait-LifecycleReadyStable', [System.StringComparison]::Ordinal)
-$stopIndex = $text.IndexOf('"/api/v1/phase7c/lifecycle/stop"', [System.StringComparison]::Ordinal)
+$stopLiteral = '"/api/v1/phase7c/lifecycle/stop"'
+$stopMatches = [regex]::Matches($text, [regex]::Escape($stopLiteral))
+$ordinaryStopCandidates = @($stopMatches | Where-Object { $_.Index -gt $stableProbeIndex })
 $startLiteral = '"/api/v1/phase7c/lifecycle/start"'
 $startMatches = [regex]::Matches($text, [regex]::Escape($startLiteral))
 Assert-True ($startMatches.Count -ge 1) "helper must contain lifecycle START"
 $normalStartIndex = $startMatches[$startMatches.Count - 1].Index
 Assert-True ($deployIndex -ge 0) "helper must invoke canonical Web/API deploy"
 Assert-True ($stableProbeIndex -gt $deployIndex) "stable lifecycle probe must occur only after Web/API deploy"
+Assert-True ($ordinaryStopCandidates.Count -eq 1) "ordinary recovery region must contain exactly one lifecycle STOP after stable probe"
+$stopIndex = $ordinaryStopCandidates[0].Index
 Assert-True ($stopIndex -gt $deployIndex) "ordinary lifecycle STOP must never occur before Web/API deploy"
 Assert-True ($normalStartIndex -gt $stopIndex) "ordinary lifecycle START must occur only after STOP when recovery is needed"
 Assert-True ($text.Contains('-ExpectedCommit $ExpectedCommit')) "Web/API deploy must use exact ExpectedCommit"
