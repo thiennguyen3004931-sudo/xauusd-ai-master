@@ -6,6 +6,7 @@ on:
       - fix/account-risk-readiness-semantics
     paths:
       - "apps/web/src/pages/Phase7CAccountRiskPage.tsx"
+      - "apps/web/src/phase7c-live-arm-control-api.ts"
       - "scripts/test-phase7c-account-risk-readiness-semantics.mjs"
       - ".github/workflows/phase7c-account-risk-readiness-semantics-ci.yml"
   pull_request:
@@ -13,6 +14,7 @@ on:
       - main
     paths:
       - "apps/web/src/pages/Phase7CAccountRiskPage.tsx"
+      - "apps/web/src/phase7c-live-arm-control-api.ts"
       - "scripts/test-phase7c-account-risk-readiness-semantics.mjs"
       - ".github/workflows/phase7c-account-risk-readiness-semantics-ci.yml"
 
