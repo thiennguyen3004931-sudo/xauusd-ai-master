@@ -11,8 +11,10 @@ import {
   Typography,
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
+import { getPhase7CLifecycle } from "../api";
 import { getPhase7CSameModeAccountChangeReadiness } from "../phase7c-account-switch-api";
 import { maskMt5AccountLogin } from "../phase7c-account-switch";
+import { getPhase7CLiveArmControlCapability } from "../phase7c-live-arm-control-api";
 import { Phase7CAccountRiskAdvancedPanel } from "../ui/Phase7CAccountRiskAdvancedPanel";
 import { Phase7CAccountRiskLotCard } from "../ui/Phase7CAccountRiskLotCard";
 import { Phase7CAccountSwitchCard } from "../ui/Phase7CAccountSwitchCard";
@@ -20,22 +22,40 @@ import { Phase7COperatorStatusBar } from "../ui/Phase7COperatorStatusBar";
 import { Phase7CStrategyEntryConditionsCard } from "../ui/Phase7CStrategyEntryConditionsCard";
 
 const READINESS_LABELS: Record<string, string> = {
-  botPaused: "Bot đang PAUSE",
-  zeroXauusdPositions: "XAUUSD positions = 0",
-  bridgeMatchesSelectedAccount: "Bridge đúng tài khoản",
-  liveDisarmed: "LIVE đã DISARMED",
-  noSwitchRunning: "Không có account switch đang chạy",
+  botPaused: "Bot phải PAUSE",
+  zeroXauusdPositions: "XAUUSD positions phải = 0",
+  bridgeMatchesSelectedAccount: "Bridge phải đúng tài khoản",
+  liveDisarmed: "LIVE phải DISARMED",
+  noSwitchRunning: "Không được có account switch đang chạy",
 };
 
 function SafetyChip({ label, passed }: { label: string; passed: boolean }) {
+  const status = passed ? "ĐẠT" : "CẦN XỬ LÝ";
   return (
     <Chip
       size="small"
-      label={`${passed ? "✓" : "✕"} ${label}`}
+      label={`${status} · ${label}`}
       color={passed ? "success" : "error"}
       variant="outlined"
       sx={{ fontWeight: 850 }}
     />
+  );
+}
+
+function CurrentStateItem({ label, value, tone = "text.primary" }: { label: string; value: string; tone?: string }) {
+  return (
+    <Box
+      sx={{
+        minWidth: 0,
+        p: 1.5,
+        borderRadius: 3,
+        border: "1px solid rgba(148,163,184,.14)",
+        bgcolor: "rgba(15,23,42,.30)",
+      }}
+    >
+      <Typography variant="caption" color="text.secondary" fontWeight={800}>{label}</Typography>
+      <Typography mt={0.35} fontWeight={950} color={tone} noWrap>{value}</Typography>
+    </Box>
   );
 }
 
@@ -84,26 +104,59 @@ export function Phase7CAccountRiskPage() {
     placeholderData: (previous) => previous,
   });
 
+  const liveArmCapabilityQuery = useQuery({
+    queryKey: ["phase7c-live-arm-control-capability"],
+    queryFn: getPhase7CLiveArmControlCapability,
+    refetchInterval: 2_000,
+    retry: false,
+    placeholderData: (previous) => previous,
+  });
+
+  const lifecycleQuery = useQuery({
+    queryKey: ["phase7c-lifecycle-current-state"],
+    queryFn: getPhase7CLifecycle,
+    refetchInterval: 2_000,
+    retry: false,
+    placeholderData: (previous) => previous,
+  });
+
   const readiness = readinessQuery.data;
   const checks = readiness?.checks;
   const switchSafe = readiness?.approved === true;
-  const currentMode = readiness?.currentMode ?? "—";
+  const readinessMode = readiness?.currentMode ?? "—";
   const login = readiness?.accountLogin ?? null;
   const server = readiness?.server ?? "MT5 server —";
+
+  const liveArmCapability = liveArmCapabilityQuery.data;
+  const lifecycle = lifecycleQuery.data;
+  const currentAccountMode = liveArmCapability?.accountMode ?? readinessMode;
+  const currentBotMode = liveArmCapability?.botMode ?? lifecycle?.mode.mode ?? "—";
+  const currentLiveArmStatus = currentAccountMode === "LIVE"
+    ? liveArmCapability?.liveArmStatus ?? "—"
+    : "KHÔNG ÁP DỤNG";
+  const currentLifecycleStatus = lifecycle
+    ? lifecycle.running
+      ? lifecycle.ready ? "RUNNING · READY" : "RUNNING · CHƯA READY"
+      : "STOPPED"
+    : "—";
+  const currentOpenPositions = liveArmCapability
+    ? String(liveArmCapability.openXauusdPositions)
+    : "—";
 
   const safetyRows = useMemo(
     () => [
       ["botPaused", checks?.botPaused === true],
       ["zeroXauusdPositions", checks?.zeroXauusdPositions === true],
       ["bridgeMatchesSelectedAccount", checks?.bridgeMatchesSelectedAccount === true],
-      ["liveDisarmed", currentMode === "LIVE" ? checks?.liveDisarmed === true : true],
+      ["liveDisarmed", readinessMode === "LIVE" ? checks?.liveDisarmed === true : true],
       ["noSwitchRunning", checks?.noSwitchRunning === true],
     ] as const,
-    [checks, currentMode],
+    [checks, readinessMode],
   );
 
   const firstBlocked = safetyRows.find(([, passed]) => !passed)?.[0] ?? null;
   const blockedReason = firstBlocked ? READINESS_LABELS[firstBlocked] ?? firstBlocked : "Đang chờ readiness";
+  const currentStateReadError = liveArmCapabilityQuery.isError || lifecycleQuery.isError;
 
   return (
     <Stack spacing={2.2}>
@@ -118,24 +171,68 @@ export function Phase7CAccountRiskPage() {
         <Typography variant="overline" color="primary" fontWeight={950}>ACCOUNT & RISK V2</Typography>
         <Typography variant="h4" fontWeight={950}>Tài khoản & Rủi ro</Typography>
         <Typography variant="body2" color="text.secondary" mt={0.6}>
-          Theo dõi tài khoản, safety gate và cấu hình rủi ro cho lệnh mới. Các chi tiết kỹ thuật chỉ mở khi cần.
+          Theo dõi trạng thái vận hành thực tế, điều kiện đổi tài khoản và cấu hình rủi ro cho lệnh mới.
         </Typography>
       </Box>
 
       <Phase7COperatorStatusBar />
 
+      <Card variant="outlined" sx={{ borderRadius: 4 }}>
+        <CardContent sx={{ p: { xs: 2, md: 2.5 } }}>
+          <Stack spacing={1.5}>
+            <Box>
+              <Typography variant="overline" color="primary" fontWeight={950}>TRẠNG THÁI HIỆN TẠI</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Dữ liệu vận hành hiện tại từ lifecycle và canonical LIVE ARM capability. Không dùng readiness đổi tài khoản để suy diễn trạng thái này.
+              </Typography>
+            </Box>
+
+            {currentStateReadError ? (
+              <Alert severity="warning">
+                Một phần trạng thái hiện tại chưa đọc được. Không suy diễn ARM hoặc Lifecycle từ checklist đổi tài khoản.
+              </Alert>
+            ) : null}
+
+            <Grid container spacing={1.2}>
+              <Grid size={{ xs: 12, sm: 6, lg: 2.4 }}>
+                <CurrentStateItem label="Tài khoản hiện tại:" value={currentAccountMode} tone={currentAccountMode === "LIVE" ? "warning.main" : "success.main"} />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6, lg: 2.4 }}>
+                <CurrentStateItem label="Bot hiện tại:" value={currentBotMode} tone={currentBotMode === "PAUSE" ? "warning.main" : "success.main"} />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6, lg: 2.4 }}>
+                <CurrentStateItem label="LIVE ARM hiện tại:" value={currentLiveArmStatus} tone={currentLiveArmStatus === "ARMED" ? "success.main" : "warning.main"} />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6, lg: 2.4 }}>
+                <CurrentStateItem label="Lifecycle:" value={currentLifecycleStatus} tone={currentLifecycleStatus === "RUNNING · READY" ? "success.main" : "warning.main"} />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6, lg: 2.4 }}>
+                <CurrentStateItem label="Vị thế XAUUSD:" value={currentOpenPositions} tone={currentOpenPositions === "0" ? "success.main" : "warning.main"} />
+              </Grid>
+            </Grid>
+          </Stack>
+        </CardContent>
+      </Card>
+
       {readinessQuery.isError ? (
         <Alert severity="warning">
-          Không đọc được readiness đổi tài khoản: {readinessQuery.error instanceof Error ? readinessQuery.error.message : "lỗi không xác định"}
+          Không đọc được điều kiện đổi tài khoản: {readinessQuery.error instanceof Error ? readinessQuery.error.message : "lỗi không xác định"}
         </Alert>
       ) : (
         <Alert severity={switchSafe ? "success" : "warning"}>
           <Stack spacing={1}>
+            <Typography variant="overline" fontWeight={950}>ĐIỀU KIỆN ĐỂ ĐỔI TÀI KHOẢN</Typography>
             <Typography fontWeight={950}>
-              {switchSafe ? "AN TOÀN ĐỂ ĐỔI TÀI KHOẢN" : "CHƯA THỂ ĐỔI TÀI KHOẢN"}
+              {switchSafe ? "ĐÃ ĐỦ ĐIỀU KIỆN ĐỔI TÀI KHOẢN" : "CHƯA ĐỦ ĐIỀU KIỆN ĐỔI TÀI KHOẢN"}
             </Typography>
             {!switchSafe ? (
-              <Typography variant="body2">Hành động cần làm: {blockedReason}.</Typography>
+              currentAccountMode === "LIVE" ? (
+                <Typography variant="body2">
+                  Hành động an toàn: chuyển Bot về PAUSE, sau đó DISARM LIVE; tiếp theo xử lý điều kiện còn thiếu: {blockedReason}.
+                </Typography>
+              ) : (
+                <Typography variant="body2">Hành động cần làm: {blockedReason}.</Typography>
+              )
             ) : null}
             <Stack direction="row" spacing={0.8} useFlexGap flexWrap="wrap">
               {safetyRows.map(([key, passed]) => (
@@ -153,27 +250,20 @@ export function Phase7CAccountRiskPage() {
               <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" gap={1.5}>
                 <Box>
                   <Typography variant="overline" color="warning.main" fontWeight={950}>TÀI KHOẢN MT5</Typography>
-                  <Typography variant="h5" fontWeight={950}>{currentMode}</Typography>
+                  <Typography variant="h5" fontWeight={950}>{currentAccountMode}</Typography>
                   <Typography variant="body2" color="text.secondary" mt={0.5}>
                     {login ? maskMt5AccountLogin(login) : "LOGIN —"} · {server}
                   </Typography>
                 </Box>
                 <Stack direction="row" spacing={0.8} useFlexGap flexWrap="wrap" alignContent="flex-start">
-                  <Chip size="small" label={checks?.bridgeMatchesSelectedAccount ? "BRIDGE OK" : "BRIDGE CHECK"} color={checks?.bridgeMatchesSelectedAccount ? "success" : "warning"} variant="outlined" />
-                  <Chip size="small" label={checks?.noSwitchRunning ? "NO SWITCH RUNNING" : "SWITCH BUSY"} color={checks?.noSwitchRunning ? "success" : "warning"} variant="outlined" />
+                  <Chip size="small" label={checks?.bridgeMatchesSelectedAccount ? "BRIDGE ĐẠT" : "BRIDGE CẦN KIỂM TRA"} color={checks?.bridgeMatchesSelectedAccount ? "success" : "warning"} variant="outlined" />
+                  <Chip size="small" label={checks?.noSwitchRunning ? "SWITCH CONTROL RẢNH" : "SWITCH CONTROL BẬN"} color={checks?.noSwitchRunning ? "success" : "warning"} variant="outlined" />
                 </Stack>
               </Stack>
 
-              <Stack spacing={0.7} mt={2}>
-                {safetyRows.slice(0, 5).map(([key, passed]) => (
-                  <Stack key={key} direction="row" justifyContent="space-between" gap={2}>
-                    <Typography variant="body2" color="text.secondary">{READINESS_LABELS[key] ?? key}</Typography>
-                    <Typography variant="body2" fontWeight={900} color={passed ? "success.main" : "warning.main"}>
-                      {passed ? "PASS" : "BLOCK"}
-                    </Typography>
-                  </Stack>
-                ))}
-              </Stack>
+              <Typography variant="body2" color="text.secondary" mt={2}>
+                Nút đổi tài khoản dùng checklist “ĐIỀU KIỆN ĐỂ ĐỔI TÀI KHOẢN” phía trên. Việc đủ điều kiện đổi tài khoản không đồng nghĩa Bot đang PAUSE hoặc LIVE đang DISARMED sau khi thao tác hoàn tất.
+              </Typography>
 
               <Button
                 variant={accountSwitchOpen ? "outlined" : "contained"}
