@@ -63,6 +63,9 @@ jobs:
       - name: SEMI manual adoption contract
         run: pnpm --filter @xauusd/api exec tsx src/services/phase7c-semi-manual-adoption.test.ts
 
+      - name: SEMI durable adoption ledger contract
+        run: pnpm --filter @xauusd/api exec tsx src/services/phase7c-semi-adoption-state.test.ts
+
       - name: Build strategy engine and dependencies
         run: pnpm build --filter=@xauusd/strategy-engine...
 
