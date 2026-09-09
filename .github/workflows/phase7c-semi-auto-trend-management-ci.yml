@@ -10,8 +10,7 @@ on:
       - "apps/api/src/services/phase7c-bot-mode.service.ts"
       - "apps/api/src/services/phase7c-bot-mode.semi.test.ts"
       - "apps/api/src/services/phase7c-semi-*.ts"
-      - "apps/api/src/services/trend-management-runtime.service.ts"
-      - "apps/api/src/services/trend-management-runtime.semi.test.ts"
+      - "apps/api/src/services/trend-management-*.ts"
       - "apps/api/src/services/sqlite-management-state.repository.ts"
       - "apps/api/src/services/controlled-management-executor.service.ts"
       - "apps/api/src/services/phase7c-strategy-entry-conditions.service.ts"
@@ -28,8 +27,7 @@ on:
       - "apps/api/src/services/phase7c-bot-mode.service.ts"
       - "apps/api/src/services/phase7c-bot-mode.semi.test.ts"
       - "apps/api/src/services/phase7c-semi-*.ts"
-      - "apps/api/src/services/trend-management-runtime.service.ts"
-      - "apps/api/src/services/trend-management-runtime.semi.test.ts"
+      - "apps/api/src/services/trend-management-*.ts"
       - "apps/api/src/services/sqlite-management-state.repository.ts"
       - "apps/api/src/services/controlled-management-executor.service.ts"
       - "apps/api/src/services/phase7c-strategy-entry-conditions.service.ts"
@@ -77,6 +75,9 @@ jobs:
 
       - name: SEMI Trend management-only plan contract
         run: pnpm --filter @xauusd/api exec tsx src/services/phase7c-semi-trend-management-plan.test.ts
+
+      - name: SEMI Trend runtime ownership handoff contract
+        run: pnpm --filter @xauusd/api exec tsx src/services/trend-management-runtime.semi.test.ts
 
       - name: Build strategy engine and dependencies
         run: pnpm build --filter=@xauusd/strategy-engine...
