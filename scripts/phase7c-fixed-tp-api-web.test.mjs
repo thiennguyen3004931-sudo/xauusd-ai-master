@@ -157,7 +157,7 @@ test("Control Center exposes a Fixed TP-only editor while preserving canonical l
   assert.match(page, /saveLotSettings\.mutate\(\{[\s\S]*?trendFixedLot\s*:\s*configuredTrendLot[\s\S]*?sidewayRiskPercent\s*:\s*configuredSidewayRisk[\s\S]*?sidewayMaxLot\s*:\s*configuredSidewayMaxLot[\s\S]*?trendFixedTpEnabled[\s\S]*?trendFixedTpDistance[\s\S]*?sidewayFixedTpEnabled[\s\S]*?sidewayFixedTpDistance[\s\S]*?\}\)/,
     "RED_TARGET: Fixed TP save must preserve the canonical configured lot/risk values while updating only Fixed TP choices.");
 
-  const canChange = block(page, "const canChangeFixedTp =", "const canPause =");
+  const canChange = block(page, "const canChangeFixedTp =", "const canChangeBotMode =");
   assert.match(canChange, /mode\s*===\s*["']PAUSE["']/,
     "Fixed TP settings UI must remain PAUSE-gated.");
   assert.match(canChange, /bridgeReady/,
