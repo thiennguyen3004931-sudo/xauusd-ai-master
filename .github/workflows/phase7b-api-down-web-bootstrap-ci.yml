@@ -1,0 +1,33 @@
+name: Phase7B API-Down Web Bootstrap CI
+
+on:
+  push:
+    branches:
+      - fix/phase7b-api-down-web-bootstrap-20260910
+    paths:
+      - "scripts/recover-phase7b-api-down-web-bootstrap-local.ps1"
+      - "scripts/test-phase7b-api-down-web-bootstrap-source.ps1"
+      - ".github/workflows/phase7b-api-down-web-bootstrap-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "scripts/recover-phase7b-api-down-web-bootstrap-local.ps1"
+      - "scripts/test-phase7b-api-down-web-bootstrap-source.ps1"
+      - ".github/workflows/phase7b-api-down-web-bootstrap-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  source-contract:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: API-down bootstrap contract - PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7b-api-down-web-bootstrap-source.ps1
+      - name: API-down bootstrap contract - Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7b-api-down-web-bootstrap-source.ps1
