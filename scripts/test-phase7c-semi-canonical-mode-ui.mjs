@@ -11,6 +11,7 @@ const read = (...parts) => fs.readFileSync(path.join(root, ...parts), "utf8");
 
 const web = read("apps", "web", "src", "pages", "Phase7CControlCenterPage.tsx");
 const webApi = read("apps", "web", "src", "api.ts");
+const webExecutionControl = read("apps", "web", "src", "phase7c-execution-control.ts");
 const telegramController = read("scripts", "run-phase7c-telegram-mode-controller.mjs");
 const semiPlan = read(
   "apps",
@@ -45,14 +46,14 @@ requireEqual("Telegram /trend command unchanged", telegramModeForCommand("/trend
 requireEqual("Telegram /sideway command unchanged", telegramModeForCommand("/sideway"), "SIDEWAY");
 requireEqual("Telegram /pause command unchanged", telegramModeForCommand("/pause"), "PAUSE");
 
-// Web must expose all canonical modes and send the selected mode through the existing mutation.
+// Web exposes all canonical modes. Non-AUTO modes use canonical bot-mode; AUTO must retain its guarded activation path.
 requirePattern(
   "Web canonical mode options AUTO/TREND/SIDEWAY/SEMI/PAUSE",
   web,
   /BOT_MODE_OPTIONS\s*=\s*\[[\s\S]*?"AUTO"[\s\S]*?"TREND"[\s\S]*?"SIDEWAY"[\s\S]*?"SEMI"[\s\S]*?"PAUSE"[\s\S]*?\]/,
 );
 requirePattern(
-  "Web selected mode uses canonical setPhase7CBotMode mutation",
+  "Web selected mode uses shared setPhase7CBotMode mutation",
   web,
   /mutationFn:\s*\(mode:\s*Phase7cControlMode\)\s*=>\s*setPhase7CBotMode\(mode\)/,
 );
@@ -72,17 +73,32 @@ requirePattern(
   /export type Phase7cControlMode = "AUTO" \| "TREND" \| "SIDEWAY" \| "SEMI" \| "PAUSE";/,
 );
 requirePattern(
-  "Web API uses existing canonical bot-mode endpoint",
+  "Web AUTO delegates to existing guarded activation",
+  webApi,
+  /if \(mode === "AUTO"\)\s*\{[\s\S]*?enablePhase7CAuto\(\)/,
+);
+requirePattern(
+  "Web non-AUTO modes use existing canonical bot-mode endpoint",
   webApi,
   /fetch\(`\$\{API_BASE\}\/api\/v1\/phase7c\/bot-mode`,\s*\{/,
 );
 requirePattern(
-  "Web API keeps canonical web-control-center source",
+  "Web non-AUTO mode mutation keeps canonical web-control-center source",
   webApi,
   /JSON\.stringify\(\{ mode, source: "web-control-center" \}\)/,
 );
+requirePattern(
+  "Guarded AUTO execution type includes SEMI",
+  webExecutionControl,
+  /Phase7CBotExecutionMode = "AUTO" \| "TREND" \| "SIDEWAY" \| "SEMI" \| "PAUSE";/,
+);
+requirePattern(
+  "Guarded AUTO response options include SEMI",
+  webExecutionControl,
+  /options:\s*\["AUTO",\s*"TREND",\s*"SIDEWAY",\s*"SEMI",\s*"PAUSE"\]/,
+);
 
-// Telegram must expose SEMI but continue using the existing bot-mode POST path.
+// Telegram exposes SEMI but continues using the existing bot-mode POST path. AUTO remains unavailable here.
 requirePattern(
   "Telegram SEMI button",
   telegramController,
@@ -157,6 +173,7 @@ console.log("SEMI_ENTRY_POLICY=MANUAL_ONLY");
 console.log("SEMI_INITIAL_STOP_DISTANCE=6");
 console.log("SEMI_AT_PLUS_6=BE_ONLY_NO_PARTIAL_CLOSE");
 console.log("SEMI_AT_PLUS_10=PARTIAL_CLOSE_ONE_THIRD");
-console.log("WEB_MODE_MUTATION=CANONICAL_EXISTING_ENDPOINT");
+console.log("WEB_AUTO_MUTATION=EXISTING_GUARDED_AUTO_ENDPOINT");
+console.log("WEB_NON_AUTO_MODE_MUTATION=CANONICAL_EXISTING_BOT_MODE_ENDPOINT");
 console.log("TELEGRAM_MODE_MUTATION=CANONICAL_EXISTING_ENDPOINT");
 console.log("TELEGRAM_AUTO_PERMISSION=UNCHANGED_BLOCKED");
