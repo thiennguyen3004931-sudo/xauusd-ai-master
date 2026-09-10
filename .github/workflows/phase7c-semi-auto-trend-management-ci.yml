@@ -99,6 +99,9 @@ jobs:
       - name: SEMI production adoption and Trend handoff wiring
         run: node --test scripts/phase7c-semi-trend-production-wiring.test.mjs
 
+      - name: SEMI post-entry Trend management regression contract
+        run: node --test scripts/phase7c-semi-post-entry-contract.test.mjs
+
       - name: SEMI entry boundary and decision semantics
         run: pnpm --filter @xauusd/api exec tsx --test ../../scripts/phase7c-semi-entry-boundary-decision.test.mjs
 
