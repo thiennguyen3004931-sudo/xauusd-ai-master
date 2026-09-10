@@ -203,6 +203,7 @@ export type Phase7CBotExecutionMode =
   | "AUTO"
   | "TREND"
   | "SIDEWAY"
+  | "SEMI"
   | "PAUSE";
 
 export interface Phase7CSourceSafetySnapshot {

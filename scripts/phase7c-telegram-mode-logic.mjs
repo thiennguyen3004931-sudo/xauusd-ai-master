@@ -7,7 +7,7 @@ const TELEGRAM_COMMAND_MODES = new Map([
   ["/tamdung", "PAUSE"],
 ]);
 
-const TELEGRAM_CALLBACK_MODES = new Set(["TREND", "SIDEWAY", "PAUSE"]);
+const TELEGRAM_CALLBACK_MODES = new Set(["TREND", "SIDEWAY", "SEMI", "PAUSE"]);
 
 export function nextTelegramUpdateOffset(currentOffset, updateId) {
   const current = Number.isInteger(Number(currentOffset)) ? Number(currentOffset) : 0;
