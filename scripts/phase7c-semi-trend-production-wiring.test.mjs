@@ -300,6 +300,8 @@ test("valid manual LIVE position is protected then handed to the real Trend mana
   assert.equal(result.managed.breakEvenApplied, false);
   assert.equal(result.managed.partialApplied, false);
   assert.equal(result.managed.dailyMode, "TREND");
+  assert.equal(result.position.stopLoss, 3594);
+  assert.equal(result.position.takeProfit, 3620);
 });
 
 test("foreign/non-manual opening deal fails closed before durable ownership or protection", async () => {
@@ -350,7 +352,8 @@ test("source adapter hands unmanaged broker positions to SEMI adoption before le
 
   assert.match(output, /reconcilePhase7CSemiManualPosition/);
   assert.match(output, /SEMI_MANUAL_POSITION_ADOPTED/);
-  assert.match(output, /await managePosition\(positions\[0\], quote, spec, m15\)/);
+  assert.match(output, /await managePosition\(semiAdoption\.position, quote, spec, m15\)/);
+  assert.doesNotMatch(output, /await managePosition\(positions\[0\], quote, spec, m15\)/);
   assert.match(output, /markPhase7CSemiManualAdoptionClosed/);
 });
 
