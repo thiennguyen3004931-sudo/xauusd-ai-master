@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "apps/web/src/api.ts"
+      - "apps/web/src/phase7c-types.ts"
       - "apps/web/src/phase7c-execution-control.ts"
       - "apps/web/src/pages/Phase7CControlCenterPage.tsx"
       - "apps/api/src/services/phase7c-semi-trend-management-plan.service.ts"
