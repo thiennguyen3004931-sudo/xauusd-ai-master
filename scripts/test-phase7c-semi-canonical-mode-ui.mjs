@@ -10,6 +10,7 @@ const root = process.cwd();
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), "utf8");
 
 const web = read("apps", "web", "src", "pages", "Phase7CControlCenterPage.tsx");
+const webApi = read("apps", "web", "src", "api.ts");
 const telegramController = read("scripts", "run-phase7c-telegram-mode-controller.mjs");
 const semiPlan = read(
   "apps",
@@ -65,6 +66,21 @@ requirePattern(
   web,
   /SEMI = vào lệnh thủ công • SL đầu 6 giá • \+6 → BE • \+10 → chốt 1\/3 • phần còn lại quản lý như Trend/,
 );
+requirePattern(
+  "Web API exposes all canonical control modes",
+  webApi,
+  /export type Phase7cControlMode = "AUTO" \| "TREND" \| "SIDEWAY" \| "SEMI" \| "PAUSE";/,
+);
+requirePattern(
+  "Web API uses existing canonical bot-mode endpoint",
+  webApi,
+  /fetch\(`\$\{API_BASE\}\/api\/v1\/phase7c\/bot-mode`,\s*\{/,
+);
+requirePattern(
+  "Web API keeps canonical web-control-center source",
+  webApi,
+  /JSON\.stringify\(\{ mode, source: "web-control-center" \}\)/,
+);
 
 // Telegram must expose SEMI but continue using the existing bot-mode POST path.
 requirePattern(
@@ -115,9 +131,14 @@ requirePattern(
   /SEMI_PARTIAL_CLOSE_PERCENT\s*=\s*100\s*\/\s*3\s*;/,
 );
 requirePattern(
+  "Regression proves +6 is not the partial target",
+  semiPlanTest,
+  /assert\.notEqual\(plan\.management\.partialTargets\[0\]\?\.price, plusSixPrice\)/,
+);
+requirePattern(
   "Regression proves +10 target for LONG",
   semiPlanTest,
-  /partialTargets\[0\]\?\.price,\s*3610/,
+  /partialTargets\[0\]\?\.price,\s*state\.entry \+ 10/,
 );
 requirePattern(
   "Regression proves one-third partial",
