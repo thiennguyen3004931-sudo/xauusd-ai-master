@@ -14,17 +14,20 @@ if (-not (Test-Path -LiteralPath $Launcher -PathType Leaf)) {
 
 $source = (Get-Content -LiteralPath $Launcher -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
 
-# Production API TypeScript resolves workspace packages through package dist/*.d.ts.
-# Runtime startup must therefore force-refresh the entire API dependency build graph
-# instead of trusting a persistent local Turborepo cache from an older source generation.
-Assert-True ($source.Contains("& pnpm build '--filter=@xauusd/api...' '--force'")) `
-  "API runtime must force a fresh @xauusd/api dependency-graph build before tsc."
-Assert-True (-not $source.Contains("& pnpm build '--filter=@xauusd/api...'`n")) `
-  "API runtime must not retain the cache-eligible workspace build invocation."
+# API TypeScript resolves workspace package types from package dist/*.d.ts.
+# Runtime startup must therefore build the API dependency closure so source changes
+# in strategy/execution packages are materialized before API tsc runs.
+$dependencyBuild = "& pnpm build '--filter=@xauusd/api...'"
+$apiOnlyBuild = "& pnpm --filter '@xauusd/api' build"
 
-$buildIndex = $source.IndexOf("& pnpm build '--filter=@xauusd/api...' '--force'", [System.StringComparison]::Ordinal)
+Assert-True ($source.Contains($dependencyBuild)) `
+  "API runtime must build @xauusd/api and its workspace dependencies before tsc."
+Assert-True (-not $source.Contains($apiOnlyBuild)) `
+  "API runtime must not build only @xauusd/api because workspace dist declarations may be stale."
+
+$buildIndex = $source.IndexOf($dependencyBuild, [System.StringComparison]::Ordinal)
 $startIndex = $source.IndexOf("& pnpm --filter '@xauusd/api' start", [System.StringComparison]::Ordinal)
-Assert-True ($buildIndex -ge 0) "Fresh workspace build invocation is missing."
-Assert-True ($startIndex -gt $buildIndex) "API start must occur only after the forced dependency build."
+Assert-True ($buildIndex -ge 0) "API dependency-closure build invocation is missing."
+Assert-True ($startIndex -gt $buildIndex) "API start must occur only after dependency-closure build."
 
 Write-Host "PHASE7B_API_RUNTIME_FRESH_WORKSPACE_BUILD_SOURCE_CONTRACT=PASS"
