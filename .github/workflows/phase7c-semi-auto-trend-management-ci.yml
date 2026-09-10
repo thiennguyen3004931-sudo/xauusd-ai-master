@@ -5,6 +5,7 @@ on:
     branches:
       - feat/semi-auto-trend-management-20260909
       - fix/phase7b-api-runtime-dependency-build-20260910
+      - fix/semi-production-adoption-runner-20260910
     paths:
       - "packages/strategy-engine/src/models/BotMode.ts"
       - "packages/execution-engine/src/**"
@@ -18,7 +19,7 @@ on:
       - "apps/api/src/services/phase7c-decision-monitor.service.ts"
       - "apps/api/src/services/phase7c-ui-contract.service.ts"
       - "apps/web/src/**"
-      - "scripts/phase7c-semi-entry-boundary-decision.test.mjs"
+      - "scripts/phase7c-semi-*.mjs"
       - "scripts/phase7c-decision-monitor.test.mjs"
       - "scripts/run-phase7b-api-runtime-local.ps1"
       - "scripts/test-phase7b-api-runtime-dependency-build-source.mjs"
@@ -41,7 +42,7 @@ on:
       - "apps/api/src/services/phase7c-decision-monitor.service.ts"
       - "apps/api/src/services/phase7c-ui-contract.service.ts"
       - "apps/web/src/**"
-      - "scripts/phase7c-semi-entry-boundary-decision.test.mjs"
+      - "scripts/phase7c-semi-*.mjs"
       - "scripts/phase7c-decision-monitor.test.mjs"
       - "scripts/run-phase7b-api-runtime-local.ps1"
       - "scripts/test-phase7b-api-runtime-dependency-build-source.mjs"
@@ -94,6 +95,9 @@ jobs:
 
       - name: Build API and dependencies for runtime integration tests
         run: pnpm build --filter=@xauusd/api...
+
+      - name: SEMI production adoption and Trend handoff wiring
+        run: node --test scripts/phase7c-semi-trend-production-wiring.test.mjs
 
       - name: SEMI entry boundary and decision semantics
         run: pnpm --filter @xauusd/api exec tsx --test ../../scripts/phase7c-semi-entry-boundary-decision.test.mjs

@@ -6,6 +6,7 @@ import { acquireRuntimeSingleton } from "./phase7c-runtime-singleton-lock.mjs";
 import { evaluateAutoTrendEntryModeGate } from "./phase7c-trend-mode-gate.mjs";
 import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
 import { recordTrendEntryAttributionBestEffort } from "./phase7c-trend-entry-attribution.mjs";
+import { transformPhase7CSemiTrendRuntimeSource } from "./phase7c-semi-trend-runtime-source-adapter.mjs";
 
 const nativeFetch = globalThis.fetch.bind(globalThis);
 const controlApiBase = (process.env.ZIQ_PHASE7C_CONTROL_API_URL?.trim() || "http://127.0.0.1:3711").replace(/\/$/, "");
@@ -157,7 +158,8 @@ async function importLegacyTrendController() {
   // in memory, then import it in this same process so the Phase 7C fetch gate
   // and execution lock remain active around every new-order request.
   const sourceUrl = new URL("./run-phase7b-demo-controller.ts", import.meta.url);
-  const source = fs.readFileSync(sourceUrl, "utf8");
+  let source = fs.readFileSync(sourceUrl, "utf8");
+  source = transformPhase7CSemiTrendRuntimeSource(source);
   const transformed = ts.transpileModule(source, {
     fileName: "run-phase7b-demo-controller.ts",
     reportDiagnostics: true,
