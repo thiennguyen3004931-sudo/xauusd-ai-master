@@ -52,7 +52,7 @@ export function assertPhase7CSemiPostEntryContract({
   requireIncludes(trendWrapperSource, 'decision.activeMode === "SEMI"', "SEMI mode branch");
   requireIncludes(
     trendWrapperSource,
-    'reason: "PHASE7C_SEMI_MANUAL_ENTRY_ONLY"',
+    'reason: "SEMI_MANUAL_ENTRY_ONLY"',
     "SEMI manual-entry-only boundary",
   );
   requireIncludes(
