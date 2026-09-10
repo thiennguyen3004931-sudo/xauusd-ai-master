@@ -30,6 +30,7 @@ const statusFile = resolve(
   process.env.ZIQ_PHASE7C_TELEGRAM_MODE_STATUS_FILE?.trim() || defaultStatusFile,
 );
 const telegramBase = `https://api.telegram.org/bot${token}`;
+const semiModeHelpText = "SEMI = vào lệnh thủ công • SL đầu 6 giá • +6 → BE • +10 → chốt 1/3 • phần còn lại quản lý như Trend";
 let updateOffset = await loadUpdateOffset();
 let ready = false;
 let initialPanelSent = false;
@@ -279,6 +280,7 @@ function modeVi(mode) {
   return {
     TREND: "bot Trend",
     SIDEWAY: "bot Sideway",
+    SEMI: "BÁN TỰ ĐỘNG",
     AUTO: "TỰ ĐỘNG",
     PAUSE: "TẠM DỪNG",
     UNKNOWN: "KHÔNG XÁC ĐỊNH",
@@ -289,6 +291,7 @@ function panelText(mode, note) {
   const description = {
     TREND: "Chỉ bot Trend được phép tạo chiến lược mới.",
     SIDEWAY: "Chỉ bot Sideway được phép tạo chiến lược mới theo vùng cung/cầu và hồi quy về trung bình.",
+    SEMI: "Chỉ nhận lệnh XAUUSD vào thủ công để bảo vệ và quản lý theo Trend; hệ thống không tự tạo entry SEMI.",
     AUTO: "Bộ phân loại trạng thái thị trường tự chọn bot Trend hoặc bot Sideway; AUTO chỉ được kích hoạt thủ công từ Web.",
     PAUSE: "Không bot nào được phép tạo kế hoạch giao dịch mới; executor vẫn chạy để quản lý trạng thái/vị thế hiện có.",
   }[mode] ?? "Trạng thái không xác định.";
@@ -298,6 +301,7 @@ function panelText(mode, note) {
     "",
     `Chế độ hiện tại: <b>${escapeHtml(modeVi(mode))}</b>`,
     escapeHtml(description),
+    `✋ ${escapeHtml(semiModeHelpText)}`,
     "",
     `ℹ️ ${escapeHtml(note)}`,
     "🔒 Telegram không thể bật AUTO và không gửi lệnh trực tiếp tới MT5.",
@@ -312,7 +316,7 @@ function keyboard(activeMode) {
   return {
     inline_keyboard: [
       [button("bot Trend", "TREND"), button("bot Sideway", "SIDEWAY")],
-      [button("TẠM DỪNG", "PAUSE")],
+      [button("✋ SEMI", "SEMI"), button("TẠM DỪNG", "PAUSE")],
       [{ text: "🔄 Làm mới", callback_data: "p7c:REFRESH" }],
     ],
   };
