@@ -11,6 +11,7 @@ const read = (...parts) => fs.readFileSync(path.join(root, ...parts), "utf8");
 
 const web = read("apps", "web", "src", "pages", "Phase7CControlCenterPage.tsx");
 const webApi = read("apps", "web", "src", "api.ts");
+const webTypes = read("apps", "web", "src", "phase7c-types.ts");
 const webExecutionControl = read("apps", "web", "src", "phase7c-execution-control.ts");
 const telegramController = read("scripts", "run-phase7c-telegram-mode-controller.mjs");
 const semiPlan = read(
@@ -71,6 +72,11 @@ requirePattern(
   "Web API exposes all canonical control modes",
   webApi,
   /export type Phase7cControlMode = "AUTO" \| "TREND" \| "SIDEWAY" \| "SEMI" \| "PAUSE";/,
+);
+requirePattern(
+  "Web lifecycle/decision type includes SEMI",
+  webTypes,
+  /export type Phase7CBotExecutionMode\s*=\s*[\s\S]*?"AUTO"[\s\S]*?"TREND"[\s\S]*?"SIDEWAY"[\s\S]*?"SEMI"[\s\S]*?"PAUSE"\s*;/,
 );
 requirePattern(
   "Web AUTO delegates to existing guarded activation",
