@@ -18,6 +18,13 @@ const semiPlan = read(
   "services",
   "phase7c-semi-trend-management-plan.service.ts",
 );
+const semiPlanTest = read(
+  "apps",
+  "api",
+  "src",
+  "services",
+  "phase7c-semi-trend-management-plan.test.ts",
+);
 
 const failures = [];
 const requirePattern = (label, source, pattern) => {
@@ -81,26 +88,41 @@ requirePattern(
   /apiRequest\("POST",\s*"\/api\/v1\/phase7c\/bot-mode",\s*\{ mode, source \}\)/,
 );
 
-// Management semantics: +6 is the 1R BE trigger; partial close remains +10 at one third.
+// Current SEMI plan already inherits Trend management. Lock the approved +6/+10 milestones explicitly.
 requirePattern(
-  "SEMI default initial stop distance is 6",
-  semiPlan,
-  /DEFAULT_PHASE7C_SEMI_INITIAL_STOP_DISTANCE\s*=\s*6\s*;/,
+  "SEMI fixture initial stop distance is 6",
+  semiPlanTest,
+  /initialStopDistance:\s*6\s*,/,
 );
 requirePattern(
-  "SEMI BE trigger is 1R",
+  "Trend BE trigger is 1R",
   semiPlan,
-  /breakEvenTriggerR:\s*1\s*,/,
+  /TREND_BREAK_EVEN_AT_R\s*=\s*1\s*;/,
 );
 requirePattern(
-  "SEMI partial target distance is 10",
+  "Trend +6 trailing activation remains separate from partial close",
   semiPlan,
-  /DEFAULT_PHASE7C_SEMI_PARTIAL_PROFIT_DISTANCE\s*=\s*10\s*;/,
+  /TREND_TRAILING_ACTIVATE_PRICE\s*=\s*6\s*;/,
 );
 requirePattern(
-  "SEMI partial close ratio is one third",
+  "SEMI partial target remains +10",
   semiPlan,
-  /DEFAULT_PHASE7C_SEMI_PARTIAL_RATIO\s*=\s*1\s*\/\s*3\s*;/,
+  /SEMI_PARTIAL_CLOSE_PRICE_GAIN\s*=\s*10\s*;/,
+);
+requirePattern(
+  "SEMI partial close remains one third",
+  semiPlan,
+  /SEMI_PARTIAL_CLOSE_PERCENT\s*=\s*100\s*\/\s*3\s*;/,
+);
+requirePattern(
+  "Regression proves +10 target for LONG",
+  semiPlanTest,
+  /partialTargets\[0\]\?\.price,\s*3610/,
+);
+requirePattern(
+  "Regression proves one-third partial",
+  semiPlanTest,
+  /partialTargets\[0\]\?\.closePercent,\s*100\s*\/\s*3/,
 );
 
 if (failures.length > 0) {
