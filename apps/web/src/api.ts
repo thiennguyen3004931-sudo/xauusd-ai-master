@@ -37,6 +37,7 @@ import type {
   Phase7ERealignmentRequest,
   Phase7ERealignmentResult,
 } from "./phase7e-realignment-types";
+import { enablePhase7CAuto } from "./phase7c-execution-control";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
@@ -156,6 +157,15 @@ export async function setPhase7CBotMode(mode: Phase7cControlMode): Promise<{
   options: string[];
   accountMode: string;
 }> {
+  if (mode === "AUTO") {
+    const guardedAuto = await enablePhase7CAuto();
+    return {
+      state: guardedAuto.state,
+      options: guardedAuto.options,
+      accountMode: guardedAuto.accountMode,
+    };
+  }
+
   return read(await fetch(`${API_BASE}/api/v1/phase7c/bot-mode`, {
     method: "POST",
     headers: { "content-type": "application/json" },
