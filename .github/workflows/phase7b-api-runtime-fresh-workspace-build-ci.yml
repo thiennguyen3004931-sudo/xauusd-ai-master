@@ -1,0 +1,36 @@
+name: Phase7B API Runtime Fresh Workspace Build CI
+
+on:
+  push:
+    branches:
+      - fix/phase7b-api-runtime-fresh-workspace-build-20260910
+    paths:
+      - "scripts/run-phase7b-api-runtime-local.ps1"
+      - "scripts/test-phase7b-api-runtime-fresh-workspace-build-source.ps1"
+      - ".github/workflows/phase7b-api-runtime-fresh-workspace-build-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "scripts/run-phase7b-api-runtime-local.ps1"
+      - "scripts/test-phase7b-api-runtime-fresh-workspace-build-source.ps1"
+      - ".github/workflows/phase7b-api-runtime-fresh-workspace-build-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  source-contract:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fresh workspace build contract - PowerShell 7
+        shell: pwsh
+        run: .\scripts\test-phase7b-api-runtime-fresh-workspace-build-source.ps1
+
+      - name: Fresh workspace build contract - Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\test-phase7b-api-runtime-fresh-workspace-build-source.ps1
