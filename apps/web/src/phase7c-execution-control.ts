@@ -4,7 +4,7 @@ const LIVE_ARM_BASE = "/api/v1/phase7c-live-arm-control";
 const AUTO_BASE = "/api/v1/phase7c-auto-activation";
 
 export type Phase7CLiveArmAction = "ARM_LIVE" | "DISARM_LIVE";
-export type Phase7CBotExecutionMode = "AUTO" | "TREND" | "SIDEWAY" | "PAUSE";
+export type Phase7CBotExecutionMode = "AUTO" | "TREND" | "SIDEWAY" | "SEMI" | "PAUSE";
 export type Phase7CBooleanChecks = Record<string, boolean>;
 
 export type Phase7CLiveArmControlCapability = {
@@ -125,6 +125,6 @@ export async function enablePhase7CAuto(): Promise<Phase7CAutoEnableResponse> {
   });
   return {
     ...payload,
-    options: ["AUTO", "TREND", "SIDEWAY", "PAUSE"],
+    options: ["AUTO", "TREND", "SIDEWAY", "SEMI", "PAUSE"],
   };
 }
