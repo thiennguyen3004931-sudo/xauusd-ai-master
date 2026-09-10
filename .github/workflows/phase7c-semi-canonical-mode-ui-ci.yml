@@ -3,6 +3,7 @@ name: Phase7C SEMI Canonical Mode UI
 on:
   pull_request:
     paths:
+      - "apps/web/src/api.ts"
       - "apps/web/src/pages/Phase7CControlCenterPage.tsx"
       - "apps/api/src/services/phase7c-semi-trend-management-plan.service.ts"
       - "apps/api/src/services/phase7c-semi-trend-management-plan.test.ts"
