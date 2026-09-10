@@ -26,13 +26,16 @@ test("SEMI post-entry source chain preserves the canonical Trend management cont
   assert.deepEqual(result.contract, {
     entryPolicy: "MANUAL_ONLY",
     initialStopDistance: 6,
-    fixedTakeProfitDistance: 20,
+    fixedTakeProfitPolicy: "TREND_RUNTIME_CONFIG",
     plus6Action: "SL_TO_ENTRY_ONLY",
+    plus6PartialClose: "NONE",
     plus10Action: "PARTIAL_ONE_THIRD",
     managementStrategy: "TREND",
+    fixedTakeProfitInherited: true,
     fastMoveInherited: true,
-    structuralExitInherited: true,
+    structuralTrailingInherited: true,
     reversalExitInherited: true,
+    runnerTrendExitInherited: true,
     holdReasonInherited: true,
   });
 });
