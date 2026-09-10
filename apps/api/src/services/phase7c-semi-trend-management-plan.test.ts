@@ -64,6 +64,19 @@ test("PROTECTED manual LONG gets a truthful management-only Trend plan", () => {
   assert.equal(plan.management.trendHoldUntilStructureBreak, true);
 });
 
+test("+6 is BE-only; partial close waits for +10 and closes one third", () => {
+  const state = adoption();
+  const plan = createPhase7CSemiTrendManagementPlan(state);
+  const plusSixPrice = state.entry + state.initialStopDistance;
+
+  assert.equal(state.initialStopDistance, 6);
+  assert.equal(plan.management.moveStopToBreakEvenAtR, 1);
+  assert.equal(plan.management.trailingStop.activateAtProfitPrice, 6);
+  assert.notEqual(plan.management.partialTargets[0]?.price, plusSixPrice);
+  assert.equal(plan.management.partialTargets[0]?.price, state.entry + 10);
+  assert.equal(plan.management.partialTargets[0]?.closePercent, 100 / 3);
+});
+
 test("manual SHORT +10 milestone is directional", () => {
   const plan = createPhase7CSemiTrendManagementPlan(adoption({
     side: "SHORT",
