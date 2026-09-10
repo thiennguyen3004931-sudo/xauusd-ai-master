@@ -11,6 +11,7 @@ $files = @{
   autoRoute = Join-Path $ProjectRoot "apps\api\src\routes\phase7c-auto-activation.route.ts"
   app = Join-Path $ProjectRoot "apps\api\src\app.ts"
   webControl = Join-Path $ProjectRoot "apps\web\src\phase7c-execution-control.ts"
+  webApi = Join-Path $ProjectRoot "apps\web\src\api.ts"
   executionCard = Join-Path $ProjectRoot "apps\web\src\ui\Phase7CExecutionAuthorizationCard.tsx"
   accountSwitch = Join-Path $ProjectRoot "apps\web\src\ui\Phase7CAccountSwitchCard.tsx"
   controlCenter = Join-Path $ProjectRoot "apps\web\src\pages\Phase7CControlCenterPage.tsx"
@@ -30,6 +31,7 @@ $autoService = Get-Content -LiteralPath $files.autoService -Raw
 $autoRoute = Get-Content -LiteralPath $files.autoRoute -Raw
 $app = Get-Content -LiteralPath $files.app -Raw
 $webControl = Get-Content -LiteralPath $files.webControl -Raw
+$webApi = Get-Content -LiteralPath $files.webApi -Raw
 $executionCard = Get-Content -LiteralPath $files.executionCard -Raw
 $accountSwitch = Get-Content -LiteralPath $files.accountSwitch -Raw
 $controlCenter = Get-Content -LiteralPath $files.controlCenter -Raw
@@ -142,9 +144,19 @@ Assert-NotContains $accountSwitch 'ARM FILE' 'Account/Risk must not show ARM fil
 Assert-NotContains $accountSwitch 'LIVE arm file' 'Account/Risk must not show final ARM file status'
 Assert-NotContains $accountSwitch 'ARM LIVE' 'Account/Risk must not show LIVE ARM guidance or control'
 
-Assert-NotContains $controlCenter 'enablePhase7CAuto' 'Control Center must not duplicate guarded AUTO activation'
-Assert-NotContains $controlCenter 'botModeAction\.mutate\("AUTO"\)' 'Control Center must not expose a second AUTO action'
-Assert-Literal $controlCenter 'setPhase7CBotMode("PAUSE")' 'Control Center retains PAUSE control'
+# The canonical mode UI may display AUTO, but AUTO must delegate to the existing guarded endpoint.
+Assert-Literal $controlCenter 'BOT_MODE_OPTIONS' 'Control Center exposes canonical mode options'
+Assert-Contains $controlCenter 'mode:\s*"AUTO"' 'Control Center retains AUTO option'
+Assert-Contains $controlCenter 'mode:\s*"TREND"' 'Control Center retains TREND option'
+Assert-Contains $controlCenter 'mode:\s*"SIDEWAY"' 'Control Center retains SIDEWAY option'
+Assert-Contains $controlCenter 'mode:\s*"SEMI"' 'Control Center exposes SEMI option'
+Assert-Contains $controlCenter 'mode:\s*"PAUSE"' 'Control Center retains PAUSE option'
+Assert-Literal $controlCenter 'botModeAction.mutate(option.mode)' 'Control Center uses shared mode mutation helper'
+Assert-NotContains $controlCenter 'setPhase7CBotMode\("AUTO"\)' 'Control Center must not hard-code a direct AUTO bot-mode mutation'
+Assert-Literal $webApi 'if (mode === "AUTO")' 'Web mode helper explicitly separates AUTO'
+Assert-Literal $webApi 'enablePhase7CAuto()' 'Web AUTO selection uses guarded AUTO activation'
+Assert-Literal $webApi '/api/v1/phase7c/bot-mode' 'non-AUTO modes retain canonical bot-mode endpoint'
+Assert-Literal $webApi 'source: "web-control-center"' 'non-AUTO mode source remains canonical Web source'
 Assert-NotContains $controlCenter 'disabled=\{!canEnableAuto' 'legacy opaque AUTO disabled gate removed'
 
 Assert-Literal $controlShell 'Phase7CExecutionAuthorizationCard' 'execution card shown in Control Center'
