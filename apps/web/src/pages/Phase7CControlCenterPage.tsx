@@ -34,8 +34,19 @@ import {
   runPhase7CLifecycleAction,
   setPhase7CBotMode,
   setPhase7CLotSettings,
+  type Phase7cControlMode,
 } from "../api";
 import { MetricCard } from "../ui/MetricCard";
+
+const BOT_MODE_OPTIONS = [
+  { mode: "AUTO", label: "AUTO" },
+  { mode: "TREND", label: "TREND" },
+  { mode: "SIDEWAY", label: "SIDEWAY" },
+  { mode: "SEMI", label: "✋ SEMI" },
+  { mode: "PAUSE", label: "PAUSE" },
+] satisfies ReadonlyArray<{ mode: Phase7cControlMode; label: string }>;
+
+const SEMI_MODE_HELP_TEXT = "SEMI = vào lệnh thủ công • SL đầu 6 giá • +6 → BE • +10 → chốt 1/3 • phần còn lại quản lý như Trend";
 
 function money(value: number | null | undefined, currency = "USD") {
   if (!Number.isFinite(value)) return "—";
@@ -188,7 +199,7 @@ export function Phase7CControlCenterPage() {
   });
 
   const botModeAction = useMutation({
-    mutationFn: () => setPhase7CBotMode("PAUSE"),
+    mutationFn: (mode: Phase7cControlMode) => setPhase7CBotMode(mode),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["phase7c-lifecycle"] }),
@@ -249,9 +260,7 @@ export function Phase7CControlCenterPage() {
     bridgeReady &&
     brokerModeSupported &&
     (lifecycleData?.bridge.openXauusdPositions ?? 0) === 0;
-  const canPause =
-    lifecycleData?.controlEnabled === true &&
-    mode !== "PAUSE";
+  const canChangeBotMode = lifecycleData?.controlEnabled === true;
 
   return (
     <Stack spacing={2}>
@@ -280,7 +289,7 @@ export function Phase7CControlCenterPage() {
                 <Chip label={`MODE ${mode}`} size="small" variant="outlined" />
               </Stack>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                BẬT BOT chỉ khởi động/khôi phục executors và luôn kết thúc ở PAUSE. AUTO không còn được bật từ lifecycle hay Telegram; chỉ nút BẬT AUTO trên Web mới có quyền kích hoạt AUTO sau khi toàn bộ cổng an toàn đạt.
+                BẬT BOT chỉ khởi động/khôi phục executors và luôn kết thúc ở PAUSE. Các nút mode bên dưới chỉ gửi canonical bot-mode mutation; backend tiếp tục quyết định toàn bộ safety gate, không tự ARM và không bypass điều kiện giao dịch.
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.7 }}>
                 {detectedAccountLabel}
@@ -331,18 +340,24 @@ export function Phase7CControlCenterPage() {
                   {lifecycleAction.isPending && lifecycleAction.variables === "stop" ? "ĐANG DỪNG..." : "DỪNG HỆ THỐNG"}
                 </Button>
               </Stack>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2}>
-                <Button
-                  fullWidth
-                  variant="outlined"
-                  color="warning"
-                  disabled={!canPause || botModeAction.isPending}
-                  onClick={() => botModeAction.mutate()}
-                  sx={{ fontWeight: 950 }}
-                >
-                  {botModeAction.isPending ? "ĐANG PAUSE..." : "TẠM DỪNG"}
-                </Button>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                {BOT_MODE_OPTIONS.map((option) => (
+                  <Button
+                    key={option.mode}
+                    variant={mode === option.mode ? "contained" : "outlined"}
+                    disabled={!canChangeBotMode || botModeAction.isPending || mode === option.mode}
+                    onClick={() => botModeAction.mutate(option.mode)}
+                    sx={{ fontWeight: 900, flex: "1 1 110px" }}
+                  >
+                    {botModeAction.isPending && botModeAction.variables === option.mode
+                      ? "ĐANG ĐỔI..."
+                      : option.label}
+                  </Button>
+                ))}
               </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.55 }}>
+                {SEMI_MODE_HELP_TEXT}
+              </Typography>
             </Stack>
           </Stack>
 
@@ -360,7 +375,7 @@ export function Phase7CControlCenterPage() {
             </Alert>
           ) : isLiveAccount ? (
             <Alert severity="success" sx={{ mt: 2 }}>
-              ARM LIVE · {liveArmScope === "BRIDGE_SESSION" ? "BRIDGE_SESSION" : liveArmScope}. LIVE entry được mở khóa cho đúng phiên bridge hiện tại. Web không tự cấp quyền/ARM LIVE lần đầu; sau khi executors READY hệ thống vẫn giữ PAUSE cho tới khi người vận hành bấm BẬT AUTO riêng.
+              ARM LIVE · {liveArmScope === "BRIDGE_SESSION" ? "BRIDGE_SESSION" : liveArmScope}. LIVE entry được mở khóa cho đúng phiên bridge hiện tại. Web không tự cấp quyền/ARM LIVE lần đầu; sau khi executors READY hệ thống vẫn giữ PAUSE cho tới khi người vận hành chọn mode riêng.
             </Alert>
           ) : null}
           {lifecycle.error ? <Alert severity="error" sx={{ mt: 2 }}>{friendlyError(lifecycle.error)}</Alert> : null}
@@ -374,7 +389,7 @@ export function Phase7CControlCenterPage() {
           {botModeAction.error ? <Alert severity="error" sx={{ mt: 2 }}>{friendlyError(botModeAction.error)}</Alert> : null}
           {(lifecycleData?.bridge.openXauusdPositions ?? 0) > 0 ? (
             <Alert severity="info" sx={{ mt: 2 }}>
-              Đang có vị thế XAUUSD; DỪNG HỆ THỐNG bị khóa. Yêu cầu AUTO sẽ bị backend từ chối cho tới khi vị thế về 0. TẠM DỪNG mode vẫn khả dụng và không dừng executor quản lý vị thế.
+              Đang có vị thế XAUUSD; DỪNG HỆ THỐNG bị khóa. Yêu cầu AUTO sẽ bị backend từ chối cho tới khi vị thế về 0. PAUSE mode vẫn khả dụng và không dừng executor quản lý vị thế.
             </Alert>
           ) : null}
         </CardContent>
