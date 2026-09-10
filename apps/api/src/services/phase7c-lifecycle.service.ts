@@ -186,6 +186,14 @@ export function getPhase7CLifecycleRuntimeStatus() {
   const lots = phase7CLotSettingsService.get();
   const broker = getPhase7CLifecycleBrokerClientStatus();
   const running = processes.supervisor.alive && processes.trend.alive && processes.sideway.alive;
+  const brokerOwnsExecutorTree = Boolean(
+    broker.heartbeat?.state === "RUNNING" &&
+    broker.status?.state === "RUNNING" &&
+    broker.heartbeat?.desiredExecutorState === "RUNNING" &&
+    broker.status?.desiredExecutorState === "RUNNING" &&
+    supervisorPid !== null &&
+    broker.status?.supervisorPid === supervisorPid,
+  );
   const telegramReady = Boolean(
     processes.telegram.alive &&
     processes.regimeNotifier.alive &&
@@ -194,7 +202,7 @@ export function getPhase7CLifecycleRuntimeStatus() {
     telegramHeartbeatAgeMs !== null &&
     telegramHeartbeatAgeMs <= TELEGRAM_STALE_MS,
   );
-  const ready = broker.ready && accountModeState.valid && running && telegramReady && lots.activeAlive && !lots.restartRequired;
+  const ready = broker.ready && brokerOwnsExecutorTree && accountModeState.valid && running && telegramReady && lots.activeAlive && !lots.restartRequired;
 
   return {
     controlEnabled: controlEnabled(),
