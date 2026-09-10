@@ -10,12 +10,6 @@ export function transformPhase7CTrendM5PreStructureProfitLockSource(input) {
 
   source = replaceRequired(
     source,
-    "const FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE = 6;",
-    "const FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE = 10;",
-    "Trend Fast-Move giveback constant",
-  );
-  source = replaceRequired(
-    source,
     "  const fastMove = fastMoveProfitLockCandidate({",
     `  const fastMoveEligible = stopIsAtLeastAsTight(
     managed.side,
@@ -38,12 +32,6 @@ export function transformPhase7CTrendM5PreStructureProfitLockSource(input) {
 export function transformPhase7CSidewayM5PreStructureProfitLockSource(input) {
   let source = String(input);
 
-  source = replaceRequired(
-    source,
-    "const FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE = 4;",
-    "const FAST_MOVE_PROFIT_LOCK_GIVEBACK_PRICE = 10;",
-    "Sideway Fast-Move giveback constant",
-  );
   source = replaceRequired(
     source,
     "  const fastMove = fastMoveProfitLockCandidate({",
