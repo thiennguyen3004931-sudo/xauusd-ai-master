@@ -149,7 +149,9 @@ export async function runPhase7CLifecycleAction(action: "start" | "stop"): Promi
   }));
 }
 
-export async function setPhase7CBotMode(mode: "AUTO" | "PAUSE"): Promise<{
+export type Phase7cControlMode = "AUTO" | "TREND" | "SIDEWAY" | "SEMI" | "PAUSE";
+
+export async function setPhase7CBotMode(mode: Phase7cControlMode): Promise<{
   state: Phase7CLifecycleSnapshot["mode"];
   options: string[];
   accountMode: string;
