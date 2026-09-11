@@ -182,7 +182,9 @@ $observableCoveragePass =
     $slMonotonicObserved -and
     -not $slWideningViolation
 
-if ($exactRows.Count -eq 0) {
+if ($fastMoveAfterHandoffViolation -or $slWideningViolation) {
+    $classification = 'OBSERVED_CONTRACT_VIOLATION'
+} elseif ($exactRows.Count -eq 0) {
     $classification = 'NO_NATURAL_TRADE_EVIDENCE'
 } elseif ($observableCoveragePass) {
     $classification = 'COVERAGE_PASS'
@@ -218,7 +220,7 @@ Write-Host "SL_WIDENING_VIOLATION=$slWideningViolation"
 Write-Host 'PEAK_PERSISTENCE_RUNTIME=NOT_PROVEN_BY_P3_V1'
 Write-Host "NATURAL_TRADE_EVIDENCE_STATUS=$classification"
 
-# Absence of natural evidence is not a trading-system failure. This probe is an
-# observer/coverage classifier and therefore exits successfully for all valid,
-# read-only P3 snapshots; explicit observed violations are surfaced in output.
+# Missing or partial natural evidence is an observation state, not a trading
+# failure. A directly observed contract violation is fail-closed.
+if ($classification -eq 'OBSERVED_CONTRACT_VIOLATION') { exit 2 }
 exit 0
