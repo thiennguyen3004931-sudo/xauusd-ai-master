@@ -18,7 +18,7 @@ for (const invariant of [
   "LIVE_TEST_ORDER=NONE",
   "BRIDGE_RESTART=NONE",
 ]) {
-  assert.match(source, new RegExp(invariant.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `missing safety invariant ${invariant}`);
+  assert.ok(source.includes(invariant), `missing safety invariant ${invariant}`);
 }
 
 for (const endpoint of [
@@ -35,10 +35,13 @@ assert.ok(source.includes("state.updatedAt"), "AUTO activation freshness must us
 assert.ok(source.includes("engine.checkedAt"), "decision freshness must use decision-monitor.engine.checkedAt");
 assert.ok(source.includes("lastCandleCloseTime"), "probe must expose M15 candle evidence");
 assert.ok(source.includes("DECISION_AFTER_AUTO"), "probe must report decision-after-AUTO evidence");
+assert.ok(source.includes("M15_AFTER_AUTO"), "probe must require a post-AUTO M15 candle");
 assert.ok(source.includes("DECISION_FRESH"), "probe must report decision freshness");
 assert.ok(source.includes("PENDING_FRESH_DECISION"), "probe must fail closed when no post-AUTO decision exists");
-assert.ok(source.includes("PR322_PRODUCTION_ACCEPTANCE=PASS"), "probe must have an explicit PASS verdict");
-assert.ok(source.includes("PR322_PRODUCTION_ACCEPTANCE=FAIL"), "probe must have an explicit FAIL verdict");
+assert.ok(source.includes("$verdict = 'PASS'"), "probe must define an explicit PASS verdict branch");
+assert.ok(source.includes("$verdict = 'FAIL'"), "probe must define explicit FAIL verdict branches");
+assert.ok(source.includes('PR322_PRODUCTION_ACCEPTANCE=$verdict'), "probe must emit its final PR322 acceptance verdict");
+assert.ok(source.includes("UI_GENERATED_AT_REFERENCE_ONLY"), "generatedAt may be reported only as reference evidence");
 
 assert.doesNotMatch(source, /generatedAt\s*(?:-gt|-ge|>|>=)\s*\$?mode/i, "generatedAt must not establish decision freshness");
 assert.doesNotMatch(source, /Invoke-(?:RestMethod|WebRequest)[^\n]*-Method\s+(?:Post|Put|Patch|Delete)/i, "probe must never issue mutating HTTP methods");
