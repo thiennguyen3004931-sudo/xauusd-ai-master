@@ -132,6 +132,9 @@ function normalizeEvent(
     timestamp,
     stopLoss: finiteNumber(raw.stopLoss),
     price: eventPrice(raw),
+    favorablePrice: finiteNumber(raw.favorable),
+    closedVolume: finiteNumber(raw.closedVolume),
+    remainingVolume: finiteNumber(raw.remainingVolume),
     source: relativeJournalPath.split(path.sep).join("/"),
     eventId: `${strategy}:${relativeJournalPath.split(path.sep).join("/")}:${index}:${name}`,
   };
