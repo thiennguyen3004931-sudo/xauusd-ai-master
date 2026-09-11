@@ -8,7 +8,9 @@ on:
       - "apps/api/src/contracts/phase7c-performance-effectiveness.schema.ts"
       - "apps/api/src/services/phase7c-performance-management-evidence.service.ts"
       - "scripts/phase7c-performance-management-evidence.test.ts"
+      - "scripts/probe-phase7c-natural-trade-evidence-readonly-local.ps1"
       - "scripts/test-phase7c-natural-trade-evidence-source.mjs"
+      - "scripts/test-phase7c-natural-trade-evidence-probe.mjs"
       - ".github/workflows/phase7c-natural-trade-evidence-ci.yml"
   pull_request:
     branches:
@@ -17,7 +19,9 @@ on:
       - "apps/api/src/contracts/phase7c-performance-effectiveness.schema.ts"
       - "apps/api/src/services/phase7c-performance-management-evidence.service.ts"
       - "scripts/phase7c-performance-management-evidence.test.ts"
+      - "scripts/probe-phase7c-natural-trade-evidence-readonly-local.ps1"
       - "scripts/test-phase7c-natural-trade-evidence-source.mjs"
+      - "scripts/test-phase7c-natural-trade-evidence-probe.mjs"
       - ".github/workflows/phase7c-natural-trade-evidence-ci.yml"
 
 permissions:
@@ -44,6 +48,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Natural trade evidence source contract
         run: node scripts/test-phase7c-natural-trade-evidence-source.mjs
+      - name: Natural trade evidence read-only probe contract
+        run: node scripts/test-phase7c-natural-trade-evidence-probe.mjs
       - name: Natural trade management evidence RED/GREEN contract
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-performance-management-evidence.test.ts
       - name: Build API dependency graph
