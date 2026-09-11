@@ -13,7 +13,7 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), "p3-management-evidence-"));
 try {
   const trendJournal = path.join(root, "phase7b-live-forward", "phase7b-demo-events.jsonl");
   writeJsonl(trendJournal, [
-    { timestamp: new Date(1_100).toISOString(), type: "PLUS6_SL_TO_ENTRY", ticket: "101", stopLoss: 4300 },
+    { timestamp: new Date(1_100).toISOString(), type: "PLUS6_SL_TO_ENTRY", ticket: "101", stopLoss: 4300, favorable: 6.25 },
     { timestamp: new Date(1_200).toISOString(), type: "FAST_MOVE_PROFIT_LOCK_TIGHTEN", ticket: "101", peakPrice: 4310, stopLoss: 4304 },
     { timestamp: new Date(1_300).toISOString(), type: "FAST_MOVE_HANDOFF_M5_STRUCTURE", ticket: "101", structurePrice: 4308 },
     { timestamp: new Date(2_100).toISOString(), type: "FAST_MOVE_PROFIT_LOCK_TIGHTEN", ticket: "101", peakPrice: 4316, stopLoss: 4310 },
@@ -35,6 +35,8 @@ try {
     trend.events.map((event) => event.family),
     ["BREAK_EVEN", "FAST_MOVE_TIGHTEN", "FAST_MOVE_HANDOFF_M5_STRUCTURE"],
   );
+  assert.equal(trend.events[0]?.stopLoss, 4300);
+  assert.equal((trend.events[0] as unknown as { favorablePrice?: number }).favorablePrice, 6.25);
   assert.equal(trend.events[1]?.stopLoss, 4304);
   assert.equal(trend.events[1]?.price, 4310);
   assert.equal(trend.source.available, true);
@@ -43,7 +45,14 @@ try {
 
   const sidewayJournal = path.join(root, "phase7c-sideway-live-forward", "phase7c-sideway-events.jsonl");
   writeJsonl(sidewayJournal, [
-    { timestamp: 3_100, event: "PLUS10_PARTIAL_ONE_THIRD", ticket: 202, closedVolume: 0.01 },
+    {
+      timestamp: 3_100,
+      event: "PLUS10_PARTIAL_ONE_THIRD",
+      ticket: 202,
+      favorable: 10.4,
+      closedVolume: 0.01,
+      remainingVolume: 0.02,
+    },
     { timestamp: 3_200, event: "SIDEWAY_M5_STRUCTURAL_SL_TIGHTEN", ticket: "202", structurePrice: 4320, stopLoss: 4321 },
     { timestamp: 3_300, event: "FAST_MOVE_PROFIT_LOCK_REJECTED", ticket: "202", peakPrice: 4325, stopLoss: 4321 },
   ]);
@@ -62,6 +71,14 @@ try {
     sideway.events.map((event) => event.family),
     ["PARTIAL_CLOSE", "M5_STRUCTURAL_TIGHTEN", "FAST_MOVE_REJECTED"],
   );
+  const partial = sideway.events[0] as unknown as {
+    favorablePrice?: number;
+    closedVolume?: number;
+    remainingVolume?: number;
+  };
+  assert.equal(partial.favorablePrice, 10.4);
+  assert.equal(partial.closedVolume, 0.01);
+  assert.equal(partial.remainingVolume, 0.02);
   assert.equal(sideway.events[1]?.price, 4320);
 
   writeJsonl(trendJournal, [
@@ -106,6 +123,7 @@ try {
   console.log("P3_PERFORMANCE_MANAGEMENT_EVIDENCE_TEST=PASS");
   console.log("P3_MANAGEMENT_IDENTITY=EXPLICIT_POSITION_ONLY");
   console.log("P3_MANAGEMENT_AMBIGUOUS=FAIL_CLOSED");
+  console.log("P3_MANAGEMENT_NATURAL_TRADE_DETAILS=FAVORABLE_CLOSED_REMAINING_VOLUME");
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }

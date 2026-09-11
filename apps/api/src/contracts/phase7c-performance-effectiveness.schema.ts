@@ -40,6 +40,9 @@ export interface Phase7CPerformanceManagementEvent {
   timestamp: number;
   stopLoss: number | null;
   price: number | null;
+  favorablePrice: number | null;
+  closedVolume: number | null;
+  remainingVolume: number | null;
   source: string;
   eventId: string;
 }
