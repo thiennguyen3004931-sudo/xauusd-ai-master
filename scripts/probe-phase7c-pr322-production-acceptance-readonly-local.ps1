@@ -37,6 +37,36 @@ Write-Host 'SECRET_VALUES_PRINTED=FALSE'
 if (-not (Test-Path -LiteralPath $ProjectRoot -PathType Container)) { throw "ProjectRoot does not exist: $ProjectRoot" }
 if ($ExpectedMainCommit -notmatch '^[0-9a-f]{40}$') { throw 'ExpectedMainCommit must be an exact 40-character Git SHA.' }
 
+# Reuse the established production read-only preflight first. This preserves
+# canonical account identity, task ownership/drift, unresolved control-request,
+# deployment, runtime-source and bridge safety checks instead of reimplementing
+# a narrower acceptance path here.
+$CanonicalPreflightPath = Join-Path $ProjectRoot 'scripts\preflight-phase7c-production-readonly-local.ps1'
+if (-not (Test-Path -LiteralPath $CanonicalPreflightPath -PathType Leaf)) {
+    throw "Canonical production read-only preflight is missing: $CanonicalPreflightPath"
+}
+$currentPowerShellPath = (Get-Process -Id $PID).Path
+if ([string]::IsNullOrWhiteSpace($currentPowerShellPath)) {
+    throw 'Unable to resolve the current PowerShell executable for canonical preflight reuse.'
+}
+$canonicalPreflightOutput = @(
+    & $currentPowerShellPath -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+        -File $CanonicalPreflightPath `
+        -ProjectRoot $ProjectRoot `
+        -ExpectedMainCommit $ExpectedMainCommit `
+        -TimeoutSeconds $TimeoutSeconds 2>&1
+)
+$canonicalPreflightExitCode = $LASTEXITCODE
+$canonicalPreflightPassMarker = @(
+    $canonicalPreflightOutput | Where-Object {
+        ([string]$_).Trim() -eq 'PHASE7C_PRODUCTION_READONLY_PREFLIGHT_V2=PASS'
+    }
+).Count -eq 1
+$canonicalPreflightPass = $canonicalPreflightExitCode -eq 0 -and $canonicalPreflightPassMarker
+foreach ($line in $canonicalPreflightOutput) {
+    Write-Host "[CANONICAL_PREFLIGHT] $line"
+}
+
 function Resolve-ConfigPath([string]$Value) {
     if ([string]::IsNullOrWhiteSpace($Value)) { return '' }
     if ([System.IO.Path]::IsPathRooted($Value)) { return [System.IO.Path]::GetFullPath($Value) }
@@ -151,7 +181,9 @@ $runtimeGate = $lifecycleRunning -and $lifecycleReady -and $accountModeValid -an
 
 $verdict = 'PASS'
 $reason = 'ALL_GATES_PASS'
-if (-not $sourceAttestationPass) {
+if (-not $canonicalPreflightPass) {
+    $verdict = 'FAIL'; $reason = 'CANONICAL_PREFLIGHT_FAIL'
+} elseif (-not $sourceAttestationPass) {
     $verdict = 'FAIL'; $reason = 'SOURCE_OR_RUNTIME_PARITY_FAIL'
 } elseif (-not $runtimeGate) {
     $verdict = 'FAIL'; $reason = 'RUNTIME_GATE_FAIL'
@@ -167,6 +199,8 @@ if (-not $sourceAttestationPass) {
 
 Write-Host '=== SOURCE ==='
 Write-Host "CANONICAL_MAIN=$ExpectedMainCommit"
+Write-Host "CANONICAL_PREFLIGHT_RESULT=$(if ($canonicalPreflightPass) { 'PASS' } else { 'FAIL' })"
+Write-Host "CANONICAL_PREFLIGHT_EXIT_CODE=$canonicalPreflightExitCode"
 Write-Host "LOCAL_SOURCE=$(if ($sourceExact) { 'EXACT' } else { 'MISMATCH' })"
 Write-Host "RUNTIME_SOURCE=$(if ($allRequiredExact) { 'EXACT' } else { 'MISMATCH' })"
 Write-Host "DEPLOYMENT_GENERATION=$(if ($deploymentGenerationExact) { 'EXACT' } else { 'MISMATCH' })"
