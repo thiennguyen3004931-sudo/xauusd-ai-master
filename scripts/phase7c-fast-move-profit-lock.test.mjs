@@ -157,6 +157,36 @@ assert.match(
   /if \(response\.success\) \{[\s\S]*?managed\.fastMoveHandedOffToM5 = true;[\s\S]*?FAST_MOVE_HANDOFF_M5_STRUCTURE/,
   "Trend M5 ownership handoff must become durable only after the broker accepts the tighter M5 stop.",
 );
+assert.match(
+  trendSource,
+  /fastMoveCycleAnchorPrice\?: number;[\s\S]*?fastMoveCycleStartedAt\?: number;/,
+  "Trend must persist cyclic FastMove/M5 handoff state.",
+);
+assert.match(
+  trendSource,
+  /if \(managed\.fastMoveHandedOffToM5 && !\(Number\(managed\.fastMoveCycleAnchorPrice\) > 0\)\) \{[\s\S]*?managed\.fastMoveCycleAnchorPrice = exitPrice;[\s\S]*?managed\.fastMovePeakPrice = exitPrice;[\s\S]*?FAST_MOVE_CYCLE_ANCHOR_MIGRATED/,
+  "Trend must safely seed a cycle anchor for pre-existing handed-off runtime state.",
+);
+assert.match(
+  trendSource,
+  /const fastMoveReactivationDistance =[\s\S]*?FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE[\s\S]*?managed\.fastMoveHandedOffToM5 = false;[\s\S]*?managed\.fastMoveCycleStartedAt = Number\(quote\.timestamp\);[\s\S]*?managed\.fastMovePeakPrice = exitPrice;[\s\S]*?FAST_MOVE_REACTIVATED_AFTER_M5/,
+  "Trend must reactivate FastMove after a new +10 favorable impulse from the M5 handoff anchor.",
+);
+assert.match(
+  trendSource,
+  /const fastMoveReferencePrice = Number\(managed\.fastMoveCycleAnchorPrice\) > 0[\s\S]*?entry: fastMoveReferencePrice/,
+  "Trend reactivated FastMove must use the new cycle anchor, not the original entry.",
+);
+assert.match(
+  trendSource,
+  /afterTimestamp: managed\.fastMoveCycleStartedAt \?\? managed\.partialActivatedAt \?\? managed\.signalTimestamp/,
+  "Trend M5 handoff after reactivation must require structure newer than the FastMove cycle start.",
+);
+assert.match(
+  trendSource,
+  /const handoffFromFastMove = !managed\.fastMoveHandedOffToM5;[\s\S]*?if \(handoffFromFastMove\) \{[\s\S]*?managed\.fastMoveCycleAnchorPrice = exitPrice;[\s\S]*?managed\.fastMovePeakPrice = exitPrice;[\s\S]*?FAST_MOVE_HANDOFF_M5_STRUCTURE/,
+  "Trend successful M5 takeover must reset the next FastMove cycle anchor and peak.",
+);
 assert.doesNotMatch(
   trendSource,
   /const fastMoveStructure = managed\.partialApplied && latestM15[\s\S]*?latestConfirmedStructureStop/,
@@ -185,6 +215,36 @@ assert.match(
   /if \(response\.success\) \{[\s\S]*?managed\.fastMoveHandedOffToM5 = true;[\s\S]*?FAST_MOVE_HANDOFF_M5_STRUCTURE/,
   "Sideway M5 ownership handoff must become durable only after the broker accepts the tighter M5 stop.",
 );
+assert.match(
+  sidewaySource,
+  /fastMoveHandedOffToM5: false,[\s\S]*?fastMoveCycleAnchorPrice: null,[\s\S]*?fastMoveCycleStartedAt: null,/,
+  "Sideway must persist cyclic FastMove/M5 handoff state.",
+);
+assert.match(
+  sidewaySource,
+  /if \(managed\.fastMoveHandedOffToM5 && !\(Number\(managed\.fastMoveCycleAnchorPrice\) > 0\)\) \{[\s\S]*?managed\.fastMoveCycleAnchorPrice = marketPrice;[\s\S]*?managed\.fastMovePeakPrice = marketPrice;[\s\S]*?FAST_MOVE_CYCLE_ANCHOR_MIGRATED/,
+  "Sideway must safely seed a cycle anchor for pre-existing handed-off runtime state.",
+);
+assert.match(
+  sidewaySource,
+  /const fastMoveReactivationDistance =[\s\S]*?FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE[\s\S]*?managed\.fastMoveHandedOffToM5 = false;[\s\S]*?managed\.fastMoveCycleStartedAt = Number\(quote\.timestamp\);[\s\S]*?managed\.fastMovePeakPrice = marketPrice;[\s\S]*?FAST_MOVE_REACTIVATED_AFTER_M5/,
+  "Sideway must reactivate FastMove after a new +10 favorable impulse from the M5 handoff anchor.",
+);
+assert.match(
+  sidewaySource,
+  /const fastMoveReferencePrice = Number\(managed\.fastMoveCycleAnchorPrice\) > 0[\s\S]*?entry: fastMoveReferencePrice/,
+  "Sideway reactivated FastMove must use the new cycle anchor, not the original entry.",
+);
+assert.match(
+  sidewaySource,
+  /afterTimestamp: Number\(managed\.fastMoveCycleStartedAt \?\? managed\.partialActivatedAt \?\? managed\.signalM5CloseTime \?\? 0\)/,
+  "Sideway M5 handoff after reactivation must require structure newer than the FastMove cycle start.",
+);
+assert.match(
+  sidewaySource,
+  /const handoffFromFastMove = !managed\.fastMoveHandedOffToM5;[\s\S]*?if \(handoffFromFastMove\) \{[\s\S]*?managed\.fastMoveCycleAnchorPrice = marketPrice;[\s\S]*?managed\.fastMovePeakPrice = marketPrice;[\s\S]*?FAST_MOVE_HANDOFF_M5_STRUCTURE/,
+  "Sideway successful M5 takeover must reset the next FastMove cycle anchor and peak.",
+);
 
 console.log("M5_PRE_STRUCTURE_PROFIT_LOCK_CONTRACT=PASS");
 console.log("M5_PRE_STRUCTURE_BUY_SELL_SYMMETRY=PASS");
@@ -192,4 +252,6 @@ console.log("M5_PRE_STRUCTURE_PEAK_PERSISTS_THROUGH_PULLBACK=PASS");
 console.log("M5_PRE_STRUCTURE_GIVEBACK_10_BOTH_STRATEGIES=PASS");
 console.log("M5_PRE_STRUCTURE_REQUIRES_BE_OR_BETTER=PASS");
 console.log("M5_PRE_STRUCTURE_HANDOFF_AFTER_ACCEPTED_TIGHTEN=PASS");
+console.log("M5_PRE_STRUCTURE_CYCLIC_HANDOFF=PASS");
+console.log("M5_PRE_STRUCTURE_NEW_STRUCTURE_AFTER_REACTIVATION=PASS");
 console.log("M5_PRE_STRUCTURE_NEVER_LOOSENS_STOP=PASS");
