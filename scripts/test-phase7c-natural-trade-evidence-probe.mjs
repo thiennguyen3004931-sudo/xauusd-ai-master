@@ -27,8 +27,11 @@ assert.ok(source.includes("M5_STRUCTURAL_TIGHTEN"), "probe must inspect M5 tight
 assert.ok(source.includes("NO_NATURAL_TRADE_EVIDENCE"), "no evidence must be distinguished from trading failure");
 assert.ok(source.includes("PARTIAL_EVIDENCE"), "partial coverage must be explicit");
 assert.ok(source.includes("COVERAGE_PASS"), "full observable coverage must have an explicit verdict");
+assert.ok(source.includes("OBSERVED_CONTRACT_VIOLATION"), "observed safety/management violations must have an explicit fail-closed verdict");
 assert.ok(source.includes("BROKER_STEP_LEGALITY_UNPROVEN"), "one-third proof must fail closed when broker-step evidence is unavailable");
 assert.ok(source.includes("PEAK_PERSISTENCE_RUNTIME=NOT_PROVEN_BY_P3_V1"), "P3 v1 must not overclaim peak persistence runtime proof");
+assert.match(source, /if \(\$classification -eq 'OBSERVED_CONTRACT_VIOLATION'\) \{ exit 2 \}/,
+  "observed FastMove-after-handoff or SL-widening violations must exit nonzero");
 assert.doesNotMatch(source, /-Method\s+(?:Post|Put|Patch|Delete)/i, "probe must never issue mutating HTTP methods");
 assert.doesNotMatch(source, /\b(?:Stop-Process|Start-Process|Stop-ScheduledTask|Start-ScheduledTask|Set-Content|Add-Content|Remove-Item|Move-Item|Copy-Item)\b/i, "probe must not mutate local runtime state");
 
