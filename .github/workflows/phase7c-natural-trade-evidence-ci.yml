@@ -42,5 +42,11 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Natural trade evidence source contract
+        run: node scripts/test-phase7c-natural-trade-evidence-source.mjs
       - name: Natural trade management evidence RED/GREEN contract
         run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-performance-management-evidence.test.ts
+      - name: Build API dependency graph
+        run: pnpm --filter @xauusd/api... build
+      - name: P3 aggregate regression
+        run: pnpm --filter @xauusd/api exec tsx ../../scripts/phase7c-performance-effectiveness.test.ts
