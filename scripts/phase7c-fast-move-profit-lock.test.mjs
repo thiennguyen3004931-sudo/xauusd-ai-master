@@ -144,8 +144,18 @@ assert.match(
 );
 assert.match(
   trendSource,
-  /const fastMoveStructure = managed\.partialApplied && latestM5[\s\S]*?latestConfirmedM5Structure\([\s\S]*?if \(fastMoveStructure === null\) \{[\s\S]*?fastMoveProfitLockCandidate/,
-  "Trend Fast-Move must hand off to confirmed M5 structure before the pre-structure lock can advance again.",
+  /if \(!managed\.fastMoveHandedOffToM5\) \{[\s\S]*?fastMoveProfitLockCandidate/,
+  "Trend FastMove must remain active until a successful M5 stop handoff is durably confirmed.",
+);
+assert.doesNotMatch(
+  trendSource,
+  /if \(fastMoveStructure !== null && !managed\.fastMoveHandedOffToM5\) \{[\s\S]*?managed\.fastMoveHandedOffToM5 = true/,
+  "Trend must not disable FastMove merely because an M5 structure exists before that candidate is accepted.",
+);
+assert.match(
+  trendSource,
+  /if \(response\.success\) \{[\s\S]*?managed\.fastMoveHandedOffToM5 = true;[\s\S]*?FAST_MOVE_HANDOFF_M5_STRUCTURE/,
+  "Trend M5 ownership handoff must become durable only after the broker accepts the tighter M5 stop.",
 );
 assert.doesNotMatch(
   trendSource,
@@ -162,8 +172,18 @@ assert.match(
 );
 assert.match(
   sidewaySource,
-  /const fastMoveStructure = managed\.partialApplied[\s\S]*?latestConfirmedM5Structure\([\s\S]*?if \(fastMoveStructure === null\) \{[\s\S]*?fastMoveProfitLockCandidate/,
-  "Sideway Fast-Move must hand off to confirmed M5 structure before the pre-structure lock can advance again.",
+  /if \(!managed\.fastMoveHandedOffToM5\) \{[\s\S]*?fastMoveProfitLockCandidate/,
+  "Sideway FastMove must remain active until a successful M5 stop handoff is durably confirmed.",
+);
+assert.doesNotMatch(
+  sidewaySource,
+  /if \(fastMoveStructure !== null && !managed\.fastMoveHandedOffToM5\) \{[\s\S]*?managed\.fastMoveHandedOffToM5 = true/,
+  "Sideway must not disable FastMove merely because an M5 structure exists before that candidate is accepted.",
+);
+assert.match(
+  sidewaySource,
+  /if \(response\.success\) \{[\s\S]*?managed\.fastMoveHandedOffToM5 = true;[\s\S]*?FAST_MOVE_HANDOFF_M5_STRUCTURE/,
+  "Sideway M5 ownership handoff must become durable only after the broker accepts the tighter M5 stop.",
 );
 
 console.log("M5_PRE_STRUCTURE_PROFIT_LOCK_CONTRACT=PASS");
@@ -171,5 +191,5 @@ console.log("M5_PRE_STRUCTURE_BUY_SELL_SYMMETRY=PASS");
 console.log("M5_PRE_STRUCTURE_PEAK_PERSISTS_THROUGH_PULLBACK=PASS");
 console.log("M5_PRE_STRUCTURE_GIVEBACK_10_BOTH_STRATEGIES=PASS");
 console.log("M5_PRE_STRUCTURE_REQUIRES_BE_OR_BETTER=PASS");
-console.log("M5_PRE_STRUCTURE_HANDOFF=PASS");
+console.log("M5_PRE_STRUCTURE_HANDOFF_AFTER_ACCEPTED_TIGHTEN=PASS");
 console.log("M5_PRE_STRUCTURE_NEVER_LOOSENS_STOP=PASS");
