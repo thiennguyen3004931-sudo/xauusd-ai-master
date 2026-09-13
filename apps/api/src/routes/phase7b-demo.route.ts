@@ -119,20 +119,6 @@ type EntryDiagnostics = {
 };
 
 const ENGULF_BODY_TOLERANCE_PRICE = 0.1;
-const BROKER_CLOCK_HOUR_MS = 60 * 60_000;
-const BROKER_CLOCK_MAX_OFFSET_MS = 14 * BROKER_CLOCK_HOUR_MS;
-const BROKER_CLOCK_RESIDUAL_TOLERANCE_MS = 5 * 60_000;
-
-function inferBrokerClockOffset(brokerTimestamp: unknown, systemTimestamp: unknown): number | null {
-  const broker = Number(brokerTimestamp);
-  const system = Number(systemTimestamp);
-  if (!Number.isFinite(broker) || !Number.isFinite(system) || broker <= 0 || system <= 0) return null;
-  const rawOffset = broker - system;
-  const roundedOffset = Math.round(rawOffset / BROKER_CLOCK_HOUR_MS) * BROKER_CLOCK_HOUR_MS;
-  if (Math.abs(roundedOffset) > BROKER_CLOCK_MAX_OFFSET_MS) return null;
-  if (Math.abs(rawOffset - roundedOffset) > BROKER_CLOCK_RESIDUAL_TOLERANCE_MS) return null;
-  return roundedOffset;
-}
 
 function normalizeBrokerTimestamp(timestamp: number, brokerClockOffsetMs: number): number {
   return timestamp - brokerClockOffsetMs;
@@ -191,14 +177,7 @@ router.get("/", async (_req: Request, res: Response) => {
       accountMode: telemetry.health?.accountMode ?? null,
     })) {
       try {
-        const brokerClockOffsetMs = inferBrokerClockOffset(
-          telemetry.quote?.timestamp,
-          telemetry.health?.timestamp ?? telemetry.checkedAt,
-        );
-        if (brokerClockOffsetMs === null) {
-          throw new Error("Broker clock offset is not a plausible whole-hour offset.");
-        }
-        entryDiagnostics = await getEntryDiagnostics(brokerClockOffsetMs, telemetry.quote);
+        entryDiagnostics = await getEntryDiagnostics(0, telemetry.quote);
       } catch (error) {
         entryDiagnosticsError = error instanceof Error ? error.message : "M15 entry diagnostics unavailable.";
       }
