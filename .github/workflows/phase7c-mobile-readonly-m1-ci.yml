@@ -1,17 +1,6 @@
 name: Phase7C Mobile Read-Only M1 CI
 
 on:
-  push:
-    branches:
-      - feat/mobile-remote-access-m1-readonly
-    paths:
-      - "apps/web/src/pages/Phase7CMobileReadOnlyPage.tsx"
-      - "apps/web/src/router.tsx"
-      - "apps/web/src/ui/DashboardLayout.tsx"
-      - "apps/web/src/phase7c-panel-status.ts"
-      - "apps/web/src/ui/Phase7COperatorStatusBar.tsx"
-      - "scripts/test-phase7c-mobile-readonly-m1.mjs"
-      - ".github/workflows/phase7c-mobile-readonly-m1-ci.yml"
   pull_request:
     branches:
       - main
