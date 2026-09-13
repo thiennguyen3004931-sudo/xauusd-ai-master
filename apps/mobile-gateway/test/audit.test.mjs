@@ -11,7 +11,7 @@ const { createAuditSink, buildAuditEvent } = require("../audit.cjs");
 test("audit event shape is bounded and action target is canonical", () => {
   const event = buildAuditEvent({
     timestamp: "2026-09-14T00:00:00.000Z",
-    identity: "thiennguyen300493@gmail.com",
+    identity: "operator@example.com",
     action: "MODE_TREND",
     phase: "ATTEMPT",
     transactionId: null,
@@ -25,7 +25,7 @@ test("audit event shape is bounded and action target is canonical", () => {
   assert.deepEqual(event, {
     version: 1,
     timestamp: "2026-09-14T00:00:00.000Z",
-    identity: "thiennguyen300493@gmail.com",
+    identity: "operator@example.com",
     action: "MODE_TREND",
     phase: "ATTEMPT",
     transactionId: null,
