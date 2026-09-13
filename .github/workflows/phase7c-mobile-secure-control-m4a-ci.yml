@@ -68,8 +68,8 @@ jobs:
       - name: Build Web
         run: pnpm --filter @xauusd/web build
 
-      - name: Build API
-        run: pnpm --filter @xauusd/api build
+      - name: Build API dependency graph
+        run: pnpm --filter @xauusd/api... build
 
       - name: M4 source security contract
         run: node scripts/test-phase7c-mobile-m4a-source-contract.mjs
