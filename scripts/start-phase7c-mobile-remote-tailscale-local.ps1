@@ -102,6 +102,21 @@ if ([string]$tailStatus.BackendState -ne "Running") {
 }
 Write-Host "PHASE7C_MOBILE_REMOTE_M2_TAILSCALE=RUNNING"
 
+$serveStatusBefore = (& $tailscale.Source serve status --json | Out-String).Trim()
+if ($LASTEXITCODE -ne 0) {
+  throw "Tailscale Serve status preflight failed. Remote access was not changed."
+}
+$servePortToken = ":$TailscaleHttpsPort"
+$serveQuotedPortToken = '"' + [string]$TailscaleHttpsPort + '"'
+$servePortAlreadyConfigured = (
+  $serveStatusBefore.IndexOf($servePortToken, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+  $serveStatusBefore.IndexOf($serveQuotedPortToken, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+)
+if ($servePortAlreadyConfigured) {
+  throw "Tailscale Serve HTTPS port $TailscaleHttpsPort is already configured. M2 refuses to overwrite an existing listener. Use another dedicated port or explicitly stop the existing owner first."
+}
+Write-Host "PHASE7C_MOBILE_REMOTE_M2_SERVE_PORT_PREFLIGHT=PASS|HTTPS_PORT=$TailscaleHttpsPort|STATE=FREE"
+
 $gatewayPid = Read-PidFile
 if ($gatewayPid -gt 0 -and -not (Test-OwnedGatewayProcess -ProcessId $gatewayPid)) {
   if ($null -ne (Get-Process -Id $gatewayPid -ErrorAction SilentlyContinue)) {
