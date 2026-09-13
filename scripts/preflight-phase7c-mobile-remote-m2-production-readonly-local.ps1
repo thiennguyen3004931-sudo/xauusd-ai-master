@@ -70,21 +70,62 @@ function Test-HttpSuccess([object]$Response) {
   return ($null -ne $Response -and [int]$Response.StatusCode -ge 200 -and [int]$Response.StatusCode -lt 400)
 }
 
-function Get-ReadOnlyCommandOutput([scriptblock]$Command) {
-  $raw = (& $Command | Out-String).Trim()
-  $exitCode = $LASTEXITCODE
-  return [pscustomobject]@{
-    Raw = $raw
-    ExitCode = $exitCode
+function Test-ServePortConfigured([object]$Value, [int]$Port) {
+  if ($null -eq $Value) { return $false }
+  if ($Value -is [string] -or $Value -is [System.ValueType]) { return $false }
+
+  if ($Value -is [System.Array]) {
+    foreach ($item in $Value) {
+      if (Test-ServePortConfigured -Value $item -Port $Port) { return $true }
+    }
+    return $false
   }
+
+  foreach ($property in @($Value.PSObject.Properties)) {
+    if ($property.Name -eq "TCP" -and $null -ne $property.Value) {
+      foreach ($endpoint in @($property.Value.PSObject.Properties)) {
+        if ([string]$endpoint.Name -eq [string]$Port) { return $true }
+      }
+    }
+
+    if ($property.Name -eq "Web" -and $null -ne $property.Value) {
+      $portSuffix = ":$Port"
+      foreach ($endpoint in @($property.Value.PSObject.Properties)) {
+        $endpointName = [string]$endpoint.Name
+        if ($endpointName.EndsWith($portSuffix, [System.StringComparison]::OrdinalIgnoreCase)) {
+          return $true
+        }
+      }
+    }
+
+    if (Test-ServePortConfigured -Value $property.Value -Port $Port) { return $true }
+  }
+
+  return $false
 }
 
-function Test-JsonHasData([object]$Value) {
+function Test-FunnelEnabled([object]$Value) {
   if ($null -eq $Value) { return $false }
-  if ($Value -is [System.Array]) { return ($Value.Count -gt 0) }
-  if ($Value -is [string]) { return (-not [string]::IsNullOrWhiteSpace([string]$Value)) }
-  $properties = @($Value.PSObject.Properties)
-  return ($properties.Count -gt 0)
+  if ($Value -is [string] -or $Value -is [System.ValueType]) { return $false }
+
+  if ($Value -is [System.Array]) {
+    foreach ($item in $Value) {
+      if (Test-FunnelEnabled -Value $item) { return $true }
+    }
+    return $false
+  }
+
+  foreach ($property in @($Value.PSObject.Properties)) {
+    if ($property.Name -eq "AllowFunnel" -and $null -ne $property.Value) {
+      foreach ($endpoint in @($property.Value.PSObject.Properties)) {
+        if ($endpoint.Value -eq $true) { return $true }
+      }
+    }
+
+    if (Test-FunnelEnabled -Value $property.Value) { return $true }
+  }
+
+  return $false
 }
 
 Write-Host ""
@@ -210,21 +251,21 @@ try {
   }
 
   $serveStatusRaw = (& $tailscale.Source serve status --json | Out-String).Trim()
-  if ($LASTEXITCODE -ne 0) {
-    Add-Failure "tailscale serve status --json failed."
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($serveStatusRaw)) {
+    Add-Failure "tailscale serve status --json failed or returned no data."
     $servePortState = "UNKNOWN"
   } else {
-    $servePortToken = ":$TailscaleHttpsPort"
-    $serveQuotedPortToken = '"' + [string]$TailscaleHttpsPort + '"'
-    $serveOccupied = (
-      $serveStatusRaw.IndexOf($servePortToken, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
-      $serveStatusRaw.IndexOf($serveQuotedPortToken, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
-    )
-    if ($serveOccupied) {
-      $servePortState = "OCCUPIED"
-      Add-Failure "Tailscale Serve HTTPS port $TailscaleHttpsPort is already configured."
-    } else {
-      $servePortState = "FREE"
+    try {
+      $serveStatusObject = $serveStatusRaw | ConvertFrom-Json
+      if (Test-ServePortConfigured -Value $serveStatusObject -Port $TailscaleHttpsPort) {
+        $servePortState = "OCCUPIED"
+        Add-Failure "Tailscale Serve HTTPS port $TailscaleHttpsPort is already configured."
+      } else {
+        $servePortState = "FREE"
+      }
+    } catch {
+      $servePortState = "UNKNOWN"
+      Add-Failure "tailscale serve status --json returned invalid JSON."
     }
   }
 
@@ -235,7 +276,7 @@ try {
   } else {
     try {
       $funnelStatusObject = $funnelStatusRaw | ConvertFrom-Json
-      if (Test-JsonHasData -Value $funnelStatusObject) {
+      if (Test-FunnelEnabled -Value $funnelStatusObject) {
         $publicFunnel = "DETECTED"
         Add-Failure "Public Tailscale Funnel configuration is present."
       } else {
@@ -253,7 +294,7 @@ try {
 Write-Host ""
 Write-Host "=== LOCAL GATEWAY PORT ==="
 try {
-  $netTcp = Get-Command Get-NetTCPConnection -ErrorAction Stop
+  [void](Get-Command Get-NetTCPConnection -ErrorAction Stop)
   $listener = Get-NetTCPConnection -LocalPort $GatewayPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($null -eq $listener) {
     $gatewayPortState = "FREE"
