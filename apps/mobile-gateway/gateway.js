@@ -44,7 +44,7 @@ function validateProductionConfig(config) {
 }
 
 function loadConfig(filePath = CONFIG_PATH) {
-  const raw = fs.readFileSync(filePath, "utf8");
+  const raw = fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, "");
   return validateProductionConfig(JSON.parse(raw));
 }
 
