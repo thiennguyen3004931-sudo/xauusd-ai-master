@@ -182,7 +182,13 @@ if ($LASTEXITCODE -ne 0 -or $serveStatusRaw.IndexOf($gatewayUrl, [System.StringC
 
 $dnsName = ([string]$tailStatus.Self.DNSName).Trim().TrimEnd('.')
 if ([string]::IsNullOrWhiteSpace($dnsName)) {
-  throw "Tailscale DNS name is unavailable after Serve configuration."
+  & $tailscale.Source serve $httpsArg off | Out-Null
+  if (Test-OwnedGatewayProcess -ProcessId $gatewayPid) {
+    Stop-OwnedGateway -ProcessId $gatewayPid
+  }
+  Remove-Item -LiteralPath $PidPath -Force -ErrorAction SilentlyContinue
+  Write-Host "PHASE7C_MOBILE_REMOTE_M2_DNS_FAIL_ROLLBACK=PASS"
+  throw "Tailscale DNS name is unavailable after Serve configuration. Remote access was rolled back."
 }
 $remoteUrl = "https://${dnsName}:$TailscaleHttpsPort$mobilePath"
 
