@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { createMobileGatewayServer } = require("../server.cjs");
+const TEST_USER = "operator@example.com";
 
 async function listen(server, host = "127.0.0.1") {
   await new Promise((resolve, reject) => {
@@ -38,12 +39,12 @@ test("preserves accepted M2 read-only gateway semantics", async () => {
       listenHost: "127.0.0.1",
       listenPort: 0,
       webOrigin,
-      allowedUsers: ["thiennguyen300493@gmail.com"],
+      allowedUsers: [TEST_USER],
     },
   });
   const gatewayAddress = await listen(gateway);
   const gatewayOrigin = `http://127.0.0.1:${gatewayAddress.port}`;
-  const trustedHeaders = { "tailscale-user-login": "thiennguyen300493@gmail.com" };
+  const trustedHeaders = { "tailscale-user-login": TEST_USER };
 
   try {
     assert.equal(gatewayAddress.address, "127.0.0.1");
@@ -83,7 +84,7 @@ test("does not forward Tailscale identity headers to Web upstream", async () => 
       listenHost: "127.0.0.1",
       listenPort: 0,
       webOrigin: `http://127.0.0.1:${upstreamAddress.port}`,
-      allowedUsers: ["thiennguyen300493@gmail.com"],
+      allowedUsers: [TEST_USER],
     },
   });
   const gatewayAddress = await listen(gateway);
@@ -93,7 +94,7 @@ test("does not forward Tailscale identity headers to Web upstream", async () => 
       `http://127.0.0.1:${gatewayAddress.port}`,
       "GET",
       "/phase7c-mobile",
-      { "tailscale-user-login": "thiennguyen300493@gmail.com" },
+      { "tailscale-user-login": TEST_USER },
     );
     assert.equal(result.status, 200);
     assert.equal(forwardedIdentity, null);
