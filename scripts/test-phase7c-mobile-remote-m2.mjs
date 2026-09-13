@@ -54,6 +54,7 @@ requireText(start, "serve", "Tailscale Serve command");
 requireText(start, "--bg", "persistent private Serve mode");
 requireText(start, "--https=", "dedicated Tailscale HTTPS port");
 requireText(start, "phase7c-mobile", "mobile preflight path");
+requireText(start, "PHASE7C_MOBILE_REMOTE_M2_SERVE_PORT_PREFLIGHT=PASS", "Serve listener collision preflight");
 requireText(start, "PHASE7C_MOBILE_REMOTE_M2_DNS_FAIL_ROLLBACK=PASS", "post-Serve DNS failure rollback proof");
 forbid(start, /\bfunnel\b/i, "start script must never enable Funnel");
 forbid(start, /0\.0\.0\.0/, "start script must never expose wildcard bind");
