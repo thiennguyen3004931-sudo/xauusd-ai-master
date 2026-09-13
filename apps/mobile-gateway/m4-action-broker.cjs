@@ -1,6 +1,6 @@
 "use strict";
 
-const { parseActionBody } = require("./m4-contract.cjs");
+const { parseActionBody, isRiskIncreasing } = require("./m4-contract.cjs");
 
 function normalizeIdentity(value) {
   return String(value ?? "").trim().toLowerCase();
@@ -21,10 +21,7 @@ function failureResult(action, error) {
 }
 
 function sanitizePreflight(preflight) {
-  const {
-    preflightToken: _secret,
-    ...safe
-  } = preflight || {};
+  const { preflightToken: _secret, ...safe } = preflight || {};
   return safe;
 }
 
@@ -32,26 +29,49 @@ function createM4ActionBroker({ canonical, transactions, audit, now = Date.now }
   if (!canonical) throw new Error("CANONICAL_CLIENT_REQUIRED");
   if (!transactions) throw new Error("TRANSACTION_STORE_REQUIRED");
 
-  async function auditBefore(event) {
-    if (audit?.before) await audit.before(event);
-  }
-
-  async function auditAfter(event) {
-    if (audit?.after) await audit.after(event);
+  async function writeAudit(event, phase, mandatory) {
+    const fullEvent = {
+      timestamp: new Date(now()).toISOString(),
+      identity: normalizeIdentity(event.identity),
+      action: event.action,
+      phase,
+      transactionId: event.transactionId ?? null,
+      ...(event.outcome ? { outcome: event.outcome } : {}),
+      ...(event.httpStatus ? { httpStatus: event.httpStatus } : {}),
+      ...(event.requestId ? { requestId: event.requestId } : {}),
+    };
+    try {
+      if (audit?.append) {
+        await audit.append(fullEvent);
+      } else if (phase === "ATTEMPT" && audit?.before) {
+        await audit.before(fullEvent);
+      } else if (phase === "RESULT" && audit?.after) {
+        await audit.after(fullEvent);
+      }
+      return true;
+    } catch (error) {
+      if (mandatory) throw error;
+      return false;
+    }
   }
 
   async function handleMode(identity, parsed) {
-    const event = { identity: normalizeIdentity(identity), action: parsed.action, at: now() };
-    await auditBefore(event);
+    const baseEvent = { identity, action: parsed.action, transactionId: null };
+    let auditDegraded = !(await writeAudit(baseEvent, "ATTEMPT", isRiskIncreasing(parsed.action)));
     try {
       const result = await canonical.executeModeAction(parsed.action);
-      const response = { action: parsed.action, outcome: "PASS", result };
-      await auditAfter({ ...event, outcome: "PASS" });
-      return response;
+      const resultAudit = await writeAudit({ ...baseEvent, outcome: "PASS" }, "RESULT", false);
+      auditDegraded ||= !resultAudit;
+      return { action: parsed.action, outcome: "PASS", result, ...(auditDegraded ? { auditDegraded: true } : {}) };
     } catch (error) {
       const response = failureResult(parsed.action, error);
-      await auditAfter({ ...event, outcome: response.outcome, httpStatus: response.httpStatus });
-      return response;
+      const resultAudit = await writeAudit({
+        ...baseEvent,
+        outcome: response.outcome,
+        httpStatus: response.httpStatus,
+      }, "RESULT", false);
+      auditDegraded ||= !resultAudit;
+      return { ...response, ...(auditDegraded ? { auditDegraded: true } : {}) };
     }
   }
 
@@ -62,12 +82,7 @@ function createM4ActionBroker({ canonical, transactions, audit, now = Date.now }
     const safe = sanitizePreflight(preflight);
 
     if (!preflight?.approved || !preflight?.preflightToken) {
-      return {
-        action: parsed.action,
-        phase: "PREFLIGHT",
-        approved: false,
-        ...safe,
-      };
+      return { action: parsed.action, phase: "PREFLIGHT", approved: false, ...safe };
     }
 
     const transactionId = transactions.create({
@@ -90,30 +105,51 @@ function createM4ActionBroker({ canonical, transactions, audit, now = Date.now }
   async function handleExecute(identity, parsed) {
     const record = transactions.getForExecute(identity, parsed.action, parsed.transactionId);
     const token = record.canonicalToken;
+    const baseEvent = { identity, action: parsed.action, transactionId: parsed.transactionId };
+    let auditDegraded = !(await writeAudit(baseEvent, "ATTEMPT", isRiskIncreasing(parsed.action)));
+
     transactions.markExecuting(parsed.transactionId);
 
     try {
       const accepted = await canonical.executeArm(parsed.action, token);
       if (!accepted?.requestId) {
+        const resultAudit = await writeAudit({ ...baseEvent, outcome: "AMBIGUOUS" }, "RESULT", false);
+        auditDegraded ||= !resultAudit;
         return {
           action: parsed.action,
           transactionId: parsed.transactionId,
           outcome: "AMBIGUOUS",
           message: "CANONICAL_REQUEST_ID_MISSING",
+          ...(auditDegraded ? { auditDegraded: true } : {}),
         };
       }
       transactions.setRequestId(parsed.transactionId, accepted.requestId);
+      const resultAudit = await writeAudit({
+        ...baseEvent,
+        outcome: "RUNNING",
+        requestId: accepted.requestId,
+      }, "RESULT", false);
+      auditDegraded ||= !resultAudit;
       return {
         action: parsed.action,
         transactionId: parsed.transactionId,
         requestId: accepted.requestId,
         outcome: "RUNNING",
         message: String(accepted.message ?? "accepted"),
+        ...(auditDegraded ? { auditDegraded: true } : {}),
       };
     } catch (error) {
+      const failure = failureResult(parsed.action, error);
+      const resultAudit = await writeAudit({
+        ...baseEvent,
+        outcome: failure.outcome,
+        httpStatus: failure.httpStatus,
+      }, "RESULT", false);
+      auditDegraded ||= !resultAudit;
       return {
         transactionId: parsed.transactionId,
-        ...failureResult(parsed.action, error),
+        ...failure,
+        ...(auditDegraded ? { auditDegraded: true } : {}),
       };
     }
   }
