@@ -61,6 +61,42 @@ function createM4ActionBroker({ canonical, transactions, audit, now = Date.now }
     }
   }
 
+  async function getState(identity) {
+    const [botMode, auto, arm] = await Promise.all([
+      canonical.getBotMode(),
+      canonical.getAutoStatus(),
+      canonical.getArmCapability(),
+    ]);
+    const mode = botMode?.state?.mode ?? botMode?.mode ?? arm?.botMode ?? auto?.botMode ?? "UNKNOWN";
+    return {
+      operator: normalizeIdentity(identity),
+      mode,
+      auto: {
+        approved: auto?.approved === true,
+        accountMode: auto?.accountMode ?? null,
+        botMode: auto?.botMode ?? mode,
+        liveArmRequired: auto?.liveArmRequired === true,
+        liveArmStatus: auto?.liveArmStatus ?? null,
+        checks: auto?.checks ?? {},
+        blockedBy: Array.isArray(auto?.blockedBy) ? auto.blockedBy : [],
+      },
+      arm: {
+        accountMode: arm?.accountMode ?? null,
+        botMode: arm?.botMode ?? mode,
+        liveArmStatus: arm?.liveArmStatus ?? null,
+        liveExecutionArmed: arm?.liveExecutionArmed === true,
+        bridgeSessionId: arm?.bridgeSessionId ?? null,
+        openXauusdPositions: Number(arm?.openXauusdPositions ?? 0),
+        canArm: arm?.canArm === true,
+        canDisarm: arm?.canDisarm === true,
+        armChecks: arm?.armChecks ?? {},
+        armBlockedBy: Array.isArray(arm?.armBlockedBy) ? arm.armBlockedBy : [],
+        disarmChecks: arm?.disarmChecks ?? {},
+        disarmBlockedBy: Array.isArray(arm?.disarmBlockedBy) ? arm.disarmBlockedBy : [],
+      },
+    };
+  }
+
   async function handleMode(identity, parsed) {
     const baseEvent = { identity, action: parsed.action, transactionId: null };
     let auditDegraded = !(await writeAudit(baseEvent, "ATTEMPT", isRiskIncreasing(parsed.action)));
@@ -198,7 +234,7 @@ function createM4ActionBroker({ canonical, transactions, audit, now = Date.now }
     return safe;
   }
 
-  return Object.freeze({ handleAction, getTransactionStatus });
+  return Object.freeze({ getState, handleAction, getTransactionStatus });
 }
 
 module.exports = { createM4ActionBroker };
