@@ -133,8 +133,13 @@ requireText(preflight, "/api/v1/phase7c/runtime-source-attestation", "runtime so
 requireText(preflight, "status --json", "Tailscale backend read-only status");
 requireText(preflight, "serve status --json", "Tailscale Serve read-only status");
 requireText(preflight, "funnel status --json", "Tailscale Funnel read-only status");
+requireText(preflight, "Test-ServePortConfigured", "semantic Serve port parser");
+requireText(preflight, "Test-FunnelEnabled", "semantic Funnel parser");
+requireText(preflight, "AllowFunnel", "Tailscale Funnel enablement field");
 requireText(preflight, "-Method Get", "GET-only HTTP probe implementation");
 
+forbid(preflight, /Test-JsonHasData/, "generic non-empty JSON must not be treated as Funnel enablement");
+forbid(preflight, /\.IndexOf\(\$servePortToken/, "Serve collision must not be inferred from arbitrary JSON text");
 forbid(preflight, /-Method\s+(Post|Put|Patch|Delete)\b/i, "preflight must never use mutating HTTP methods");
 forbid(preflight, /\bserve\s+reset\b/i, "preflight must never reset Serve");
 forbid(preflight, /\bserve\b[^\r\n]*(--bg|\boff\b)/i, "preflight must never mutate Serve");
