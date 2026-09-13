@@ -1,19 +1,19 @@
 # M4-A Mobile Secure Control — Design Specification
 
 Date: 2026-09-13  
-Status: DESIGN APPROVED — awaiting written-spec review  
+Status: DESIGN APPROVED — canonical AUTO-path correction awaiting acknowledgment  
 Scope: mobile remote control through the existing Tailscale-only gateway  
-Production mutation during this design phase: NONE
+Production mutation during design/spec work: NONE
 
 ## 1. Objective
 
-M4-A extends the existing mobile remote-access architecture with a narrowly bounded control surface for Phase 7C. The phone may change the bot operating mode and request LIVE ARM/DISARM, while all canonical safety checks, provenance rules, preflight gates, elevated task execution, and runtime ownership remain inside the existing Phase 7C services.
+M4-A extends the existing mobile remote-access architecture with a narrowly bounded control surface for Phase 7C. The phone may change operating mode and request LIVE ARM/DISARM, while canonical safety checks, provenance rules, elevated task execution, strategy logic, MT5 ownership, and runtime ownership remain in the existing Phase 7C services.
 
-M4-A is not a second bot-control implementation. It is an authenticated action broker that maps a fixed set of remote actions to existing localhost-only canonical control paths.
+M4-A is an authenticated action broker, not a second bot-control implementation and not a generic API proxy.
 
 ## 2. Approved Remote Actions
 
-The complete remote mutation allowlist is:
+The complete mutation allowlist is exactly:
 
 - `MODE_AUTO`
 - `MODE_SEMI`
@@ -23,411 +23,380 @@ The complete remote mutation allowlist is:
 - `ARM_LIVE`
 - `DISARM_LIVE`
 
-No other mutation is in scope.
+Explicitly out of scope and denied remotely:
 
-Explicitly denied:
-
-- process start/stop/restart
-- lifecycle start/stop
+- process/lifecycle start, stop, restart
 - direct order open/close
 - direct position mutation
-- lot-setting mutation
+- lot/risk-setting mutation
 - account switching
-- arbitrary API paths
-- arbitrary request bodies
+- arbitrary API path/method/body
 - direct MT5 bridge access
-- direct remote access to API port 3711
-- direct remote access to MT5 bridge port 8765
-- Tailscale Funnel
-- public Internet exposure
+- direct remote access to API 3711 or MT5 8765
+- Tailscale Funnel/public Internet exposure
 
-## 3. Existing Canonical Control Paths
+## 3. Canonical Control Paths
 
-M4-A must reuse the current production control paths exactly.
+M4-A must reuse the production paths already used by the local Web control center. It must not choose a shorter path when a stronger canonical guard exists.
 
-### 3.1 Bot mode
+### 3.1 AUTO activation — corrected canonical path
 
-Existing API:
+The local Web control center currently activates AUTO through:
+
+- `GET /api/v1/phase7c-auto-activation/status`
+- `POST /api/v1/phase7c-auto-activation/enable`
+
+`enablePhase7CAutoFromWeb()` evaluates the canonical AUTO activation gates before setting mode AUTO. The checks include:
+
+- control enabled
+- account-mode state valid
+- bot currently PAUSE
+- runtime ready
+- MT5 bridge reachable
+- bridge account matches selected account mode
+- bridge trading enabled
+- terminal trading allowed
+- expert/algo trading allowed
+- zero open XAUUSD positions
+- LIVE ARM satisfied when account mode is LIVE
+
+Only after every canonical AUTO check passes does the service call the bot-mode service with source `web-control-center`.
+
+Therefore `MODE_AUTO` in M4-A must call **only** `POST /api/v1/phase7c-auto-activation/enable`. It must not call `/api/v1/phase7c/bot-mode` directly for AUTO and must not reproduce the AUTO checks inside the gateway.
+
+This correction is stricter than the earlier draft and preserves the actual current local Web safety path.
+
+### 3.2 Non-AUTO mode changes
+
+For `SEMI`, `TREND`, `SIDEWAY`, and `PAUSE`, the canonical mutation path is:
 
 `POST /api/v1/phase7c/bot-mode`
 
-Canonical supported modes are defined in `apps/api/src/services/phase7c-bot-mode.service.ts`:
+The gateway supplies fixed server-side bodies:
 
-- `AUTO`
-- `TREND`
-- `SIDEWAY`
-- `SEMI`
-- `PAUSE`
+```text
+MODE_SEMI    -> { mode: "SEMI",    source: "mobile-control-center" }
+MODE_TREND   -> { mode: "TREND",   source: "mobile-control-center" }
+MODE_SIDEWAY -> { mode: "SIDEWAY", source: "mobile-control-center" }
+MODE_PAUSE   -> { mode: "PAUSE",   source: "mobile-control-center" }
+```
 
-The existing route and service remain authoritative for validation, account-mode checks, audit behavior, and mode persistence.
+The browser cannot choose `source`, canonical path, or arbitrary body fields. Canonical API validation remains authoritative.
 
-`AUTO` already has an additional provenance constraint: activation is accepted only when the canonical source is exactly `web-control-center`. M4-A must not weaken or bypass this rule. For `MODE_AUTO`, the broker must call the canonical bot-mode endpoint using the canonical source value `web-control-center` so the request enters the same accepted control path as the existing manual Web control center.
+### 3.3 LIVE ARM / DISARM
 
-For all non-AUTO modes, M4-A must still rely on the canonical route/service for validity and safety-state enforcement. It must not duplicate the account-mode or PAUSE fallback rules.
-
-### 3.2 LIVE ARM / DISARM
-
-Existing API prefix:
+Canonical API prefix:
 
 `/api/v1/phase7c-live-arm-control`
 
-Existing canonical sequence:
+Required canonical sequence:
 
 1. `GET /capability`
 2. `POST /preflight`
 3. `POST /execute`
 4. `GET /status`
 
-The canonical implementation in `apps/api/src/services/phase7c-live-arm-control.service.ts` remains the only owner of LIVE ARM/DISARM safety logic.
+The existing Phase7C LIVE ARM service remains the only owner of ARM/DISARM safety logic. M4-A must not reimplement, weaken, cache around, short-circuit, or bypass it.
 
-M4-A must not reimplement, weaken, short-circuit, cache around, or bypass any of these checks. In particular, ARM must still require all conditions currently enforced by the canonical service, including runtime readiness, account validity, LIVE selection/authorization, bridge health and account match, PAUSE state where required, zero XAUUSD positions where required, valid bridge session, elevated task availability, no conflicting request, and fresh preflight verification.
-
-The existing 45-second preflight-token TTL and fresh re-evaluation before execute remain authoritative.
+The existing 45-second canonical preflight-token TTL, bridge-session binding, fresh re-evaluation before execute, elevated task ownership, PAUSE requirement where applicable, LIVE authorization, runtime readiness, and zero-position checks remain authoritative.
 
 ## 4. Network Architecture
-
-Approved topology:
 
 ```text
 PHONE
   |
-  | Tailscale tailnet only
-  | HTTPS :8443
+  | Tailscale tailnet only / HTTPS :8443
   v
 M4 SECURE GATEWAY
 127.0.0.1:5791
   |
   +-- GET/HEAD read-only UI traffic --> 127.0.0.1:5717
   |
-  +-- POST /__m4/action -----------> fixed action broker
-                                         |
-                                         +--> canonical API 127.0.0.1:3711
+  +-- bounded /__m4/* action broker --> 127.0.0.1:3711
 ```
 
-Non-negotiable exposure rules:
+Non-negotiable network invariants:
 
-- Tailscale Serve exposes only gateway port `5791` through HTTPS `8443`.
-- Port `5717` remains local web origin and is not directly exposed to the tailnet.
-- Port `3711` remains localhost-only and is never served directly.
-- Port `8765` remains localhost-only and is never served directly.
-- Tailscale Funnel is forbidden.
-- Router/NAT port-forwarding is forbidden.
+- Serve exposes only gateway 5791 through HTTPS 8443.
+- Web 5717 remains localhost-only.
+- API 3711 remains localhost-only.
+- MT5 bridge 8765 remains localhost-only.
+- Funnel remains disabled.
+- No router/NAT port-forward is introduced.
 
-## 5. Gateway Model: Action Broker, Not Generic Proxy
+## 5. Action Broker Model
 
-The mobile client must never submit an arbitrary upstream URL, HTTP method, or canonical request body.
+The phone never sends an upstream URL, canonical method, canonical source value, or canonical request body.
 
-The only mutation entry point is:
+Mutation entry point:
 
 `POST /__m4/action`
 
-Request payload contains a bounded action identifier plus action-specific confirmation fields defined by the gateway contract. The gateway maps the action internally to a fixed canonical endpoint and fixed canonical request shape.
+The gateway maps a bounded action identifier to a fixed internal canonical operation.
 
 Examples:
 
 ```text
 MODE_TREND
-  -> POST http://127.0.0.1:3711/api/v1/phase7c/bot-mode
-  -> { mode: "TREND", source: "mobile-control-center" }
+  -> POST 127.0.0.1:3711/api/v1/phase7c/bot-mode
+  -> fixed { mode:"TREND", source:"mobile-control-center" }
 
 MODE_AUTO
-  -> POST http://127.0.0.1:3711/api/v1/phase7c/bot-mode
-  -> { mode: "AUTO", source: "web-control-center" }
+  -> POST 127.0.0.1:3711/api/v1/phase7c-auto-activation/enable
+  -> fixed {}
 ```
 
-The `MODE_AUTO` source value is intentionally the existing canonical provenance accepted by the current bot-mode service. M4-A does not modify that service contract.
+Unknown actions, unknown fields, arbitrary URL/path/method/source/body fields, lifecycle actions, order actions, position actions, lot actions, and account-switch actions fail closed before any canonical call.
 
-The broker must reject unknown actions fail-closed with no upstream call.
+## 6. Identity and Browser Request Trust
 
-## 6. Identity and Request Trust
+M4-A authorizes mutations using the Tailscale Serve identity header `Tailscale-User-Login` plus exact Origin validation.
 
-M4-A is tailnet-only, but network membership alone is not sufficient authorization for mutations.
+Production requirements:
 
-The gateway must authorize mutations using the Tailscale Serve identity header `Tailscale-User-Login`. Tailscale Serve removes incoming client-supplied Tailscale identity headers before adding its own identity headers for tailnet Serve traffic. The backend therefore trusts `Tailscale-User-Login` only when the request arrives through the localhost-only Serve proxy path.
+- accepted identity must be in an explicit deployment-configured allowlist;
+- missing identity -> reject;
+- identity outside allowlist -> reject;
+- gateway binds exactly `127.0.0.1:5791`;
+- production startup fails closed if mutation capability is enabled with an empty/invalid allowlist;
+- browser mutation Origin must exactly equal deployment configuration;
+- approved current Origin is `https://emlvt-dt-1.taila2e32b.ts.net:8443`;
+- Origin supplements identity; it never replaces identity;
+- client input cannot choose or override trusted identity.
 
-Requirements:
+Tailscale Serve strips client-supplied Tailscale identity headers before adding its trusted headers. The gateway must not forward those identity headers to the Web/API upstreams.
 
-- the accepted `Tailscale-User-Login` value must be configured in an explicit operator allowlist;
-- mutation requests without `Tailscale-User-Login` are rejected;
-- identities not on the explicit allowlist are rejected;
-- the browser cannot select or override the trusted identity value;
-- gateway production bind remains exactly localhost (`127.0.0.1:5791`);
-- direct localhost test mode may use a separate explicit test bypass only in automated tests, never in production defaults;
-- production startup must fail closed if the mutation identity allowlist is empty or invalid while mutation capability is enabled.
+## 7. Confirmation Semantics
 
-The gateway must also restrict browser mutation requests to the exact deployment-configured HTTPS Origin. For the currently approved machine/Serve deployment the expected Origin is:
+### Mode actions
 
-`https://emlvt-dt-1.taila2e32b.ts.net:8443`
+All mode changes use one explicit user confirmation showing current mode, requested mode, and the fact that production bot behavior changes.
 
-The expected Origin is deployment configuration, not client input. Missing or mismatched Origin is rejected for browser mutation requests. Origin checking supplements identity checking; it does not replace it.
+### DISARM_LIVE
 
-## 7. Mutation Confirmation Model
+DISARM uses one user confirmation because it is risk-reducing, but the gateway still performs canonical preflight then canonical execute; no direct state change exists.
 
-### 7.1 Mode changes
+### ARM_LIVE
 
-Mode changes use one explicit confirmation step in the mobile UI.
+ARM uses two visible stages:
 
-The UI must display:
+1. request canonical preflight;
+2. display canonical checks/blocked reasons;
+3. retain the approved canonical token only in gateway memory;
+4. require explicit user ARM confirmation;
+5. execute with the same unexpired canonical token;
+6. poll canonical status by canonical request ID;
+7. report success only when canonical status is `PASS` and final ARM state is correct.
 
-- current mode;
-- requested mode;
-- the fact that this changes production bot behavior;
-- confirmation action.
-
-The gateway then submits the fixed canonical bot-mode request and returns the canonical result.
-
-### 7.2 DISARM_LIVE
-
-DISARM uses one explicit user confirmation because it is risk-reducing. It still goes through canonical `/preflight` and `/execute` rather than a direct state change.
-
-### 7.3 ARM_LIVE
-
-ARM uses a two-stage flow:
-
-1. user requests ARM preflight;
-2. gateway obtains canonical capability/preflight result and presents the canonical blocked/approved state;
-3. only an approved, unexpired canonical preflight token may proceed;
-4. user explicitly confirms ARM;
-5. gateway calls canonical execute with the original token and exact confirmation `ARM_LIVE`;
-6. gateway polls canonical status by request ID;
-7. UI reports ARMED only when canonical status reaches `PASS` and the final canonical arm state is armed.
-
-A local gateway timeout, network error, or ambiguous response must never be displayed as success.
+Timeout, network failure, unknown response, or final-state mismatch is never displayed as success.
 
 ## 8. Gateway API Contract
 
-### 8.1 Read-only mobile UI
+### Read-only compatibility
 
-Existing read-only proxy behavior remains unchanged for approved GET/HEAD UI paths.
+Existing M2/M3 GET/HEAD proxy behavior and `/__m2/health` remain intact.
 
-### 8.2 Action endpoint
+### State
+
+`GET /__m4/state`
+
+Returns only bounded current mobile-control state assembled from fixed canonical read-only calls, including current bot mode, LIVE ARM capability/state, and AUTO activation readiness/status. It is not a generic API proxy.
+
+### Action
 
 `POST /__m4/action`
 
-Base request:
+Mode execute shape:
+
+```json
+{ "action": "MODE_TREND", "confirmation": "MODE_TREND" }
+```
+
+ARM/DISARM preflight:
+
+```json
+{ "action": "ARM_LIVE", "phase": "PREFLIGHT" }
+```
+
+ARM/DISARM execute:
 
 ```json
 {
-  "action": "MODE_TREND"
+  "action": "ARM_LIVE",
+  "phase": "EXECUTE",
+  "transactionId": "gateway-generated-id",
+  "confirmation": "ARM_LIVE"
 }
 ```
 
-For ARM/DISARM flows that require canonical preflight, the gateway must issue a short-lived gateway transaction identifier. The raw canonical preflight token stays server-side and must not be persisted to browser storage or audit logs.
+The canonical preflight token is never returned to the browser.
 
-The browser receives only the bounded information necessary to render confirmation and progress.
+### Status
 
-### 8.3 Status endpoint
+`GET /__m4/status?transactionId=<gateway-generated-id>`
 
-A dedicated bounded read-only endpoint may expose the current action transaction state, but it must not become a generic pass-through to arbitrary canonical status URLs. If implemented, it accepts only gateway-generated transaction/request identifiers and resolves only gateway-owned state.
+This resolves only gateway-owned transaction/status state. It cannot accept arbitrary canonical URLs or request IDs from the browser.
 
 ## 9. Server-side Transaction State
 
-ARM/DISARM transactions require temporary server-side state so canonical preflight tokens do not need to be trusted to browser storage.
+ARM/DISARM pending-confirmation state is:
 
-Transaction state must be:
+- in memory
+- keyed by `crypto.randomUUID()`
+- bound to authenticated identity
+- bound to action
+- single-use for execute
+- expires no later than canonical token TTL
+- invalidated by gateway restart
 
-- in memory by default;
-- short-lived;
-- keyed by a cryptographically random transaction identifier;
-- bound to the authenticated `Tailscale-User-Login` identity;
-- bound to the requested action;
-- single-use for execute;
-- expired no later than the canonical token TTL;
-- deleted on successful execute, explicit rejection, or expiry.
+On execute, the secret-bearing pending record is consumed immediately. The canonical token is deleted. A separate non-secret status record may retain the gateway transaction ID -> canonical request ID mapping for bounded polling, for no more than 10 minutes.
 
-The gateway must not extend the validity of a canonical token.
-
-Gateway restart invalidates pending confirmation transactions. The user must perform a new preflight after restart.
+The gateway never extends canonical token validity.
 
 ## 10. Audit Contract
 
-Every remote mutation attempt must generate a gateway audit event containing only non-secret metadata:
+Every remote mutation attempt records non-secret metadata only:
 
 - timestamp
-- authenticated Tailscale identity
+- Tailscale identity
 - remote action
-- canonical target identifier, not arbitrary URL input
-- observed before-state when available
-- canonical HTTP/result classification
-- observed after-state when available
-- canonical request ID for ARM/DISARM when available
-- gateway transaction ID
-- success/failure/ambiguous outcome
+- fixed canonical target identifier
+- bounded before-state when available
+- result classification
+- bounded after-state when available
+- canonical request ID when available
+- gateway transaction ID when applicable
 
-Never log:
+Never log canonical preflight tokens, authorization values, cookies, sensitive environment values, or full secret-bearing headers.
 
-- canonical preflight tokens
-- authorization tokens
-- cookies
-- sensitive environment values
-- full secret-bearing headers
+Audit failure semantics:
 
-Audit write failure behavior:
-
-- risk-increasing actions (`MODE_AUTO`, `MODE_TREND`, `MODE_SIDEWAY`, `MODE_SEMI`, `ARM_LIVE`) fail closed if mandatory audit persistence cannot be established;
-- risk-reducing actions (`MODE_PAUSE`, `DISARM_LIVE`) remain available even if the audit sink is degraded, while reporting the audit degradation in the response/log channel.
-
-This mirrors the project's existing safety principle that PAUSE/risk reduction should remain reachable under partial failure.
+- risk-increasing `MODE_AUTO`, `MODE_TREND`, `MODE_SIDEWAY`, `MODE_SEMI`, `ARM_LIVE` -> fail closed before mutation if mandatory attempt-audit cannot be persisted;
+- risk-reducing `MODE_PAUSE`, `DISARM_LIVE` -> remain reachable under audit degradation and report `auditDegraded`.
 
 ## 11. Failure Semantics
 
-The gateway must be fail-closed for all risk-increasing actions.
-
-Examples:
-
-- canonical API unreachable -> no success, no retry loop that can duplicate mutation;
-- unknown canonical response -> `AMBIGUOUS`, never assumed success;
-- preflight expired -> require a new preflight;
-- identity missing/mismatch -> 403, no canonical call;
-- invalid Origin -> 403, no canonical call;
+- canonical API unreachable -> no success;
+- mutation POSTs are never automatically retried;
+- unknown/ambiguous canonical result -> `AMBIGUOUS`, not success;
+- expired transaction -> new preflight required;
+- identity/origin mismatch -> 403 and no canonical call;
 - unsupported method -> 405;
-- unsupported action -> fail-closed with no canonical call;
-- upstream timeout -> ambiguous/failure; query canonical read-only state before allowing another user attempt where appropriate;
-- gateway restart during pending ARM -> transaction invalidated, new preflight required.
+- unsupported action/body -> fail closed and no canonical call;
+- gateway restart during pending ARM/DISARM -> transaction lost; new preflight required.
 
-M4-A must not automatically retry canonical mutation POSTs unless idempotence is proven for that exact operation. Read-only status/capability queries may be retried within bounded limits.
+Read-only capability/status calls may have bounded retry behavior, but mutation POSTs do not.
 
-## 12. Mobile UI Requirements
+## 12. Mobile UI
 
-The mobile control page may expose only:
+The existing `/phase7c-mobile` page retains its current read-only operational cards and adds only:
 
 - current mode
 - current LIVE ARM state
-- mode buttons: AUTO / SEMI / TREND / SIDEWAY / PAUSE
-- ARM LIVE
-- DISARM LIVE
-- canonical blocked reasons and progress/status messages
+- AUTO readiness/blocked reason from canonical AUTO activation status
+- AUTO / SEMI / TREND / SIDEWAY / PAUSE buttons
+- ARM LIVE / DISARM LIVE
+- canonical checks, blocked reasons, progress, final status
 
-It must not expose:
+It must not add lifecycle, process, account-switch, lot-setting, order, position-close, or arbitrary API controls.
 
-- lifecycle start/stop
-- process restart
-- account switch
-- lot settings
-- order buttons
-- position-close buttons
-- arbitrary API console
+Risk-increasing actions are visually distinct. ARM clearly states that PAUSE and all canonical safety gates are prerequisites.
 
-Risk-increasing actions must have visually distinct confirmation treatment from read-only information. ARM must clearly show that PAUSE/canonical safety gates are prerequisites, not suggestions.
+## 13. Source Boundaries
 
-## 13. Source Layout
+Implementation is split into focused units under `apps/mobile-gateway`, the existing Web mobile page/client, deployment/preflight/rollback scripts, tests, and CI.
 
-Implementation should remain focused and independently testable.
-
-Expected source areas:
-
-```text
-apps/mobile-gateway/server.mjs
-apps/mobile-gateway/m4-action-broker.mjs
-apps/mobile-gateway/m4-action-broker.test.mjs
-apps/mobile-gateway/server.test.mjs
-scripts/deploy-mobile-gateway-local.ps1
-scripts/preflight-mobile-control-local.ps1
-scripts/rollback-mobile-gateway-local.ps1
-```
-
-Exact filenames may be adjusted during implementation planning to match current repository structure, but the boundaries must remain:
-
-- HTTP/Tailscale-facing gateway concerns;
-- fixed action mapping;
-- canonical API client/control flow;
-- audit/transaction state;
-- deployment/preflight/rollback scripts.
-
-No M4 implementation belongs in MT5 bridge code or strategy logic.
+No M4 implementation belongs in strategy-engine, MT5 bridge logic, Phase7C execution logic, lifecycle service, account switching, lot settings, or order/position code.
 
 ## 14. TDD Acceptance Matrix
 
-Implementation must begin with failing tests proving the desired security contract.
+Before implementation turns GREEN, tests must prove:
 
-### Action allowlist
+### Allowlist and generic-proxy denial
 
-- all seven approved actions are recognized;
-- unknown action rejected;
-- arbitrary URL/path/body cannot be supplied;
-- lifecycle actions rejected;
-- order/position mutation actions rejected.
+- exactly seven actions accepted;
+- unknown/lifecycle/order/position/lot/account actions rejected;
+- custom URL/path/method/source/body fields rejected.
 
 ### Identity/origin
 
 - missing identity rejected;
 - unauthorized identity rejected;
 - authorized identity accepted;
-- spoofed client identity cannot override the Serve-provided identity;
-- invalid/missing Origin rejected for browser mutations;
-- production gateway remains localhost-only.
+- invalid/missing Origin rejected for mutations;
+- production bind remains localhost-only.
 
 ### Mode mapping
 
-- each mode maps to the exact canonical endpoint and mode value;
-- AUTO maps to canonical source `web-control-center`;
-- no mode request can select a custom source/body/path;
-- canonical rejection is propagated as failure, not converted to success.
+- `MODE_AUTO` calls only `/api/v1/phase7c-auto-activation/enable`;
+- AUTO readiness comes from `/api/v1/phase7c-auto-activation/status`;
+- AUTO never calls `/api/v1/phase7c/bot-mode` directly;
+- SEMI/TREND/SIDEWAY/PAUSE call exact `/api/v1/phase7c/bot-mode` with fixed mode/source;
+- canonical rejection propagates as failure.
 
 ### ARM/DISARM
 
-- capability/preflight occur before execute;
-- execute cannot occur without approved fresh canonical preflight;
-- action/token mismatch rejected;
-- expired transaction rejected;
-- transaction identity mismatch rejected;
-- transaction is single-use;
-- bridge/session drift rejection from canonical service is propagated;
-- ARM success is shown only after canonical PASS status;
-- timeout/ambiguous status never reported as ARMED;
-- DISARM uses canonical preflight/execute flow.
+- capability/preflight precede execute;
+- raw canonical token never reaches browser/audit;
+- wrong identity/action/confirmation, missing/expired/used transaction rejected;
+- transaction single-use;
+- canonical bridge/session drift rejection propagated;
+- success shown only after canonical PASS plus correct final state;
+- ambiguous/timeout never shown as success;
+- DISARM still uses preflight/execute.
 
 ### HTTP surface
 
-- existing GET/HEAD read-only proxy still works;
-- mutation endpoint accepts POST only;
-- PUT/PATCH/DELETE/OPTIONS mutation attempts rejected;
-- direct `/api` proxying remains blocked;
-- direct proxy to 3711/8765 impossible from mobile path.
+- current M2 GET/HEAD proxy remains GREEN;
+- `/__m4/action` accepts POST only;
+- other mutation methods rejected;
+- `/api` mutation proxy unavailable;
+- 3711/8765 cannot be selected by browser input.
 
 ### Audit
 
-- allowed mutation attempt produces non-secret audit metadata;
-- preflight token never appears in audit;
-- risk-increasing action fails closed when mandatory audit sink fails;
-- PAUSE/DISARM remain risk-reduction reachable under audit degradation.
+- non-secret attempt/result metadata written;
+- tokens absent from audit;
+- risk-increasing actions fail closed if mandatory attempt-audit fails;
+- PAUSE/DISARM remain available under audit degradation.
 
 ## 15. CI Gates
 
-Before merge, CI must prove at minimum:
+CI must prove:
 
-- mobile-gateway unit tests green;
-- security/action-broker tests green;
-- existing gateway read-only tests remain green;
-- API/strategy tests unaffected;
-- build/lint/typecheck appropriate to touched packages green;
-- no secret material added;
-- diff contains no direct exposure of ports 3711 or 8765;
-- diff contains no Funnel enablement;
-- diff contains no lifecycle/order/position remote mutation path.
+- mobile-gateway unit/security tests GREEN;
+- M2 read-only regression GREEN;
+- Web mobile client tests GREEN;
+- Web build GREEN;
+- API build GREEN without API source changes;
+- no secrets;
+- no direct 3711/8765 exposure;
+- no Funnel enablement;
+- no lifecycle/order/position remote mutation path.
 
-## 16. Production Rollout Sequence
+## 16. Production Rollout
 
-Production rollout is a separate gated phase after source merge and CI.
+Rollout is separate from source implementation and occurs only after merge/CI/review.
 
-Required order:
+Required sequence:
 
 1. read-only source/runtime preflight;
-2. prove deployed source equals merged accepted source;
-3. prove existing Tailscale Serve remains tailnet-only;
-4. deploy gateway source only;
-5. start/reload only the gateway component through its canonical deployment mechanism;
-6. local acceptance against `127.0.0.1:5791` with mutation tests directed at safe conditions;
-7. tailnet/mobile acceptance;
-8. verify 3711 and 8765 remain unexposed;
-9. verify Funnel remains disabled;
-10. record final source/runtime attestation.
+2. prove local accepted source equals merged source;
+3. prove current M3 gateway/task/Serve/Funnel/port isolation;
+4. backup current gateway bundle;
+5. stage accepted gateway source + non-secret config;
+6. stop/start only the exact mobile-gateway Scheduled Task;
+7. local security acceptance;
+8. mobile/tailnet acceptance;
+9. verify 3711/8765 still localhost-only and Funnel false;
+10. functional control acceptance only in explicit safe operator window;
+11. final source/runtime attestation.
 
-No rollout step may restart MT5, strategy executors, or Phase 7C lifecycle merely to activate M4.
+No rollout step restarts Tailscale, MT5, API, Phase7C lifecycle, broker, strategy executors, or Windows unless a new separately approved recovery task is created.
 
-## 17. Production Mutation Boundaries
+## 17. Source/Runtime Mutation Boundaries
 
-During source implementation, tests, CI, review, and merge:
+During implementation/tests/CI/review/merge:
 
 ```text
 BOT_MUTATION=NONE
@@ -438,58 +407,41 @@ POSITION_MUTATION=NONE
 LIVE_TEST_ORDER=NONE
 ```
 
-During later M4 production rollout, the only allowed infrastructure mutation is the explicitly approved mobile-gateway deployment/reload and Tailscale Serve configuration if required by that rollout plan.
+During rollout, only gateway files/config and the exact mobile-gateway task runtime may change.
 
-Actual functional control mutations (mode or ARM/DISARM) are performed only during an explicit operator acceptance step and must use safe, predeclared test state. No order is opened solely to test M4.
+Functional mode/ARM actions occur only in a separately announced acceptance step. No order is opened solely for M4-A testing.
 
 ## 18. Rollback
 
-Rollback must be possible without touching bot/MT5/Phase7C runtime:
+Rollback restores the previous read-only gateway bundle/config and reloads only the gateway task. It must preserve tailnet-only read access when safe and must not restart API/MT5/Phase7C processes.
 
-- disable/remove M4 mutation surface;
-- restore previous read-only gateway source/config;
-- preserve tailnet-only read-only access when safe;
-- do not restart API/MT5/strategy processes as part of gateway rollback;
-- verify ports 3711/8765 remain localhost-only;
-- verify Funnel remains disabled.
-
-If control behavior becomes ambiguous, safest operational fallback is to remove the remote mutation surface and continue using the canonical local Web control center.
+If control behavior is ambiguous, remove the remote mutation surface and fall back to the canonical local Web control center.
 
 ## 19. Non-goals
 
-M4-A does not introduce:
-
-- remote lifecycle management;
-- trading commands;
-- copy trading;
-- account switching;
-- lot/risk-setting editing;
-- mobile strategy configuration;
-- public web access;
-- a replacement for existing Web/Telegram control semantics;
-- a new ARM implementation.
+M4-A does not add remote lifecycle management, trading commands, copy trading, account switching, lot/risk editing, strategy editing, public access, a replacement for Web/Telegram semantics, or a new ARM/AUTO safety implementation.
 
 ## 20. Definition of Done
 
-M4-A is complete only when all of the following are proven:
+M4-A is complete only when:
 
-1. Phone can use the seven approved actions through Tailscale HTTPS only.
-2. No arbitrary upstream API request can be formed by the client.
-3. `Tailscale-User-Login` allowlist and exact Origin checks are enforced.
-4. AUTO still satisfies existing canonical provenance enforcement without weakening API rules.
-5. ARM/DISARM traverse the full canonical capability/preflight/execute/status flow.
-6. ARM cannot bypass PAUSE or any other canonical safety gate.
-7. No process/lifecycle/order/position/account/lot mutation is remotely reachable.
+1. Phone can use exactly seven approved actions through Tailscale HTTPS.
+2. Client cannot form arbitrary upstream requests.
+3. Identity allowlist and exact Origin checks are enforced.
+4. AUTO traverses the same canonical AUTO activation service as the current local Web control center.
+5. ARM/DISARM traverse full canonical capability/preflight/execute/status.
+6. No ARM safety gate is weakened.
+7. No lifecycle/order/position/account/lot mutation is remotely reachable.
 8. Ports 3711 and 8765 remain localhost-only.
 9. Funnel remains disabled.
-10. Audit contains sufficient operator/action/outcome provenance without secrets.
+10. Audit is sufficient and secret-free.
 11. TDD/CI pass.
 12. Merged source, deployed source, and runtime attestation match.
-13. Rollback is tested and does not require bot/MT5/Phase7C restart.
+13. Gateway-only rollback is proven.
 
-## 21. Spec Self-review Record
+## 21. Self-review Record
 
-- Placeholder scan: PASS — no TBD/TODO requirements remain.
-- Internal consistency: PASS — network exposure, action allowlist, canonical control ownership, and rollback constraints align.
-- Scope check: PASS — one bounded subsystem, suitable for one implementation plan.
-- Ambiguity check: PASS — trusted identity header, expected Origin, ARM transaction handling, and canonical ownership are explicit.
+- Placeholder scan: PASS.
+- Internal consistency: PASS after correcting AUTO to the canonical `/phase7c-auto-activation/enable` path used by the existing Web control center.
+- Scope check: PASS — one mobile secure-control subsystem.
+- Ambiguity check: PASS — exact actions, trusted identity header, Origin, AUTO path, ARM transaction/token handling, network boundaries, and rollback are explicit.
