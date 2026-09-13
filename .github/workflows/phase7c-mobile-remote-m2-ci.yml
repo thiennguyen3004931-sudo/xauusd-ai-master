@@ -9,6 +9,7 @@ on:
       - "scripts/start-phase7c-mobile-remote-tailscale-local.ps1"
       - "scripts/stop-phase7c-mobile-remote-tailscale-local.ps1"
       - "scripts/test-phase7c-mobile-remote-m2.mjs"
+      - "scripts/test-phase7c-mobile-readonly-gateway-behavior.mjs"
       - ".github/workflows/phase7c-mobile-remote-m2-ci.yml"
 
 permissions:
@@ -24,6 +25,9 @@ jobs:
 
       - name: Mobile remote M2 source contract
         run: node scripts/test-phase7c-mobile-remote-m2.mjs
+
+      - name: Mobile read-only gateway behavior
+        run: node scripts/test-phase7c-mobile-readonly-gateway-behavior.mjs
 
   powershell-parse:
     runs-on: windows-latest
