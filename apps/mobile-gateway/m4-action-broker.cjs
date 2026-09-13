@@ -28,6 +28,7 @@ function sanitizePreflight(preflight) {
 function createM4ActionBroker({ canonical, transactions, audit, now = Date.now } = {}) {
   if (!canonical) throw new Error("CANONICAL_CLIENT_REQUIRED");
   if (!transactions) throw new Error("TRANSACTION_STORE_REQUIRED");
+  if (!audit || (!audit.append && !audit.before && !audit.after)) throw new Error("AUDIT_SINK_REQUIRED");
 
   async function writeAudit(event, phase, mandatory) {
     const fullEvent = {
@@ -41,13 +42,18 @@ function createM4ActionBroker({ canonical, transactions, audit, now = Date.now }
       ...(event.requestId ? { requestId: event.requestId } : {}),
     };
     try {
-      if (audit?.append) {
+      let handled = false;
+      if (audit.append) {
+        handled = true;
         await audit.append(fullEvent);
-      } else if (phase === "ATTEMPT" && audit?.before) {
+      } else if (phase === "ATTEMPT" && audit.before) {
+        handled = true;
         await audit.before(fullEvent);
-      } else if (phase === "RESULT" && audit?.after) {
+      } else if (phase === "RESULT" && audit.after) {
+        handled = true;
         await audit.after(fullEvent);
       }
+      if (!handled) throw new Error("AUDIT_HANDLER_UNAVAILABLE");
       return true;
     } catch (error) {
       if (mandatory) throw error;
