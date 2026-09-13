@@ -31,6 +31,7 @@ function forbid(content, pattern, label) {
 const gateway = readRequired("scripts/run-phase7c-mobile-readonly-gateway.mjs");
 const start = readRequired("scripts/start-phase7c-mobile-remote-tailscale-local.ps1");
 const stop = readRequired("scripts/stop-phase7c-mobile-remote-tailscale-local.ps1");
+const preflight = readRequired("scripts/preflight-phase7c-mobile-remote-m2-production-readonly-local.ps1");
 
 requireText(gateway, 'const BIND_HOST = "127.0.0.1"', "loopback-only gateway bind");
 requireText(gateway, 'new Set(["GET", "HEAD"])', "GET/HEAD-only method gate");
@@ -85,6 +86,67 @@ forbid(stop, /\bserve\s+reset\b/i, "rollback must not reset unrelated Serve conf
 forbid(stop, /\bfunnel\b/i, "rollback must never manage Funnel");
 forbid(stop, /Start-ScheduledTask|Stop-ScheduledTask|Set-ScheduledTask|Register-ScheduledTask|Unregister-ScheduledTask/i, "rollback must not mutate canonical scheduled tasks");
 forbid(stop, /taskkill\.exe|run-phase7c-executors|trend-executor|sideway-executor/i, "rollback must not touch trading processes");
+
+for (const invariant of [
+  "READ_ONLY=TRUE",
+  "HTTP_METHODS=GET_ONLY",
+  "TAILSCALE_SERVE_MUTATION=NONE",
+  "TAILSCALE_FUNNEL_MUTATION=NONE",
+  "GATEWAY_START_STOP=NONE",
+  "FIREWALL_MUTATION=NONE",
+  "TASK_MUTATION=NONE",
+  "PROCESS_MUTATION=NONE",
+  "BOT_RESTART=NONE",
+  "WEB_RESTART=NONE",
+  "API_RESTART=NONE",
+  "MT5_RESTART=NONE",
+  "MODE_MUTATION=NONE",
+  "ARM_MUTATION=NONE",
+  "ORDER_MUTATION=NONE",
+  "POSITION_MUTATION=NONE",
+  "SL_TP_MUTATION=NONE",
+  "LIVE_TEST_ORDER=NONE",
+]) {
+  requireText(preflight, invariant, `preflight safety invariant ${invariant}`);
+}
+
+for (const outputToken of [
+  "PHASE7C_MOBILE_REMOTE_M2_PRODUCTION_PREFLIGHT=",
+  "READY_FOR_M2_ACTIVATION=",
+  "SOURCE_ATTESTATION=",
+  "LOCAL_MOBILE_WEB=",
+  "READONLY_API_SET=",
+  "TAILSCALE_BACKEND=",
+  "SERVE_8443=",
+  "GATEWAY_5791=",
+  "PUBLIC_FUNNEL=",
+]) {
+  requireText(preflight, outputToken, `preflight output ${outputToken}`);
+}
+
+requireText(preflight, "127.0.0.1", "preflight loopback-only probes");
+requireText(preflight, "5717", "local Web port");
+requireText(preflight, "5791", "local gateway port");
+requireText(preflight, "8443", "private Serve HTTPS port");
+requireText(preflight, "/phase7c-mobile", "mobile page probe");
+requireText(preflight, "/api/v1/phase7c/runtime-source-attestation", "runtime source attestation probe");
+requireText(preflight, "status --json", "Tailscale backend read-only status");
+requireText(preflight, "serve status --json", "Tailscale Serve read-only status");
+requireText(preflight, "funnel status --json", "Tailscale Funnel read-only status");
+requireText(preflight, "Test-ServePortConfigured", "semantic Serve port parser");
+requireText(preflight, "Test-FunnelEnabled", "semantic Funnel parser");
+requireText(preflight, "AllowFunnel", "Tailscale Funnel enablement field");
+requireText(preflight, "-Method Get", "GET-only HTTP probe implementation");
+
+forbid(preflight, /Test-JsonHasData/, "generic non-empty JSON must not be treated as Funnel enablement");
+forbid(preflight, /\.IndexOf\(\$servePortToken/, "Serve collision must not be inferred from arbitrary JSON text");
+forbid(preflight, /-Method\s+(Post|Put|Patch|Delete)\b/i, "preflight must never use mutating HTTP methods");
+forbid(preflight, /\bserve\s+reset\b/i, "preflight must never reset Serve");
+forbid(preflight, /\bserve\b[^\r\n]*(--bg|\boff\b)/i, "preflight must never mutate Serve");
+forbid(preflight, /\bfunnel\b[^\r\n]*(--bg|\bon\b|\boff\b)/i, "preflight must never mutate Funnel");
+forbid(preflight, /Start-Process|Stop-Process|Start-ScheduledTask|Stop-ScheduledTask|Set-ScheduledTask|Register-ScheduledTask|Unregister-ScheduledTask/i, "preflight must not mutate processes or tasks");
+forbid(preflight, /taskkill\.exe|netsh\b[^\r\n]*firewall|New-NetFirewallRule|Set-NetFirewallRule|Remove-NetFirewallRule/i, "preflight must not kill processes or mutate firewall");
+forbid(preflight, /run-phase7c-executors|trend-executor|sideway-executor/i, "preflight must not touch trading executors");
 
 console.log("PHASE7C_MOBILE_REMOTE_M2_SOURCE_CONTRACT=PASS");
 console.log("TAILSCALE_SCOPE=TAILNET_ONLY");
