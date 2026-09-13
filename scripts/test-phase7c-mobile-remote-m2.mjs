@@ -16,6 +16,14 @@ function requireText(content, needle, label) {
   if (!content.includes(needle)) throw new Error(`M2 contract missing ${label}: ${needle}`);
 }
 
+function requireOrder(content, first, second, label) {
+  const firstIndex = content.indexOf(first);
+  const secondIndex = content.indexOf(second);
+  if (firstIndex < 0 || secondIndex < 0 || firstIndex >= secondIndex) {
+    throw new Error(`M2 contract ordering violation: ${label}`);
+  }
+}
+
 function forbid(content, pattern, label) {
   if (pattern.test(content)) throw new Error(`M2 safety violation: ${label}`);
 }
@@ -61,10 +69,18 @@ forbid(start, /0\.0\.0\.0/, "start script must never expose wildcard bind");
 forbid(start, /Start-ScheduledTask|Stop-ScheduledTask|Set-ScheduledTask|Register-ScheduledTask|Unregister-ScheduledTask/i, "start script must not mutate canonical scheduled tasks");
 forbid(start, /taskkill\.exe|run-phase7c-executors|trend-executor|sideway-executor/i, "start script must not touch trading processes");
 
+requireText(stop, "serve status --json", "rollback Serve ownership preflight");
+requireText(stop, "PHASE7C_MOBILE_REMOTE_M2_SERVE_OWNERSHIP=PASS", "rollback Serve ownership proof");
 requireText(stop, "serve", "targeted Tailscale Serve disable");
 requireText(stop, "--https=", "targeted remote HTTPS listener disable");
 requireText(stop, "off", "Serve disable action");
 requireText(stop, "run-phase7c-mobile-readonly-gateway.mjs", "owned gateway process provenance guard");
+requireOrder(
+  stop,
+  "PHASE7C_MOBILE_REMOTE_M2_SERVE_OWNERSHIP=PASS",
+  "& $tailscale.Source serve $httpsArg off",
+  "Serve ownership must be proven before targeted disable",
+);
 forbid(stop, /\bserve\s+reset\b/i, "rollback must not reset unrelated Serve configuration");
 forbid(stop, /\bfunnel\b/i, "rollback must never manage Funnel");
 forbid(stop, /Start-ScheduledTask|Stop-ScheduledTask|Set-ScheduledTask|Register-ScheduledTask|Unregister-ScheduledTask/i, "rollback must not mutate canonical scheduled tasks");
