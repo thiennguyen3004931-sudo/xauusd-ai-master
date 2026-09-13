@@ -4,56 +4,54 @@
 
 **Goal:** Add a tailnet-only mobile action broker that allows exactly AUTO / SEMI / TREND / SIDEWAY / PAUSE and canonical LIVE ARM / DISARM from the existing Phase7C mobile page without exposing API 3711, MT5 bridge 8765, lifecycle controls, or arbitrary mutation paths.
 
-**Architecture:** Add a new `@xauusd/mobile-gateway` workspace that preserves the existing M2/M3 read-only proxy on `127.0.0.1:5791` and introduces only bounded `/__m4/*` endpoints. The gateway authenticates `Tailscale-User-Login`, validates the exact HTTPS Origin, maps seven fixed actions to localhost-only canonical Phase7C APIs, keeps ARM/DISARM preflight tokens server-side, and records non-secret audit events. The existing React mobile page calls same-origin `/__m4/*`; it never calls `127.0.0.1:3711` directly for mutation.
+**Architecture:** Add a new `@xauusd/mobile-gateway` workspace that preserves the accepted M2/M3 read-only proxy on `127.0.0.1:5791` and introduces only bounded `/__m4/*` endpoints. The gateway authenticates `Tailscale-User-Login`, validates the exact HTTPS Origin, maps seven fixed actions to canonical localhost-only Phase7C control paths, keeps ARM/DISARM preflight tokens only in server memory, and records non-secret audit events. `MODE_AUTO` must use the same canonical AUTO activation service as the current Web control center (`/api/v1/phase7c-auto-activation/enable`); it must never call `/api/v1/phase7c/bot-mode` directly. The React mobile page calls only same-origin `/__m4/*` for mutation.
 
-**Tech Stack:** Node.js 24 runtime for Windows gateway, CommonJS runtime modules, Vitest 2.1.x, React 19, MUI 7, TanStack Query 5, TypeScript 6 for Web, pnpm 10.18.0, Turbo 2.x, PowerShell 5+/7 for local deployment scripts, GitHub Actions.
+**Tech Stack:** Node.js 24, CommonJS runtime modules for the Windows gateway, Vitest 2.1.x, React 19, MUI 7, TanStack Query 5, TypeScript 6 for Web, pnpm 10.18.0, Turbo 2.x, PowerShell 5+/7, GitHub Actions.
 
 **Spec:** `docs/superpowers/specs/2026-09-13-mobile-secure-control-m4a-design.md`
 
 ## Global Constraints
 
 - Approved mutation allowlist is exactly `MODE_AUTO`, `MODE_SEMI`, `MODE_TREND`, `MODE_SIDEWAY`, `MODE_PAUSE`, `ARM_LIVE`, `DISARM_LIVE`.
-- `AUTO` must reach canonical bot-mode logic with source exactly `web-control-center`; do not weaken `isPhase7CAutoActivationSourceAllowed()`.
-- Other mode actions use fixed source `mobile-control-center`; client input may not choose source/path/body.
+- `MODE_AUTO` calls only `POST /api/v1/phase7c-auto-activation/enable`; AUTO readiness is read from `GET /api/v1/phase7c-auto-activation/status`.
+- `MODE_AUTO` must never call `/api/v1/phase7c/bot-mode` directly and must not duplicate AUTO safety checks in the gateway.
+- `MODE_SEMI`, `MODE_TREND`, `MODE_SIDEWAY`, and `MODE_PAUSE` call `POST /api/v1/phase7c/bot-mode` with fixed server-side source `mobile-control-center`.
 - LIVE ARM/DISARM must reuse `/api/v1/phase7c-live-arm-control/{capability,preflight,execute,status}` and never reimplement canonical safety logic.
-- ARM remains gated by the canonical PAUSE/runtime/account/bridge/authorization/zero-position/session checks and fresh canonical re-evaluation.
-- Canonical preflight tokens never leave gateway memory and never appear in browser storage, audit, response bodies, or logs.
-- Mutation authorization requires the exact Tailscale Serve header `Tailscale-User-Login` and the deployment-configured exact Origin.
+- Canonical ARM preflight tokens never leave gateway memory and never appear in browser storage, response bodies, audit, or logs.
+- Mutation authorization requires exact `Tailscale-User-Login` allowlist membership and exact deployment-configured HTTPS Origin.
 - Gateway production bind remains exactly `127.0.0.1:5791`.
 - Web remains `127.0.0.1:5717`; API remains `127.0.0.1:3711`; MT5 bridge remains `127.0.0.1:8765`.
-- Tailscale Funnel and router/NAT port forwarding are forbidden.
-- Remote lifecycle start/stop/restart, account switch, lot settings, order entry/close, position mutation, and arbitrary API proxying are forbidden.
+- Tailscale Funnel and router/NAT port forwarding remain forbidden.
+- Remote lifecycle start/stop/restart, account switch, lot settings, order entry/close, position mutation, and arbitrary API proxying remain forbidden.
 - Source implementation/CI/review must keep `BOT_MUTATION=NONE`, `MT5_MUTATION=NONE`, `PHASE7C_RUNTIME_MUTATION=NONE`, `ORDER_MUTATION=NONE`, `POSITION_MUTATION=NONE`, `LIVE_TEST_ORDER=NONE`.
-- Production rollout is a separate gated phase after merge; only the mobile gateway task/source/config may be mutated during rollout.
+- Production rollout is a separate gated phase after merge; only the mobile gateway files/config and exact mobile-gateway task runtime may change during rollout.
 - No order is opened solely to test M4-A.
 
 ## File Structure
 
-Create a focused gateway workspace rather than placing security logic in one large `gateway.js`.
-
 - `apps/mobile-gateway/package.json` — workspace scripts and Vitest dependency.
-- `apps/mobile-gateway/gateway.js` — production entry point; loads config and starts localhost HTTP server.
-- `apps/mobile-gateway/server.cjs` — HTTP routing, identity/origin enforcement, existing GET/HEAD read-only proxy, M4 endpoints.
-- `apps/mobile-gateway/m4-contract.cjs` — immutable action enum, risk classification, canonical mode mappings, strict request parsing.
-- `apps/mobile-gateway/canonical-client.cjs` — fixed localhost API calls only; no caller-provided upstream URL/method.
-- `apps/mobile-gateway/transaction-store.cjs` — in-memory ARM/DISARM transaction lifecycle and TTL enforcement.
-- `apps/mobile-gateway/audit.cjs` — append-only JSONL audit with secret-field exclusion.
-- `apps/mobile-gateway/m4-action-broker.cjs` — mode and ARM/DISARM orchestration; dependency-injected client/audit/store for tests.
-- `apps/mobile-gateway/gateway.config.example.json` — non-secret config schema only.
-- `apps/mobile-gateway/test/*.test.mjs` — action, ARM transaction, HTTP surface, audit, and M2 compatibility tests.
-- `apps/web/src/mobile-m4-control.ts` — same-origin browser client and TypeScript response types.
-- `apps/web/src/mobile-m4-control.test.ts` — pure request/response/client contract tests with injected fetch.
-- `apps/web/src/pages/Phase7CMobileReadOnlyPage.tsx` — add bounded mode + ARM/DISARM UI to existing mobile page.
-- `apps/web/package.json` / `pnpm-lock.yaml` — add Web Vitest test script/dependency if not already present and register the new workspace importer.
+- `apps/mobile-gateway/gateway.js` — production entry point; loads config and starts localhost server.
+- `apps/mobile-gateway/server.cjs` — HTTP routing, identity/origin checks, existing M2 GET/HEAD proxy, bounded M4 endpoints.
+- `apps/mobile-gateway/m4-contract.cjs` — immutable action enum, risk classification, strict body parsing.
+- `apps/mobile-gateway/canonical-client.cjs` — fixed canonical localhost calls; exports no generic request primitive.
+- `apps/mobile-gateway/transaction-store.cjs` — in-memory ARM/DISARM secret transaction + non-secret status lifecycle.
+- `apps/mobile-gateway/audit.cjs` — append-only JSONL audit with secret exclusion.
+- `apps/mobile-gateway/m4-action-broker.cjs` — mode/AUTO/ARM/DISARM orchestration.
+- `apps/mobile-gateway/gateway.config.example.json` — non-secret schema example.
+- `apps/mobile-gateway/test/*.test.mjs` — M2 regression, contract, client, transactions, audit, HTTP security.
+- `apps/web/src/mobile-m4-control.ts` — same-origin browser client.
+- `apps/web/src/mobile-m4-control.test.ts` — browser client contract tests.
+- `apps/web/src/pages/Phase7CMobileReadOnlyPage.tsx` — preserve current read-only cards and add bounded M4 controls.
+- `apps/web/package.json` / `pnpm-lock.yaml` — Web test command/dependency and new workspace lock importer.
+- `scripts/test-phase7c-mobile-m4a-source-contract.mjs` — static forbidden-surface/source assertions.
 - `scripts/preflight-phase7c-mobile-m4a-local.ps1` — read-only production preflight.
-- `scripts/deploy-phase7c-mobile-m4a-local.ps1` — bounded gateway-only deployment/handoff.
-- `scripts/rollback-phase7c-mobile-m4a-local.ps1` — restore previous gateway bundle only.
-- `scripts/test-phase7c-mobile-m4a-source-contract.mjs` — static forbidden-surface/security assertions.
-- `.github/workflows/phase7c-mobile-secure-control-m4a-ci.yml` — dedicated tests/build/security contract.
+- `scripts/deploy-phase7c-mobile-m4a-local.ps1` — gateway-only bounded deployment.
+- `scripts/rollback-phase7c-mobile-m4a-local.ps1` — gateway-only rollback.
+- `.github/workflows/phase7c-mobile-secure-control-m4a-ci.yml` — dedicated CI.
 
 ---
 
-### Task 1: Canonicalize the existing mobile gateway as a tested workspace
+### Task 1: Canonicalize the accepted M2/M3 gateway as a tested workspace
 
 **Files:**
 - Create: `apps/mobile-gateway/package.json`
@@ -64,10 +62,10 @@ Create a focused gateway workspace rather than placing security logic in one lar
 - Modify: `pnpm-lock.yaml`
 
 **Interfaces:**
-- Consumes: config `{ listenHost, listenPort, webOrigin, apiOrigin, allowedUsers, allowedOrigin, auditPath }`.
-- Produces: `createMobileGatewayServer({ config, broker, fetchImpl })` and the existing M2 routes/semantics: `GET /__m2/health`, GET/HEAD web proxy, app-route identity requirement, non-read-only methods denied unless explicitly owned by M4.
+- Consumes config `{ listenHost, listenPort, webOrigin, apiOrigin, allowedUsers, allowedOrigin, auditPath }`.
+- Produces `createMobileGatewayServer({ config, broker, fetchImpl })` and preserves accepted M2 behavior: `GET /__m2/health`, authenticated GET/HEAD proxy to Web, denial of non-read-only methods unless an exact M4 route owns them.
 
-- [ ] **Step 1: Add workspace package with tests but no production implementation yet**
+- [ ] **Step 1: Add workspace metadata**
 
 Create `apps/mobile-gateway/package.json`:
 
@@ -87,11 +85,17 @@ Create `apps/mobile-gateway/package.json`:
 }
 ```
 
-Run `pnpm install --lockfile-only` so `pnpm-lock.yaml` contains an `apps/mobile-gateway` importer.
+Run:
 
-- [ ] **Step 2: Write RED tests for the accepted M2/M3 behavior**
+```bash
+pnpm install --lockfile-only
+```
 
-Use ephemeral upstream servers and `createMobileGatewayServer()` in `server-readonly.test.mjs`. Require:
+Expected: `pnpm-lock.yaml` gains an `apps/mobile-gateway` importer without unrelated dependency churn.
+
+- [ ] **Step 2: Write failing M2/M3 regression tests**
+
+Use an ephemeral Web upstream and require:
 
 ```js
 expect(await request("GET", "/__m2/health")).toMatchObject({ status: 200 });
@@ -101,50 +105,34 @@ expect(await request("GET", "/phase7c-mobile")).toMatchObject({ status: 403 });
 expect(await request("POST", "/phase7c-mobile", trustedHeaders)).toMatchObject({ status: 405 });
 ```
 
-Also assert `server.address().address === "127.0.0.1"` when using production config.
+Also assert production config accepts only `listenHost: "127.0.0.1"`.
 
-- [ ] **Step 3: Run RED**
+- [ ] **Step 3: Verify RED**
 
 ```bash
 pnpm --filter @xauusd/mobile-gateway test
 ```
 
-Expected: FAIL because `server.cjs` / `createMobileGatewayServer` does not exist yet.
+Expected: FAIL because the canonical workspace/server implementation is not present yet.
 
-- [ ] **Step 4: Implement only the read-only baseline**
+- [ ] **Step 4: Implement only accepted read-only behavior**
 
-`server.cjs` must:
+`server.cjs` uses Node `http`, serves `/__m2/health`, proxies only GET/HEAD to fixed `webOrigin`, requires `tailscale-user-login` for proxied application routes, strips hop-by-hop and Tailscale identity headers before upstream forwarding, and rejects other methods with 405.
 
-```js
-const http = require("node:http");
-
-function isReadOnly(method) {
-  return method === "GET" || method === "HEAD";
-}
-
-function identity(req) {
-  return String(req.headers["tailscale-user-login"] ?? "").trim().toLowerCase();
-}
-```
-
-Implement `/__m2/health` locally; proxy approved GET/HEAD requests to `webOrigin`; require configured identity for proxied application routes; reject other methods with 405. Strip hop-by-hop headers and do not forward Tailscale identity headers to the Web upstream.
-
-`gateway.js` loads machine config from:
+`gateway.js` loads runtime config from:
 
 ```text
 C:\ProgramData\XAUUSD-AI-MASTER\mobile-readonly-gateway\gateway.config.json
 ```
 
-and refuses production startup if `listenHost !== "127.0.0.1"`.
+Production startup must throw if `listenHost !== "127.0.0.1"`.
 
-- [ ] **Step 5: Run GREEN and syntax checks**
+- [ ] **Step 5: Verify GREEN**
 
 ```bash
 pnpm --filter @xauusd/mobile-gateway test
 pnpm --filter @xauusd/mobile-gateway build
 ```
-
-Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -155,20 +143,20 @@ git commit -m "feat: canonicalize mobile gateway source"
 
 ---
 
-### Task 2: Add the fixed M4 action contract and canonical localhost client
+### Task 2: Add the fixed M4 contract and canonical localhost client
 
 **Files:**
 - Create: `apps/mobile-gateway/m4-contract.cjs`
 - Create: `apps/mobile-gateway/canonical-client.cjs`
 - Create: `apps/mobile-gateway/test/m4-contract.test.mjs`
 - Create: `apps/mobile-gateway/test/canonical-client.test.mjs`
-- Modify: `apps/mobile-gateway/package.json` build/lint scripts to syntax-check new runtime files.
+- Modify: `apps/mobile-gateway/package.json`
 
 **Interfaces:**
-- Produces `REMOTE_ACTIONS`, `parseModeActionBody(input)`, `parseArmBody(input)`, `isRiskIncreasing(action)`.
-- Produces `createCanonicalClient({ apiOrigin, fetchImpl, timeoutMs })` with only fixed methods: `getBotMode`, `setBotMode`, `getArmCapability`, `createArmPreflight`, `executeArm`, `getArmStatus`.
+- Produces `REMOTE_ACTIONS`, `parseActionBody(input)`, `isRiskIncreasing(action)`.
+- Produces `createCanonicalClient({ apiOrigin, fetchImpl, timeoutMs })` with only: `getBotMode`, `setBotMode`, `getAutoActivationStatus`, `enableAuto`, `getArmCapability`, `createArmPreflight`, `executeArm`, `getArmStatus`.
 
-- [ ] **Step 1: Write RED action allowlist tests**
+- [ ] **Step 1: Write RED action-contract tests**
 
 Require exact actions:
 
@@ -184,28 +172,42 @@ Require exact actions:
 ]
 ```
 
-Reject examples `LIFECYCLE_START`, `ORDER_BUY`, `POSITION_CLOSE`, `LOT_SET`, `ACCOUNT_SWITCH`, and bodies containing `url`, `path`, `method`, `source`, or `body` fields.
+Reject unknown actions and any request object containing forbidden keys `url`, `path`, `method`, `source`, `body`, `headers`, `apiOrigin`, or `mt5Origin`.
 
-- [ ] **Step 2: Write RED canonical-client mapping tests**
-
-Inject `fetchImpl` and capture calls. Require exactly:
-
-```text
-MODE endpoint: POST http://127.0.0.1:3711/api/v1/phase7c/bot-mode
-ARM capability: GET http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability
-ARM preflight: POST http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/preflight
-ARM execute: POST http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/execute
-ARM status: GET http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/status?requestId=<encoded>
-```
-
-Mode bodies must be fixed:
+Accepted bodies are only:
 
 ```js
-MODE_AUTO  -> { mode: "AUTO", source: "web-control-center" }
-MODE_SEMI  -> { mode: "SEMI", source: "mobile-control-center" }
-MODE_TREND -> { mode: "TREND", source: "mobile-control-center" }
+{ action: "MODE_TREND", confirmation: "MODE_TREND" }
+{ action: "ARM_LIVE", phase: "PREFLIGHT" }
+{ action: "ARM_LIVE", phase: "EXECUTE", transactionId: "tx-1", confirmation: "ARM_LIVE" }
+```
+
+with equivalent DISARM shape. Mode confirmation must exactly equal action; ARM/DISARM execute confirmation must exactly equal action.
+
+- [ ] **Step 2: Write RED canonical mapping tests**
+
+Inject `fetchImpl`, capture every call, and require these fixed endpoints:
+
+```text
+GET  http://127.0.0.1:3711/api/v1/phase7c/bot-mode
+POST http://127.0.0.1:3711/api/v1/phase7c/bot-mode
+GET  http://127.0.0.1:3711/api/v1/phase7c-auto-activation/status
+POST http://127.0.0.1:3711/api/v1/phase7c-auto-activation/enable
+GET  http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/capability
+POST http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/preflight
+POST http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/execute
+GET  http://127.0.0.1:3711/api/v1/phase7c-live-arm-control/status?requestId=<URL-encoded-id>
+```
+
+Require `enableAuto()` to POST fixed `{}` to `/phase7c-auto-activation/enable` and assert it never calls `/phase7c/bot-mode`.
+
+Require non-AUTO mappings:
+
+```js
+MODE_SEMI    -> { mode: "SEMI", source: "mobile-control-center" }
+MODE_TREND   -> { mode: "TREND", source: "mobile-control-center" }
 MODE_SIDEWAY -> { mode: "SIDEWAY", source: "mobile-control-center" }
-MODE_PAUSE -> { mode: "PAUSE", source: "mobile-control-center" }
+MODE_PAUSE   -> { mode: "PAUSE", source: "mobile-control-center" }
 ```
 
 - [ ] **Step 3: Run RED**
@@ -214,66 +216,60 @@ MODE_PAUSE -> { mode: "PAUSE", source: "mobile-control-center" }
 pnpm --filter @xauusd/mobile-gateway test
 ```
 
-Expected: contract/client tests fail because modules do not exist.
+Expected: contract/client tests FAIL because modules are absent.
 
-- [ ] **Step 4: Implement strict contract parser**
+- [ ] **Step 4: Implement strict action parser**
 
-Use an immutable map; reject unknown keys rather than ignoring them. Mode execute body must be exactly:
+Use immutable allowed-key sets per action/phase. Reject unknown keys instead of ignoring them. Do not export any way for the caller to select upstream path/method/body/source.
 
-```js
-{ action: "MODE_TREND", confirmation: "MODE_TREND" }
-```
+- [ ] **Step 5: Implement canonical client**
 
-ARM/DISARM uses:
+The client builds URLs only from fixed constants plus URL-encoded canonical request IDs. Use `AbortSignal.timeout(timeoutMs)` and parse bounded JSON errors. Never retry POST mutations.
 
-```js
-{ action: "ARM_LIVE", phase: "PREFLIGHT" }
-{ action: "ARM_LIVE", phase: "EXECUTE", transactionId: "...", confirmation: "ARM_LIVE" }
-```
-
-Use the same shape for DISARM. `confirmation` must exactly equal `action` on execute.
-
-- [ ] **Step 5: Implement canonical client with no generic request method exported**
-
-Internally use `fetch()` with `AbortSignal.timeout(timeoutMs)`; never retry mutation POSTs. Parse non-2xx JSON errors and throw an error carrying `status` and bounded canonical message.
-
-- [ ] **Step 6: Run GREEN**
+- [ ] **Step 6: GREEN + commit**
 
 ```bash
 pnpm --filter @xauusd/mobile-gateway test
 pnpm --filter @xauusd/mobile-gateway build
-```
-
-- [ ] **Step 7: Commit**
-
-```bash
 git add apps/mobile-gateway
-git commit -m "feat: add fixed M4 action contract"
+git commit -m "feat: add fixed M4 canonical client"
 ```
 
 ---
 
-### Task 3: Implement server-side ARM/DISARM transactions and broker orchestration
+### Task 3: Add ARM/DISARM transaction state and action broker
 
 **Files:**
 - Create: `apps/mobile-gateway/transaction-store.cjs`
 - Create: `apps/mobile-gateway/m4-action-broker.cjs`
-- Create: `apps/mobile-gateway/test/arm-transactions.test.mjs`
 - Create: `apps/mobile-gateway/test/mode-actions.test.mjs`
+- Create: `apps/mobile-gateway/test/arm-transactions.test.mjs`
 
 **Interfaces:**
-- `createTransactionStore({ now, randomUUID })` produces `create`, `getForExecute`, `markExecuting`, `setRequestId`, `readStatus`, `deleteExpired`.
-- `createM4ActionBroker({ canonical, transactions, audit, now })` produces `getState(identity)`, `handleAction(identity, body)`, `getTransactionStatus(identity, transactionId)`.
+- `createTransactionStore({ now, randomUUID })` returns `createPending`, `consumePendingForExecute`, `createStatusRecord`, `getStatusRecord`, `deleteExpired`.
+- `createM4ActionBroker({ canonical, transactions, audit, now })` returns `getState(identity)`, `handleAction(identity, body)`, `getTransactionStatus(identity, transactionId)`.
 
 - [ ] **Step 1: Write RED mode broker tests**
 
-Require every mode action to call only `canonical.setBotMode()` with the fixed mapping. Canonical 400/403/409/5xx must return failure/ambiguous classification, never success.
+Require:
 
-Require `MODE_AUTO`, `MODE_TREND`, `MODE_SIDEWAY`, `MODE_SEMI` to be classified risk-increasing and `MODE_PAUSE` risk-reducing.
+```text
+MODE_AUTO    -> canonical.enableAuto() only
+MODE_SEMI    -> canonical.setBotMode("SEMI", "mobile-control-center")
+MODE_TREND   -> canonical.setBotMode("TREND", "mobile-control-center")
+MODE_SIDEWAY -> canonical.setBotMode("SIDEWAY", "mobile-control-center")
+MODE_PAUSE   -> canonical.setBotMode("PAUSE", "mobile-control-center")
+```
 
-- [ ] **Step 2: Write RED ARM transaction tests**
+Assert `MODE_AUTO` never invokes `canonical.setBotMode()`.
 
-For `phase=PREFLIGHT`, fake canonical returns:
+Require `getState()` to combine fixed read-only calls: `getBotMode()`, `getAutoActivationStatus()`, and `getArmCapability()`.
+
+Require canonical rejection/timeout to propagate as failure/ambiguous, never success.
+
+- [ ] **Step 2: Write RED ARM preflight tests**
+
+Fake canonical preflight:
 
 ```js
 {
@@ -281,31 +277,21 @@ For `phase=PREFLIGHT`, fake canonical returns:
   action: "ARM_LIVE",
   bridgeSessionId: "session-1",
   preflightToken: "SECRET-CANONICAL-TOKEN",
-  expiresAt: now + 45000,
+  expiresAt: now + 45_000,
   checks: { botPaused: true },
   blockedBy: []
 }
 ```
 
-Require browser response to contain a random `transactionId` and sanitized preflight fields but not `preflightToken`.
+Require browser result to contain a cryptographically random gateway `transactionId`, approved/checks/blockedBy/expiresAt, but never `preflightToken`.
 
-Require store record to bind:
+Pending record must bind identity + action + canonical token and expire at `Math.min(canonicalExpiresAt, now + 45_000)`.
 
-```js
-{
-  identity: "thiennguyen300493@gmail.com",
-  action: "ARM_LIVE",
-  canonicalToken: "SECRET-CANONICAL-TOKEN",
-  expiresAt: now + 45000,
-  consumed: false
-}
-```
+- [ ] **Step 3: Write RED execute-gate tests**
 
-- [ ] **Step 3: Test execute gates**
+Reject before canonical execute on missing transaction, expired transaction, wrong identity, wrong action, wrong confirmation, or second use.
 
-Require execute rejection for expired transaction, wrong identity, wrong action, wrong confirmation, missing transaction, or second use. No canonical execute call may occur for any rejection.
-
-On valid execute, call canonical exactly once with:
+On valid execute, `consumePendingForExecute()` deletes the secret-bearing pending record immediately and returns the secret once. Then call canonical execute exactly once with:
 
 ```js
 {
@@ -315,48 +301,37 @@ On valid execute, call canonical exactly once with:
 }
 ```
 
-Record canonical `requestId`; mark preflight token consumed immediately.
+Store only non-secret status metadata: gateway transaction ID, identity, action, canonical request ID, startedAt, expiresAt no later than 10 minutes.
 
-- [ ] **Step 4: Test status semantics**
+- [ ] **Step 4: Write RED status tests**
 
-`getTransactionStatus()` may call canonical `getArmStatus(requestId)` only for a gateway-owned transaction bound to the same identity. Require:
+Only the same identity may poll a gateway-owned transaction. Require:
 
-- `RUNNING` -> UI state `RUNNING`;
-- canonical `PASS` + `finalArmStatus="ARMED"` for ARM -> UI success;
-- canonical `PASS` + wrong final ARM state -> `AMBIGUOUS`, not success;
-- canonical `FAIL` -> failure;
-- timeout/network error -> `AMBIGUOUS`.
+- canonical `RUNNING` -> gateway `RUNNING`;
+- ARM canonical `PASS` and `finalArmStatus="ARMED"` -> success;
+- ARM PASS but final state mismatch -> `AMBIGUOUS`;
+- DISARM PASS and final state `DISARMED` -> success;
+- canonical FAIL -> failure;
+- network/timeout/unknown response -> `AMBIGUOUS`.
 
-For DISARM, success requires canonical PASS and final state not armed/equals `DISARMED` according to canonical payload.
+- [ ] **Step 5: Implement transaction store and broker**
 
-- [ ] **Step 5: Run RED**
+Use `crypto.randomUUID()`, in-memory Maps, no persistence of canonical tokens. Gateway restart invalidates pending confirmations naturally.
 
-```bash
-pnpm --filter @xauusd/mobile-gateway test
-```
+ARM/DISARM preflight must use canonical `getArmCapability()` + `createArmPreflight(action)`; approval remains canonical. AUTO uses only `enableAuto()`.
 
-- [ ] **Step 6: Implement transaction store**
-
-Use `crypto.randomUUID()`. Pending preflight expiry must be `Math.min(canonicalExpiresAt, now + 45_000)`. Gateway restart naturally clears the in-memory `Map`. Do not persist canonical preflight tokens.
-
-After canonical execute, retain only non-secret status metadata for bounded polling, with a maximum post-execute status retention of 10 minutes.
-
-- [ ] **Step 7: Implement broker**
-
-Before ARM/DISARM preflight, call canonical capability for display/current state and canonical preflight for the requested action. Do not locally infer approval. Execute only using the canonical token stored in the transaction.
-
-- [ ] **Step 8: Run GREEN and commit**
+- [ ] **Step 6: GREEN + commit**
 
 ```bash
 pnpm --filter @xauusd/mobile-gateway test
 pnpm --filter @xauusd/mobile-gateway build
 git add apps/mobile-gateway
-git commit -m "feat: add canonical mobile ARM broker"
+git commit -m "feat: add M4 action broker transactions"
 ```
 
 ---
 
-### Task 4: Add append-only audit with safety-first failure semantics
+### Task 4: Add append-only audit with risk-direction failure semantics
 
 **Files:**
 - Create: `apps/mobile-gateway/audit.cjs`
@@ -364,12 +339,12 @@ git commit -m "feat: add canonical mobile ARM broker"
 - Modify: `apps/mobile-gateway/m4-action-broker.cjs`
 
 **Interfaces:**
-- `createAuditSink({ path, appendFileSync, mkdirSync })` produces `append(event)`.
-- Broker emits phases `ATTEMPT` and `RESULT` with only non-secret metadata.
+- `createAuditSink({ auditPath, appendFileSync, mkdirSync })` returns `append(event)`.
+- Audit phases are `ATTEMPT` and `RESULT`; events never accept arbitrary raw request headers/body.
 
 - [ ] **Step 1: Write RED audit-shape tests**
 
-Audit record must include:
+Require fields:
 
 ```js
 {
@@ -383,57 +358,55 @@ Audit record must include:
 }
 ```
 
-Recursively stringify each audit line and assert it does not contain `preflightToken`, `canonicalToken`, cookies, authorization headers, or the fake token string.
+For AUTO require `canonicalTarget: "PHASE7C_AUTO_ACTIVATION"`.
 
-- [ ] **Step 2: Write RED fail-closed/degraded tests**
+Stringify every audit line and assert absence of fake canonical token, `preflightToken`, `canonicalToken`, `authorization`, `cookie`, and full incoming headers.
 
-Inject an audit sink whose `append()` throws.
+- [ ] **Step 2: Write RED audit-failure tests**
 
-Require no canonical mutation for:
+Inject an audit sink that throws. Require **no canonical mutation** for risk-increasing actions:
 
 ```text
 MODE_AUTO
+MODE_SEMI
 MODE_TREND
 MODE_SIDEWAY
-MODE_SEMI
 ARM_LIVE execute
 ```
 
-Require `MODE_PAUSE` and `DISARM_LIVE` to continue through canonical control, returning `auditDegraded=true`.
+Require `MODE_PAUSE` and `DISARM_LIVE` to remain reachable and return `auditDegraded=true`.
 
-- [ ] **Step 3: Implement append-only JSONL audit**
+- [ ] **Step 3: Implement audit sink and broker ordering**
 
-Create parent directory, append exactly one JSON object plus newline. Audit path comes from deployment config. Do not rotate/delete from request path; retention is an operator/deployment concern outside M4 request handling.
-
-- [ ] **Step 4: Integrate broker ordering**
-
-For risk-increasing execute:
+Risk-increasing ordering:
 
 ```text
-audit ATTEMPT must succeed
--> canonical mutation
+mandatory ATTEMPT audit
+-> canonical mutation once
 -> best-effort RESULT audit
 ```
 
-For PAUSE/DISARM:
+Risk-reducing ordering:
 
 ```text
-attempt audit best-effort
--> canonical risk-reducing mutation regardless of audit failure
+best-effort ATTEMPT audit
+-> canonical mutation once
 -> best-effort RESULT audit
 ```
 
-- [ ] **Step 5: Run GREEN and commit**
+Append exactly one JSON object plus newline. Request handling never rotates/deletes audit files.
+
+- [ ] **Step 4: GREEN + commit**
 
 ```bash
 pnpm --filter @xauusd/mobile-gateway test
 git add apps/mobile-gateway
-git commit -m "feat: audit M4 remote control attempts"
+git commit -m "feat: audit M4 remote control"
 ```
 
 ---
 
-### Task 5: Expose only bounded M4 HTTP endpoints with identity and Origin gates
+### Task 5: Expose only bounded M4 HTTP routes
 
 **Files:**
 - Modify: `apps/mobile-gateway/server.cjs`
@@ -441,67 +414,68 @@ git commit -m "feat: audit M4 remote control attempts"
 - Create: `apps/mobile-gateway/test/m4-http.test.mjs`
 
 **Interfaces:**
-- `GET /__m4/state` — authenticated read-only combined mode/ARM state.
-- `POST /__m4/action` — only mutation endpoint.
+- `GET /__m4/state` — authenticated bounded state only.
+- `POST /__m4/action` — sole mutation endpoint.
 - `GET /__m4/status?transactionId=<gateway-id>` — authenticated bounded transaction status.
 
 - [ ] **Step 1: Write RED identity/origin tests**
 
-Use config:
+With test config:
 
 ```js
 {
+  listenHost: "127.0.0.1",
   allowedUsers: ["thiennguyen300493@gmail.com"],
-  allowedOrigin: "https://emlvt-dt-1.taila2e32b.ts.net:8443"
+  allowedOrigin: "https://emlvt-dt-1.taila2e32b.ts.net:8443",
+  apiOrigin: "http://127.0.0.1:3711",
+  webOrigin: "http://127.0.0.1:5717"
 }
 ```
 
-Require mutation 403 when `Tailscale-User-Login` missing, unauthorized, or Origin missing/mismatched. Require authorized identity + exact Origin to reach broker.
+Mutation must return 403 with zero broker calls when identity is missing/unauthorized or Origin is missing/mismatched. Authorized identity + exact Origin may reach broker.
 
-Require production config validation to fail if `allowedUsers` empty, `allowedOrigin` is not HTTPS, `listenHost` not `127.0.0.1`, `apiOrigin` not exactly loopback, or `webOrigin` not loopback.
+Production config validation must fail closed when allowed users are empty, allowed Origin is not HTTPS, listen host is not `127.0.0.1`, or API/Web origins are non-loopback.
 
-- [ ] **Step 2: Write RED method/surface tests**
+- [ ] **Step 2: Write RED HTTP-surface tests**
 
 Require:
 
 ```text
-POST /__m4/action -> allowed only after auth/origin
+POST /__m4/action -> only authorized mutation path
 GET /__m4/action -> 405
 PUT/PATCH/DELETE/OPTIONS /__m4/action -> 405
-POST /api/v1/... -> 405; never proxied
-GET /__m4/state -> authenticated bounded state only
-GET /__m4/status without valid gateway transaction -> 404/403
+POST /api/v1/... -> 405 and never proxied
+GET /__m4/state -> bounded authenticated state
+GET /__m4/status -> only gateway transaction IDs
 ```
 
-Also prove raw input like `{ action:"MODE_TREND", url:"http://127.0.0.1:8765" }` is rejected before broker/canonical calls.
+Bodies with custom URL/path/method/source/body/header fields must fail before broker/canonical calls.
 
-- [ ] **Step 3: Add strict JSON body parser**
+- [ ] **Step 3: Add strict JSON input handling**
 
-Limit body to 8 KiB. Require `Content-Type: application/json`. Reject malformed JSON and oversized input with 400/413. Do not accept form/query-based mutation.
+Accept only `application/json`, maximum 8 KiB. Malformed JSON -> 400. Oversized -> 413. No query/form mutation.
 
-- [ ] **Step 4: Wire server to broker**
+- [ ] **Step 4: Wire production entry point**
 
-`gateway.js` constructs config, canonical client, transaction store, audit sink, and broker exactly once, then starts server. No API token or secret is introduced; canonical API is reachable only through localhost.
+`gateway.js` creates config, canonical client, transaction store, audit sink, broker, then server exactly once. No generic API token is introduced.
 
-- [ ] **Step 5: Prove M2 regression remains GREEN**
+- [ ] **Step 5: Verify M2 regression + M4 GREEN**
 
 ```bash
 pnpm --filter @xauusd/mobile-gateway test
 pnpm --filter @xauusd/mobile-gateway build
 ```
 
-Both `server-readonly.test.mjs` and M4 HTTP tests must pass.
-
 - [ ] **Step 6: Commit**
 
 ```bash
 git add apps/mobile-gateway
-git commit -m "feat: expose bounded M4 gateway endpoints"
+git commit -m "feat: expose bounded M4 gateway routes"
 ```
 
 ---
 
-### Task 6: Add same-origin M4 Web client and mobile controls
+### Task 6: Add same-origin browser client and bounded mobile UI
 
 **Files:**
 - Create: `apps/web/src/mobile-m4-control.ts`
@@ -511,27 +485,28 @@ git commit -m "feat: expose bounded M4 gateway endpoints"
 - Modify: `pnpm-lock.yaml`
 
 **Interfaces:**
-- Browser client exports `getMobileM4State`, `executeMobileMode`, `preflightMobileArm`, `executeMobileArm`, `getMobileArmStatus`.
-- All URLs are same-origin relative `/__m4/...`; no `CONTROL_DIRECT`, `VITE_API_BASE_URL`, or `127.0.0.1:3711` mutation fallback.
+- Export `getMobileM4State`, `executeMobileMode`, `preflightMobileArm`, `executeMobileArm`, `getMobileArmStatus`.
+- All mutation/status URLs are same-origin `/__m4/*`; no `127.0.0.1:3711` fallback exists in this module.
 
-- [ ] **Step 1: Add Web Vitest script and RED client tests**
+- [ ] **Step 1: Add Web Vitest command and RED client tests**
 
-Add to Web devDependencies/scripts:
+Add:
 
 ```json
-"test": "vitest run",
-"vitest": "^2.1.9"
+"test": "vitest run"
 ```
 
-Inject fetch and assert exact requests:
+and dev dependency `"vitest": "^2.1.9"`.
+
+Inject fetch and require exact requests:
 
 ```text
-GET /__m4/state
+GET  /__m4/state
 POST /__m4/action
-GET /__m4/status?transactionId=<encoded>
+GET  /__m4/status?transactionId=<URL-encoded-gateway-id>
 ```
 
-Mode request body:
+Mode request:
 
 ```json
 { "action": "MODE_TREND", "confirmation": "MODE_TREND" }
@@ -554,102 +529,87 @@ ARM execute:
 }
 ```
 
-- [ ] **Step 2: Run RED**
+- [ ] **Step 2: RED**
 
 ```bash
 pnpm --filter @xauusd/web test
 ```
 
-Expected: FAIL because mobile M4 client does not exist.
+Expected: FAIL because `mobile-m4-control.ts` is absent.
 
 - [ ] **Step 3: Implement same-origin client**
 
-Use a small `readJson` helper. Never fallback to direct API for POST. Surface canonical/gateway error message and HTTP status to the UI.
+Use bounded JSON parsing and error propagation. Never use `local-control-request.ts` or direct `CONTROL_DIRECT` for mobile mutations.
 
-- [ ] **Step 4: Extend the existing mobile page, not the desktop control center**
+- [ ] **Step 4: Extend only the existing mobile page**
 
-Preserve all current read-only cards. Replace the top `MOBILE READ ONLY` label with a truthful control status after M4 state loads, and add one `MobileCard title="ĐIỀU KHIỂN AN TOÀN"` containing only:
+Preserve current read-only cards. Add one control card containing only:
 
 ```text
 AUTO  SEMI  TREND  SIDEWAY  PAUSE
 ARM LIVE / DISARM LIVE
 ```
 
-No lifecycle/order/position/lot/account-switch controls.
+State card must display current mode, current LIVE ARM state, and AUTO readiness/blocked reason supplied by `/__m4/state` from canonical AUTO activation status.
 
-Mode behavior:
+Mode actions require one `window.confirm()` showing current -> requested mode. AUTO still only sends `MODE_AUTO`; browser never chooses canonical URL/body.
 
-```ts
-if (!window.confirm(`Xác nhận chuyển MODE từ ${currentMode} sang ${targetMode}?`)) return;
-await executeMobileMode(targetAction);
-```
+ARM flow:
 
-ARM behavior:
+1. `KIỂM TRA ARM LIVE` -> preflight.
+2. Display canonical checks/blocked reasons.
+3. Enable `ARM LIVE` only for approved, unexpired gateway transaction.
+4. Confirm that bot must be PAUSE, ARM does not enable AUTO, and ARM sends no order.
+5. Execute transaction and poll `/__m4/status`.
+6. Only canonical PASS + correct final state renders success.
 
-1. `KIỂM TRA ARM LIVE` calls preflight and displays canonical `checks/blockedBy`.
-2. `ARM LIVE` enabled only with approved unexpired gateway transaction.
-3. User confirms with the same safety wording used by local control semantics: bot must be PAUSE; ARM does not enable AUTO and does not send an order.
-4. Poll `/__m4/status` until PASS/FAIL; ambiguous/timeouts display warning, never ARMED success.
+DISARM flow: one confirmation -> preflight -> execute approved gateway transaction -> status polling.
 
-DISARM behavior:
+No lifecycle/order/position/account/lot controls are added.
 
-1. one user confirmation;
-2. request DISARM preflight;
-3. if approved, immediately execute the returned gateway transaction;
-4. poll status to canonical completion.
-
-- [ ] **Step 5: Keep risk-increasing actions visually distinct**
-
-Use existing MUI theme colors. ARM and active-mode confirmations use warning/contained treatment; PAUSE/DISARM are clearly labeled risk-reducing. Do not add unrelated redesign.
-
-- [ ] **Step 6: Run GREEN/build**
+- [ ] **Step 5: GREEN/build + commit**
 
 ```bash
 pnpm --filter @xauusd/web test
 pnpm --filter @xauusd/web build
-```
-
-- [ ] **Step 7: Commit**
-
-```bash
 git add apps/web pnpm-lock.yaml
 git commit -m "feat: add M4 controls to mobile page"
 ```
 
 ---
 
-### Task 7: Add read-only preflight, bounded deployment, and rollback scripts
+### Task 7: Add source contract, production preflight, gateway-only deploy, and rollback
 
 **Files:**
+- Create: `scripts/test-phase7c-mobile-m4a-source-contract.mjs`
 - Create: `scripts/preflight-phase7c-mobile-m4a-local.ps1`
 - Create: `scripts/deploy-phase7c-mobile-m4a-local.ps1`
 - Create: `scripts/rollback-phase7c-mobile-m4a-local.ps1`
-- Create: `scripts/test-phase7c-mobile-m4a-source-contract.mjs`
 
 **Interfaces:**
-- Preflight is read-only and prints machine/source/runtime gates.
-- Deploy mutates only gateway files/config and the existing `\XAUUSD-AI-MASTER\Phase7C-Mobile-Readonly-Gateway` runtime instance.
-- Rollback restores the captured prior gateway bundle and reloads only that task.
+- Source contract is static/non-mutating.
+- Preflight is read-only.
+- Deploy may mutate only gateway files/config and exact task `\XAUUSD-AI-MASTER\Phase7C-Mobile-Readonly-Gateway` runtime.
+- Rollback restores previous gateway bundle and restarts only that exact task.
 
-- [ ] **Step 1: Write RED source-contract test before scripts**
+- [ ] **Step 1: Write RED static source contract**
 
-`test-phase7c-mobile-m4a-source-contract.mjs` reads gateway/Web/scripts and fails unless all approved actions are present and these forbidden patterns are absent from remote-control implementation:
+Require source to contain:
 
 ```text
-/lifecycle/start
-/lifecycle/stop
-/api/v1/mt5/order
-position close mutation
-funnel on
-0.0.0.0:3711
-0.0.0.0:8765
+MODE_AUTO MODE_SEMI MODE_TREND MODE_SIDEWAY MODE_PAUSE ARM_LIVE DISARM_LIVE
+/__m4/action
+Tailscale-User-Login
+/api/v1/phase7c-auto-activation/enable
+/api/v1/phase7c-auto-activation/status
+/api/v1/phase7c-live-arm-control
 ```
 
-It also requires `Tailscale-User-Login`, exact mode actions, `/__m4/action`, and canonical ARM prefix.
+Require source to prove AUTO does not map to `/api/v1/phase7c/bot-mode` and reject forbidden remote surfaces. Fail if remote-control implementation contains lifecycle start/stop, arbitrary MT5 order/position routes, Funnel enablement, or non-loopback 3711/8765 exposure.
 
-- [ ] **Step 2: Implement read-only preflight**
+- [ ] **Step 2: Implement read-only production preflight**
 
-Require output invariants:
+It must print:
 
 ```text
 READ_ONLY=TRUE
@@ -666,78 +626,70 @@ POSITION_MUTATION=NONE
 LIVE_TEST_ORDER=NONE
 ```
 
-Checks must include:
+Required `-ExpectedCommit` parameter. Checks:
 
-- local repository clean and at explicit `-ExpectedCommit`;
-- merged-source file hashes computed and printed;
-- existing task present, SYSTEM principal, `AtStartup`, command still Node + ProgramData `gateway.js`;
-- current live gateway health 200;
-- current first-rollout gateway SHA256 equals known accepted M3 baseline `F4DC53D3E22738D26C762C78687ADBC4D20AD3DFAE8397C3C3A981884E8DB79A` unless caller explicitly supplies an already-M4 accepted hash;
-- Tailscale backend Running/Online and Serve `8443 -> 127.0.0.1:5791 (tailnet only)`;
-- Funnel not public;
-- ports 3711/5717/5791/8765 have zero non-loopback listeners;
-- API/Web/gateway read-only health routes reachable;
-- no open production mutation is executed by preflight.
+- repo branch/source clean and exact accepted commit;
+- expected gateway source hashes computed/printed;
+- scheduled task exists, SYSTEM, AtStartup, Node + ProgramData gateway path;
+- live gateway `/__m2/health` 200;
+- first M4 rollout expects existing M3 gateway SHA256 `F4DC53D3E22738D26C762C78687ADBC4D20AD3DFAE8397C3C3A981884E8DB79A`; later accepted M4 hash may be supplied explicitly;
+- Tailscale backend Running + self Online;
+- Serve remains `8443 -> 127.0.0.1:5791 (tailnet only)`;
+- public Funnel false;
+- ports 3711/5717/5791/8765 have zero non-loopback listeners.
 
-- [ ] **Step 3: Implement bounded deploy script**
+- [ ] **Step 3: Implement bounded deploy**
 
-Parameters must include `-ExpectedCommit`, `-AllowedUser`, and `-AllowedOrigin`. Before mutation it reruns/embeds all preflight gates.
+Required parameters: `-ExpectedCommit`, `-AllowedUser`, `-AllowedOrigin`.
 
-Deployment sequence:
+Exact mutation sequence:
 
 ```text
-backup current ProgramData gateway bundle + SHA manifest
-copy accepted apps/mobile-gateway runtime files to staging dir
+run all preflight gates
+backup current ProgramData gateway bundle + hashes
+copy accepted runtime files to staging
 write non-secret gateway.config.json to staging
-syntax-check staged gateway with node --check
+node --check staged runtime
 stop exact mobile gateway Scheduled Task
-atomic directory/file swap into ProgramData gateway dir
+atomic swap staged bundle into ProgramData gateway directory
 start exact mobile gateway Scheduled Task
-verify new PID is SYSTEM and bind is 127.0.0.1:5791
+verify new process owner SYSTEM and listener 127.0.0.1:5791
 verify /__m2/health=200
-verify direct no-identity app GET=403
-verify non-M4 POST remains 405
-verify Serve unchanged and Funnel false
-verify 3711/5717/5791/8765 still loopback-only
+verify no-identity app GET=403
+verify non-M4 POST=405
+verify Serve unchanged, Funnel false
+verify 3711/5717/5791/8765 loopback-only
 ```
 
-Do not restart Tailscale, API, MT5, lifecycle broker, executors, or Windows.
+Forbidden in deploy: Tailscale restart/up/login/logout, Windows reboot, API/MT5/Phase7C lifecycle/executor restart, mode mutation, ARM mutation, order/position mutation.
 
 - [ ] **Step 4: Implement rollback**
 
-Rollback stops only the exact gateway task, restores the backup bundle/config, starts only the exact gateway task, and re-runs M2/M3 safety checks. It must not run `Restart-Service Tailscale`, `Restart-Computer`, lifecycle controls, ARM, or mode mutation.
+Rollback stops only the exact gateway task, restores backup gateway bundle/config, starts only the same gateway task, then reruns M2/M3 network/security gates. It must never restart Tailscale/API/MT5/Phase7C or mutate mode/ARM/order/position.
 
-- [ ] **Step 5: Run static source contract**
+- [ ] **Step 5: GREEN static contract + commit**
 
 ```bash
 node scripts/test-phase7c-mobile-m4a-source-contract.mjs
-```
-
-Expected only after scripts/source exist: `PHASE7C_MOBILE_M4A_SOURCE_CONTRACT=PASS`.
-
-- [ ] **Step 6: Commit**
-
-```bash
 git add scripts
-git commit -m "feat: add bounded M4 gateway rollout scripts"
+git commit -m "feat: add bounded M4 rollout scripts"
 ```
+
+Expected: `PHASE7C_MOBILE_M4A_SOURCE_CONTRACT=PASS`.
 
 ---
 
-### Task 8: Add dedicated CI and complete source verification
+### Task 8: Add dedicated CI and source-only acceptance
 
 **Files:**
 - Create: `.github/workflows/phase7c-mobile-secure-control-m4a-ci.yml`
-- Review: all M4-A touched files.
 
 **Interfaces:**
-- CI is source-only; it performs no production/network mutation.
+- CI is source-only; no production/network mutation.
 
 - [ ] **Step 1: Add path-scoped workflow**
 
-Trigger on pull requests to `main` and feature branches when M4 files change. Use `permissions: contents: read`, pnpm 10.18.0, Node 24 for gateway tests and Node 22/24 compatible Web build.
-
-Required jobs/commands:
+Use `permissions: contents: read`, pnpm 10.18.0, Node 24. Required commands:
 
 ```bash
 pnpm install --frozen-lockfile
@@ -745,39 +697,23 @@ pnpm --filter @xauusd/mobile-gateway test
 pnpm --filter @xauusd/mobile-gateway build
 pnpm --filter @xauusd/web test
 pnpm --filter @xauusd/web build
-node scripts/test-phase7c-mobile-m4a-source-contract.mjs
-```
-
-Also build API to prove canonical interfaces still compile even though API source should not change:
-
-```bash
-pnpm --filter @xauusd/api build
-```
-
-- [ ] **Step 2: Run full local/source verification**
-
-```bash
-pnpm --filter @xauusd/mobile-gateway test
-pnpm --filter @xauusd/mobile-gateway build
-pnpm --filter @xauusd/web test
-pnpm --filter @xauusd/web build
 pnpm --filter @xauusd/api build
 node scripts/test-phase7c-mobile-m4a-source-contract.mjs
 ```
 
-Expected: all GREEN.
+- [ ] **Step 2: Run full source verification locally/CI**
 
-- [ ] **Step 3: Scope diff review**
+Require all commands above GREEN. API build proves canonical interfaces still compile; API source should remain unchanged.
 
-Reject implementation if diff touches strategy engine, MT5 bridge logic, Phase7C ARM service safety checks, lifecycle service, account switching, lot settings, order/position execution, or Tailscale Funnel configuration.
+- [ ] **Step 3: Scope/secret review**
 
-The only allowed API files are **none** by default. If implementation discovers an API change is necessary, stop and return to design review rather than silently expanding scope.
+Reject the implementation if it touches strategy engine, MT5 broker logic, LIVE ARM service safety code, AUTO activation service safety code, lifecycle service, account switching, lot settings, or order/position execution.
 
-- [ ] **Step 4: Secret scan / route review**
+The implementation must not commit the real operator email as a source default; `gateway.config.example.json` uses `operator@example.com`. The real allowlisted user is passed only at deployment/runtime config.
 
-Confirm no preflight token, auth token, cookies, personal credentials, or raw secret headers are committed. Machine operator email belongs only in deployment parameters/runtime config, not source defaults; example config uses `operator@example.com`.
+If an API source change becomes necessary, stop and return to design review rather than expanding scope silently.
 
-- [ ] **Step 5: Commit CI**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add .github/workflows/phase7c-mobile-secure-control-m4a-ci.yml
@@ -786,18 +722,18 @@ git commit -m "ci: verify M4 mobile secure control"
 
 ---
 
-### Task 9: PR review gate before any production mutation
+### Task 9: PR review gate before production mutation
 
 **Files:**
-- No new implementation files unless review finds a defect.
+- Review-only unless defects are found.
 
-- [ ] **Step 1: Compare feature branch with current `main`**
+- [ ] **Step 1: Compare implementation branch with current main**
 
-Record base/head SHAs and changed filenames. Require every file to map to this plan/spec.
+Record base/head SHA and every changed filename. Every file must map to this plan/spec.
 
 - [ ] **Step 2: Open PR with explicit safety statement**
 
-PR body must state:
+PR body must include:
 
 ```text
 BOT_MUTATION=NONE
@@ -808,78 +744,84 @@ POSITION_MUTATION=NONE
 LIVE_TEST_ORDER=NONE
 3711_REMOTE_EXPOSURE=NONE
 8765_REMOTE_EXPOSURE=NONE
-FUNNEL=OFF/UNCHANGED
+FUNNEL=OFF_UNCHANGED
 ```
 
 - [ ] **Step 3: Require CI GREEN and review patches**
 
-Review especially:
+Specifically verify:
 
-- action parser cannot carry arbitrary URL/path/body;
-- `MODE_AUTO` provenance is exactly `web-control-center`;
-- ARM token never exits memory;
+- exactly seven actions;
+- AUTO uses only canonical AUTO activation enable/status paths;
+- AUTO never directly uses bot-mode route;
+- non-AUTO modes use fixed server-side mode/source;
+- ARM token never exits gateway memory;
 - identity/origin fail closed;
-- audit failure semantics match risk direction;
-- no retry of canonical mutation POSTs;
+- risk-direction audit semantics are correct;
+- mutation POSTs are not retried;
 - gateway remains localhost-only;
-- existing M2 read-only behavior remains tested.
+- M2 read-only behavior remains tested.
 
 - [ ] **Step 4: Merge only after all gates pass**
 
-After merge, record accepted `main` commit and tree. Do not deploy automatically from CI.
+Record merged `main` commit/tree. CI does not deploy production.
 
 ---
 
-### Task 10: Post-merge production preflight and bounded M4-A rollout
+### Task 10: Post-merge read-only preflight and bounded production rollout
 
 **Files:**
-- Execute merged scripts only after explicit operator rollout approval.
+- Execute merged scripts only after separate explicit rollout approval.
 
 **Interfaces:**
-- Consumes accepted merged commit and currently running M3 gateway.
-- Produces M4 gateway runtime while keeping bot/MT5/Phase7C lifecycle untouched.
+- Consumes accepted merged commit and current M3 runtime.
+- Produces an M4 gateway runtime while bot/MT5/Phase7C processes remain untouched.
 
-- [ ] **Step 1: Sync local production source to accepted `main` and prove clean exact source**
+- [ ] **Step 1: Prove local production source equals accepted merged source**
 
-Run the merged read-only preflight with `-ExpectedCommit <accepted-main-sha>`. Stop on any mismatch; do not repair unrelated runtime drift in this rollout.
+Run merged preflight with required `-ExpectedCommit` set to the accepted merged main SHA. Stop on any mismatch. Do not repair unrelated runtime drift inside this rollout.
 
-- [ ] **Step 2: Capture pre-rollout runtime evidence**
+- [ ] **Step 2: Capture pre-rollout evidence**
 
-Record current gateway PID/owner/hash, task definition/state, Serve/Funnel status, ports 3711/5717/5791/8765, bot mode/ARM status read-only, and open XAUUSD positions read-only. Position state is evidence only; no order/position mutation is permitted.
+Record gateway PID/owner/hash, task definition/state, Tailscale Serve/Funnel state, ports 3711/5717/5791/8765, read-only bot mode/ARM status, and read-only XAUUSD position count.
 
 - [ ] **Step 3: Deploy gateway only**
 
-Invoke the bounded deploy script with:
+Invoke deploy script with runtime values:
 
 ```text
 AllowedUser=thiennguyen300493@gmail.com
 AllowedOrigin=https://emlvt-dt-1.taila2e32b.ts.net:8443
 ```
 
-Mutation scope must be exactly gateway files/config + exact mobile-gateway Scheduled Task stop/start.
+Mutation scope is exactly ProgramData gateway files/config + exact gateway Scheduled Task stop/start.
 
-- [ ] **Step 4: Local non-mutating security acceptance first**
+- [ ] **Step 4: Run local non-mutating security acceptance first**
 
-Verify health, identity rejection, invalid Origin rejection, unknown action rejection, forbidden method rejection, Serve/Funnel, and port isolation without executing mode or ARM mutation.
+Verify health, no-identity rejection, invalid-Origin rejection, unknown-action rejection, forbidden-method rejection, Serve/Funnel state, and port isolation without executing mode or ARM mutation.
 
-- [ ] **Step 5: Mobile read-only + control-page rendering acceptance**
+- [ ] **Step 5: Validate phone rendering**
 
-Open `https://emlvt-dt-1.taila2e32b.ts.net:8443/phase7c-mobile`; verify current mode/ARM state renders and only approved controls exist.
-
-- [ ] **Step 6: Explicit functional acceptance using safe state**
-
-Functional mutation tests require a separately announced operator acceptance window. Use only safe canonical actions; never create an order solely for testing.
-
-Preferred sequence when runtime conditions permit:
+Open:
 
 ```text
-MODE_PAUSE -> verify canonical mode PAUSE
-DISARM_LIVE if currently armed -> verify canonical DISARM PASS
-ARM preflight only -> verify blocked/approved reasons and token remains server-side
-ARM execute only if operator explicitly approves and canonical preflight is PASS
+https://emlvt-dt-1.taila2e32b.ts.net:8443/phase7c-mobile
 ```
 
-Do not test AUTO/TREND/SIDEWAY/SEMI in a state where they could open a new trade unless entry is otherwise safely blocked by the canonical environment. If such proof cannot be made, verify their mapping in TDD/CI and defer live functional mutation.
+Verify current mode, AUTO readiness, ARM state, and exactly the seven approved controls are visible.
+
+- [ ] **Step 6: Functional control acceptance only in an explicit safe operator window**
+
+Preferred safe sequence when runtime state permits:
+
+```text
+MODE_PAUSE -> verify canonical PAUSE
+DISARM_LIVE if currently armed -> verify canonical DISARM PASS
+ARM preflight only -> verify canonical checks/blocked reasons, token remains server-side
+ARM execute only after explicit operator approval and canonical preflight PASS
+```
+
+Do not live-test AUTO/TREND/SIDEWAY/SEMI when those actions could open a new position. Their route/body mappings are proven by TDD/CI; live functional mutation is deferred unless entry is independently and safely blocked by canonical runtime.
 
 - [ ] **Step 7: Final attestation**
 
@@ -887,6 +829,7 @@ Require:
 
 ```text
 M4_ALLOWED_ACTIONS=7
+AUTO_CANONICAL_PATH=PHASE7C_AUTO_ACTIVATION
 DIRECT_3711_REMOTE_EXPOSURE=FALSE
 DIRECT_8765_REMOTE_EXPOSURE=FALSE
 PUBLIC_FUNNEL_ACTIVE=FALSE
@@ -899,4 +842,11 @@ LIVE_TEST_ORDER=NONE
 PHONE_M4_ACCEPTANCE=PASS
 ```
 
-If any gate fails or behavior is ambiguous, run gateway-only rollback and restore M3 read-only operation.
+Any failed/ambiguous gate triggers gateway-only rollback to the accepted M3 read-only bundle.
+
+## Plan Self-review Record
+
+- Spec coverage: PASS — network, identity/origin, seven-action allowlist, corrected AUTO service path, ARM transaction secrecy, audit, UI, CI, rollout, and rollback all have implementation tasks.
+- Placeholder scan: PASS — no TBD/TODO/"implement later" steps remain.
+- Type/interface consistency: PASS — broker/client/store function names are defined before dependent tasks use them; browser APIs map only to `/__m4/*`.
+- Safety correction: PASS — every AUTO step now uses `/api/v1/phase7c-auto-activation/{status,enable}` and explicitly forbids direct AUTO use of `/api/v1/phase7c/bot-mode`.
