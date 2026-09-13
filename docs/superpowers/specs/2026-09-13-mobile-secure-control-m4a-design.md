@@ -1,7 +1,7 @@
 # M4-A Mobile Secure Control — Design Specification
 
 Date: 2026-09-13  
-Status: DESIGN APPROVED — implementation not started  
+Status: DESIGN APPROVED — awaiting written-spec review  
 Scope: mobile remote control through the existing Tailscale-only gateway  
 Production mutation during this design phase: NONE
 
@@ -143,17 +143,23 @@ The broker must reject unknown actions fail-closed with no upstream call.
 
 M4-A is tailnet-only, but network membership alone is not sufficient authorization for mutations.
 
-The gateway must enforce an explicit operator identity allowlist using the identity headers supplied by Tailscale Serve. The accepted identity must be configured by deployment and compared exactly after normalization appropriate to the documented header format.
+The gateway must authorize mutations using the Tailscale Serve identity header `Tailscale-User-Login`. Tailscale Serve removes incoming client-supplied Tailscale identity headers before adding its own identity headers for tailnet Serve traffic. The backend therefore trusts `Tailscale-User-Login` only when the request arrives through the localhost-only Serve proxy path.
 
 Requirements:
 
-- mutation requests without a trusted Tailscale identity are rejected;
+- the accepted `Tailscale-User-Login` value must be configured in an explicit operator allowlist;
+- mutation requests without `Tailscale-User-Login` are rejected;
 - identities not on the explicit allowlist are rejected;
-- the browser cannot override trusted identity headers through client-provided copies;
+- the browser cannot select or override the trusted identity value;
+- gateway production bind remains exactly localhost (`127.0.0.1:5791`);
 - direct localhost test mode may use a separate explicit test bypass only in automated tests, never in production defaults;
 - production startup must fail closed if the mutation identity allowlist is empty or invalid while mutation capability is enabled.
 
-The gateway must also restrict mutation requests to the expected HTTPS origin for the local machine's Tailscale Serve hostname and port 8443. Origin checking supplements identity checking; it does not replace it.
+The gateway must also restrict browser mutation requests to the exact deployment-configured HTTPS Origin. For the currently approved machine/Serve deployment the expected Origin is:
+
+`https://emlvt-dt-1.taila2e32b.ts.net:8443`
+
+The expected Origin is deployment configuration, not client input. Missing or mismatched Origin is rejected for browser mutation requests. Origin checking supplements identity checking; it does not replace it.
 
 ## 7. Mutation Confirmation Model
 
@@ -188,7 +194,7 @@ ARM uses a two-stage flow:
 
 A local gateway timeout, network error, or ambiguous response must never be displayed as success.
 
-## 8. Proposed Gateway API Contract
+## 8. Gateway API Contract
 
 ### 8.1 Read-only mobile UI
 
@@ -198,7 +204,7 @@ Existing read-only proxy behavior remains unchanged for approved GET/HEAD UI pat
 
 `POST /__m4/action`
 
-Request:
+Base request:
 
 ```json
 {
@@ -206,13 +212,13 @@ Request:
 }
 ```
 
-For action flows needing a prior canonical preflight token, the gateway may issue a short-lived gateway transaction identifier. The raw canonical preflight token must stay server-side and must not be persisted to browser storage or audit logs.
+For ARM/DISARM flows that require canonical preflight, the gateway must issue a short-lived gateway transaction identifier. The raw canonical preflight token stays server-side and must not be persisted to browser storage or audit logs.
 
-The browser may receive only the bounded information necessary to render confirmation and progress.
+The browser receives only the bounded information necessary to render confirmation and progress.
 
 ### 8.3 Status endpoint
 
-A dedicated bounded read-only endpoint may expose the current action transaction state, but it must not become a generic pass-through to arbitrary canonical status URLs.
+A dedicated bounded read-only endpoint may expose the current action transaction state, but it must not become a generic pass-through to arbitrary canonical status URLs. If implemented, it accepts only gateway-generated transaction/request identifiers and resolves only gateway-owned state.
 
 ## 9. Server-side Transaction State
 
@@ -223,7 +229,7 @@ Transaction state must be:
 - in memory by default;
 - short-lived;
 - keyed by a cryptographically random transaction identifier;
-- bound to the authenticated Tailscale identity;
+- bound to the authenticated `Tailscale-User-Login` identity;
 - bound to the requested action;
 - single-use for execute;
 - expired no later than the canonical token TTL;
@@ -275,7 +281,7 @@ Examples:
 - identity missing/mismatch -> 403, no canonical call;
 - invalid Origin -> 403, no canonical call;
 - unsupported method -> 405;
-- unsupported action -> 400/403 fail-closed;
+- unsupported action -> fail-closed with no canonical call;
 - upstream timeout -> ambiguous/failure; query canonical read-only state before allowing another user attempt where appropriate;
 - gateway restart during pending ARM -> transaction invalidated, new preflight required.
 
@@ -334,8 +340,6 @@ No M4 implementation belongs in MT5 bridge code or strategy logic.
 
 Implementation must begin with failing tests proving the desired security contract.
 
-Minimum tests:
-
 ### Action allowlist
 
 - all seven approved actions are recognized;
@@ -349,8 +353,9 @@ Minimum tests:
 - missing identity rejected;
 - unauthorized identity rejected;
 - authorized identity accepted;
-- spoofed client identity header cannot override trusted Serve identity;
-- invalid/missing Origin rejected for browser mutations according to contract.
+- spoofed client identity cannot override the Serve-provided identity;
+- invalid/missing Origin rejected for browser mutations;
+- production gateway remains localhost-only.
 
 ### Mode mapping
 
@@ -470,7 +475,7 @@ M4-A is complete only when all of the following are proven:
 
 1. Phone can use the seven approved actions through Tailscale HTTPS only.
 2. No arbitrary upstream API request can be formed by the client.
-3. Tailscale identity allowlist and Origin checks are enforced.
+3. `Tailscale-User-Login` allowlist and exact Origin checks are enforced.
 4. AUTO still satisfies existing canonical provenance enforcement without weakening API rules.
 5. ARM/DISARM traverse the full canonical capability/preflight/execute/status flow.
 6. ARM cannot bypass PAUSE or any other canonical safety gate.
@@ -481,3 +486,10 @@ M4-A is complete only when all of the following are proven:
 11. TDD/CI pass.
 12. Merged source, deployed source, and runtime attestation match.
 13. Rollback is tested and does not require bot/MT5/Phase7C restart.
+
+## 21. Spec Self-review Record
+
+- Placeholder scan: PASS — no TBD/TODO requirements remain.
+- Internal consistency: PASS — network exposure, action allowlist, canonical control ownership, and rollback constraints align.
+- Scope check: PASS — one bounded subsystem, suitable for one implementation plan.
+- Ambiguity check: PASS — trusted identity header, expected Origin, ARM transaction handling, and canonical ownership are explicit.
