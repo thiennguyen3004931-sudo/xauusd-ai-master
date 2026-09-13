@@ -18,10 +18,6 @@ const bridgeAppSource = fs.readFileSync(
   path.join(repoRoot, "packages/mt5-broker/bridge/mt5_bridge/app.py"),
   "utf8",
 );
-const liveEnvTemplate = fs.readFileSync(
-  path.join(repoRoot, "packages/mt5-broker/bridge/.env.phase7b-live.example"),
-  "utf8",
-);
 
 // Canonical bridge contract: quote/candle timestamps are normalized before they
 // leave the bridge. Phase7B must therefore consume them as UTC directly rather
@@ -31,7 +27,7 @@ assert.match(brokerTimeSource, /def normalize_candles\(/);
 assert.match(bridgeAppSource, /return normalize_quote\(gateway\.quote\(symbol\)\)/);
 assert.match(bridgeAppSource, /return normalize_candles\(/);
 assert.match(
-  liveEnvTemplate,
+  brokerTimeSource,
   /stale weekend\s+quotes or a bad Windows clock cannot silently rewrite market time/i,
 );
 
