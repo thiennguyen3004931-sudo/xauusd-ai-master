@@ -13,6 +13,7 @@ let upstream;
 let upstreamOrigin;
 let gateway;
 let gatewayOrigin;
+let upstreamRequests = [];
 
 function listen(server, host = "127.0.0.1") {
   return new Promise((resolve, reject) => {
@@ -40,6 +41,7 @@ async function request(method, path, headers = {}) {
 
 before(async () => {
   upstream = http.createServer((req, res) => {
+    upstreamRequests.push({ method: req.method, url: req.url });
     if (req.url === "/phase7c-mobile") {
       res.statusCode = 200;
       res.setHeader("content-type", "text/html; charset=utf-8");
@@ -108,6 +110,16 @@ test("non-read-only method stays blocked outside exact M4 routes", async () => {
     Origin: TRUSTED_ORIGIN,
   });
   assert.equal(result.status, 405);
+});
+
+test("network-path input cannot escape the configured Web upstream", async () => {
+  const beforeCount = upstreamRequests.length;
+  const result = await request("GET", "//127.0.0.1:1/escape", {
+    "Tailscale-User-Login": TRUSTED_USER,
+  });
+  assert.equal(result.status, 404);
+  assert.equal(upstreamRequests.length, beforeCount + 1);
+  assert.equal(upstreamRequests.at(-1).url, "//127.0.0.1:1/escape");
 });
 
 test("production-configured gateway binds loopback only", () => {
