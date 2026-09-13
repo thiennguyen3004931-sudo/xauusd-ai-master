@@ -18,6 +18,7 @@ import CandlestickChartRounded from "@mui/icons-material/CandlestickChartRounded
 import PowerSettingsNewRounded from "@mui/icons-material/PowerSettingsNewRounded";
 import TuneRounded from "@mui/icons-material/TuneRounded";
 import InsightsRounded from "@mui/icons-material/InsightsRounded";
+import PhoneIphoneRounded from "@mui/icons-material/PhoneIphoneRounded";
 import MenuRounded from "@mui/icons-material/MenuRounded";
 import LockRounded from "@mui/icons-material/LockRounded";
 import { useMt5Telemetry } from "../hooks";
@@ -33,6 +34,7 @@ const links: readonly LinkRow[] = [
   ["/phase7b-pattern-check", "Tín hiệu", CandlestickChartRounded],
   ["/phase7b-ops", "Tài khoản & rủi ro", PowerSettingsNewRounded],
   ["/phase7c-control-center", "Trung tâm điều khiển", TuneRounded],
+  ["/phase7c-mobile", "Điện thoại", PhoneIphoneRounded],
   ["/performance", "Hiệu suất", InsightsRounded],
 ] as const;
 
@@ -112,6 +114,9 @@ export function DashboardLayout() {
   } else if (location.pathname.startsWith("/phase7c-control-center")) {
     headerTitle = "Trung tâm điều khiển";
     headerSubtitle = `MT5 · bot · Telegram · quyết định giao dịch · khối lượng/rủi ro · ${runtime}`;
+  } else if (location.pathname.startsWith("/phase7c-mobile")) {
+    headerTitle = "Điện thoại · chỉ đọc";
+    headerSubtitle = `MOBILE_REMOTE_ACCESS_M1 · trạng thái canonical · ${runtime}`;
   } else if (location.pathname.startsWith("/performance")) {
     headerTitle = "Hiệu suất";
     headerSubtitle = `Kết quả giao dịch XAUUSD của tài khoản ${runtime} hiện tại`;

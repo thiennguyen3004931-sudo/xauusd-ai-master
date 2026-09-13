@@ -13,6 +13,9 @@ const Phase7CAccountRiskPage = lazy(() =>
 const Phase7CControlCenterShellPage = lazy(() =>
   import("./pages/Phase7CControlCenterShellPage").then((module) => ({ default: module.Phase7CControlCenterShellPage })),
 );
+const Phase7CMobileReadOnlyPage = lazy(() =>
+  import("./pages/Phase7CMobileReadOnlyPage").then((module) => ({ default: module.Phase7CMobileReadOnlyPage })),
+);
 const PerformancePage = lazy(() =>
   import("./pages/PerformancePage").then((module) => ({ default: module.PerformancePage })),
 );
@@ -39,6 +42,10 @@ export const router = createBrowserRouter([
       {
         path: "phase7c-control-center",
         element: <DeferredPage><Phase7CControlCenterShellPage /></DeferredPage>,
+      },
+      {
+        path: "phase7c-mobile",
+        element: <DeferredPage><Phase7CMobileReadOnlyPage /></DeferredPage>,
       },
       {
         path: "performance",
