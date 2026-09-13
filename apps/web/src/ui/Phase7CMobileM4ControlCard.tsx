@@ -7,7 +7,6 @@ import {
   getMobileArmStatus,
   getMobileM4State,
   preflightMobileArm,
-  type MobileM4ArmAction,
   type MobileM4ArmPreflight,
   type MobileM4Mode,
 } from "../mobile-m4-control";
