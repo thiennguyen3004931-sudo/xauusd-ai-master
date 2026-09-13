@@ -4,8 +4,8 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "build": "node --check gateway.js && node --check server.cjs",
-    "lint": "node --check gateway.js && node --check server.cjs",
+    "build": "node --check gateway.js && node --check server.cjs && node --check m4-contract.cjs && node --check canonical-client.cjs",
+    "lint": "node --check gateway.js && node --check server.cjs && node --check m4-contract.cjs && node --check canonical-client.cjs",
     "test": "node --test test/*.test.mjs"
   }
 }
