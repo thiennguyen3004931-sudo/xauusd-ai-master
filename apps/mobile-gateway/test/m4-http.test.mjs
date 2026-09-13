@@ -6,8 +6,8 @@ const require = createRequire(import.meta.url);
 const { createMobileGatewayServer } = require("../server.cjs");
 const { validateProductionConfig } = require("../gateway.js");
 
-const ORIGIN = "https://emlvt-dt-1.taila2e32b.ts.net:8443";
-const USER = "thiennguyen300493@gmail.com";
+const ORIGIN = "https://test-device.example-tailnet.ts.net:8443";
+const USER = "operator@example.com";
 
 async function listen(server) {
   await new Promise((resolve, reject) => {
