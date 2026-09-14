@@ -5,7 +5,7 @@ import sys
 import threading
 import types
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -38,10 +38,11 @@ class _Mt5:
 
 
 class _Gateway:
-    def __init__(self) -> None:
+    def __init__(self, rows: list[dict[str, object]] | None = None) -> None:
         self.mt5 = _Mt5()
         self._lock = threading.RLock()
         self.captured: dict[str, object] = {}
+        self.rows = [] if rows is None else rows
 
     def _ensure_symbol(self, canonical: str) -> str:
         return canonical
@@ -53,7 +54,7 @@ class _Gateway:
         if method_name == "copy_rates_range":
             self.captured["method_name"] = method_name
             self.captured["args"] = args
-            return []
+            return self.rows
 
         raise AssertionError(f"Unexpected MT5 read: {method_name}")
 
@@ -98,6 +99,40 @@ class HistoricalCandleBrokerTimeRangeTest(unittest.TestCase):
             datetime(2026, 9, 11, 9, 35, tzinfo=timezone.utc),
             "UTC toMs must be shifted to broker pseudo-UTC before copy_rates_range",
         )
+
+    def test_closed_broker_time_candle_is_not_rejected_as_future(self) -> None:
+        os.environ["MT5_BROKER_TIME_OFFSET_SECONDS"] = "10800"
+        real_now = datetime.now(tz=timezone.utc).replace(second=0, microsecond=0)
+        real_open = real_now - timedelta(minutes=10)
+        broker_open = real_open + timedelta(hours=3)
+        gateway = _Gateway(
+            rows=[
+                {
+                    "time": int(broker_open.timestamp()),
+                    "spread": 20,
+                    "open": 4400.0,
+                    "high": 4401.0,
+                    "low": 4399.0,
+                    "close": 4400.5,
+                    "tick_volume": 100,
+                }
+            ]
+        )
+
+        candles = historical_candles(
+            gateway,
+            "XAUUSD",
+            "M5",
+            int((real_now - timedelta(minutes=15)).timestamp() * 1000),
+            int(real_now.timestamp() * 1000),
+        )
+
+        self.assertEqual(
+            len(candles),
+            1,
+            "A candle closed in real UTC must remain closed when MT5 returns broker pseudo-UTC time",
+        )
+        self.assertEqual(candles[0]["openTime"], int(broker_open.timestamp() * 1000))
 
 
 if __name__ == "__main__":
