@@ -27,11 +27,11 @@ $core = (Get-Content -LiteralPath $CorePath -Raw).Replace("`r`n", "`n").Replace(
 
 # Production reproduction 2026-09-14: target source generation can be stale while
 # lifecycle remains RUNNING+READY and the canonical singleton startup lock is HELD.
-# A prior definition-only runner hash repair can make the CURRENT canonical task hash
-# newer than the already-running stale broker launcher's attested hash. The guarded
-# entrypoint must therefore prove the stale broker by PID + heartbeat + singleton lock
-# + well-formed stale generation attestation, while proving the CURRENT task trust
-# separately. It must not require the old broker launcher hash to equal the new task hash.
+# A prior definition-only runner hash repair can make BOTH the current registered task
+# action token and runner hash newer than the already-running stale broker instance.
+# Therefore the guarded entrypoint must bind the running task instance to broker PID via
+# Task Scheduler IRunningTask.EnginePID, while proving CURRENT registered task trust and
+# stale broker generation attestation separately.
 $guardRequired = @(
   '$generationDecision = Get-Phase7CRuntimeSourceGenerationReloadDecision',
   '$reloadRequired = [bool]$generationDecision.reloadRequired',
@@ -40,10 +40,12 @@ $guardRequired = @(
   '[bool]$lifecycle.running',
   '[bool]$lifecycle.ready',
   '[string]$runtimeGeneration.startupRunnerLockState -eq ''HELD''',
+  'function Get-Phase7CRunningTaskInstanceProcessIds',
+  '$instance.EnginePID',
   '$heldEligible',
-  '$canonicalProcessIds.Count -eq 1',
-  '$runningInstanceCount -eq 1',
-  '[int]$canonicalProcessIds[0] -eq [int]$runtimeGeneration.statusBrokerPid',
+  '$runningTaskInstancePids = @(Get-Phase7CRunningTaskInstanceProcessIds -Name $TaskName)',
+  '$runningTaskInstancePids.Count -eq 1',
+  '[int]$runningTaskInstancePids[0] -eq [int]$runtimeGeneration.statusBrokerPid',
   '[string]$brokerAttestation.component -eq ''lifecycle-broker''',
   '[int]$brokerAttestation.pid -eq [int]$runtimeGeneration.statusBrokerPid',
   '$brokerAttestationVersionValid',
@@ -66,6 +68,7 @@ foreach ($literal in $guardRequired) {
   Assert-True ($guarded.Contains($literal)) "RED: RUNNING+READY held-lock guarded recovery contract missing: $literal"
 }
 Assert-True (-not $guarded.Contains('$attestedLauncherSha256 -eq $expectedLauncherSha256')) 'RED: stale running broker must not be required to carry the CURRENT repaired task runner hash.'
+Assert-True (-not $guarded.Contains('$canonicalProcessIds = @(Get-Phase7CCanonicalTaskProcessIds -Task $task)')) 'RED: stale running task instance must not be identified from the CURRENT repaired task action token.'
 
 $eligible = 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK=ELIGIBLE_QUIESCE_REQUIRED'
 $stopApi = '[void](Invoke-ApiPost "/api/v1/phase7c/lifecycle/stop" @{})'
