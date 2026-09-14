@@ -76,11 +76,40 @@ $canonicalNoNonExactComponents = @(
         ([string]$_).Trim() -eq 'RUNTIME_SOURCE_NON_EXACT_COMPONENTS=NONE'
     }
 ).Count -eq 1
+$canonicalLiveAccount = @(
+    $canonicalPreflightOutput | Where-Object {
+        ([string]$_).Trim() -eq 'ACCOUNT_MODE=LIVE'
+    }
+).Count -eq 1
+$canonicalBridgeAccountModeMatch = @(
+    $canonicalPreflightOutput | Where-Object {
+        ([string]$_).Trim() -eq 'BRIDGE_ACCOUNT_MODE_MATCH=True'
+    }
+).Count -eq 1
+$canonicalBridgeAccountIdentityMatch = @(
+    $canonicalPreflightOutput | Where-Object {
+        ([string]$_).Trim() -eq 'BRIDGE_ACCOUNT_IDENTITY_MATCH=True'
+    }
+).Count -eq 1
+$canonicalLiveAuthorizationValid = @(
+    $canonicalPreflightOutput | Where-Object {
+        ([string]$_).Trim() -eq 'LIVE_AUTHORIZATION_VALID=True'
+    }
+).Count -eq 1
+$canonicalNoMutatingRequests = @(
+    $canonicalPreflightOutput | Where-Object {
+        ([string]$_).Trim() -eq 'UNRESOLVED_MUTATING_REQUESTS=0'
+    }
+).Count -eq 1
 $canonicalPreflightPass = $canonicalPreflightExitCode -eq 0 -and $canonicalPreflightPassMarker
 $canonicalRuntimeExact = $canonicalPreflightPass -and
     $canonicalNoRecoveryRequired -and
     $canonicalRecoveryNotRequired -and
     $canonicalNoNonExactComponents
+$canonicalLiveProductionIdentity = $canonicalLiveAccount -and
+    $canonicalBridgeAccountModeMatch -and
+    $canonicalBridgeAccountIdentityMatch -and
+    $canonicalLiveAuthorizationValid
 foreach ($line in $canonicalPreflightOutput) {
     Write-Host "[CANONICAL_PREFLIGHT] $line"
 }
@@ -148,6 +177,7 @@ function Get-DecimalField($Row, [string]$Name) {
 function Write-SafeStateEvidence(
     [string]$Mode,
     [string]$Arm,
+    [bool]$LiveExecutionArmed,
     [int]$PositionCount,
     [int]$PendingOrderCount
 ) {
@@ -156,6 +186,9 @@ function Write-SafeStateEvidence(
 
     if ($Arm -eq 'DISARMED') { Write-Host 'ARM=DISARMED' }
     else { Write-Host "ARM=$Arm" }
+
+    if ($LiveExecutionArmed) { Write-Host 'LIVE_EXECUTION_ARMED=True' }
+    else { Write-Host 'LIVE_EXECUTION_ARMED=False' }
 
     if ($PositionCount -eq 0) { Write-Host 'XAUUSD_POSITIONS=0' }
     else { Write-Host "XAUUSD_POSITIONS=$PositionCount" }
@@ -192,8 +225,10 @@ $pendingOrders = @(Read-BridgeArray '/v1/orders?symbol=XAUUSD')
 
 $botMode = ([string]$modeSnapshot.state.mode).Trim().ToUpperInvariant()
 $arm = ([string]$armSnapshot.liveArmStatus).Trim().ToUpperInvariant()
+$liveExecutionArmed = [bool]$armSnapshot.liveExecutionArmed
 $safeState = $botMode -eq 'PAUSE' -and
     $arm -eq 'DISARMED' -and
+    -not $liveExecutionArmed -and
     $positions.Count -eq 0 -and
     $pendingOrders.Count -eq 0
 
@@ -201,12 +236,20 @@ Write-Host '=== CANONICAL PREFLIGHT ==='
 Write-Host "CANONICAL_PREFLIGHT_RESULT=$(if ($canonicalPreflightPass) { 'PASS' } else { 'FAIL' })"
 Write-Host "CANONICAL_PREFLIGHT_EXIT_CODE=$canonicalPreflightExitCode"
 Write-Host "CANONICAL_NO_RECOVERY_REQUIRED=$canonicalNoRecoveryRequired"
+Write-Host "CANONICAL_LIVE_ACCOUNT=$canonicalLiveAccount"
+Write-Host "CANONICAL_BRIDGE_ACCOUNT_MODE_MATCH=$canonicalBridgeAccountModeMatch"
+Write-Host "CANONICAL_BRIDGE_ACCOUNT_IDENTITY_MATCH=$canonicalBridgeAccountIdentityMatch"
+Write-Host "CANONICAL_LIVE_AUTHORIZATION_VALID=$canonicalLiveAuthorizationValid"
+Write-Host "CANONICAL_NO_MUTATING_REQUESTS=$canonicalNoMutatingRequests"
 if ($canonicalRuntimeExact) { Write-Host 'CANONICAL_RUNTIME_SOURCE=EXACT' }
 else { Write-Host 'CANONICAL_RUNTIME_SOURCE=MISMATCH' }
+if ($canonicalLiveProductionIdentity) { Write-Host 'CANONICAL_PRODUCTION_ACCOUNT=LIVE_REAL_EXACT' }
+else { Write-Host 'CANONICAL_PRODUCTION_ACCOUNT=MISMATCH' }
 Write-Host '=== SAFE RUNTIME STATE ==='
 Write-SafeStateEvidence `
     -Mode $botMode `
     -Arm $arm `
+    -LiveExecutionArmed $liveExecutionArmed `
     -PositionCount $positions.Count `
     -PendingOrderCount $pendingOrders.Count
 
@@ -217,6 +260,12 @@ if (-not $canonicalPreflightPass) {
     $reason = 'CANONICAL_PREFLIGHT_FAIL'
 } elseif (-not $canonicalRuntimeExact) {
     $reason = 'RUNTIME_SOURCE_NOT_EXACT'
+} elseif (-not $canonicalLiveProductionIdentity) {
+    $reason = 'PRODUCTION_LIVE_ACCOUNT_REQUIRED'
+} elseif (-not $canonicalNoMutatingRequests) {
+    $reason = 'UNRESOLVED_MUTATING_REQUESTS_PRESENT'
+} elseif ($liveExecutionArmed) {
+    $reason = 'LIVE_EXECUTION_ARMED_NOT_FALSE'
 } elseif (-not $safeState) {
     $reason = 'PAUSE_DISARMED_FLAT_REQUIRED'
 } else {
