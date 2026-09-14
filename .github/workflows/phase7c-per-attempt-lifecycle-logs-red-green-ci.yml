@@ -26,3 +26,5 @@ jobs:
       - name: Per-attempt lifecycle log contract with Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\test-phase7c-per-attempt-lifecycle-logs-source.ps1
+
+# GREEN trigger after bounded source fix; this one-shot workflow is removed before PR review.
