@@ -17,15 +17,29 @@ def test_repair_is_definition_only_and_uses_canonical_ownership_contract():
     assert "Get-Phase7CScheduledTaskOwnershipVerdict" in source
     assert "OWNED_HASH_DRIFT_REPAIR_REQUIRED" in source
     assert "RUNNER_HASH_DRIFT" in source
-    assert "Set-ScheduledTask" in source
+    assert source.count("Set-ScheduledTask") == 1
 
     forbidden = (
         "Start-ScheduledTask",
         "Stop-ScheduledTask",
         "Register-ScheduledTask",
         "Unregister-ScheduledTask",
+        "Enable-ScheduledTask",
+        "Disable-ScheduledTask",
         "Start-Process",
         "Stop-Process",
+        "Start-Service",
+        "Stop-Service",
+        "Restart-Service",
+        "schtasks.exe",
+        "Invoke-RestMethod",
+        "Invoke-WebRequest",
+        "Set-Content",
+        "Add-Content",
+        "Remove-Item",
+        "Move-Item",
+        "Copy-Item",
+        "Set-ItemProperty",
     )
     for token in forbidden:
         assert token not in source, f"definition-only repair must not contain {token}"
