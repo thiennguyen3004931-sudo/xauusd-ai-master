@@ -1,0 +1,107 @@
+name: Temporary Phase7C Held-Lock RED Patch
+
+on:
+  push:
+    branches:
+      - "fix/phase7c-running-held-lock-generation-reload"
+    paths:
+      - ".github/workflows/tmp-phase7c-held-lock-red-patch.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-red-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+      - name: Add held-lock regression only
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/test-phase7c-stopped-lifecycle-preweb-generation-source.ps1')
+          text = path.read_text(encoding='utf-8')
+          marker = 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK=ELIGIBLE_QUIESCE_REQUIRED'
+          if marker in text:
+              print('RED regression already present; no change required.')
+              raise SystemExit(0)
+
+          needle = 'Write-Host "PHASE7C_STOPPED_LIFECYCLE_PREWEB_GENERATION_SOURCE_TEST=PASS"'
+          if text.count(needle) != 1:
+              raise SystemExit(f'Expected exactly one final source-test marker, found {text.count(needle)}')
+
+          section = r'''
+# Production reproduction 2026-09-14: source generation reload can be required while
+# lifecycle remains RUNNING+READY, the canonical SYSTEM broker is alive/fresh and
+# PID-matched, and the startup-runner singleton lock is correctly HELD. This is a
+# healthy old generation, not a lock-repair case. Recovery must quiesce lifecycle
+# before strict Web/API deploy, then reuse the existing stopped-lifecycle generation
+# restart path. It must never weaken the strict verifier or kill processes directly.
+$runningHeldRequired = @(
+  '$preWebRunningHeldLockCandidate',
+  '$preWebRunningHeldLockReloadEligible',
+  'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK=ELIGIBLE_QUIESCE_REQUIRED',
+  '[string]$preWebRuntimeGeneration.startupRunnerLockState -eq ''HELD''',
+  '$preWebRunningHeldCanonicalProcessIds.Count -eq 1',
+  '$preWebRunningHeldInstanceCount -eq 1',
+  '[int]$preWebRunningHeldCanonicalProcessIds[0] -eq [int]$preWebRuntimeGeneration.statusBrokerPid',
+  '[string]$preWebRunningHeldBrokerAttestation.component -eq ''lifecycle-broker''',
+  '[int]$preWebRunningHeldBrokerAttestation.pid -eq [int]$preWebRuntimeGeneration.statusBrokerPid',
+  '$preWebRunningHeldAttestedLauncherSha256 -eq $preWebExpectedLauncherSha256',
+  'Assert-PauseDisarmed -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK"',
+  'Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK"',
+  'Assert-FlatBroker -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK"',
+  '[void](Invoke-ApiPost "/api/v1/phase7c/lifecycle/stop" @{})',
+  'Wait-LifecycleStopped',
+  'Assert-LifecycleExecutorsStopped -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK_POST_STOP"',
+  'Assert-PauseDisarmed -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK_POST_STOP"',
+  'Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK_POST_STOP"',
+  'Assert-FlatBroker -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK_POST_STOP"',
+  'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK_LIFECYCLE_STOP=PASS'
+)
+foreach ($literal in $runningHeldRequired) {
+  Assert-True ($recovery.Contains($literal)) "RED: running+ready held-lock generation quiesce contract missing: $literal"
+}
+
+$runningHeldEligible = 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK=ELIGIBLE_QUIESCE_REQUIRED'
+$runningHeldStopped = 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK_LIFECYCLE_STOP=PASS'
+$runningHeldEligibleIndex = $recovery.IndexOf($runningHeldEligible, [System.StringComparison]::Ordinal)
+$runningHeldStoppedIndex = $recovery.IndexOf($runningHeldStopped, [System.StringComparison]::Ordinal)
+$generalStoppedEligibleIndex = $recovery.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB=ELIGIBLE', [System.StringComparison]::Ordinal)
+$heldWebDeployIndex = $recovery.IndexOf('& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy', [System.StringComparison]::Ordinal)
+
+Assert-True ($runningHeldEligibleIndex -ge 0) 'RUNNING+READY held-lock generation reload must expose exact quiesce eligibility.'
+Assert-True ($runningHeldStoppedIndex -gt $runningHeldEligibleIndex) 'Held-lock lifecycle STOP proof must occur after exact eligibility.'
+Assert-True ($generalStoppedEligibleIndex -gt $runningHeldStoppedIndex) 'Existing stopped-lifecycle generation restart must be entered only after held-lock lifecycle STOP is proven.'
+Assert-True ($heldWebDeployIndex -gt $runningHeldStoppedIndex) 'Strict Web/API deploy must remain after held-lock generation quiesce.'
+
+$runningHeldSection = $recovery.Substring($runningHeldEligibleIndex, $generalStoppedEligibleIndex - $runningHeldEligibleIndex)
+Assert-True (-not $runningHeldSection.Contains('Stop-Process')) `
+  'RUNNING+READY held-lock generation reload must never kill a process directly.'
+Assert-True (-not $runningHeldSection.Contains('Stop-ScheduledTask')) `
+  'RUNNING+READY held-lock quiesce must stop lifecycle before the existing stopped-generation path stops the canonical task.'
+Assert-True (-not $runningHeldSection.Contains('Remove-Item')) `
+  'RUNNING+READY held-lock generation reload must never delete the singleton lock manually.'
+Assert-True (-not $runningHeldSection.Contains('Set-Content')) `
+  'RUNNING+READY held-lock generation reload must never rewrite the singleton lock manually.'
+
+'''
+          text = text.replace(needle, section + needle)
+          path.write_text(text, encoding='utf-8', newline='\n')
+          PY
+
+          if git diff --quiet -- scripts/test-phase7c-stopped-lifecycle-preweb-generation-source.ps1; then
+            echo "No patch required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/test-phase7c-stopped-lifecycle-preweb-generation-source.ps1
+          git commit -m "test: reproduce running held-lock generation reload blocker"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
