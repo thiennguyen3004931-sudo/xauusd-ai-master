@@ -58,6 +58,15 @@ def test_repair_is_fail_closed_to_runner_hash_drift_only():
     assert "RUNNER_ACTUAL_SHA_MISMATCH" in source
 
 
+def test_repair_requires_exact_observed_embedded_sha_before_mutation():
+    source = _source()
+
+    assert "ExpectedEmbeddedRunnerSha256" in source
+    assert "PRE_REPAIR_EMBEDDED_SHA_MISMATCH" in source
+    assert "$preEmbeddedSha -ne $expectedEmbeddedSha" in source
+    assert "PRE_REPAIR_RUNNERSHA256=" in source
+
+
 def test_repair_rechecks_canonical_acceptance_after_definition_change():
     source = _source()
 
