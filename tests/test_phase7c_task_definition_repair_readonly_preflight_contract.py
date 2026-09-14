@@ -106,6 +106,7 @@ def test_preflight_allows_only_exact_runner_hash_drift_with_fresh_evidence() -> 
         "PRE_REPAIR_TASK_DRIFT",
         "PRE_REPAIR_PRINCIPAL_NOT_CANONICAL_SYSTEM",
         "PRE_REPAIR_EMBEDDED_SHA_MISMATCH",
+        "TASK_STATE_RUNNING_REJECTED",
         "ONLY_CONFIRMED_DRIFT=RUNNER_HASH",
     )
     for token in required:
@@ -124,6 +125,7 @@ def test_preflight_emits_explicit_repair_gate_evidence() -> None:
         "RUNNER_ACTUAL_SHA=",
         "RUNNER_TRUSTED_SHA=",
         "TASK_EMBEDDED_SHA=",
+        "TASK_STATE=",
         "OWNERSHIP_OWNED=True",
         "OWNERSHIP_CANONICAL=False",
         "OWNERSHIP_REPAIRREQUIRED=True",
