@@ -106,6 +106,21 @@ for (const field of ["openTime", "closeTime", "open", "high", "low", "close"]) {
 assert.ok(source.includes("$verdict = 'PASS'"), "probe must define an explicit PASS verdict branch");
 assert.ok(source.includes("$verdict = 'FAIL'"), "probe must define explicit FAIL verdict branches");
 
+assert.ok(
+  source.includes("$parsed = $raw | ConvertFrom-Json"),
+  "Read-BridgeArray must materialize ConvertFrom-Json output before enumeration so Windows PowerShell 5.1 JSON arrays are flattened candle-by-candle",
+);
+assert.match(
+  source,
+  /\$parsed\s*\|\s*Where-Object\s*\{\s*\$null\s*-ne\s*\$_\s*\}/,
+  "Read-BridgeArray must enumerate the materialized parsed array before returning rows",
+);
+assert.doesNotMatch(
+  source,
+  /\$raw\s*\|\s*ConvertFrom-Json\s*\|\s*Where-Object/,
+  "Read-BridgeArray must not pipe ConvertFrom-Json directly into Where-Object because Windows PowerShell 5.1 can preserve the JSON array as one Object[] pipeline object",
+);
+
 assert.doesNotMatch(
   source,
   /Invoke-(?:RestMethod|WebRequest)[^\n]*-Method\s+(?:Post|Put|Patch|Delete)/i,
