@@ -1,0 +1,49 @@
+name: Phase7C Historical Candle Time CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/phase7c-historical-candle-broker-time
+    paths:
+      - "packages/mt5-broker/bridge/mt5_bridge/historical_candles.py"
+      - "packages/mt5-broker/bridge/mt5_bridge/broker_time.py"
+      - "packages/mt5-broker/bridge/tests/test_historical_candle_time.py"
+      - ".github/workflows/phase7c-historical-candle-time-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "packages/mt5-broker/bridge/mt5_bridge/historical_candles.py"
+      - "packages/mt5-broker/bridge/mt5_bridge/broker_time.py"
+      - "packages/mt5-broker/bridge/tests/test_historical_candle_time.py"
+      - ".github/workflows/phase7c-historical-candle-time-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  historical-candle-broker-time:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Historical candle broker-time regression
+        run: python -m unittest discover -s packages/mt5-broker/bridge/tests -p 'test_historical_candle_time.py' -v
+
+  diff-hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Diff hygiene
+        run: git diff --check
