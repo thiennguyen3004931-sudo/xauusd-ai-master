@@ -58,6 +58,7 @@ def test_repair_is_fail_closed_to_runner_hash_drift_only():
     assert "PRE_REPAIR_TASK_DRIFT" in source
     assert "PRE_REPAIR_PRINCIPAL_NOT_CANONICAL_SYSTEM" in source
     assert "Get-FileHash" in source
+    assert "Get-Phase7CTrustedGitFileSha256" in source
     assert "-Algorithm SHA256" in source
     assert "RUNNER_ACTUAL_SHA_MISMATCH" in source
 
@@ -98,3 +99,20 @@ def test_repair_rechecks_canonical_acceptance_after_definition_change():
     assert "TASK_DRIFT=NONE" in source
     assert "MUTATION=TASK_DEFINITION_ONLY" in source
     assert "REPAIR_SCOPE=RUNNER_HASH_ONLY" in source
+
+
+def main() -> None:
+    tests = (
+        test_repair_is_definition_only_and_uses_canonical_ownership_contract,
+        test_repair_is_fail_closed_to_runner_hash_drift_only,
+        test_repair_requires_exact_observed_embedded_sha_before_mutation,
+        test_repair_builds_the_same_guard_action_contract_as_canonical_library,
+        test_repair_rechecks_canonical_acceptance_after_definition_change,
+    )
+    for test in tests:
+        test()
+    print(f"PASS: {len(tests)} definition-only repair contract checks")
+
+
+if __name__ == "__main__":
+    main()
