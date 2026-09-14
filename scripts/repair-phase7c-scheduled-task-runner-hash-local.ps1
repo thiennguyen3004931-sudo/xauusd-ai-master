@@ -1,18 +1,6 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateNotNullOrEmpty()]
-    [string]$TaskName,
-
-    [Parameter(Mandatory = $false)]
-    [ValidateNotNullOrEmpty()]
-    [string]$TaskPath = "\",
-
-    [Parameter(Mandatory = $true)]
-    [ValidateNotNullOrEmpty()]
-    [string]$RunnerPath,
-
-    [Parameter(Mandatory = $true)]
     [ValidatePattern('^[A-Fa-f0-9]{64}$')]
     [string]$ExpectedEmbeddedRunnerSha256,
 
@@ -43,7 +31,9 @@ function Test-Phase7CCanonicalSystemPrincipal {
 }
 
 $projectRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
-$resolvedRunnerPath = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $RunnerPath -ErrorAction Stop).Path)
+$TaskName = 'XAUUSD-Phase7C-Executors'
+$TaskPath = '\'
+$resolvedRunnerPath = Get-Phase7CExecutorTaskRunnerPath -ProjectRoot $projectRoot
 $expectedEmbeddedSha = Normalize-Phase7CRunnerSha256 -Sha256 $ExpectedEmbeddedRunnerSha256
 $expectedSha = Normalize-Phase7CRunnerSha256 -Sha256 $ExpectedRunnerSha256
 
