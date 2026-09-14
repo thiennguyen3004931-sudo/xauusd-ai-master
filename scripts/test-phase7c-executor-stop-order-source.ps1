@@ -46,4 +46,22 @@ foreach ($contract in @(
 $tradeNotifierOrphan = 'Stop-OrphanNodeProcess "run-phase7b-telegram-notifier.mjs" "TRADE_NOTIFIER"'
 Assert-True ($stopperText.Contains($tradeNotifierOrphan)) "executor stopper orphan cleanup must include the trade notifier Node process"
 
+# PID files can disappear while their canonical PowerShell launcher processes are
+# still alive. Orphan reconciliation must therefore be bounded to exact canonical
+# wrapper paths instead of broadly terminating powershell.exe processes.
+Assert-True ($stopperText.Contains('function Stop-OrphanPowerShellProcess')) "executor stopper must define bounded orphan PowerShell wrapper cleanup"
+Assert-True ($stopperText.Contains('[System.IO.Path]::GetFullPath($ScriptPath)')) "orphan PowerShell cleanup must canonicalize the exact wrapper script path"
+Assert-True ($stopperText.Contains("Name='powershell.exe'")) "orphan PowerShell cleanup must inspect Windows PowerShell wrapper processes"
+Assert-True ($stopperText.Contains("Name='pwsh.exe'")) "orphan PowerShell cleanup must inspect PowerShell 7 wrapper processes without broad process termination"
+
+foreach ($contract in @(
+  @{ Label = "supervisor"; Text = 'Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-executors-local.ps1") "SUPERVISOR"' },
+  @{ Label = "Trend"; Text = 'Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-trend-controller-local.ps1") "TREND"' },
+  @{ Label = "Sideway"; Text = 'Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-sideway-controller-local.ps1") "SIDEWAY"' },
+  @{ Label = "Telegram mode"; Text = 'Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-telegram-mode-controller-local.ps1") "TELEGRAM_MODE"' },
+  @{ Label = "regime notifier"; Text = 'Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-regime-notifier-local.ps1") "REGIME_NOTIFIER"' }
+)) {
+  Assert-True ($stopperText.Contains([string]$contract.Text)) "executor stopper must boundedly reconcile orphan $($contract.Label) PowerShell wrapper by exact canonical script path"
+}
+
 Write-Host "PHASE7C_EXECUTOR_STOP_ORDER_SOURCE_TEST=PASS"

@@ -14,10 +14,6 @@ if (-not (Test-Path $WorkDir)) {
 }
 $WorkDir = (Resolve-Path $WorkDir).Path
 $RuntimeDir = Join-Path $WorkDir "phase7c-executors"
-if (-not (Test-Path $RuntimeDir)) {
-  Write-Host "PHASE7C_EXECUTOR_STOP=NO_RUNTIME"
-  exit 0
-}
 
 function Get-Phase7CProcessStartTicks([System.Diagnostics.Process]$Process) {
   if ($null -eq $Process) { return $null }
@@ -127,6 +123,37 @@ function Stop-PidFile([string]$Path, [string]$Label) {
   }
 }
 
+function Stop-OrphanPowerShellProcess([string]$ScriptPath, [string]$Label) {
+  try {
+    $canonicalScriptPath = [System.IO.Path]::GetFullPath($ScriptPath)
+    $candidates = @(
+      @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction Stop)
+      @(Get-CimInstance Win32_Process -Filter "Name='pwsh.exe'" -ErrorAction Stop)
+    )
+    $matches = @($candidates | Where-Object {
+      $commandLine = [string]$_.CommandLine
+      if ([string]::IsNullOrWhiteSpace($commandLine)) { return $false }
+      $hasFileSwitch = $commandLine -match '(?i)(?:^|\s)-File(?:\s|=)'
+      $hasCanonicalScript = $commandLine.IndexOf($canonicalScriptPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+      $hasFileSwitch -and $hasCanonicalScript
+    })
+    foreach ($match in $matches) {
+      $pidValue = [int]$match.ProcessId
+      if ($pidValue -le 0 -or $pidValue -eq $PID) { continue }
+      $stopped = Stop-ProcessTree $pidValue $Label
+      if ($stopped) {
+        Write-Host "PHASE7C_${Label}_POWERSHELL_ORPHAN_STOP=PASS|PID=$pidValue"
+      } else {
+        Write-Warning "Could not fully stop orphan $Label PowerShell wrapper PID $pidValue."
+        $script:StopFailures += "${Label}_POWERSHELL_ORPHAN:$pidValue"
+      }
+    }
+  } catch {
+    Write-Warning "Could not inspect orphan $Label PowerShell wrappers. $($_.Exception.Message)"
+    $script:StopFailures += "${Label}_POWERSHELL_ORPHAN:INSPECTION_ERROR"
+  }
+}
+
 function Stop-OrphanNodeProcess([string]$ScriptName, [string]$Label) {
   try {
     $matches = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction Stop | Where-Object {
@@ -153,6 +180,11 @@ function Stop-OrphanNodeProcess([string]$ScriptName, [string]$Label) {
 # Stop the watchdog owner first. Otherwise it can recreate a managed child
 # while this stopper is still cleaning that child's PID file/process tree.
 Stop-PidFile (Join-Path $RuntimeDir "supervisor.pid") "SUPERVISOR"
+if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDir "supervisor.pid"))) {
+  Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-executors-local.ps1") "SUPERVISOR"
+} else {
+  Write-Host "PHASE7C_SUPERVISOR_POWERSHELL_ORPHAN_STOP=SKIP_PID_EVIDENCE_PRESENT"
+}
 
 # The supervisor tree kill normally removes all descendants. These idempotent
 # child checks clean up anything that survived or detached before shutdown.
@@ -161,6 +193,22 @@ Stop-PidFile (Join-Path $RuntimeDir "telegram-mode.pid") "TELEGRAM_MODE"
 Stop-PidFile (Join-Path $RuntimeDir "regime-notifier.pid") "REGIME_NOTIFIER"
 Stop-PidFile (Join-Path $RuntimeDir "trend.pid") "TREND"
 Stop-PidFile (Join-Path $RuntimeDir "sideway.pid") "SIDEWAY"
+
+# Reconcile canonical PowerShell wrappers by exact full script path only when
+# their PID evidence is absent. An existing but invalid PID file is an ownership
+# ambiguity and must fail closed without killing a potentially managed wrapper.
+if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDir "telegram-mode.pid"))) {
+  Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-telegram-mode-controller-local.ps1") "TELEGRAM_MODE"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDir "regime-notifier.pid"))) {
+  Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-regime-notifier-local.ps1") "REGIME_NOTIFIER"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDir "trend.pid"))) {
+  Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-trend-controller-local.ps1") "TREND"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDir "sideway.pid"))) {
+  Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-sideway-controller-local.ps1") "SIDEWAY"
+}
 
 # Clean up Node children left by older versions that only killed the launcher PID.
 Stop-OrphanNodeProcess "run-phase7b-telegram-notifier.mjs" "TRADE_NOTIFIER"
