@@ -1,7 +1,7 @@
 import type { CopyCommandBody, JsonValue } from "./command.js";
 import { assertCopyCommandBody } from "./command.js";
 
-export function canonicalizeJson(value: JsonValue): string {
+function canonicalizeJsonInternal(value: unknown, seen: WeakSet<object>): string {
   if (value === null || typeof value === "boolean" || typeof value === "string") {
     return JSON.stringify(value);
   }
@@ -13,18 +13,47 @@ export function canonicalizeJson(value: JsonValue): string {
     return JSON.stringify(value);
   }
 
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalizeJson).join(",")}]`;
-  }
-
   if (typeof value !== "object") {
     throw new TypeError("canonical JSON value is unsupported");
   }
 
-  const keys = Object.keys(value).sort();
-  return `{${keys
-    .map((key) => `${JSON.stringify(key)}:${canonicalizeJson(value[key]!)}`)
-    .join(",")}}`;
+  if (seen.has(value)) {
+    throw new TypeError("canonical JSON value must not be cyclic");
+  }
+  seen.add(value);
+
+  try {
+    if (Array.isArray(value)) {
+      const items: string[] = [];
+      for (let index = 0; index < value.length; index += 1) {
+        if (!Object.prototype.hasOwnProperty.call(value, index)) {
+          throw new TypeError("canonical JSON array must not be sparse");
+        }
+        items.push(canonicalizeJsonInternal(value[index], seen));
+      }
+      return `[${items.join(",")}]`;
+    }
+
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError("canonical JSON object must be plain");
+    }
+
+    const record = value as Record<string, unknown>;
+    const keys = Object.keys(record).sort();
+    return `{${keys
+      .map(
+        (key) =>
+          `${JSON.stringify(key)}:${canonicalizeJsonInternal(record[key], seen)}`
+      )
+      .join(",")}}`;
+  } finally {
+    seen.delete(value);
+  }
+}
+
+export function canonicalizeJson(value: JsonValue): string {
+  return canonicalizeJsonInternal(value, new WeakSet<object>());
 }
 
 export function canonicalizeCopyCommandBody(body: CopyCommandBody): string {
