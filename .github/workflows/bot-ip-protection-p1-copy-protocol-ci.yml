@@ -31,5 +31,5 @@ jobs:
           node-version: 24
       - name: Install workspace dependencies for TDD branch
         run: pnpm install --no-frozen-lockfile
-      - name: Command contract
-        run: pnpm --filter @xauusd/copy-protocol test -- command.test.ts
+      - name: Protocol tests
+        run: pnpm --filter @xauusd/copy-protocol test
