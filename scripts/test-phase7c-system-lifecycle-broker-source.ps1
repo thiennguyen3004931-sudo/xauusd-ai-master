@@ -72,6 +72,11 @@ Assert-True (-not ($runner -match '(?s)while\s*\(\$true\).*?Start-Process.*?run-
 # cleanup, so the idempotent canonical stopper must still be allowed to reconcile them.
 Assert-True (-not ($runner.Contains('return [pscustomobject]@{ success = $true; reasonCode = "NOOP_ALREADY_STOPPED"; message = "Executor runtime already stopped." }'))) "Lifecycle STOP must not return NOOP_ALREADY_STOPPED solely from missing PID files; canonical stopper reconciliation must run"
 
+# START after a fresh broker/task generation is also an orphan-reconciliation boundary.
+# The source-generation recovery path restarts the SYSTEM task and then sends START,
+# so START must run the bounded canonical stopper before launching a new supervisor.
+Assert-True ($runner -match '(?s)if\s*\(\$action\s*-eq\s*"START"\)\s*\{.*?\$preStartReconcile\s*=\s*Stop-Phase7CExecutorRuntime\s+\$config.*?if\s*\(-not\s+\$preStartReconcile\.success\).*?return.*?\}.*?\$startResult\s*=\s*Start-Phase7CExecutorRuntime\s+\$config') "Lifecycle START must reconcile bounded canonical orphan wrappers before launching a new supervisor"
+
 # The migrated-task verifier must use the broker's fresh heartbeat as the runner-liveness authority.
 # startup-runner-status.json belongs to the legacy runner and may legitimately contain a stale PID after migration.
 Assert-True ($verifier -match 'phase7c-lifecycle-broker') "executor verifier must inspect the lifecycle broker runtime"
