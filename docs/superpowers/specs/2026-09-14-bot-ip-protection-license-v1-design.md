@@ -101,11 +101,21 @@ On first enrollment, the follower creates a unique asymmetric device key pair.
 
 The device private key stays on that installation and should be protected using Windows DPAPI or an equivalent OS-protected secret store. The server stores only the installation public key and installation identifier.
 
+Enrollment and reconnect authentication require proof of possession of the device private key. A bearer installation identifier alone is never sufficient.
+
 Hardware fingerprinting may be used as an anomaly signal but is not the primary license root because hardware identifiers are brittle and create support/recovery problems.
 
 Reinstallation requires an explicit re-enrollment/transfer operation; copying files alone must not reproduce the device identity.
 
-### 4.5 Command signing
+### 4.5 Transport boundary
+
+Production follower transport must use HTTPS/TLS. The copy transport exposes only the bounded copy/license protocol; it must not expose the internal Phase7C API, MT5 bridge, generic API proxy, lifecycle controls, or arbitrary order endpoints.
+
+Device-authenticated requests use proof of possession of the enrolled installation key or a short-lived session credential obtained through such proof. Long-lived global bearer secrets are forbidden in the follower.
+
+The protocol implementation may be tested with an in-memory/local transport before any network rollout.
+
+### 4.6 Command signing
 
 Master commands are signed with Ed25519.
 
@@ -131,16 +141,15 @@ keyId
 signature
 ```
 
-The signature covers a deterministic canonical serialization of every security-relevant field. No security-relevant field may exist outside the signed body.
+The signature covers a deterministic canonical UTF-8 serialization of every security-relevant field. No security-relevant field may exist outside the signed body. The implementation plan must choose one canonical serialization and lock it with golden-vector tests before network integration.
 
-### 4.6 Replay and ordering protection
+### 4.7 Replay and ordering protection
 
-Each license/account command stream has a monotonically increasing `sequence`.
+Each `(licenseId, installationId, mt5Login, brokerServer)` command stream has a monotonically increasing `sequence`.
 
 Follower acceptance requires:
 
 ```text
-LICENSE_ACTIVE
 INSTALLATION_MATCH
 MT5_LOGIN_MATCH
 BROKER_SERVER_MATCH
@@ -151,11 +160,29 @@ SEQUENCE_GT_LAST_ACCEPTED
 COMMAND_ID_NOT_PREVIOUSLY_APPLIED
 ACTION_ALLOWLISTED
 PAYLOAD_VALID
+LICENSE_ACTION_ALLOWED
 ```
 
 The follower persists the highest accepted sequence and an idempotency record for recently applied command IDs. Duplicate delivery is safe; old/replayed commands are rejected.
 
 Clock skew tolerance must be bounded and explicit. Sequence validation remains authoritative even when clock skew is tolerated.
+
+### 4.8 License/action authorization matrix
+
+License state is action-sensitive so revocation cannot accidentally strand an existing position.
+
+`ACTIVE` may execute all allowlisted actions subject to account, device, signature, sequence, payload, and follower-risk gates.
+
+`SUSPENDED`, `EXPIRED`, and `REVOKED` must block `POSITION_OPEN` immediately.
+
+For an already-existing matched follower position, non-active license states may accept only signed risk-reducing/reconciliation actions:
+
+- a `STOP_LOSS_UPDATE` that is proven to tighten or preserve protection;
+- `PARTIAL_CLOSE`;
+- `POSITION_CLOSE`;
+- `POSITION_SNAPSHOT`.
+
+`TAKE_PROFIT_UPDATE` is blocked while the license is non-active because a generic TP mutation is not guaranteed to be risk-reducing.
 
 ## 5. Follower Agent boundary
 
@@ -168,7 +195,7 @@ It may contain only:
 - command envelope validation;
 - device identity handling;
 - sequence/replay/idempotency store;
-- per-follower risk caps;
+- per-follower risk configuration and hard protections;
 - MT5 execution adapter;
 - reconciliation/snapshot handling;
 - health/ack reporting;
@@ -176,7 +203,15 @@ It may contain only:
 
 It must not contain any source or compiled copy of Master strategy logic.
 
-Follower-side risk controls may reduce risk but may never increase Master risk. Examples: lower fixed lot, lower multiplier, lower max lot, fewer max open trades, lower max daily loss. A follower risk rule may reject or reduce a new/open exposure; it must not alter Master strategy decisions upstream.
+The approved follower sizing modes are:
+
+```text
+EQUITY_RATIO
+LOT_MULTIPLIER
+FIXED_LOT
+```
+
+Follower sizing is independent of Master strategy logic and never feeds back into Master decisions. Every mode remains bounded by follower hard protections such as maximum lot, maximum open trades, maximum daily loss, account/license authorization, and broker legality. A risk gate may reject or reduce a requested follower exposure when a hard protection would be violated.
 
 ## 6. Failure semantics
 
@@ -190,9 +225,9 @@ No valid fresh command means no new follower entry.
 
 Existing positions are fail-safe, not abandoned.
 
-The follower retains broker-side SL/TP already applied and may execute only previously authorized protection/close commands. On reconnect it performs snapshot reconciliation before accepting new exposure.
+The follower retains broker-side SL/TP already applied. Under a non-active license it may execute only the risk-reducing/reconciliation actions defined in the license/action matrix. On reconnect it performs snapshot reconciliation before accepting new exposure.
 
-A license becoming suspended/revoked blocks new entries immediately. It does not remove an existing broker SL/TP. Server policy may issue a signed close command for existing positions, but revocation alone must not strand a naked position.
+A license becoming suspended, expired, or revoked blocks new entries immediately. It does not remove an existing broker SL/TP and does not prevent an authenticated signed full/partial close or strictly non-loosening SL update for an existing matched position.
 
 ### 6.3 Reconciliation
 
@@ -200,11 +235,11 @@ After disconnect/restart, follower sends its execution state and requests a cano
 
 ## 7. Key management
 
-- Master signing private key never enters repository source, follower package, logs, or browser UI.
+- Master command-signing private key never enters repository source, follower package, logs, or browser UI.
 - Runtime obtains private signing material from a restricted server secret store/environment with OS ACL protection.
 - Public verification keys are versioned by `keyId`.
-- Key rotation supports an overlap window with old and new public keys trusted.
-- A compromised key can be retired server-side; followers receive a signed trust-set/update path before the old key is disabled.
+- Command-key rotation uses an overlap window where a follower release trusts both old and new public keys before the old command key is disabled.
+- Adding a new trusted command key requires an authenticated follower release/update path; V1 does not allow an arbitrary command message to add trust roots.
 - No global symmetric secret is embedded in the follower.
 
 ## 8. Logging and privacy
@@ -223,6 +258,8 @@ Follower source should be isolated behind a separate package/repository/release 
 
 The historical fact that this repository was previously public is treated as an exposure baseline. Future proprietary improvements are protected by keeping the repository private; V1 does not claim to retract historical clones.
 
+Current-history secret scanning is an acceptance requirement before customer distribution. Any discovered credential must be rotated; deleting a file from the current tree alone is not considered remediation for a secret that entered Git history.
+
 ## 10. Compatibility with approved Master Copy Trading model
 
 The Master bot remains the sole source of trading logic.
@@ -237,7 +274,7 @@ Master strategy decision
   -> Command Signer
   -> Transport
   -> Follower verification
-  -> Follower risk cap
+  -> Follower sizing/risk protection
   -> MT5 execution
   -> ACK/reconciliation
 ```
@@ -252,22 +289,25 @@ V1 is not accepted until automated tests prove at least the following:
 2. wrong MT5 account is rejected;
 3. wrong broker server is rejected;
 4. copied installation without the enrolled device key is rejected;
-5. expired license blocks new entry;
-6. suspended/revoked license blocks new entry;
+5. expired/suspended/revoked license blocks new entry;
+6. non-active license permits only the explicitly allowed risk-reducing/reconciliation actions for an existing matched position;
 7. modified action/payload fails signature verification;
 8. unknown `keyId` is rejected;
 9. expired command is rejected;
 10. replayed sequence is rejected;
 11. duplicate command ID is idempotent and never double-executes;
 12. out-of-order sequence is rejected;
-13. reconnect requires reconciliation before new exposure;
-14. transport/server loss blocks new exposure;
-15. an existing position keeps its broker-side protection during auth/server loss;
-16. follower package has no import/dependency on strategy-engine, Trend/Sideway controller, FastMove, M5, or proprietary decision modules;
-17. network payload and follower logs contain no proprietary strategy internals;
-18. private signing key is absent from repository and follower artifacts;
-19. BUY/SELL copied execution semantics are symmetric where applicable;
-20. security layer performs no direct mutation of Master strategy behavior.
+13. sequence state is isolated by license + installation + MT5 login + broker server;
+14. reconnect requires reconciliation before new exposure;
+15. transport/server loss blocks new exposure;
+16. an existing position keeps its broker-side protection during auth/server loss;
+17. follower package has no import/dependency on strategy-engine, Trend/Sideway controller, FastMove, M5, or proprietary decision modules;
+18. network payload and follower logs contain no proprietary strategy internals;
+19. private signing keys and device private keys are absent from repository and follower artifacts;
+20. `EQUITY_RATIO`, `LOT_MULTIPLIER`, and `FIXED_LOT` sizing all obey configured hard protections;
+21. BUY/SELL copied execution semantics are symmetric where applicable;
+22. security layer performs no direct mutation of Master strategy behavior;
+23. current repository/history is scanned for committed secrets before distribution, and discovered credentials are rotated.
 
 ## 12. Production safety boundary
 
@@ -293,14 +333,14 @@ No security test may create a LIVE order merely to prove the protocol.
 
 V1 should be implemented in bounded phases so each can be proven independently:
 
-- P1: protocol types + deterministic canonical serialization + Ed25519 sign/verify;
-- P2: license model + server-side validation service;
-- P3: installation enrollment/device binding;
+- P1: protocol types + canonical serialization + Ed25519 sign/verify;
+- P2: license model + action-sensitive server-side validation service;
+- P3: installation enrollment/device-key proof of possession;
 - P4: sequence/idempotency/replay protection;
 - P5: sanitized copy-event adapter and command generation;
-- P6: thin follower verifier/executor boundary with simulated broker adapter first;
+- P6: thin follower verifier + three sizing modes + hard protections + simulated broker adapter first;
 - P7: reconciliation and failure semantics;
-- P8: packaging/integrity/no-strategy-dependency acceptance;
+- P8: packaging/integrity/no-strategy-dependency + secret-history acceptance;
 - P9: staged non-production integration, then separate production rollout decision.
 
 Every phase follows TDD RED -> minimal source fix -> GREEN -> CI -> diff review -> PR/merge only when exact-head gates pass.
