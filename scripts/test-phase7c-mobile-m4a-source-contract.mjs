@@ -97,4 +97,23 @@ for (const [relative, source] of runtimeFiles) {
   assert.doesNotMatch(source, /0\.0\.0\.0:3711|0\.0\.0\.0:8765/, `${relative}: remote API/MT5 exposure forbidden`);
 }
 
+const preflightSource = fs.readFileSync(path.join(root, "scripts/preflight-phase7c-mobile-m4a-local.ps1"), "utf8");
+const deploySource = fs.readFileSync(path.join(root, "scripts/deploy-phase7c-mobile-m4a-local.ps1"), "utf8");
+const rollbackSource = fs.readFileSync(path.join(root, "scripts/rollback-phase7c-mobile-m4a-local.ps1"), "utf8");
+
+assert.match(preflightSource, /LOCAL_BRANCH_NOT_MAIN/, "production preflight must require main branch");
+assert.match(preflightSource, /ORIGIN_MAIN_MISMATCH/, "production preflight must require accepted origin\/main commit");
+assert.match(preflightSource, /LOCAL_HEAD_NOT_ORIGIN_MAIN/, "production preflight must prove local head equals origin\/main");
+assert.match(preflightSource, /MERGED_SOURCE_GATE=PASS/, "merged-source proof marker missing");
+
+assert.match(deploySource, /DEPLOYED_RUNTIME_HASH_MISMATCH/, "deploy must compare deployed runtime hashes to accepted source");
+assert.match(deploySource, /RUNTIME_SOURCE_ATTESTATION=PASS/, "deploy runtime-source attestation marker missing");
+assert.match(deploySource, /RUNTIME_SOURCE_COMMIT=\$ExpectedCommit/, "deploy must bind runtime attestation to expected commit");
+
+assert.match(rollbackSource, /BACKUP_ROOT_NOT_ALLOWED/, "rollback must reject backup root itself");
+assert.match(rollbackSource, /BACKUP_OUTSIDE_APPROVED_ROOT/, "rollback must enforce directory-boundary containment");
+assert.match(rollbackSource, /BACKUP_NOT_PREDEPLOY_BUNDLE/, "rollback must accept only predeploy backup bundles");
+assert.match(rollbackSource, /TASK_PRECHECK_GATE=PASS/, "rollback must verify exact gateway task before mutation");
+assert.match(rollbackSource, /CURRENT_GATEWAY_DIR_EXISTS/, "rollback must tolerate a partially failed deploy with missing current gateway directory");
+
 console.log("PHASE7C_MOBILE_M4A_SOURCE_CONTRACT=PASS");
