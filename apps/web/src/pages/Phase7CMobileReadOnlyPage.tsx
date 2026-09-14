@@ -18,6 +18,7 @@ import {
   value,
 } from "../phase7c-panel-status";
 import { ErrorState, LoadingState } from "../ui/PageState";
+import { Phase7CMobileM4ControlCard } from "../ui/Phase7CMobileM4ControlCard";
 import { Phase7COperatorStatusBar } from "../ui/Phase7COperatorStatusBar";
 
 function asRecord(input: unknown): Record<string, any> {
@@ -134,18 +135,20 @@ export function Phase7CMobileReadOnlyPage() {
           <Box>
             <Typography variant="h5" fontWeight={950}>XAUUSD AI MASTER</Typography>
             <Typography variant="caption" color="text.secondary" display="block" mt={0.25}>
-              MOBILE_REMOTE_ACCESS_M1 · trạng thái vận hành trên điện thoại
+              MOBILE_REMOTE_ACCESS_M4-A · trạng thái + điều khiển bảo mật
             </Typography>
           </Box>
           <Stack direction="row" spacing={0.7} useFlexGap flexWrap="wrap">
-            <Chip label="MOBILE READ ONLY" color="info" size="small" variant="outlined" sx={{ fontWeight: 950 }} />
+            <Chip label="M4 SECURE CONTROL" color="warning" size="small" variant="outlined" sx={{ fontWeight: 950 }} />
             <Chip label={`MODE ${activeMode}`} size="small" variant="outlined" sx={{ fontWeight: 900 }} />
-            <Chip label={ui?.safety.readOnly === true ? "SEMANTIC READ ONLY ✓" : "READ ONLY CHECK"} size="small" color="success" variant="outlined" sx={{ fontWeight: 900 }} />
+            <Chip label={ui?.safety.readOnly === true ? "READ DATA CANONICAL ✓" : "READ DATA CHECK"} size="small" color="success" variant="outlined" sx={{ fontWeight: 900 }} />
           </Stack>
         </Stack>
       </Box>
 
       <Phase7COperatorStatusBar />
+
+      <Phase7CMobileM4ControlCard />
 
       {(data?.errors ?? []).length > 0 ? (
         <Alert severity="warning" variant="outlined">
@@ -217,7 +220,7 @@ export function Phase7CMobileReadOnlyPage() {
 
       <Box sx={{ px: { xs: 0.3, sm: 0.6 } }}>
         <Typography variant="caption" color="text.secondary" lineHeight={1.5}>
-          M1 chỉ đọc dữ liệu canonical. Trang này không đổi MODE, không ARM/DISARM, không đặt lệnh, không sửa vị thế và không điều khiển process/task.
+          Dữ liệu trạng thái vẫn đọc từ canonical sources. M4-A chỉ cho đổi MODE và ARM/DISARM qua secure gateway; không đặt lệnh, không sửa vị thế và không điều khiển lifecycle/process.
         </Typography>
       </Box>
     </Stack>
