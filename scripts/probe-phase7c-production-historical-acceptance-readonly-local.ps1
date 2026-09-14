@@ -61,7 +61,26 @@ $canonicalPreflightPassMarker = @(
         ([string]$_).Trim() -eq 'PHASE7C_PRODUCTION_READONLY_PREFLIGHT_V2=PASS'
     }
 ).Count -eq 1
+$canonicalNoRecoveryRequired = @(
+    $canonicalPreflightOutput | Where-Object {
+        ([string]$_).Trim() -eq 'PREFLIGHT_CLASSIFICATION=NO_RECOVERY_REQUIRED'
+    }
+).Count -eq 1
+$canonicalRecoveryNotRequired = @(
+    $canonicalPreflightOutput | Where-Object {
+        ([string]$_).Trim() -eq 'RECOVERY_REQUIRED=False'
+    }
+).Count -eq 1
+$canonicalNoNonExactComponents = @(
+    $canonicalPreflightOutput | Where-Object {
+        ([string]$_).Trim() -eq 'RUNTIME_SOURCE_NON_EXACT_COMPONENTS=NONE'
+    }
+).Count -eq 1
 $canonicalPreflightPass = $canonicalPreflightExitCode -eq 0 -and $canonicalPreflightPassMarker
+$canonicalRuntimeExact = $canonicalPreflightPass -and
+    $canonicalNoRecoveryRequired -and
+    $canonicalRecoveryNotRequired -and
+    $canonicalNoNonExactComponents
 foreach ($line in $canonicalPreflightOutput) {
     Write-Host "[CANONICAL_PREFLIGHT] $line"
 }
@@ -181,6 +200,9 @@ $safeState = $botMode -eq 'PAUSE' -and
 Write-Host '=== CANONICAL PREFLIGHT ==='
 Write-Host "CANONICAL_PREFLIGHT_RESULT=$(if ($canonicalPreflightPass) { 'PASS' } else { 'FAIL' })"
 Write-Host "CANONICAL_PREFLIGHT_EXIT_CODE=$canonicalPreflightExitCode"
+Write-Host "CANONICAL_NO_RECOVERY_REQUIRED=$canonicalNoRecoveryRequired"
+if ($canonicalRuntimeExact) { Write-Host 'CANONICAL_RUNTIME_SOURCE=EXACT' }
+else { Write-Host 'CANONICAL_RUNTIME_SOURCE=MISMATCH' }
 Write-Host '=== SAFE RUNTIME STATE ==='
 Write-SafeStateEvidence `
     -Mode $botMode `
@@ -193,6 +215,8 @@ $reason = 'UNINITIALIZED'
 
 if (-not $canonicalPreflightPass) {
     $reason = 'CANONICAL_PREFLIGHT_FAIL'
+} elseif (-not $canonicalRuntimeExact) {
+    $reason = 'RUNTIME_SOURCE_NOT_EXACT'
 } elseif (-not $safeState) {
     $reason = 'PAUSE_DISARMED_FLAT_REQUIRED'
 } else {
