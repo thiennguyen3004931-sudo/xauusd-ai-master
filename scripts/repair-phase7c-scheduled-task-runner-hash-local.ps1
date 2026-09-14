@@ -10,14 +10,6 @@ param(
 
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
-    [string]$OwnedTaskMarker,
-
-    [Parameter(Mandatory = $true)]
-    [ValidateNotNullOrEmpty()]
-    [string]$ExpectedDescription,
-
-    [Parameter(Mandatory = $true)]
-    [ValidateNotNullOrEmpty()]
     [string]$RunnerPath,
 
     [Parameter(Mandatory = $true)]
@@ -33,72 +25,101 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $ownershipLibrary = Join-Path $PSScriptRoot "lib\phase7c-scheduled-task-ownership.ps1"
-if (-not (Test-Path -LiteralPath $ownershipLibrary)) {
+if (-not (Test-Path -LiteralPath $ownershipLibrary -PathType Leaf)) {
     throw "OWNERSHIP_LIBRARY_NOT_FOUND path=$ownershipLibrary"
 }
 . $ownershipLibrary
+Import-Module ScheduledTasks -ErrorAction Stop
 
-$resolvedRunnerPath = (Resolve-Path -LiteralPath $RunnerPath -ErrorAction Stop).Path
-$expectedEmbeddedSha = $ExpectedEmbeddedRunnerSha256.Trim().ToUpperInvariant()
-$expectedSha = $ExpectedRunnerSha256.Trim().ToUpperInvariant()
+function Test-Phase7CCanonicalSystemPrincipal {
+    param([Parameter(Mandatory = $true)] $Principal)
+
+    if ($null -eq $Principal) { return $false }
+    $user = ([string]$Principal.UserId).Trim()
+    $systemUser = $user -in @('SYSTEM', 'NT AUTHORITY\SYSTEM', 'S-1-5-18')
+    return $systemUser -and `
+        [string]$Principal.LogonType -eq 'ServiceAccount' -and `
+        [string]$Principal.RunLevel -eq 'Highest'
+}
+
+$projectRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
+$resolvedRunnerPath = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $RunnerPath -ErrorAction Stop).Path)
+$expectedEmbeddedSha = Normalize-Phase7CRunnerSha256 -Sha256 $ExpectedEmbeddedRunnerSha256
+$expectedSha = Normalize-Phase7CRunnerSha256 -Sha256 $ExpectedRunnerSha256
+
 $actualRunnerSha256 = (Get-FileHash -LiteralPath $resolvedRunnerPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToUpperInvariant()
+$trustedRunnerSha256 = Get-Phase7CTrustedGitFileSha256 -ProjectRoot $projectRoot -Path $resolvedRunnerPath
+if ($actualRunnerSha256 -ne $trustedRunnerSha256) {
+    throw "RUNNER_TRUSTED_SHA_MISMATCH trusted=$trustedRunnerSha256 actual=$actualRunnerSha256"
+}
 if ($actualRunnerSha256 -ne $expectedSha) {
     throw "RUNNER_ACTUAL_SHA_MISMATCH expected=$expectedSha actual=$actualRunnerSha256"
 }
 
-$pre = Get-Phase7CScheduledTaskOwnershipVerdict `
-    -TaskName $TaskName `
-    -TaskPath $TaskPath `
-    -OwnedTaskMarker $OwnedTaskMarker `
-    -ExpectedDescription $ExpectedDescription `
+$task = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction Stop
+$preOwnership = Test-Phase7CExecutorTaskActionOwnership `
+    -Actions $task.Actions `
     -ExpectedRunnerPath $resolvedRunnerPath `
     -ExpectedRunnerSha256 $expectedSha
-if (-not $pre.Owned) {
-    throw "TASK_NOT_PHASE7C_OWNED reason=$($pre.Reason)"
+$preTaskDrift = @(Get-Phase7CExecutorTaskDrift -Task $task)
+
+if (-not (Test-Phase7CCanonicalSystemPrincipal -Principal $task.Principal)) {
+    throw "PRE_REPAIR_PRINCIPAL_NOT_CANONICAL_SYSTEM"
+}
+if ($preTaskDrift.Count -ne 0) {
+    throw "PRE_REPAIR_TASK_DRIFT drift=$($preTaskDrift -join ',')"
+}
+if (-not $preOwnership.owned) {
+    throw "TASK_NOT_PHASE7C_OWNED reason=$($preOwnership.reason)"
 }
 
-if ($pre.Canonical) {
-    if ($pre.RepairRequired) {
+if ($preOwnership.canonical) {
+    if ($preOwnership.repairRequired) {
         throw "OWNERSHIP_CONTRACT_INCONSISTENT canonical=True repairRequired=True"
     }
     Write-Output "SKIP=OWNED_CANONICAL"
     Write-Output "OWNERSHIP_OWNED=True"
     Write-Output "OWNERSHIP_CANONICAL=True"
     Write-Output "OWNERSHIP_REPAIRREQUIRED=False"
-    Write-Output "OWNERSHIP_RUNNERSHA256=$($pre.RunnerSha256)"
+    Write-Output "OWNERSHIP_RUNNERSHA256=$($preOwnership.runnerSha256)"
     Write-Output "TASK_DRIFT=NONE"
     Write-Output "MUTATION=NONE"
     Write-Output "REPAIR_SCOPE=RUNNER_HASH_ONLY"
     exit 0
 }
 
-if (-not $pre.RepairRequired) {
-    throw "REPAIR_NOT_REQUIRED_BUT_NONCANONICAL reason=$($pre.Reason)"
+if (-not $preOwnership.repairRequired) {
+    throw "REPAIR_NOT_REQUIRED_BUT_NONCANONICAL reason=$($preOwnership.reason)"
 }
-if ($pre.Reason -ne "OWNED_HASH_DRIFT_REPAIR_REQUIRED") {
-    throw "REPAIR_SCOPE_REJECTED reason=$($pre.Reason)"
-}
-
-$preReasons = @($pre.Reasons | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
-if ($preReasons.Count -ne 1) {
-    throw "REPAIR_SCOPE_REJECTED reasons=$($preReasons -join ',')"
-}
-if ($preReasons[0] -ne "RUNNER_HASH_DRIFT") {
-    throw "REPAIR_SCOPE_REJECTED reason=$($preReasons[0])"
+if ($preOwnership.reason -ne "OWNED_HASH_DRIFT_REPAIR_REQUIRED") {
+    throw "REPAIR_SCOPE_REJECTED reason=$($preOwnership.reason)"
 }
 
-$preEmbeddedSha = ([string]$pre.RunnerSha256).Trim().ToUpperInvariant()
+$preEmbeddedSha = Normalize-Phase7CRunnerSha256 -Sha256 ([string]$preOwnership.runnerSha256)
 if ($preEmbeddedSha -ne $expectedEmbeddedSha) {
     throw "PRE_REPAIR_EMBEDDED_SHA_MISMATCH expected=$expectedEmbeddedSha actual=$preEmbeddedSha"
 }
 Write-Output "PRE_REPAIR_RUNNERSHA256=$preEmbeddedSha"
+Write-Output "DRIFT_REASON=RUNNER_HASH_DRIFT"
+Write-Output "ONLY_CONFIRMED_DRIFT=RUNNER_HASH"
 
-$workingDirectory = Split-Path -Parent $resolvedRunnerPath
-$arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -ExpectedRunnerSha256 "{1}"' -f $resolvedRunnerPath, $expectedSha
-$action = New-ScheduledTaskAction `
-    -Execute "powershell.exe" `
-    -Argument $arguments `
-    -WorkingDirectory $workingDirectory
+$existingAction = @($task.Actions)[0]
+$existingExecute = [string]$existingAction.Execute
+$existingWorkingDirectory = [string]$existingAction.WorkingDirectory
+$guardArguments = New-Phase7CExecutorTaskGuardArguments `
+    -RunnerPath $resolvedRunnerPath `
+    -RunnerSha256 $expectedSha
+
+if ([string]::IsNullOrWhiteSpace($existingWorkingDirectory)) {
+    $action = New-ScheduledTaskAction `
+        -Execute $existingExecute `
+        -Argument $guardArguments
+} else {
+    $action = New-ScheduledTaskAction `
+        -Execute $existingExecute `
+        -Argument $guardArguments `
+        -WorkingDirectory $existingWorkingDirectory
+}
 
 Set-ScheduledTask `
     -TaskName $TaskName `
@@ -106,29 +127,31 @@ Set-ScheduledTask `
     -Action $action `
     -ErrorAction Stop | Out-Null
 
-$post = Get-Phase7CScheduledTaskOwnershipVerdict `
-    -TaskName $TaskName `
-    -TaskPath $TaskPath `
-    -OwnedTaskMarker $OwnedTaskMarker `
-    -ExpectedDescription $ExpectedDescription `
+$postTask = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction Stop
+$postOwnership = Test-Phase7CExecutorTaskActionOwnership `
+    -Actions $postTask.Actions `
     -ExpectedRunnerPath $resolvedRunnerPath `
     -ExpectedRunnerSha256 $expectedSha
-if (-not $post.Owned) {
-    throw "POST_REPAIR_OWNERSHIP_FAILED owned=False reason=$($post.Reason)"
+$postTaskDrift = @(Get-Phase7CExecutorTaskDrift -Task $postTask)
+
+if (-not (Test-Phase7CCanonicalSystemPrincipal -Principal $postTask.Principal)) {
+    throw "POST_REPAIR_PRINCIPAL_NOT_CANONICAL_SYSTEM"
 }
-if (-not $post.Canonical) {
-    throw "POST_REPAIR_CANONICAL_FAILED reason=$($post.Reason) reasons=$(@($post.Reasons) -join ',')"
+if (-not $postOwnership.owned) {
+    throw "POST_REPAIR_OWNERSHIP_FAILED owned=False reason=$($postOwnership.reason)"
 }
-if ($post.RepairRequired) {
-    throw "POST_REPAIR_STILL_REQUIRED reason=$($post.Reason)"
+if (-not $postOwnership.canonical) {
+    throw "POST_REPAIR_CANONICAL_FAILED reason=$($postOwnership.reason)"
 }
-$postSha = ([string]$post.RunnerSha256).Trim().ToUpperInvariant()
+if ($postOwnership.repairRequired) {
+    throw "POST_REPAIR_STILL_REQUIRED reason=$($postOwnership.reason)"
+}
+if ($postTaskDrift.Count -ne 0) {
+    throw "POST_REPAIR_TASK_DRIFT drift=$($postTaskDrift -join ',')"
+}
+$postSha = Normalize-Phase7CRunnerSha256 -Sha256 ([string]$postOwnership.runnerSha256)
 if ($postSha -ne $expectedSha) {
     throw "POST_REPAIR_RUNNER_SHA_MISMATCH expected=$expectedSha actual=$postSha"
-}
-$postReasons = @($post.Reasons | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
-if ($postReasons.Count -ne 0) {
-    throw "POST_REPAIR_TASK_DRIFT reasons=$($postReasons -join ',')"
 }
 
 Write-Output "OWNERSHIP_OWNED=True"
