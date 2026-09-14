@@ -39,3 +39,10 @@ jobs:
         run: pnpm --filter @xauusd/copy-protocol build
       - name: IP boundary contract
         run: node --test scripts/test-bot-ip-protection-p1-boundary.mjs
+      - name: Upload generated lockfile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-generated-lock
+          path: pnpm-lock.yaml
+          retention-days: 1
