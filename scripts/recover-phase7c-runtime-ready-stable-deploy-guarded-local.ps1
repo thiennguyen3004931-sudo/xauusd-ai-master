@@ -91,6 +91,26 @@ function Get-Phase7CRunningTaskInstanceCount([string]$Name) {
   }
 }
 
+function Get-Phase7CRunningTaskInstanceProcessIds([string]$Name) {
+  try {
+    $service = New-Object -ComObject 'Schedule.Service'
+    $service.Connect()
+    $root = $service.GetFolder('\')
+    $registered = $root.GetTask($Name)
+    $instances = @($registered.GetInstances(0))
+    $pids = @()
+    foreach ($instance in $instances) {
+      $enginePid = 0
+      try { $enginePid = [int]$instance.EnginePID } catch { return @(-1) }
+      if ($enginePid -le 0) { return @(-1) }
+      $pids += $enginePid
+    }
+    return @($pids)
+  } catch {
+    return @(-1)
+  }
+}
+
 function Test-Phase7CLifecycleHasAliveProcess($State) {
   if ($null -eq $State -or $null -eq $State.processes) { return $true }
   foreach ($property in @($State.processes.PSObject.Properties)) {
@@ -214,8 +234,7 @@ $heldObserved = `
   [string]$runtimeGeneration.startupRunnerLockState -eq 'HELD'
 
 if ($heldObserved) {
-  $canonicalProcessIds = @(Get-Phase7CCanonicalTaskProcessIds -Task $task)
-  $runningInstanceCount = Get-Phase7CRunningTaskInstanceCount -Name $TaskName
+  $runningTaskInstancePids = @(Get-Phase7CRunningTaskInstanceProcessIds -Name $TaskName)
   $brokerAttestationPath = Join-Path $WorkDir "phase7c-source-attestation\components\lifecycle-broker.json"
   if (-not (Test-Path -LiteralPath $brokerAttestationPath -PathType Leaf)) {
     throw "Guarded recovery lifecycle broker attestation is missing."
@@ -245,9 +264,8 @@ if ($heldObserved) {
     [bool]$runtimeGeneration.brokerProcessAlive -and `
     [bool]$runtimeGeneration.brokerHeartbeatFresh -and `
     [string]$runtimeGeneration.startupRunnerLockState -eq 'HELD' -and `
-    $canonicalProcessIds.Count -eq 1 -and `
-    $runningInstanceCount -eq 1 -and `
-    [int]$canonicalProcessIds[0] -eq [int]$runtimeGeneration.statusBrokerPid -and `
+    $runningTaskInstancePids.Count -eq 1 -and `
+    [int]$runningTaskInstancePids[0] -eq [int]$runtimeGeneration.statusBrokerPid -and `
     [string]$brokerAttestation.component -eq 'lifecycle-broker' -and `
     [int]$brokerAttestation.pid -eq [int]$runtimeGeneration.statusBrokerPid -and `
     $brokerAttestationVersionValid -and `
@@ -263,12 +281,11 @@ if ($heldObserved) {
 
   # Re-prove mutable evidence immediately before the only wrapper mutation. The
   # current task trust is verified against the current trusted runner SHA separately
-  # from the stale running broker's historical launcher SHA.
+  # from the stale running broker's historical launcher SHA and action token.
   $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
   $runtimeGeneration = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $WorkDir
   $lifecycle = Invoke-ApiGet "/api/v1/phase7c/lifecycle"
-  $canonicalProcessIds = @(Get-Phase7CCanonicalTaskProcessIds -Task $task)
-  $runningInstanceCount = Get-Phase7CRunningTaskInstanceCount -Name $TaskName
+  $runningTaskInstancePids = @(Get-Phase7CRunningTaskInstanceProcessIds -Name $TaskName)
   $taskOwnership = Test-Phase7CExecutorTaskActionOwnership -Actions $task.Actions -ExpectedRunnerPath $runnerPath -ExpectedRunnerSha256 $trustedRunnerSha256
   $taskDrift = @(Get-Phase7CExecutorTaskDrift -Task $task)
   $brokerAttestation = Get-Content -LiteralPath $brokerAttestationPath -Raw | ConvertFrom-Json
@@ -295,8 +312,8 @@ if ($heldObserved) {
     [string]$runtimeGeneration.statusReadState -eq 'OK' -and [string]$runtimeGeneration.heartbeatReadState -eq 'OK' -and `
     [bool]$runtimeGeneration.brokerStatusPidMatch -and [bool]$runtimeGeneration.brokerProcessAlive -and [bool]$runtimeGeneration.brokerHeartbeatFresh -and `
     [string]$runtimeGeneration.startupRunnerLockState -eq 'HELD' -and `
-    $canonicalProcessIds.Count -eq 1 -and $runningInstanceCount -eq 1 -and `
-    [int]$canonicalProcessIds[0] -eq [int]$runtimeGeneration.statusBrokerPid -and `
+    $runningTaskInstancePids.Count -eq 1 -and `
+    [int]$runningTaskInstancePids[0] -eq [int]$runtimeGeneration.statusBrokerPid -and `
     [string]$brokerAttestation.component -eq 'lifecycle-broker' -and [int]$brokerAttestation.pid -eq [int]$runtimeGeneration.statusBrokerPid -and `
     $brokerAttestationVersionValid -and $brokerAttestationGenerationValid -and $brokerAttestationIsStale -and `
     [bool]$taskOwnership.owned -and [bool]$taskOwnership.canonical -and -not [bool]$taskOwnership.repairRequired -and `
