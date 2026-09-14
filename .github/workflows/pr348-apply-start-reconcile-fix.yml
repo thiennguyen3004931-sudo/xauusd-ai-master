@@ -1,18 +1,19 @@
-# One-shot branch helper. It patches the exact START block and deletes itself.
+# One-shot PR #348 helper. It patches one exact START block and deletes itself.
 name: PR348 Apply START Reconciliation Fix
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/phase7c-stopped-orphan-executor-reconciliation
-    paths:
-      - ".github/workflows/pr348-apply-start-reconcile-fix.yml"
+      - main
+    types:
+      - synchronize
 
 permissions:
   contents: write
 
 jobs:
   apply-bounded-fix:
+    if: github.event.pull_request.number == 348 && github.event.pull_request.head.ref == 'fix/phase7c-stopped-orphan-executor-reconciliation'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout feature branch
@@ -72,8 +73,9 @@ jobs:
 
     if ($action -eq "RESTART") {
 '''
-          if text.count(old) != 1:
-              raise SystemExit(f"runner START block count={text.count(old)}; refusing non-exact patch")
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f"runner START block count={count}; refusing non-exact patch")
           path.write_text(text.replace(old, new), encoding="utf-8", newline="\n")
           Path(".github/workflows/pr348-apply-start-reconcile-fix.yml").unlink()
 
