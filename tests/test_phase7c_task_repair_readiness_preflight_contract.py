@@ -83,8 +83,10 @@ def test_probe_requires_safe_stopped_flat_runtime():
     assert "MODE_NOT_PAUSE" in source
     assert "ARM_NOT_DISARMED" in source
     assert "LIFECYCLE_NOT_STOPPED" in source
+    assert "LIFECYCLE_READY_NOT_FALSE" in source
     assert "XAUUSD_POSITIONS_NONZERO" in source
     assert "XAUUSD_PENDING_ORDERS_NONZERO" in source
+    assert "LIFECYCLE_READY=" in source
 
 
 def test_probe_uses_canonical_task_ownership_and_exact_hash_evidence():
@@ -115,6 +117,7 @@ def test_probe_outputs_machine_readable_repair_decision():
         "MODE=",
         "ARM=",
         "LIFECYCLE_RUNNING=",
+        "LIFECYCLE_READY=",
         "XAUUSD_POSITIONS=",
         "XAUUSD_PENDING_ORDERS=",
         "RUNNER_ACTUAL_SHA=",
