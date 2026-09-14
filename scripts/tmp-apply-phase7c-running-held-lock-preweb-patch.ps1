@@ -3,25 +3,13 @@ Set-StrictMode -Version Latest
 
 $path = Join-Path $PSScriptRoot 'recover-phase7c-runtime-ready-stable-deploy-local.ps1'
 $text = (Get-Content -LiteralPath $path -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
+$marker = '  $preWebRunningReleasedLockObserved = `'
+$matches = [regex]::Matches($text, [regex]::Escape($marker))
+if ($matches.Count -ne 1) {
+  throw "Expected exactly one released-lock insertion marker, found $($matches.Count)"
+}
 
-$old = @'
-  $preWebLifecycleRunningReady = `
-    [bool]$preWebLifecycle.running -and `
-    [bool]$preWebLifecycle.ready -and `
-    [string]$preWebLifecycle.mode.mode -eq 'PAUSE' -and `
-    [string]$preWebLifecycle.accountMode.accountMode -eq 'LIVE' -and `
-    [bool]$preWebLifecycle.accountMode.valid
-  $preWebRunningReleasedLockObserved = `
-'@
-
-$new = @'
-  $preWebLifecycleRunningReady = `
-    [bool]$preWebLifecycle.running -and `
-    [bool]$preWebLifecycle.ready -and `
-    [string]$preWebLifecycle.mode.mode -eq 'PAUSE' -and `
-    [string]$preWebLifecycle.accountMode.accountMode -eq 'LIVE' -and `
-    [bool]$preWebLifecycle.accountMode.valid
-
+$insert = @'
   # Production reproduction 2026-09-14: source generation can be stale while the
   # lifecycle remains RUNNING+READY and the canonical SYSTEM broker still owns a
   # healthy HELD singleton lock. Quiesce that exact tuple before strict Web/API
@@ -141,14 +129,9 @@ $new = @'
     $preWebTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
   }
 
-  $preWebRunningReleasedLockObserved = `
 '@
 
-$count = ([regex]::Matches($text, [regex]::Escape($old))).Count
-if ($count -ne 1) {
-  throw "Expected exactly one held-lock insertion point, found $count"
-}
-
-$patched = $text.Replace($old, $new)
+$index = $matches[0].Index
+$patched = $text.Substring(0, $index) + $insert + $text.Substring($index)
 [System.IO.File]::WriteAllText($path, $patched, [System.Text.UTF8Encoding]::new($false))
 Write-Host 'PATCH_PHASE7C_RUNNING_READY_HELD_LOCK_PREWEB=PASS'
