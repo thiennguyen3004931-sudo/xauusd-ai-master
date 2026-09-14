@@ -22,6 +22,10 @@ param(
 
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^[A-Fa-f0-9]{64}$')]
+    [string]$ExpectedEmbeddedRunnerSha256,
+
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^[A-Fa-f0-9]{64}$')]
     [string]$ExpectedRunnerSha256
 )
 
@@ -35,6 +39,7 @@ if (-not (Test-Path -LiteralPath $ownershipLibrary)) {
 . $ownershipLibrary
 
 $resolvedRunnerPath = (Resolve-Path -LiteralPath $RunnerPath -ErrorAction Stop).Path
+$expectedEmbeddedSha = $ExpectedEmbeddedRunnerSha256.Trim().ToUpperInvariant()
 $expectedSha = $ExpectedRunnerSha256.Trim().ToUpperInvariant()
 $actualRunnerSha256 = (Get-FileHash -LiteralPath $resolvedRunnerPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToUpperInvariant()
 if ($actualRunnerSha256 -ne $expectedSha) {
@@ -81,6 +86,12 @@ if ($preReasons.Count -ne 1) {
 if ($preReasons[0] -ne "RUNNER_HASH_DRIFT") {
     throw "REPAIR_SCOPE_REJECTED reason=$($preReasons[0])"
 }
+
+$preEmbeddedSha = ([string]$pre.RunnerSha256).Trim().ToUpperInvariant()
+if ($preEmbeddedSha -ne $expectedEmbeddedSha) {
+    throw "PRE_REPAIR_EMBEDDED_SHA_MISMATCH expected=$expectedEmbeddedSha actual=$preEmbeddedSha"
+}
+Write-Output "PRE_REPAIR_RUNNERSHA256=$preEmbeddedSha"
 
 $workingDirectory = Split-Path -Parent $resolvedRunnerPath
 $arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -ExpectedRunnerSha256 "{1}"' -f $resolvedRunnerPath, $expectedSha
