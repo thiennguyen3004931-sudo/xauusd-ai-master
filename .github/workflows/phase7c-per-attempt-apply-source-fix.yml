@@ -1,0 +1,111 @@
+name: Phase7C Apply Per-Attempt Lifecycle Log Source Fix
+
+on:
+  push:
+    branches:
+      - fix/phase7c-per-attempt-lifecycle-logs
+    paths:
+      - ".github/workflows/phase7c-per-attempt-apply-source-fix.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-source-fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/phase7c-per-attempt-lifecycle-logs
+          fetch-depth: 0
+      - name: Apply bounded source fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, got {count}")
+              return text.replace(old, new, 1)
+
+          runner_path = Path("scripts/run-phase7c-executor-task-runner-local.ps1")
+          runner = runner_path.read_text(encoding="utf-8")
+          runner = replace_once(
+              runner,
+              '$runtimeDir = Join-Path $workDir "phase7c-executors"\n',
+              '$runtimeDir = Join-Path $workDir "phase7c-executors"\n$attemptsRoot = Join-Path $runtimeDir "attempts"\n',
+              "runner attempts root",
+          )
+          runner = replace_once(
+              runner,
+              'foreach ($directory in @($runtimeDir, $brokerRoot, $inboxDir, $stateDir, $resultsDir, $logsDir)) {',
+              'foreach ($directory in @($runtimeDir, $attemptsRoot, $brokerRoot, $inboxDir, $stateDir, $resultsDir, $logsDir)) {',
+              "runner attempts directory creation",
+          )
+          runner = replace_once(
+              runner,
+              '$runnerLockPath = Join-Path $runtimeDir "startup-runner.lock"\n$supervisorOut = Join-Path $runtimeDir "startup-supervisor.out.log"\n$supervisorErr = Join-Path $runtimeDir "startup-supervisor.err.log"\n',
+              '$runnerLockPath = Join-Path $runtimeDir "startup-runner.lock"\n',
+              "remove fixed supervisor log paths",
+          )
+          runner = replace_once(
+              runner,
+              'function Start-Phase7CExecutorRuntime($Config) {\n  Set-Phase7CProcessEnvironment $Config\n',
+              '''function New-Phase7CAttemptLogDirectory {\n  New-Item -ItemType Directory -Force -Path $attemptsRoot | Out-Null\n  $attemptId = "{0}-{1}" -f ([DateTimeOffset]::UtcNow.ToString("yyyyMMddTHHmmssfffZ")), ([Guid]::NewGuid().ToString("N"))\n  $attemptDir = Join-Path $attemptsRoot $attemptId\n  [void](New-Item -ItemType Directory -Path $attemptDir -ErrorAction Stop)\n  return (Resolve-Path -LiteralPath $attemptDir).Path\n}\n\nfunction Start-Phase7CExecutorRuntime($Config) {\n  Set-Phase7CProcessEnvironment $Config\n  $attemptLogDir = New-Phase7CAttemptLogDirectory\n  $supervisorOut = Join-Path $attemptLogDir "startup-supervisor.out.log"\n  $supervisorErr = Join-Path $attemptLogDir "startup-supervisor.err.log"\n''',
+              "runner attempt allocator",
+          )
+          runner = replace_once(
+              runner,
+              '    "-WorkDir", (\'"{0}"\' -f $Config.workDir),\n    "-ControlApiUrl",',
+              '    "-WorkDir", (\'"{0}"\' -f $Config.workDir),\n    "-AttemptLogDir", (\'"{0}"\' -f $attemptLogDir),\n    "-ControlApiUrl",',
+              "runner passes attempt log dir",
+          )
+          runner_path.write_text(runner, encoding="utf-8", newline="\n")
+
+          supervisor_path = Path("scripts/run-phase7c-executors-local.ps1")
+          supervisor = supervisor_path.read_text(encoding="utf-8")
+          supervisor = replace_once(
+              supervisor,
+              '  [string]$TelegramEnvFile = ".env.phase7b-telegram",\n',
+              '  [string]$TelegramEnvFile = ".env.phase7b-telegram",\n  [string]$AttemptLogDir = "",\n',
+              "supervisor attempt parameter",
+          )
+          supervisor = replace_once(
+              supervisor,
+              '''foreach ($dir in @($RuntimeDir, $TrendWorkDir, $SidewayWorkDir, $DecisionRuntimeBase, $DecisionRuntimeDir)) {\n  New-Item -ItemType Directory -Force -Path $dir | Out-Null\n}\n\n$env:ZIQ_PHASE7C_EXECUTION_LOCK''',
+              '''foreach ($dir in @($RuntimeDir, $TrendWorkDir, $SidewayWorkDir, $DecisionRuntimeBase, $DecisionRuntimeDir)) {\n  New-Item -ItemType Directory -Force -Path $dir | Out-Null\n}\n$AttemptsRoot = Join-Path $RuntimeDir "attempts"\nNew-Item -ItemType Directory -Force -Path $AttemptsRoot | Out-Null\n$AttemptsRoot = (Resolve-Path -LiteralPath $AttemptsRoot).Path\nif ([string]::IsNullOrWhiteSpace($AttemptLogDir)) {\n  $AttemptLogDir = Join-Path $AttemptsRoot ([Guid]::NewGuid().ToString("N"))\n  [void](New-Item -ItemType Directory -Path $AttemptLogDir -ErrorAction Stop)\n} else {\n  if (-not [System.IO.Path]::IsPathRooted($AttemptLogDir)) {\n    throw "AttemptLogDir must be an absolute path under $AttemptsRoot."\n  }\n  $attemptFullPath = [System.IO.Path]::GetFullPath($AttemptLogDir)\n  $attemptsPrefix = $AttemptsRoot + [System.IO.Path]::DirectorySeparatorChar\n  if (-not $attemptFullPath.StartsWith($attemptsPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {\n    throw "AttemptLogDir must remain under $AttemptsRoot."\n  }\n  if (-not (Test-Path -LiteralPath $attemptFullPath -PathType Container)) {\n    throw "AttemptLogDir does not exist: $attemptFullPath"\n  }\n  $AttemptLogDir = (Resolve-Path -LiteralPath $attemptFullPath).Path\n}\nWrite-Host "PHASE7C_ATTEMPT_LOG_DIR=$AttemptLogDir"\n\n$env:ZIQ_PHASE7C_EXECUTION_LOCK''',
+              "supervisor attempt directory validation",
+          )
+          for variable, filename in (
+              ("TrendOut", "trend.out.log"),
+              ("TrendErr", "trend.err.log"),
+              ("SidewayOut", "sideway.out.log"),
+              ("SidewayErr", "sideway.err.log"),
+              ("TelegramModeOut", "telegram-mode.out.log"),
+              ("TelegramModeErr", "telegram-mode.err.log"),
+              ("RegimeNotifierOut", "regime-notifier.out.log"),
+              ("RegimeNotifierErr", "regime-notifier.err.log"),
+              ("TradeNotifierOut", "trade-notifier.out.log"),
+              ("TradeNotifierErr", "trade-notifier.err.log"),
+          ):
+              supervisor = replace_once(
+                  supervisor,
+                  f'${variable} = Join-Path $RuntimeDir "{filename}"',
+                  f'${variable} = Join-Path $AttemptLogDir "{filename}"',
+                  f"supervisor log binding {variable}",
+              )
+          supervisor_path.write_text(supervisor, encoding="utf-8", newline="\n")
+          PY
+      - name: Commit bounded source fix and remove one-shot workflow
+        shell: bash
+        run: |
+          git rm .github/workflows/phase7c-per-attempt-apply-source-fix.yml
+          git add scripts/run-phase7c-executor-task-runner-local.ps1 scripts/run-phase7c-executors-local.ps1
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(phase7c): preserve lifecycle logs per attempt"
+          git push origin HEAD:fix/phase7c-per-attempt-lifecycle-logs
