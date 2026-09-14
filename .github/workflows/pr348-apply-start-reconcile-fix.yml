@@ -1,3 +1,4 @@
+# One-shot branch helper. It patches the exact START block and deletes itself.
 name: PR348 Apply START Reconciliation Fix
 
 on:
