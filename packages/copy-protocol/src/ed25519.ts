@@ -84,18 +84,22 @@ export function verifyCopyCommandSignature(
     return { ok: false, code: "MALFORMED_SIGNATURE" };
   }
 
-  const publicKey = createPublicKey(publicKeyPem);
-  if (publicKey.asymmetricKeyType !== "ed25519") {
-    throw new TypeError("public key must be Ed25519");
+  try {
+    const publicKey = createPublicKey(publicKeyPem);
+    if (publicKey.asymmetricKeyType !== "ed25519") {
+      return { ok: false, code: "INVALID_SIGNATURE" };
+    }
+
+    const body = toSignedBody(command);
+    const valid = cryptoVerify(
+      null,
+      copyCommandSigningBytes(body),
+      publicKey,
+      signature
+    );
+
+    return valid ? { ok: true } : { ok: false, code: "INVALID_SIGNATURE" };
+  } catch {
+    return { ok: false, code: "INVALID_SIGNATURE" };
   }
-
-  const body = toSignedBody(command);
-  const valid = cryptoVerify(
-    null,
-    copyCommandSigningBytes(body),
-    publicKey,
-    signature
-  );
-
-  return valid ? { ok: true } : { ok: false, code: "INVALID_SIGNATURE" };
 }
