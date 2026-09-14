@@ -50,6 +50,28 @@ assert.ok(
   "probe must fail closed when canonical preflight passes only because recovery is allowed",
 );
 
+for (const productionMarker of [
+  "ACCOUNT_MODE=LIVE",
+  "BRIDGE_ACCOUNT_MODE_MATCH=True",
+  "BRIDGE_ACCOUNT_IDENTITY_MATCH=True",
+  "LIVE_AUTHORIZATION_VALID=True",
+  "UNRESOLVED_MUTATING_REQUESTS=0",
+  "LIVE_EXECUTION_ARMED=False",
+]) {
+  assert.ok(
+    source.includes(productionMarker),
+    `historical acceptance must require stable LIVE production evidence ${productionMarker}`,
+  );
+}
+
+for (const failClosedReason of [
+  "PRODUCTION_LIVE_ACCOUNT_REQUIRED",
+  "UNRESOLVED_MUTATING_REQUESTS_PRESENT",
+  "LIVE_EXECUTION_ARMED_NOT_FALSE",
+]) {
+  assert.ok(source.includes(failClosedReason), `missing fail-closed reason ${failClosedReason}`);
+}
+
 for (const endpoint of [
   "/v1/candles/XAUUSD",
   "/v1/history/candles/XAUUSD",
