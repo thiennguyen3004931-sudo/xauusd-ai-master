@@ -59,11 +59,16 @@ Assert-True (-not [string]::Equals($ResolvedBackup, $ResolvedBackupRoot, [System
 Assert-True ($ResolvedBackup.StartsWith($BackupRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) "BACKUP_OUTSIDE_APPROVED_ROOT"
 Assert-True ($BackupLeaf -like "m4a-predeploy-*") "BACKUP_NOT_PREDEPLOY_BUNDLE"
 Assert-True (Test-Path (Join-Path $ResolvedBackup "gateway.js")) "BACKUP_GATEWAY_JS_MISSING"
-Assert-True (Test-Path $GatewayDir) "CURRENT_GATEWAY_DIR_MISSING"
 
+$CurrentGatewayExists = Test-Path $GatewayDir
 Write-Host "BACKUP_DIR=$ResolvedBackup"
 Write-Host "BACKUP_GATEWAY_SHA256=$((Get-FileHash (Join-Path $ResolvedBackup 'gateway.js') -Algorithm SHA256).Hash)"
-Write-Host "CURRENT_GATEWAY_SHA256=$((Get-FileHash (Join-Path $GatewayDir 'gateway.js') -Algorithm SHA256).Hash)"
+Write-Host "CURRENT_GATEWAY_DIR_EXISTS=$CurrentGatewayExists"
+if ($CurrentGatewayExists -and (Test-Path (Join-Path $GatewayDir "gateway.js"))) {
+    Write-Host "CURRENT_GATEWAY_SHA256=$((Get-FileHash (Join-Path $GatewayDir 'gateway.js') -Algorithm SHA256).Hash)"
+} else {
+    Write-Host "CURRENT_GATEWAY_SHA256=UNAVAILABLE"
+}
 Write-Host "BACKUP_PATH_GATE=PASS"
 
 Write-Host ""
@@ -93,9 +98,13 @@ Write-Host "CURRENT_GATEWAY_STOPPED=TRUE"
 
 $Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $ReplacedDir = Join-Path $BackupRoot "m4a-rollback-replaced-$Timestamp"
-Move-Item -Path $GatewayDir -Destination $ReplacedDir
+if (Test-Path $GatewayDir) {
+    Move-Item -Path $GatewayDir -Destination $ReplacedDir
+    Write-Host "REPLACED_M4_BUNDLE=$ReplacedDir"
+} else {
+    Write-Host "REPLACED_M4_BUNDLE=NONE_CURRENT_GATEWAY_MISSING"
+}
 Move-Item -Path $RestoreStage -Destination $GatewayDir
-Write-Host "REPLACED_M4_BUNDLE=$ReplacedDir"
 Write-Host "RESTORE_SWAP=PASS"
 
 Start-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName
