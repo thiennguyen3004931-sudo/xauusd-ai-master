@@ -136,6 +136,7 @@ param(
   [Parameter(Mandatory = $true)] [string]$ControlApiUrl,
   [Parameter(Mandatory = $true)] [string]$EnvFile,
   [Parameter(Mandatory = $true)] [string]$TelegramEnvFile,
+  [string]$AttemptLogDir = '',
   [Parameter(Mandatory = $true)] [string]$AccountMode,
   [double]$TrendFixedVolume,
   [double]$SidewayRiskPercent,

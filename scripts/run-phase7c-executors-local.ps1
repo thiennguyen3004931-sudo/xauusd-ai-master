@@ -3,6 +3,7 @@ param(
   [string]$ControlApiUrl = "http://127.0.0.1:3711",
   [string]$EnvFile = "packages/mt5-broker/bridge/.env.phase7b-demo",
   [string]$TelegramEnvFile = ".env.phase7b-telegram",
+  [string]$AttemptLogDir = "",
   [ValidateSet("DEMO", "LIVE")] [string]$AccountMode = "DEMO",
   [switch]$LiveExecutionEnabled,
   [double]$TrendFixedVolume = 0.03,
@@ -104,6 +105,27 @@ $DecisionRuntimeDir = Join-Path $DecisionRuntimeBase ($AccountMode.ToLowerInvari
 foreach ($dir in @($RuntimeDir, $TrendWorkDir, $SidewayWorkDir, $DecisionRuntimeBase, $DecisionRuntimeDir)) {
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
 }
+$AttemptsRoot = Join-Path $RuntimeDir "attempts"
+New-Item -ItemType Directory -Force -Path $AttemptsRoot | Out-Null
+$AttemptsRoot = (Resolve-Path -LiteralPath $AttemptsRoot).Path
+if ([string]::IsNullOrWhiteSpace($AttemptLogDir)) {
+  $AttemptLogDir = Join-Path $AttemptsRoot ([Guid]::NewGuid().ToString("N"))
+  [void](New-Item -ItemType Directory -Path $AttemptLogDir -ErrorAction Stop)
+} else {
+  if (-not [System.IO.Path]::IsPathRooted($AttemptLogDir)) {
+    throw "AttemptLogDir must be an absolute path under $AttemptsRoot."
+  }
+  $attemptFullPath = [System.IO.Path]::GetFullPath($AttemptLogDir)
+  $attemptsPrefix = $AttemptsRoot + [System.IO.Path]::DirectorySeparatorChar
+  if (-not $attemptFullPath.StartsWith($attemptsPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "AttemptLogDir must remain under $AttemptsRoot."
+  }
+  if (-not (Test-Path -LiteralPath $attemptFullPath -PathType Container)) {
+    throw "AttemptLogDir does not exist: $attemptFullPath"
+  }
+  $AttemptLogDir = (Resolve-Path -LiteralPath $attemptFullPath).Path
+}
+Write-Host "PHASE7C_ATTEMPT_LOG_DIR=$AttemptLogDir"
 
 $env:ZIQ_PHASE7C_EXECUTION_LOCK = Join-Path $RuntimeDir "phase7c-execution.lock"
 $env:ZIQ_PHASE7C_REGIME_STATE_FILE = Join-Path $RuntimeDir "regime-notifier-state.json"
@@ -117,16 +139,16 @@ $TelegramModePidPath = Join-Path $RuntimeDir "telegram-mode.pid"
 $RegimeNotifierPidPath = Join-Path $RuntimeDir "regime-notifier.pid"
 $TradeNotifierPidPath = Join-Path $RuntimeDir "trade-notifier.pid"
 $TradeNotifierRuntimePath = Join-Path $RuntimeDir "trade-notifier-runtime.json"
-$TrendOut = Join-Path $RuntimeDir "trend.out.log"
-$TrendErr = Join-Path $RuntimeDir "trend.err.log"
-$SidewayOut = Join-Path $RuntimeDir "sideway.out.log"
-$SidewayErr = Join-Path $RuntimeDir "sideway.err.log"
-$TelegramModeOut = Join-Path $RuntimeDir "telegram-mode.out.log"
-$TelegramModeErr = Join-Path $RuntimeDir "telegram-mode.err.log"
-$RegimeNotifierOut = Join-Path $RuntimeDir "regime-notifier.out.log"
-$RegimeNotifierErr = Join-Path $RuntimeDir "regime-notifier.err.log"
-$TradeNotifierOut = Join-Path $RuntimeDir "trade-notifier.out.log"
-$TradeNotifierErr = Join-Path $RuntimeDir "trade-notifier.err.log"
+$TrendOut = Join-Path $AttemptLogDir "trend.out.log"
+$TrendErr = Join-Path $AttemptLogDir "trend.err.log"
+$SidewayOut = Join-Path $AttemptLogDir "sideway.out.log"
+$SidewayErr = Join-Path $AttemptLogDir "sideway.err.log"
+$TelegramModeOut = Join-Path $AttemptLogDir "telegram-mode.out.log"
+$TelegramModeErr = Join-Path $AttemptLogDir "telegram-mode.err.log"
+$RegimeNotifierOut = Join-Path $AttemptLogDir "regime-notifier.out.log"
+$RegimeNotifierErr = Join-Path $AttemptLogDir "regime-notifier.err.log"
+$TradeNotifierOut = Join-Path $AttemptLogDir "trade-notifier.out.log"
+$TradeNotifierErr = Join-Path $AttemptLogDir "trade-notifier.err.log"
 $ActiveLotSettingsPath = Join-Path $RuntimeDir "active-lot-settings.json"
 $attestationConfigIdentity = Get-Phase7CRuntimeSourceConfigIdentity `
   -RuntimeRoot $WorkDir `
