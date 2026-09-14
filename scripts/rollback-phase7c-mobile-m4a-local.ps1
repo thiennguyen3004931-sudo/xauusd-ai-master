@@ -24,10 +24,12 @@ Write-Host "SYSTEM_REBOOT=NONE"
 Write-Host ""
 
 $GatewayDir = "C:\ProgramData\XAUUSD-AI-MASTER\mobile-readonly-gateway"
+$GatewayJs = Join-Path $GatewayDir "gateway.js"
 $BackupRoot = "C:\ProgramData\XAUUSD-AI-MASTER\mobile-gateway-backups"
 $RestoreStage = "C:\ProgramData\XAUUSD-AI-MASTER\mobile-readonly-gateway.rollback-stage-$([guid]::NewGuid().ToString('N'))"
 $TaskPath = "\XAUUSD-AI-MASTER\"
 $TaskName = "Phase7C-Mobile-Readonly-Gateway"
+$NodeExe = "C:\Program Files\nodejs\node.exe"
 $TailscaleExe = "C:\Program Files\Tailscale\tailscale.exe"
 
 function Assert-True([bool]$Condition, [string]$Code) {
@@ -51,23 +53,40 @@ Assert-True ($Principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Admini
 
 $ResolvedBackup = (Resolve-Path $BackupDir).Path
 $ResolvedBackupRoot = (Resolve-Path $BackupRoot).Path
-Assert-True ($ResolvedBackup.StartsWith($ResolvedBackupRoot, [System.StringComparison]::OrdinalIgnoreCase)) "BACKUP_OUTSIDE_APPROVED_ROOT"
+$BackupRootPrefix = $ResolvedBackupRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+$BackupLeaf = Split-Path -Leaf $ResolvedBackup
+Assert-True (-not [string]::Equals($ResolvedBackup, $ResolvedBackupRoot, [System.StringComparison]::OrdinalIgnoreCase)) "BACKUP_ROOT_NOT_ALLOWED"
+Assert-True ($ResolvedBackup.StartsWith($BackupRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) "BACKUP_OUTSIDE_APPROVED_ROOT"
+Assert-True ($BackupLeaf -like "m4a-predeploy-*") "BACKUP_NOT_PREDEPLOY_BUNDLE"
 Assert-True (Test-Path (Join-Path $ResolvedBackup "gateway.js")) "BACKUP_GATEWAY_JS_MISSING"
 Assert-True (Test-Path $GatewayDir) "CURRENT_GATEWAY_DIR_MISSING"
 
 Write-Host "BACKUP_DIR=$ResolvedBackup"
 Write-Host "BACKUP_GATEWAY_SHA256=$((Get-FileHash (Join-Path $ResolvedBackup 'gateway.js') -Algorithm SHA256).Hash)"
 Write-Host "CURRENT_GATEWAY_SHA256=$((Get-FileHash (Join-Path $GatewayDir 'gateway.js') -Algorithm SHA256).Hash)"
+Write-Host "BACKUP_PATH_GATE=PASS"
 
 Write-Host ""
-Write-Host "=== 1. STAGE APPROVED BACKUP ==="
+Write-Host "=== 1. EXACT TASK PRECHECK ==="
+$Task = Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction Stop
+$Action = $Task.Actions | Select-Object -First 1
+Assert-True ([string]$Task.Principal.UserId -in @("SYSTEM", "S-1-5-18")) "TASK_NOT_SYSTEM"
+Assert-True ([string]::Equals([string]$Action.Execute, $NodeExe, [System.StringComparison]::OrdinalIgnoreCase)) "TASK_NODE_PATH_MISMATCH"
+Assert-True ([string]$Action.Arguments -like "*$GatewayJs*") "TASK_GATEWAY_ARGUMENT_MISMATCH"
+Write-Host "TASK_PRINCIPAL=$($Task.Principal.UserId)"
+Write-Host "TASK_ACTION=$($Action.Execute)"
+Write-Host "TASK_ARGUMENTS=$($Action.Arguments)"
+Write-Host "TASK_PRECHECK_GATE=PASS"
+
+Write-Host ""
+Write-Host "=== 2. STAGE APPROVED BACKUP ==="
 Copy-Item -Path $ResolvedBackup -Destination $RestoreStage -Recurse -Force
 Assert-True (Test-Path (Join-Path $RestoreStage "gateway.js")) "RESTORE_STAGE_INVALID"
 Write-Host "RESTORE_STAGE=$RestoreStage"
 Write-Host "RESTORE_STAGE_GATE=PASS"
 
 Write-Host ""
-Write-Host "=== 2. EXACT TASK STOP / SWAP / START ==="
+Write-Host "=== 3. EXACT TASK STOP / SWAP / START ==="
 Stop-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName
 Wait-ForPort -Port 5791 -ShouldExist $false -Seconds 30 | Out-Null
 Write-Host "CURRENT_GATEWAY_STOPPED=TRUE"
@@ -89,10 +108,11 @@ $Owner = Invoke-CimMethod -InputObject $Process -MethodName GetOwner
 Write-Host "RESTORED_GATEWAY_PID=$GatewayPid"
 Write-Host "RESTORED_GATEWAY_OWNER=$($Owner.Domain)\$($Owner.User)"
 Assert-True ($Owner.User -eq "SYSTEM") "RESTORED_GATEWAY_NOT_SYSTEM"
+Assert-True ([string]$Process.CommandLine -like "*$GatewayDir\gateway.js*") "RESTORED_GATEWAY_COMMAND_MISMATCH"
 Write-Host "ROLLBACK_HANDOFF_GATE=PASS"
 
 Write-Host ""
-Write-Host "=== 3. M2/M3 SECURITY ACCEPTANCE ==="
+Write-Host "=== 4. M2/M3 SECURITY ACCEPTANCE ==="
 $Health = Invoke-WebRequest -Uri "http://127.0.0.1:5791/__m2/health" -Method GET -UseBasicParsing -TimeoutSec 5
 Write-Host "HEALTH_HTTP=$($Health.StatusCode)"
 Assert-True ($Health.StatusCode -eq 200) "RESTORED_HEALTH_FAILED"
@@ -119,7 +139,7 @@ Assert-True $PostBlocked "RESTORED_POST_GATE_FAILED"
 Write-Host "M2_M3_SECURITY_GATE=PASS"
 
 Write-Host ""
-Write-Host "=== 4. SERVE / FUNNEL / PORT ISOLATION ==="
+Write-Host "=== 5. SERVE / FUNNEL / PORT ISOLATION ==="
 $Serve = (& $TailscaleExe serve status 2>&1 | Out-String)
 $Funnel = (& $TailscaleExe funnel status 2>&1 | Out-String)
 $ServeGate = ($Serve -match "8443") -and ($Serve -match "127\.0\.0\.1:5791") -and ($Serve -match "tailnet only")
