@@ -37,6 +37,18 @@ assert.ok(
 );
 assert.ok(source.includes("CANONICAL_PREFLIGHT_RESULT"), "probe must expose canonical preflight result");
 assert.ok(source.includes("CANONICAL_PREFLIGHT_FAIL"), "canonical preflight failure must fail acceptance closed");
+assert.ok(
+  source.includes("PREFLIGHT_CLASSIFICATION=NO_RECOVERY_REQUIRED"),
+  "historical acceptance must require canonical preflight to prove no recovery is required",
+);
+assert.ok(
+  source.includes("CANONICAL_RUNTIME_SOURCE=EXACT"),
+  "probe must expose that the deployed runtime source is exact before candle acceptance",
+);
+assert.ok(
+  source.includes("RUNTIME_SOURCE_NOT_EXACT"),
+  "probe must fail closed when canonical preflight passes only because recovery is allowed",
+);
 
 for (const endpoint of [
   "/v1/candles/XAUUSD",
