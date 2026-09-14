@@ -59,10 +59,20 @@ const PHASE7C_PENDING_FVG_TYPE_TAIL = `  recoveryDayStartTime: number;
   fvgConfirmedAtEntry?: boolean;
 };`;
 
-const LEGACY_PENDING_FVG_VALUE_TAIL = `    recoveryTakeProfit: takeProfit,
+const LEGACY_PENDING_FVG_VALUE_TAIL = `    brokerReferenceTimestamp,
+    dailyMode: dailyRecovery.mode,
+    dailyNetPnlAtEntry: dailyRecovery.dailyNetPnl,
+    recoveryTargetNetPnl: dailyRecovery.targetNetPnl,
+    recoveryTpDistance: dailyRecovery.tpDistance,
+    recoveryTakeProfit: takeProfit,
     recoveryDayStartTime: dailyRecovery.dayStartTime,
   };`;
-const PHASE7C_PENDING_FVG_VALUE_TAIL = `    recoveryTakeProfit: takeProfit,
+const PHASE7C_PENDING_FVG_VALUE_TAIL = `    brokerReferenceTimestamp,
+    dailyMode: dailyRecovery.mode,
+    dailyNetPnlAtEntry: dailyRecovery.dailyNetPnl,
+    recoveryTargetNetPnl: dailyRecovery.targetNetPnl,
+    recoveryTpDistance: dailyRecovery.tpDistance,
+    recoveryTakeProfit: takeProfit,
     recoveryDayStartTime: dailyRecovery.dayStartTime,
     fvgConfirmedAtEntry,
   };`;
