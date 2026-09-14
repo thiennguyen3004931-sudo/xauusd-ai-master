@@ -37,3 +37,5 @@ jobs:
         run: pnpm --filter @xauusd/copy-protocol typecheck
       - name: Protocol build
         run: pnpm --filter @xauusd/copy-protocol build
+      - name: IP boundary contract
+        run: node --test scripts/test-bot-ip-protection-p1-boundary.mjs
