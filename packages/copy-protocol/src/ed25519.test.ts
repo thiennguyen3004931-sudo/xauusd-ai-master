@@ -98,14 +98,42 @@ describe("Ed25519 copy command signing", () => {
     expect(() => signCopyCommand(body, privatePem)).toThrow("Ed25519");
   });
 
-  it("rejects non-Ed25519 public keys", () => {
+  it("fails closed for non-Ed25519 trusted public keys", () => {
     const { privatePem } = createEd25519PemPair();
     const signed = signCopyCommand(body, privatePem);
     const { publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
     const publicPem = publicKey.export({ type: "spki", format: "pem" }).toString();
 
-    expect(() =>
+    expect(
       verifyCopyCommandSignature(signed, new Map([[body.keyId, publicPem]]))
-    ).toThrow("Ed25519");
+    ).toEqual({ ok: false, code: "INVALID_SIGNATURE" });
+  });
+
+  it("fails closed for malformed trusted public keys", () => {
+    const { privatePem } = createEd25519PemPair();
+    const signed = signCopyCommand(body, privatePem);
+
+    expect(
+      verifyCopyCommandSignature(
+        signed,
+        new Map([[body.keyId, "not-a-public-key"]])
+      )
+    ).toEqual({ ok: false, code: "INVALID_SIGNATURE" });
+  });
+
+  it("fails closed for malformed signed command bodies", () => {
+    const { privatePem, publicPem } = createEd25519PemPair();
+    const signed = signCopyCommand(body, privatePem);
+    const malformedBody = {
+      ...signed,
+      version: 2
+    } as unknown as SignedCopyCommand;
+
+    expect(
+      verifyCopyCommandSignature(
+        malformedBody,
+        new Map([[body.keyId, publicPem]])
+      )
+    ).toEqual({ ok: false, code: "INVALID_SIGNATURE" });
   });
 });
