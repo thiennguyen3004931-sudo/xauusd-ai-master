@@ -180,7 +180,11 @@ function Stop-OrphanNodeProcess([string]$ScriptName, [string]$Label) {
 # Stop the watchdog owner first. Otherwise it can recreate a managed child
 # while this stopper is still cleaning that child's PID file/process tree.
 Stop-PidFile (Join-Path $RuntimeDir "supervisor.pid") "SUPERVISOR"
-Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-executors-local.ps1") "SUPERVISOR"
+if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDir "supervisor.pid"))) {
+  Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-executors-local.ps1") "SUPERVISOR"
+} else {
+  Write-Host "PHASE7C_SUPERVISOR_POWERSHELL_ORPHAN_STOP=SKIP_PID_EVIDENCE_PRESENT"
+}
 
 # The supervisor tree kill normally removes all descendants. These idempotent
 # child checks clean up anything that survived or detached before shutdown.
@@ -190,12 +194,21 @@ Stop-PidFile (Join-Path $RuntimeDir "regime-notifier.pid") "REGIME_NOTIFIER"
 Stop-PidFile (Join-Path $RuntimeDir "trend.pid") "TREND"
 Stop-PidFile (Join-Path $RuntimeDir "sideway.pid") "SIDEWAY"
 
-# Reconcile canonical PowerShell wrappers by exact full script path. This covers
-# the fail-closed state where PID files were cleaned up before wrappers exited.
-Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-telegram-mode-controller-local.ps1") "TELEGRAM_MODE"
-Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-regime-notifier-local.ps1") "REGIME_NOTIFIER"
-Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-trend-controller-local.ps1") "TREND"
-Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-sideway-controller-local.ps1") "SIDEWAY"
+# Reconcile canonical PowerShell wrappers by exact full script path only when
+# their PID evidence is absent. An existing but invalid PID file is an ownership
+# ambiguity and must fail closed without killing a potentially managed wrapper.
+if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDir "telegram-mode.pid"))) {
+  Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-telegram-mode-controller-local.ps1") "TELEGRAM_MODE"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDir "regime-notifier.pid"))) {
+  Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-regime-notifier-local.ps1") "REGIME_NOTIFIER"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDir "trend.pid"))) {
+  Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-trend-controller-local.ps1") "TREND"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $RuntimeDir "sideway.pid"))) {
+  Stop-OrphanPowerShellProcess (Join-Path $PSScriptRoot "run-phase7c-sideway-controller-local.ps1") "SIDEWAY"
+}
 
 # Clean up Node children left by older versions that only killed the launcher PID.
 Stop-OrphanNodeProcess "run-phase7b-telegram-notifier.mjs" "TRADE_NOTIFIER"
