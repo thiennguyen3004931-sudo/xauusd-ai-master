@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import types
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,7 +13,21 @@ BRIDGE_ROOT = Path(__file__).resolve().parents[1]
 if str(BRIDGE_ROOT) not in sys.path:
     sys.path.insert(0, str(BRIDGE_ROOT))
 
-from mt5_bridge.historical_candles import historical_candles
+# historical_candles imports Mt5Gateway only for its type annotation. Stub that
+# module so this dedicated regression stays stdlib-only on Linux CI and does
+# not require the bridge's pydantic/Windows runtime dependencies.
+_previous_gateway = sys.modules.get("mt5_bridge.mt5_gateway")
+gateway_module = types.ModuleType("mt5_bridge.mt5_gateway")
+gateway_module.Mt5Gateway = type("Mt5Gateway", (), {})
+sys.modules["mt5_bridge.mt5_gateway"] = gateway_module
+
+try:
+    from mt5_bridge.historical_candles import historical_candles
+finally:
+    if _previous_gateway is None:
+        sys.modules.pop("mt5_bridge.mt5_gateway", None)
+    else:
+        sys.modules["mt5_bridge.mt5_gateway"] = _previous_gateway
 
 
 class _Mt5:
