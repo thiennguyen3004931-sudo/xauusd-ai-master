@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { transformPhase7CSemiTrendRuntimeSource } from "./phase7c-semi-trend-runtime-source-adapter.mjs";
 
 const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 const notifierPath = path.join(scriptsDir, "run-phase7b-telegram-notifier.mjs");
@@ -77,7 +78,7 @@ test("accepted-but-not-yet-resolved is transient on Telegram and recovered fill 
       fvgConfirmedAtEntry: false,
     },
     {
-      type: "ENTRY_ACCEPTED_POSITION_NOT_RESOLVED",
+      type: "ENTRY_ACCEPTED_POSITION_PENDING_RESOLUTION",
       timestamp: "2026-09-14T08:04:35.200Z",
       ticket: "ORDER-1",
       fillPrice: 4315.95,
@@ -104,7 +105,7 @@ test("accepted-but-not-yet-resolved is transient on Telegram and recovered fill 
   assert.match(notifications[1].text, /POSITION-1/);
 });
 
-test("pending entry expiry is the operator-visible unresolved failure", async () => {
+test("only actual pending-entry expiry produces the unresolved operator warning", async () => {
   const notifications = await runNotifier([
     {
       type: "PENDING_ENTRY_EXPIRED_NO_POSITION",
@@ -113,22 +114,42 @@ test("pending entry expiry is the operator-visible unresolved failure", async ()
       brokerTicket: "BROKER-EXPIRED-1",
       ageMs: 60000,
     },
+    {
+      type: "ENTRY_ACCEPTED_POSITION_NOT_RESOLVED",
+      timestamp: "2026-09-14T08:05:35.001Z",
+      message: "Position không resolve sau 60 giây",
+      orderId: "ORDER-EXPIRED-1",
+      ticket: "BROKER-EXPIRED-1",
+      ageMs: 60000,
+    },
   ], "expiry");
 
   assert.equal(notifications.length, 1);
   assert.match(notifications[0].text, /ENTRY/i);
-  assert.match(notifications[0].text, /không resolve|không tìm thấy|timeout|60/i);
+  assert.match(notifications[0].text, /Position không resolve sau 60 giây/i);
 });
 
-test("Trend pending recovery emits canonical ENTRY_FILLED after ownership is resolved", () => {
-  const source = fs.readFileSync(controllerPath, "utf8");
+test("Trend runtime adapter converts transient unresolved state into recoverable lifecycle", () => {
+  const legacySource = fs.readFileSync(controllerPath, "utf8");
+  const source = transformPhase7CSemiTrendRuntimeSource(legacySource);
+
+  assert.match(source, /journal\("ENTRY_ACCEPTED_POSITION_PENDING_RESOLUTION"/);
+  assert.equal(
+    (source.match(/journal\("ENTRY_ACCEPTED_POSITION_NOT_RESOLVED"/g) ?? []).length,
+    1,
+    "the only Telegram-visible unresolved marker must be the post-timeout warning",
+  );
+  assert.match(source, /message: "Position không resolve sau 60 giây"/);
+  assert.match(source, /fvgConfirmedAtEntry: pending\.fvgConfirmedAtEntry \?\? false/);
+
   const recoveryStart = source.indexOf('journal("PENDING_ENTRY_RECOVERED"');
   assert.notEqual(recoveryStart, -1, "pending recovery audit event must exist");
 
-  const recoveryWindow = source.slice(recoveryStart, recoveryStart + 1800);
+  const recoveryWindow = source.slice(recoveryStart, recoveryStart + 2200);
   assert.match(
     recoveryWindow,
     /journal\("ENTRY_FILLED"/,
     "recovered pending position must emit the same canonical fill lifecycle event as immediate resolution",
   );
+  assert.match(recoveryWindow, /recoveredFromPending: true/);
 });
