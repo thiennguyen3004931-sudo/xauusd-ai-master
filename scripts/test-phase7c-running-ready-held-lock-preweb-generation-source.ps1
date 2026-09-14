@@ -55,6 +55,7 @@ $required = @(
   'Assert-PauseDisarmed -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK"',
   'Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK"',
   'Assert-FlatBroker -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK"',
+  'RUNNING+READY HELD-lock canonical broker tuple changed during safety recheck; lifecycle stop blocked.',
   '[void](Invoke-ApiPost "/api/v1/phase7c/lifecycle/stop" @{})',
   'Wait-LifecycleStopped',
   'Assert-LifecycleExecutorsStopped -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK_POST_STOP"',
