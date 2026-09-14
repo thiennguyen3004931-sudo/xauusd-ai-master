@@ -101,12 +101,14 @@ def historical_candles(
         )
 
     point = float(getattr(info, "point", 0.0) or 0.0)
-    now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+    broker_now_ms = denormalize_timestamp_ms(
+        int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+    )
     output: list[dict[str, Any]] = []
     for row in rows:
         open_time = int(row["time"]) * 1000
         close_time = open_time + duration_ms[timeframe_key]
-        if close_time > now_ms:
+        if close_time > broker_now_ms:
             continue
         try:
             spread_points = float(row["spread"])
