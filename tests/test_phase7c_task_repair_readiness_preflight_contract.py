@@ -130,3 +130,12 @@ def test_probe_outputs_machine_readable_repair_decision():
     )
     for marker in required:
         assert marker in source
+
+
+if __name__ == "__main__":
+    test_probe_is_strictly_read_only()
+    test_probe_binds_source_to_exact_accepted_main()
+    test_probe_requires_safe_stopped_flat_runtime()
+    test_probe_uses_canonical_task_ownership_and_exact_hash_evidence()
+    test_probe_outputs_machine_readable_repair_decision()
+    print("task repair readiness preflight contract: PASS")
