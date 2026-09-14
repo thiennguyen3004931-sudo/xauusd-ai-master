@@ -137,7 +137,8 @@ function Read-BridgeArray([string]$Path) {
     if ([string]::IsNullOrWhiteSpace($raw) -or $raw -eq '[]') {
         return @()
     }
-    return @($raw | ConvertFrom-Json | Where-Object { $null -ne $_ })
+    $parsed = $raw | ConvertFrom-Json
+    return @($parsed | Where-Object { $null -ne $_ })
 }
 
 function Get-Int64Field($Row, [string]$Name) {
