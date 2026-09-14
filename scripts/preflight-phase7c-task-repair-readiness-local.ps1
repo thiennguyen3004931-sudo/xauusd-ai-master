@@ -177,10 +177,12 @@ $pendingOrders = @(Read-BridgeArray -BridgeBase $BridgeBase -Headers $BridgeHead
 $mode = ([string]$modeSnapshot.state.mode).Trim().ToUpperInvariant()
 $arm = ([string]$armSnapshot.liveArmStatus).Trim().ToUpperInvariant()
 $lifecycleRunning = [bool]$lifecycle.running
+$lifecycleReady = [bool]$lifecycle.ready
 
 if ($mode -ne 'PAUSE') { Add-Blocked 'MODE_NOT_PAUSE' }
 if ($arm -ne 'DISARMED' -or [bool]$armSnapshot.liveExecutionArmed) { Add-Blocked 'ARM_NOT_DISARMED' }
 if ($lifecycleRunning) { Add-Blocked 'LIFECYCLE_NOT_STOPPED' }
+if ($lifecycleReady) { Add-Blocked 'LIFECYCLE_READY_NOT_FALSE' }
 if ($positions.Count -ne 0) { Add-Blocked 'XAUUSD_POSITIONS_NONZERO' }
 if ($pendingOrders.Count -ne 0) { Add-Blocked 'XAUUSD_PENDING_ORDERS_NONZERO' }
 
@@ -211,6 +213,7 @@ $repairAllowed = $sourceGate -and
     $mode -eq 'PAUSE' -and
     $arm -eq 'DISARMED' -and
     -not $lifecycleRunning -and
+    -not $lifecycleReady -and
     $positions.Count -eq 0 -and
     $pendingOrders.Count -eq 0 -and
     $actualRunnerSha -eq $expectedRunnerSha -and
@@ -236,6 +239,7 @@ Write-Host "SOURCE_GATE=$sourceGate"
 Write-Host "MODE=$mode"
 Write-Host "ARM=$arm"
 Write-Host "LIFECYCLE_RUNNING=$lifecycleRunning"
+Write-Host "LIFECYCLE_READY=$lifecycleReady"
 Write-Host "XAUUSD_POSITIONS=$($positions.Count)"
 Write-Host "XAUUSD_PENDING_ORDERS=$($pendingOrders.Count)"
 Write-Host "RUNNER_ACTUAL_SHA=$actualRunnerSha"
