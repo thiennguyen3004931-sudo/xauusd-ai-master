@@ -1,0 +1,35 @@
+name: Temporary Phase7C Held-Lock Source Fix V2
+
+on:
+  push:
+    branches:
+      - fix/phase7c-running-held-lock-generation-reload
+    paths:
+      - .github/workflows/tmp-phase7c-held-lock-source-fix-v2.yml
+      - scripts/tmp-apply-held-lock-source-fix.py
+
+permissions:
+  contents: write
+
+jobs:
+  apply-source-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/phase7c-running-held-lock-generation-reload
+          fetch-depth: 0
+
+      - name: Apply bounded source patch
+        shell: bash
+        run: |
+          python scripts/tmp-apply-held-lock-source-fix.py
+          git diff --check -- scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1
+          git rm scripts/tmp-apply-held-lock-source-fix.py
+          git rm .github/workflows/tmp-phase7c-held-lock-source-fix-v2.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/recover-phase7c-runtime-ready-stable-deploy-local.ps1
+          git commit -m "fix: quiesce running held-lock generation before web deploy"
+          git push origin HEAD:fix/phase7c-running-held-lock-generation-reload
