@@ -343,16 +343,11 @@ function Test-SupervisorAlive {
 }
 
 function Stop-Phase7CExecutorRuntime($Config) {
+  # Missing PID files are not proof that the executor runtime is gone.
+  # The canonical stopper is idempotent and also reconciles bounded orphan
+  # wrapper processes by exact canonical script path.
   if (-not (Test-SupervisorAlive)) {
-    $runtimePids = @("supervisor.pid", "trend.pid", "sideway.pid", "telegram-mode.pid", "regime-notifier.pid") | ForEach-Object {
-      $pidPath = Join-Path $runtimeDir $_
-      if (-not (Test-Path -LiteralPath $pidPath)) { return }
-      try { [int](Get-Content -LiteralPath $pidPath -Raw).Trim() } catch { 0 }
-    } | Where-Object { $_ -gt 0 -and $null -ne (Get-Process -Id $_ -ErrorAction SilentlyContinue) }
-    if (@($runtimePids).Count -eq 0) {
-      $script:supervisorPid = $null
-      return [pscustomobject]@{ success = $true; reasonCode = "NOOP_ALREADY_STOPPED"; message = "Executor runtime already stopped." }
-    }
+    $script:supervisorPid = $null
   }
 
   $stopArgs = @(

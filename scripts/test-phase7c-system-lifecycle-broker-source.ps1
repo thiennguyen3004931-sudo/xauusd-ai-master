@@ -67,6 +67,11 @@ Assert-True ($runner -match '(?i)IDLE') "Broker must expose IDLE state"
 Assert-True ($runner -match '(?i)PAUSE') "Broker startup/recovery must enforce PAUSE"
 Assert-True (-not ($runner -match '(?s)while\s*\(\$true\).*?Start-Process.*?run-phase7c-executors-local')) "Broker boot loop must not unconditionally launch the executor supervisor"
 
+# STOP must not infer that executors are gone merely because canonical PID files
+# disappeared. Production can retain live attested wrapper processes after PID-file
+# cleanup, so the idempotent canonical stopper must still be allowed to reconcile them.
+Assert-True (-not ($runner.Contains('return [pscustomobject]@{ success = $true; reasonCode = "NOOP_ALREADY_STOPPED"; message = "Executor runtime already stopped." }'))) "Lifecycle STOP must not return NOOP_ALREADY_STOPPED solely from missing PID files; canonical stopper reconciliation must run"
+
 # The migrated-task verifier must use the broker's fresh heartbeat as the runner-liveness authority.
 # startup-runner-status.json belongs to the legacy runner and may legitimately contain a stale PID after migration.
 Assert-True ($verifier -match 'phase7c-lifecycle-broker') "executor verifier must inspect the lifecycle broker runtime"
