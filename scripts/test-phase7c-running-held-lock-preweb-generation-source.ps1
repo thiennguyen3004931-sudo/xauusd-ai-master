@@ -27,9 +27,11 @@ $core = (Get-Content -LiteralPath $CorePath -Raw).Replace("`r`n", "`n").Replace(
 
 # Production reproduction 2026-09-14: target source generation can be stale while
 # lifecycle remains RUNNING+READY and the canonical singleton startup lock is HELD.
-# The guarded entrypoint must prove that exact tuple and quiesce only the lifecycle;
-# all Scheduled Task recycle, new broker PID, exact attestation and Web sequencing
-# remain owned by the existing canonical recovery core.
+# A prior definition-only runner hash repair can make the CURRENT canonical task hash
+# newer than the already-running stale broker launcher's attested hash. The guarded
+# entrypoint must therefore prove the stale broker by PID + heartbeat + singleton lock
+# + well-formed stale generation attestation, while proving the CURRENT task trust
+# separately. It must not require the old broker launcher hash to equal the new task hash.
 $guardRequired = @(
   '$generationDecision = Get-Phase7CRuntimeSourceGenerationReloadDecision',
   '$reloadRequired = [bool]$generationDecision.reloadRequired',
@@ -44,7 +46,13 @@ $guardRequired = @(
   '[int]$canonicalProcessIds[0] -eq [int]$runtimeGeneration.statusBrokerPid',
   '[string]$brokerAttestation.component -eq ''lifecycle-broker''',
   '[int]$brokerAttestation.pid -eq [int]$runtimeGeneration.statusBrokerPid',
-  '$attestedLauncherSha256 -eq $expectedLauncherSha256',
+  '$brokerAttestationVersionValid',
+  '$brokerAttestationGenerationValid',
+  '$brokerAttestationIsStale',
+  '[string]$brokerAttestation.deploymentId -match ''^[0-9a-fA-F]{32}$''',
+  '[string]$brokerAttestation.sourceCommit -match ''^[0-9a-fA-F]{40}$''',
+  '[string]$brokerAttestation.sourceTree -match ''^[0-9a-fA-F]{40}$''',
+  '[string]$brokerAttestation.launcherSha256 -match ''^sha256:[0-9a-fA-F]{64}$''',
   'Assert-PauseDisarmed',
   'Assert-BridgeAndFlat -ExpectedSession $bridgeSessionId',
   'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK=ELIGIBLE_QUIESCE_REQUIRED',
@@ -57,6 +65,7 @@ $guardRequired = @(
 foreach ($literal in $guardRequired) {
   Assert-True ($guarded.Contains($literal)) "RED: RUNNING+READY held-lock guarded recovery contract missing: $literal"
 }
+Assert-True (-not $guarded.Contains('$attestedLauncherSha256 -eq $expectedLauncherSha256')) 'RED: stale running broker must not be required to carry the CURRENT repaired task runner hash.'
 
 $eligible = 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK=ELIGIBLE_QUIESCE_REQUIRED'
 $stopApi = '[void](Invoke-ApiPost "/api/v1/phase7c/lifecycle/stop" @{})'

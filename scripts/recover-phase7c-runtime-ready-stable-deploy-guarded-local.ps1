@@ -221,8 +221,21 @@ if ($heldObserved) {
     throw "Guarded recovery lifecycle broker attestation is missing."
   }
   $brokerAttestation = Get-Content -LiteralPath $brokerAttestationPath -Raw | ConvertFrom-Json
-  $expectedLauncherSha256 = 'sha256:' + $trustedRunnerSha256.ToLowerInvariant()
-  $attestedLauncherSha256 = ([string]$brokerAttestation.launcherSha256).Trim().ToLowerInvariant()
+  $brokerAttestationVersionValid = $null -ne $brokerAttestation.PSObject.Properties['version'] -and [int]$brokerAttestation.version -eq 1
+  $brokerAttestationGenerationValid = `
+    $null -ne $brokerAttestation.PSObject.Properties['deploymentId'] -and `
+    $null -ne $brokerAttestation.PSObject.Properties['sourceCommit'] -and `
+    $null -ne $brokerAttestation.PSObject.Properties['sourceTree'] -and `
+    $null -ne $brokerAttestation.PSObject.Properties['launcherSha256'] -and `
+    [string]$brokerAttestation.deploymentId -match '^[0-9a-fA-F]{32}$' -and `
+    [string]$brokerAttestation.sourceCommit -match '^[0-9a-fA-F]{40}$' -and `
+    [string]$brokerAttestation.sourceTree -match '^[0-9a-fA-F]{40}$' -and `
+    [string]$brokerAttestation.launcherSha256 -match '^sha256:[0-9a-fA-F]{64}$'
+  $brokerAttestationIsStale = `
+    $brokerAttestationGenerationValid -and `
+    (-not [string]::Equals([string]$brokerAttestation.deploymentId, [string]$targetDeployment.deploymentId, [System.StringComparison]::OrdinalIgnoreCase) -or `
+     -not [string]::Equals([string]$brokerAttestation.sourceCommit, [string]$targetDeployment.sourceCommit, [System.StringComparison]::OrdinalIgnoreCase) -or `
+     -not [string]::Equals([string]$brokerAttestation.sourceTree, [string]$targetDeployment.sourceTree, [System.StringComparison]::OrdinalIgnoreCase))
 
   $heldEligible = `
     [string]$task.State -eq 'Running' -and `
@@ -237,7 +250,9 @@ if ($heldObserved) {
     [int]$canonicalProcessIds[0] -eq [int]$runtimeGeneration.statusBrokerPid -and `
     [string]$brokerAttestation.component -eq 'lifecycle-broker' -and `
     [int]$brokerAttestation.pid -eq [int]$runtimeGeneration.statusBrokerPid -and `
-    $attestedLauncherSha256 -eq $expectedLauncherSha256
+    $brokerAttestationVersionValid -and `
+    $brokerAttestationGenerationValid -and `
+    $brokerAttestationIsStale
   if (-not $heldEligible) {
     throw "Guarded recovery observed RUNNING+READY HELD stale generation but could not prove exact canonical broker tuple."
   }
@@ -246,7 +261,9 @@ if ($heldObserved) {
   Assert-BridgeAndFlat -ExpectedSession $bridgeSessionId
   Write-Host "PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK=ELIGIBLE_QUIESCE_REQUIRED"
 
-  # Re-prove mutable evidence immediately before the only wrapper mutation.
+  # Re-prove mutable evidence immediately before the only wrapper mutation. The
+  # current task trust is verified against the current trusted runner SHA separately
+  # from the stale running broker's historical launcher SHA.
   $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
   $runtimeGeneration = Get-Phase7CRuntimeGenerationSnapshot -WorkDir $WorkDir
   $lifecycle = Invoke-ApiGet "/api/v1/phase7c/lifecycle"
@@ -255,7 +272,21 @@ if ($heldObserved) {
   $taskOwnership = Test-Phase7CExecutorTaskActionOwnership -Actions $task.Actions -ExpectedRunnerPath $runnerPath -ExpectedRunnerSha256 $trustedRunnerSha256
   $taskDrift = @(Get-Phase7CExecutorTaskDrift -Task $task)
   $brokerAttestation = Get-Content -LiteralPath $brokerAttestationPath -Raw | ConvertFrom-Json
-  $attestedLauncherSha256 = ([string]$brokerAttestation.launcherSha256).Trim().ToLowerInvariant()
+  $brokerAttestationVersionValid = $null -ne $brokerAttestation.PSObject.Properties['version'] -and [int]$brokerAttestation.version -eq 1
+  $brokerAttestationGenerationValid = `
+    $null -ne $brokerAttestation.PSObject.Properties['deploymentId'] -and `
+    $null -ne $brokerAttestation.PSObject.Properties['sourceCommit'] -and `
+    $null -ne $brokerAttestation.PSObject.Properties['sourceTree'] -and `
+    $null -ne $brokerAttestation.PSObject.Properties['launcherSha256'] -and `
+    [string]$brokerAttestation.deploymentId -match '^[0-9a-fA-F]{32}$' -and `
+    [string]$brokerAttestation.sourceCommit -match '^[0-9a-fA-F]{40}$' -and `
+    [string]$brokerAttestation.sourceTree -match '^[0-9a-fA-F]{40}$' -and `
+    [string]$brokerAttestation.launcherSha256 -match '^sha256:[0-9a-fA-F]{64}$'
+  $brokerAttestationIsStale = `
+    $brokerAttestationGenerationValid -and `
+    (-not [string]::Equals([string]$brokerAttestation.deploymentId, [string]$targetDeployment.deploymentId, [System.StringComparison]::OrdinalIgnoreCase) -or `
+     -not [string]::Equals([string]$brokerAttestation.sourceCommit, [string]$targetDeployment.sourceCommit, [System.StringComparison]::OrdinalIgnoreCase) -or `
+     -not [string]::Equals([string]$brokerAttestation.sourceTree, [string]$targetDeployment.sourceTree, [System.StringComparison]::OrdinalIgnoreCase))
   $stillEligible = `
     [bool]$lifecycle.running -and [bool]$lifecycle.ready -and `
     [string]$lifecycle.mode.mode -eq 'PAUSE' -and `
@@ -267,7 +298,7 @@ if ($heldObserved) {
     $canonicalProcessIds.Count -eq 1 -and $runningInstanceCount -eq 1 -and `
     [int]$canonicalProcessIds[0] -eq [int]$runtimeGeneration.statusBrokerPid -and `
     [string]$brokerAttestation.component -eq 'lifecycle-broker' -and [int]$brokerAttestation.pid -eq [int]$runtimeGeneration.statusBrokerPid -and `
-    $attestedLauncherSha256 -eq $expectedLauncherSha256 -and `
+    $brokerAttestationVersionValid -and $brokerAttestationGenerationValid -and $brokerAttestationIsStale -and `
     [bool]$taskOwnership.owned -and [bool]$taskOwnership.canonical -and -not [bool]$taskOwnership.repairRequired -and `
     $taskDrift.Count -eq 0 -and (Test-Phase7CSystemTaskPrincipal $task.Principal)
   if (-not $stillEligible) {
