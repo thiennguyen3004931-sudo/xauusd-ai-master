@@ -573,6 +573,32 @@ function Process-BrokerRequest {
       return
     }
 
+    if ($action -eq "START") {
+      # A fresh lifecycle-broker generation has no in-memory supervisor PID, but
+      # canonical wrapper processes from the previous generation can still be alive
+      # after PID-file cleanup. Reconcile exact-path orphans before any new launch.
+      $preStartReconcile = Stop-Phase7CExecutorRuntime $config
+      if (-not $preStartReconcile.success) {
+        $script:desiredExecutorState = "STOPPED"
+        Complete-Request $requestId $action "FAILED" ([string]$preStartReconcile.reasonCode) ([string]$preStartReconcile.message) $startedAt
+        Set-BrokerState "BLOCKED" ([string]$preStartReconcile.reasonCode) ([string]$preStartReconcile.message)
+        return
+      }
+
+      # Re-read launch config and re-run the START safety gate after reconciliation
+      # so account/MT5/trading state changes during cleanup fail closed.
+      $config = Read-Phase7CCanonicalLaunchConfig
+      $script:accountMode = [string]$config.accountMode
+      $postReconcileContext = Get-BrokerSafetyContext $config
+      $postReconcileGate = Test-Phase7CLifecycleBrokerSafetyGate -Action "START" -Context $postReconcileContext
+      if (-not $postReconcileGate.allowed) {
+        $script:desiredExecutorState = "STOPPED"
+        Complete-Request $requestId $action "REJECTED" ([string]$postReconcileGate.reasonCode) ([string]$postReconcileGate.message) $startedAt
+        Set-BrokerState "BLOCKED" ([string]$postReconcileGate.reasonCode) ([string]$postReconcileGate.message)
+        return
+      }
+    }
+
     if ($action -eq "RESTART") {
       Set-BrokerState "RESTARTING"
       $stopResult = Stop-Phase7CExecutorRuntime $config
