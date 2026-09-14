@@ -14,7 +14,10 @@ def test_repair_is_definition_only_and_uses_canonical_ownership_contract():
     source = _source()
 
     assert "phase7c-scheduled-task-ownership.ps1" in source
-    assert "Get-Phase7CScheduledTaskOwnershipVerdict" in source
+    assert "Test-Phase7CExecutorTaskActionOwnership" in source
+    assert "Get-Phase7CExecutorTaskDrift" in source
+    assert "New-Phase7CExecutorTaskGuardArguments" in source
+    assert "Get-Phase7CScheduledTaskOwnershipVerdict" not in source
     assert "OWNED_HASH_DRIFT_REPAIR_REQUIRED" in source
     assert "RUNNER_HASH_DRIFT" in source
     assert source.count("Set-ScheduledTask") == 1
@@ -48,11 +51,12 @@ def test_repair_is_definition_only_and_uses_canonical_ownership_contract():
 def test_repair_is_fail_closed_to_runner_hash_drift_only():
     source = _source()
 
-    assert "if (-not $pre.Owned)" in source
-    assert "if (-not $pre.RepairRequired)" in source
-    assert '$pre.Reason -ne "OWNED_HASH_DRIFT_REPAIR_REQUIRED"' in source
-    assert "$preReasons.Count -ne 1" in source
-    assert '$preReasons[0] -ne "RUNNER_HASH_DRIFT"' in source
+    assert "if (-not $preOwnership.owned)" in source
+    assert "if (-not $preOwnership.repairRequired)" in source
+    assert '$preOwnership.reason -ne "OWNED_HASH_DRIFT_REPAIR_REQUIRED"' in source
+    assert "if ($preTaskDrift.Count -ne 0)" in source
+    assert "PRE_REPAIR_TASK_DRIFT" in source
+    assert "PRE_REPAIR_PRINCIPAL_NOT_CANONICAL_SYSTEM" in source
     assert "Get-FileHash" in source
     assert "-Algorithm SHA256" in source
     assert "RUNNER_ACTUAL_SHA_MISMATCH" in source
@@ -67,13 +71,26 @@ def test_repair_requires_exact_observed_embedded_sha_before_mutation():
     assert "PRE_REPAIR_RUNNERSHA256=" in source
 
 
+def test_repair_builds_the_same_guard_action_contract_as_canonical_library():
+    source = _source()
+
+    assert "New-Phase7CExecutorTaskGuardArguments" in source
+    assert "-RunnerPath $resolvedRunnerPath" in source
+    assert "-RunnerSha256 $expectedSha" in source
+    assert "$existingAction = @($task.Actions)[0]" in source
+    assert "$existingExecute = [string]$existingAction.Execute" in source
+    assert "$existingWorkingDirectory = [string]$existingAction.WorkingDirectory" in source
+
+
 def test_repair_rechecks_canonical_acceptance_after_definition_change():
     source = _source()
 
-    assert source.count("Get-Phase7CScheduledTaskOwnershipVerdict") >= 2
-    assert "if (-not $post.Owned)" in source
-    assert "if (-not $post.Canonical)" in source
-    assert "if ($post.RepairRequired)" in source
+    assert source.count("Test-Phase7CExecutorTaskActionOwnership") >= 2
+    assert source.count("Get-Phase7CExecutorTaskDrift") >= 2
+    assert "if (-not $postOwnership.owned)" in source
+    assert "if (-not $postOwnership.canonical)" in source
+    assert "if ($postOwnership.repairRequired)" in source
+    assert "if ($postTaskDrift.Count -ne 0)" in source
     assert "OWNERSHIP_OWNED=True" in source
     assert "OWNERSHIP_CANONICAL=True" in source
     assert "OWNERSHIP_REPAIRREQUIRED=False" in source
