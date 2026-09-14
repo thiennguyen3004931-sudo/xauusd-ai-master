@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
+import types
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,12 +13,20 @@ BRIDGE_ROOT = Path(__file__).resolve().parents[1]
 if str(BRIDGE_ROOT) not in sys.path:
     sys.path.insert(0, str(BRIDGE_ROOT))
 
-from mt5_bridge.historical_candles import historical_candles
+# historical_candles imports Mt5Gateway only for type annotations. Stub that
+# dependency so this focused regression remains stdlib-only in Linux CI.
+_previous_gateway = sys.modules.get("mt5_bridge.mt5_gateway")
+_gateway_module = types.ModuleType("mt5_bridge.mt5_gateway")
+_gateway_module.Mt5Gateway = type("Mt5Gateway", (), {})
+sys.modules["mt5_bridge.mt5_gateway"] = _gateway_module
 
-
-class _Settings:
-    def broker_symbol(self, canonical: str) -> str:
-        return canonical
+try:
+    from mt5_bridge.historical_candles import historical_candles
+finally:
+    if _previous_gateway is None:
+        sys.modules.pop("mt5_bridge.mt5_gateway", None)
+    else:
+        sys.modules["mt5_bridge.mt5_gateway"] = _previous_gateway
 
 
 class _Mt5:
@@ -30,10 +40,7 @@ class _Mt5:
 class _Gateway:
     def __init__(self) -> None:
         self.mt5 = _Mt5()
-        self._lock = SimpleNamespace(
-            __enter__=lambda self: self,
-            __exit__=lambda self, exc_type, exc, tb: False,
-        )
+        self._lock = threading.RLock()
         self.captured: dict[str, object] = {}
 
     def _ensure_symbol(self, canonical: str) -> str:
