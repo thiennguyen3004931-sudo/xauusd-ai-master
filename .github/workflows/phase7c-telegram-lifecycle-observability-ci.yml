@@ -5,16 +5,21 @@ on:
   push:
     branches:
       - feat/phase7c-telegram-lifecycle-observability
+      - fix/phase7c-telegram-entry-resolution-lifecycle
     paths:
       - scripts/run-phase7b-telegram-notifier.mjs
+      - scripts/run-phase7b-demo-controller.ts
       - scripts/test-phase7c-telegram-lifecycle-observability-contract.mjs
+      - scripts/test-phase7c-telegram-entry-resolution-lifecycle-contract.mjs
       - scripts/phase7c-trade-notifier-synthetic.test.mjs
       - scripts/test-phase7c-hold-telegram-dedupe-contract.mjs
       - .github/workflows/phase7c-telegram-lifecycle-observability-ci.yml
   pull_request:
     paths:
       - scripts/run-phase7b-telegram-notifier.mjs
+      - scripts/run-phase7b-demo-controller.ts
       - scripts/test-phase7c-telegram-lifecycle-observability-contract.mjs
+      - scripts/test-phase7c-telegram-entry-resolution-lifecycle-contract.mjs
       - scripts/phase7c-trade-notifier-synthetic.test.mjs
       - scripts/test-phase7c-hold-telegram-dedupe-contract.mjs
       - .github/workflows/phase7c-telegram-lifecycle-observability-ci.yml
@@ -41,6 +46,9 @@ jobs:
 
       - name: Telegram lifecycle observability contract
         run: node --test ./scripts/test-phase7c-telegram-lifecycle-observability-contract.mjs
+
+      - name: Telegram entry resolution lifecycle contract
+        run: node --test ./scripts/test-phase7c-telegram-entry-resolution-lifecycle-contract.mjs
 
       - name: Existing synthetic notifier lifecycle regression
         run: node --test ./scripts/phase7c-trade-notifier-synthetic.test.mjs
