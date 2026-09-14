@@ -234,7 +234,11 @@ if (-not $canonicalPreflightPass) {
             )
 
             $matchCountExact = $matches.Count -eq 1
-            Write-Host "SAMPLE_${sampleNumber}_HISTORY_MATCH_COUNT=$(if ($matchCountExact) { '1' } else { $matches.Count })"
+            if ($matchCountExact) {
+                Write-Host "SAMPLE_${sampleNumber}_HISTORY_MATCH_COUNT=1"
+            } else {
+                Write-Host "SAMPLE_${sampleNumber}_HISTORY_MATCH_COUNT=$($matches.Count)"
+            }
 
             if (-not $matchCountExact) {
                 $allSamplesExact = $false
@@ -255,12 +259,23 @@ if (-not $canonicalPreflightPass) {
             $lowExact = (Get-DecimalField $history 'low') -eq (Get-DecimalField $reference 'low')
             $closeExact = (Get-DecimalField $history 'close') -eq (Get-DecimalField $reference 'close')
 
-            Write-Host "SAMPLE_${sampleNumber}_OPEN_TIME=$(if ($openTimeExact) { 'EXACT' } else { 'MISMATCH' })"
-            Write-Host "SAMPLE_${sampleNumber}_CLOSE_TIME=$(if ($closeTimeExact) { 'EXACT' } else { 'MISMATCH' })"
-            Write-Host "SAMPLE_${sampleNumber}_OPEN=$(if ($openExact) { 'EXACT' } else { 'MISMATCH' })"
-            Write-Host "SAMPLE_${sampleNumber}_HIGH=$(if ($highExact) { 'EXACT' } else { 'MISMATCH' })"
-            Write-Host "SAMPLE_${sampleNumber}_LOW=$(if ($lowExact) { 'EXACT' } else { 'MISMATCH' })"
-            Write-Host "SAMPLE_${sampleNumber}_CLOSE=$(if ($closeExact) { 'EXACT' } else { 'MISMATCH' })"
+            if ($openTimeExact) { Write-Host "SAMPLE_${sampleNumber}_OPEN_TIME=EXACT" }
+            else { Write-Host "SAMPLE_${sampleNumber}_OPEN_TIME=MISMATCH" }
+
+            if ($closeTimeExact) { Write-Host "SAMPLE_${sampleNumber}_CLOSE_TIME=EXACT" }
+            else { Write-Host "SAMPLE_${sampleNumber}_CLOSE_TIME=MISMATCH" }
+
+            if ($openExact) { Write-Host "SAMPLE_${sampleNumber}_OPEN=EXACT" }
+            else { Write-Host "SAMPLE_${sampleNumber}_OPEN=MISMATCH" }
+
+            if ($highExact) { Write-Host "SAMPLE_${sampleNumber}_HIGH=EXACT" }
+            else { Write-Host "SAMPLE_${sampleNumber}_HIGH=MISMATCH" }
+
+            if ($lowExact) { Write-Host "SAMPLE_${sampleNumber}_LOW=EXACT" }
+            else { Write-Host "SAMPLE_${sampleNumber}_LOW=MISMATCH" }
+
+            if ($closeExact) { Write-Host "SAMPLE_${sampleNumber}_CLOSE=EXACT" }
+            else { Write-Host "SAMPLE_${sampleNumber}_CLOSE=MISMATCH" }
 
             if (-not ($openTimeExact -and $closeTimeExact -and $openExact -and $highExact -and $lowExact -and $closeExact)) {
                 $allSamplesExact = $false
