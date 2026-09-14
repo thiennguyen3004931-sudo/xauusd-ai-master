@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from .broker_time import denormalize_timestamp_ms
 from .errors import BridgeError
 from .mt5_gateway import Mt5Gateway
 
@@ -65,8 +66,10 @@ def historical_candles(
         )
 
     broker_symbol = gateway._ensure_symbol(canonical_symbol)
-    start = datetime.fromtimestamp(start_ms / 1000.0, tz=timezone.utc)
-    end = datetime.fromtimestamp(end_ms / 1000.0, tz=timezone.utc)
+    broker_start_ms = denormalize_timestamp_ms(start_ms)
+    broker_end_ms = denormalize_timestamp_ms(end_ms)
+    start = datetime.fromtimestamp(broker_start_ms / 1000.0, tz=timezone.utc)
+    end = datetime.fromtimestamp(broker_end_ms / 1000.0, tz=timezone.utc)
 
     with gateway._lock:
         info = gateway._read_with_reconnect_locked("symbol_info", broker_symbol)
