@@ -92,13 +92,17 @@ New-Item -ItemType Directory -Path $BackupRoot -Force | Out-Null
 Copy-Item -Path $GatewayDir -Destination $StageDir -Recurse -Force
 
 $SourceDir = Join-Path $RepoRoot "apps\mobile-gateway"
+$AcceptedRuntimeHashes = @{}
 foreach ($File in $RuntimeFiles) {
     $Source = Join-Path $SourceDir $File
     $Destination = Join-Path $StageDir $File
     Assert-True (Test-Path $Source) "SOURCE_FILE_MISSING:$File"
+    $SourceHash = (Get-FileHash $Source -Algorithm SHA256).Hash
+    $AcceptedRuntimeHashes[$File] = $SourceHash
     Copy-Item $Source $Destination -Force
     $Hash = (Get-FileHash $Destination -Algorithm SHA256).Hash
     Write-Host "STAGED_FILE=$File SHA256=$Hash"
+    Assert-True ($Hash -eq $SourceHash) "STAGED_SOURCE_HASH_MISMATCH:$File"
 }
 
 $Config = [ordered]@{
@@ -157,7 +161,20 @@ Assert-True ([string]$Process.CommandLine -like "*$GatewayDir\gateway.js*") "POS
 Write-Host "TASK_HANDOFF_GATE=PASS"
 
 Write-Host ""
-Write-Host "=== 5. LOCAL SECURITY ACCEPTANCE ==="
+Write-Host "=== 5. RUNTIME SOURCE ATTESTATION ==="
+foreach ($File in $RuntimeFiles) {
+    $RuntimePath = Join-Path $GatewayDir $File
+    Assert-True (Test-Path $RuntimePath) "DEPLOYED_RUNTIME_FILE_MISSING:$File"
+    $RuntimeHash = (Get-FileHash $RuntimePath -Algorithm SHA256).Hash
+    $ExpectedHash = [string]$AcceptedRuntimeHashes[$File]
+    Write-Host "RUNTIME_FILE=$File SHA256=$RuntimeHash EXPECTED_SHA256=$ExpectedHash"
+    Assert-True ($RuntimeHash -eq $ExpectedHash) "DEPLOYED_RUNTIME_HASH_MISMATCH:$File"
+}
+Write-Host "RUNTIME_SOURCE_ATTESTATION=PASS"
+Write-Host "RUNTIME_SOURCE_COMMIT=$ExpectedCommit"
+
+Write-Host ""
+Write-Host "=== 6. LOCAL SECURITY ACCEPTANCE ==="
 $Health = Invoke-WebRequest -Uri "http://127.0.0.1:5791/__m2/health" -Method GET -UseBasicParsing -TimeoutSec 5
 Write-Host "HEALTH_HTTP=$($Health.StatusCode)"
 Assert-True ($Health.StatusCode -eq 200) "M4_HEALTH_FAILED"
@@ -184,7 +201,7 @@ Assert-True $PostBlocked "NON_M4_POST_GATE_FAILED"
 Write-Host "LOCAL_SECURITY_GATE=PASS"
 
 Write-Host ""
-Write-Host "=== 6. SERVE / FUNNEL / PORT ISOLATION ==="
+Write-Host "=== 7. SERVE / FUNNEL / PORT ISOLATION ==="
 $Serve = (& $TailscaleExe serve status 2>&1 | Out-String)
 $Funnel = (& $TailscaleExe funnel status 2>&1 | Out-String)
 $ServeGate = ($Serve -match "8443") -and ($Serve -match "127\.0\.0\.1:5791") -and ($Serve -match "tailnet only")
@@ -212,6 +229,7 @@ Write-Host "BACKUP_DIR=$BackupDir"
 Write-Host "DEPLOYED_COMMIT=$ExpectedCommit"
 Write-Host "GATEWAY_PID=$PostPid"
 Write-Host "GATEWAY_OWNER=$OwnerText"
+Write-Host "RUNTIME_SOURCE_ATTESTATION=PASS"
 Write-Host "TAILSCALE_MUTATION=NONE"
 Write-Host "SERVE_MUTATION=NONE"
 Write-Host "FUNNEL_MUTATION=NONE"
