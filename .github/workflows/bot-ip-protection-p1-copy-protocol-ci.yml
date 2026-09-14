@@ -33,3 +33,7 @@ jobs:
         run: pnpm install --no-frozen-lockfile
       - name: Protocol tests
         run: pnpm --filter @xauusd/copy-protocol test
+      - name: Protocol typecheck
+        run: pnpm --filter @xauusd/copy-protocol typecheck
+      - name: Protocol build
+        run: pnpm --filter @xauusd/copy-protocol build
