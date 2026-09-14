@@ -65,4 +65,26 @@ describe("canonical JSON", () => {
       "finite"
     );
   });
+
+  it("rejects sparse runtime arrays", () => {
+    const sparse = new Array(2) as unknown[];
+    sparse[1] = 1;
+    expect(() => canonicalizeJson(sparse as unknown as JsonValue)).toThrow(
+      "sparse"
+    );
+  });
+
+  it("rejects non-plain runtime objects", () => {
+    expect(() => canonicalizeJson(new Date(0) as unknown as JsonValue)).toThrow(
+      "plain"
+    );
+  });
+
+  it("rejects cyclic runtime objects", () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect(() => canonicalizeJson(cyclic as unknown as JsonValue)).toThrow(
+      "cyclic"
+    );
+  });
 });
