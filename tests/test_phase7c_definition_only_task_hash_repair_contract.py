@@ -10,6 +10,16 @@ def _source() -> str:
     return SCRIPT.read_text(encoding="utf-8")
 
 
+def test_repair_is_bound_to_canonical_phase7c_task_identity():
+    source = _source()
+
+    assert "$TaskName = 'XAUUSD-Phase7C-Executors'" in source
+    assert "$TaskPath = '\\'" in source
+    assert "Get-Phase7CExecutorTaskRunnerPath -ProjectRoot $projectRoot" in source
+    assert "[string]$TaskName" not in source
+    assert "[string]$RunnerPath" not in source
+
+
 def test_repair_is_definition_only_and_uses_canonical_ownership_contract():
     source = _source()
 
@@ -103,6 +113,7 @@ def test_repair_rechecks_canonical_acceptance_after_definition_change():
 
 def main() -> None:
     tests = (
+        test_repair_is_bound_to_canonical_phase7c_task_identity,
         test_repair_is_definition_only_and_uses_canonical_ownership_contract,
         test_repair_is_fail_closed_to_runner_hash_drift_only,
         test_repair_requires_exact_observed_embedded_sha_before_mutation,
