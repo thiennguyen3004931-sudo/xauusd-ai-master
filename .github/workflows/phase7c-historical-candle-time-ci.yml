@@ -1,0 +1,27 @@
+name: Phase7C Historical Candle Time CI
+
+on:
+  pull_request:
+    paths:
+      - 'packages/mt5-broker/bridge/mt5_bridge/historical_candles.py'
+      - 'packages/mt5-broker/bridge/mt5_bridge/broker_time.py'
+      - 'packages/mt5-broker/bridge/tests/test_historical_candle_time.py'
+      - '.github/workflows/phase7c-historical-candle-time-ci.yml'
+
+jobs:
+  historical-candle-time:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run historical candle time regression
+        run: |
+          python -m unittest packages/mt5-broker/bridge/tests/test_historical_candle_time.py -v
+      - name: Run broker time normalization regression
+        run: |
+          python scripts/test-phase7c-broker-time-normalization.py
+      - name: Run deal history time regression
+        run: |
+          python -m unittest packages/mt5-broker/bridge/tests/test_deal_history_time.py -v
