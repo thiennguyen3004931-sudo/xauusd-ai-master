@@ -155,12 +155,13 @@ $bootConfig = Read-Phase7CCanonicalLaunchConfig
 $workDir = [string]$bootConfig.workDir
 $controlApiUrl = [string]$bootConfig.controlApiUrl
 $runtimeDir = Join-Path $workDir "phase7c-executors"
+$attemptsRoot = Join-Path $runtimeDir "attempts"
 $brokerRoot = Join-Path $workDir "phase7c-lifecycle-broker"
 $inboxDir = Join-Path $brokerRoot "inbox"
 $stateDir = Join-Path $brokerRoot "state"
 $resultsDir = Join-Path $brokerRoot "results"
 $logsDir = Join-Path $brokerRoot "logs"
-foreach ($directory in @($runtimeDir, $brokerRoot, $inboxDir, $stateDir, $resultsDir, $logsDir)) {
+foreach ($directory in @($runtimeDir, $attemptsRoot, $brokerRoot, $inboxDir, $stateDir, $resultsDir, $logsDir)) {
   New-Item -ItemType Directory -Force -Path $directory | Out-Null
 }
 $requestPath = Join-Path $inboxDir "request.json"
@@ -168,8 +169,6 @@ $statusPath = Join-Path $stateDir "status.json"
 $heartbeatPath = Join-Path $stateDir "heartbeat.json"
 $brokerLogPath = Join-Path $logsDir "broker.log"
 $runnerLockPath = Join-Path $runtimeDir "startup-runner.lock"
-$supervisorOut = Join-Path $runtimeDir "startup-supervisor.out.log"
-$supervisorErr = Join-Path $runtimeDir "startup-supervisor.err.log"
 
 $runnerLock = $null
 try {
@@ -386,13 +385,25 @@ function Set-Phase7CProcessEnvironment($Config) {
   $env:PHASE7C_PNPM_PATH = [string]$Config.pnpmPath
 }
 
+function New-Phase7CAttemptLogDirectory {
+  New-Item -ItemType Directory -Force -Path $attemptsRoot | Out-Null
+  $attemptId = "{0}-{1}" -f ([DateTimeOffset]::UtcNow.ToString("yyyyMMddTHHmmssfffZ")), ([Guid]::NewGuid().ToString("N"))
+  $attemptDir = Join-Path $attemptsRoot $attemptId
+  [void](New-Item -ItemType Directory -Path $attemptDir -ErrorAction Stop)
+  return (Resolve-Path -LiteralPath $attemptDir).Path
+}
+
 function Start-Phase7CExecutorRuntime($Config) {
   Set-Phase7CProcessEnvironment $Config
+  $attemptLogDir = New-Phase7CAttemptLogDirectory
+  $supervisorOut = Join-Path $attemptLogDir "startup-supervisor.out.log"
+  $supervisorErr = Join-Path $attemptLogDir "startup-supervisor.err.log"
   $arguments = @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
     "-File", ('"{0}"' -f $Supervisor),
     "-WorkDir", ('"{0}"' -f $Config.workDir),
+    "-AttemptLogDir", ('"{0}"' -f $attemptLogDir),
     "-ControlApiUrl", ('"{0}"' -f $Config.controlApiUrl),
     "-EnvFile", ('"{0}"' -f $Config.envFile),
     "-TelegramEnvFile", ('"{0}"' -f $Config.telegramEnvFile),
