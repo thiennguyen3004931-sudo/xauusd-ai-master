@@ -343,16 +343,11 @@ function Test-SupervisorAlive {
 }
 
 function Stop-Phase7CExecutorRuntime($Config) {
+  # Missing PID files are not proof that the executor runtime is gone.
+  # The canonical stopper is idempotent and also reconciles bounded orphan
+  # wrapper processes by exact canonical script path.
   if (-not (Test-SupervisorAlive)) {
-    $runtimePids = @("supervisor.pid", "trend.pid", "sideway.pid", "telegram-mode.pid", "regime-notifier.pid") | ForEach-Object {
-      $pidPath = Join-Path $runtimeDir $_
-      if (-not (Test-Path -LiteralPath $pidPath)) { return }
-      try { [int](Get-Content -LiteralPath $pidPath -Raw).Trim() } catch { 0 }
-    } | Where-Object { $_ -gt 0 -and $null -ne (Get-Process -Id $_ -ErrorAction SilentlyContinue) }
-    if (@($runtimePids).Count -eq 0) {
-      $script:supervisorPid = $null
-      return [pscustomobject]@{ success = $true; reasonCode = "NOOP_ALREADY_STOPPED"; message = "Executor runtime already stopped." }
-    }
+    $script:supervisorPid = $null
   }
 
   $stopArgs = @(
@@ -576,6 +571,32 @@ function Process-BrokerRequest {
       Complete-Request $requestId $action "NOOP" "NOOP_ALREADY_RUNNING" "Executor supervisor is already running." $startedAt
       Set-BrokerState "RUNNING" "NOOP_ALREADY_RUNNING"
       return
+    }
+
+    if ($action -eq "START") {
+      # A fresh lifecycle-broker generation has no in-memory supervisor PID, but
+      # canonical wrapper processes from the previous generation can still be alive
+      # after PID-file cleanup. Reconcile exact-path orphans before any new launch.
+      $preStartReconcile = Stop-Phase7CExecutorRuntime $config
+      if (-not $preStartReconcile.success) {
+        $script:desiredExecutorState = "STOPPED"
+        Complete-Request $requestId $action "FAILED" ([string]$preStartReconcile.reasonCode) ([string]$preStartReconcile.message) $startedAt
+        Set-BrokerState "BLOCKED" ([string]$preStartReconcile.reasonCode) ([string]$preStartReconcile.message)
+        return
+      }
+
+      # Re-read launch config and re-run the START safety gate after reconciliation
+      # so account/MT5/trading state changes during cleanup fail closed.
+      $config = Read-Phase7CCanonicalLaunchConfig
+      $script:accountMode = [string]$config.accountMode
+      $postReconcileContext = Get-BrokerSafetyContext $config
+      $postReconcileGate = Test-Phase7CLifecycleBrokerSafetyGate -Action "START" -Context $postReconcileContext
+      if (-not $postReconcileGate.allowed) {
+        $script:desiredExecutorState = "STOPPED"
+        Complete-Request $requestId $action "REJECTED" ([string]$postReconcileGate.reasonCode) ([string]$postReconcileGate.message) $startedAt
+        Set-BrokerState "BLOCKED" ([string]$postReconcileGate.reasonCode) ([string]$postReconcileGate.message)
+        return
+      }
     }
 
     if ($action -eq "RESTART") {
