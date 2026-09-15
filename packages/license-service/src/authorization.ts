@@ -65,6 +65,13 @@ const REQUEST_KEYS = new Set([
   "existingPosition"
 ]);
 
+const POSITION_KEYS = new Set([
+  "masterPositionRef",
+  "side",
+  "currentStopLoss",
+  "requestedStopLoss"
+]);
+
 function assertCanonicalNonBlankString(value: unknown): asserts value is string {
   if (
     typeof value !== "string" ||
@@ -79,6 +86,49 @@ function assertCanonicalNonBlankString(value: unknown): asserts value is string 
 function assertPositiveSafeInteger(value: unknown): asserts value is number {
   if (!Number.isSafeInteger(value) || (value as number) <= 0) {
     throw new TypeError("expected positive safe integer");
+  }
+}
+
+function assertPositiveFiniteNumber(value: unknown): asserts value is number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new TypeError("expected positive finite number");
+  }
+}
+
+function assertExistingPosition(
+  value: unknown
+): asserts value is ExistingPositionContext {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("existingPosition must be an object");
+  }
+
+  const position = value as Record<string, unknown>;
+  for (const key of Object.keys(position)) {
+    if (!POSITION_KEYS.has(key)) {
+      throw new TypeError(`existingPosition contains unknown field: ${key}`);
+    }
+  }
+
+  for (const key of ["masterPositionRef", "side", "currentStopLoss"]) {
+    if (!Object.prototype.hasOwnProperty.call(position, key)) {
+      throw new TypeError(`existingPosition is missing field: ${key}`);
+    }
+  }
+
+  assertCanonicalNonBlankString(position.masterPositionRef);
+  if (position.side !== "BUY" && position.side !== "SELL") {
+    throw new TypeError("existingPosition.side must be BUY or SELL");
+  }
+
+  if (position.currentStopLoss !== null) {
+    assertPositiveFiniteNumber(position.currentStopLoss);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(position, "requestedStopLoss")) {
+    if (position.requestedStopLoss === undefined) {
+      throw new TypeError("requestedStopLoss must be omitted or positive finite");
+    }
+    assertPositiveFiniteNumber(position.requestedStopLoss);
   }
 }
 
@@ -117,6 +167,28 @@ function assertRequest(value: unknown): asserts value is LicenseActionRequest {
   if (!Number.isSafeInteger(request.now)) {
     throw new TypeError("now must be a safe integer");
   }
+
+  if (request.existingPosition !== undefined) {
+    assertExistingPosition(request.existingPosition);
+  }
+}
+
+function isNonLooseningStopUpdate(
+  position: ExistingPositionContext
+): boolean {
+  const next = position.requestedStopLoss;
+  if (next === undefined || !Number.isFinite(next) || next <= 0) {
+    return false;
+  }
+  if (position.currentStopLoss === null) {
+    return true;
+  }
+  if (!Number.isFinite(position.currentStopLoss) || position.currentStopLoss <= 0) {
+    return false;
+  }
+  return position.side === "BUY"
+    ? next >= position.currentStopLoss
+    : next <= position.currentStopLoss;
 }
 
 export function authorizeLicenseAction(
@@ -156,9 +228,48 @@ export function authorizeLicenseAction(
     return { ok: true, code: "AUTHORIZED", effectiveStatus };
   }
 
-  return {
-    ok: false,
-    code: "LICENSE_NOT_ACTIVE",
-    effectiveStatus
-  };
+  if (request.action === "POSITION_OPEN") {
+    return { ok: false, code: "LICENSE_NOT_ACTIVE", effectiveStatus };
+  }
+
+  if (request.action === "TAKE_PROFIT_UPDATE") {
+    return {
+      ok: false,
+      code: "ACTION_NOT_ALLOWED_FOR_LICENSE_STATE",
+      effectiveStatus
+    };
+  }
+
+  const position = request.existingPosition;
+  if (position === undefined) {
+    return {
+      ok: false,
+      code: "EXISTING_POSITION_REQUIRED",
+      effectiveStatus
+    };
+  }
+
+  if (position.masterPositionRef !== request.masterPositionRef) {
+    return { ok: false, code: "POSITION_MISMATCH", effectiveStatus };
+  }
+
+  if (request.action === "STOP_LOSS_UPDATE") {
+    if (position.requestedStopLoss === undefined) {
+      return {
+        ok: false,
+        code: "STOP_LOSS_CONTEXT_REQUIRED",
+        effectiveStatus
+      };
+    }
+
+    if (!isNonLooseningStopUpdate(position)) {
+      return {
+        ok: false,
+        code: "STOP_LOSS_NOT_RISK_REDUCING",
+        effectiveStatus
+      };
+    }
+  }
+
+  return { ok: true, code: "AUTHORIZED", effectiveStatus };
 }
