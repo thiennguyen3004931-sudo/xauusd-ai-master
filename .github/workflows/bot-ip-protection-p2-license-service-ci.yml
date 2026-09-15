@@ -6,24 +6,31 @@ on:
       - main
     paths:
       - "packages/license-service/**"
+      - "packages/copy-protocol/**"
+      - "scripts/test-bot-ip-protection-p2-boundary.mjs"
+      - ".github/workflows/bot-ip-protection-p2-license-service-ci.yml"
+      - "pnpm-lock.yaml"
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/license-service/**"
+      - "packages/copy-protocol/**"
       - "scripts/test-bot-ip-protection-p2-boundary.mjs"
       - ".github/workflows/bot-ip-protection-p2-license-service-ci.yml"
       - "pnpm-lock.yaml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  generate-p2-lockfile:
-    name: generate-p2-lockfile
-    if: github.event.pull_request.head.repo.full_name == github.repository
+  license-service:
+    name: license-service-contract
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Checkout feature branch head
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -34,32 +41,17 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Generate canonical workspace lockfile
-        run: pnpm install --no-frozen-lockfile
-      - name: Verify mutation scope
-        shell: bash
-        run: |
-          changed="$(git status --porcelain --untracked-files=no)"
-          echo "$changed"
-          if [ -z "$changed" ]; then
-            echo "LOCKFILE_CHANGE=NONE"
-            exit 0
-          fi
-          unexpected="$(git status --porcelain --untracked-files=no | grep -vE '^ M pnpm-lock\.yaml$' || true)"
-          if [ -n "$unexpected" ]; then
-            echo "Unexpected tracked mutation detected"
-            echo "$unexpected"
-            exit 1
-          fi
-      - name: Commit lockfile only
-        shell: bash
-        run: |
-          if git diff --quiet -- pnpm-lock.yaml; then
-            echo "LOCKFILE_COMMIT=NOT_REQUIRED"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pnpm-lock.yaml
-          git commit -m "chore(license-service): update workspace lockfile"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build copy protocol dependency
+        run: pnpm --filter @xauusd/copy-protocol build
+      - name: License service tests
+        run: pnpm --filter @xauusd/license-service test
+      - name: License service typecheck
+        run: pnpm --filter @xauusd/license-service typecheck
+      - name: License service build
+        run: pnpm --filter @xauusd/license-service build
+      - name: P2 IP boundary contract
+        run: node --test scripts/test-bot-ip-protection-p2-boundary.mjs
+      - name: Diff hygiene
+        run: git diff --check
