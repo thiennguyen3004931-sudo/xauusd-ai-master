@@ -5,13 +5,15 @@ import {
 } from "./identity.js";
 
 describe("installation identity", () => {
-  it("creates unique installation ids and Ed25519 keypairs", () => {
+  it("creates unique installation ids and Ed25519 keypairs without serializing the private key", () => {
     const a = generateInstallationIdentity();
     const b = generateInstallationIdentity();
 
     expect(a.installationId).not.toBe(b.installationId);
     expect(exportInstallationPublicKey(a)).not.toBe(exportInstallationPublicKey(b));
-    expect(a.privateKeyPem).toContain("PRIVATE KEY");
+    expect(a.privateKey.type).toBe("private");
+    expect(a.privateKey.asymmetricKeyType).toBe("ed25519");
     expect(a.publicKeyPem).toContain("PUBLIC KEY");
+    expect(JSON.stringify(a)).not.toContain("privateKey");
   });
 });
