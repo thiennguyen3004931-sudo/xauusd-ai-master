@@ -191,11 +191,15 @@ function deferSidewayHandoffUntilAcceptedM5Tighten(source) {
             journal("SIDEWAY_M5_STRUCTURAL_SL_TIGHTEN", {
 `,
     `          if (response.success) {
-            const firstM5Handoff = !managed.fastMoveHandedOffToM5;
+            const handoffFromFastMove = !managed.fastMoveHandedOffToM5;
             managed.fastMoveHandedOffToM5 = true;
             managed.lastStructuralStop = m5Trail.stopLoss;
+            if (handoffFromFastMove) {
+              managed.fastMoveCycleAnchorPrice = marketPrice;
+              managed.fastMovePeakPrice = marketPrice;
+            }
             saveState();
-            if (firstM5Handoff) {
+            if (handoffFromFastMove) {
               journal("FAST_MOVE_HANDOFF_M5_STRUCTURE", {
                 ticket: managed.ticket,
                 side: managed.side,
@@ -207,6 +211,85 @@ function deferSidewayHandoffUntilAcceptedM5Tighten(source) {
             journal("SIDEWAY_M5_STRUCTURAL_SL_TIGHTEN", {
 `,
     "Sideway successful M5 tighten handoff",
+  );
+
+  return source;
+}
+
+function addSidewayCyclicOwnership(source) {
+  source = replaceRequired(
+    source,
+    "    fastMoveHandedOffToM5: false,\n",
+    "    fastMoveHandedOffToM5: false,\n    fastMoveCycleAnchorPrice: null,\n    fastMoveCycleStartedAt: null,\n",
+    "Sideway cyclic Fast-Move state fields",
+  );
+
+  source = replaceAllRequired(
+    source,
+    "afterTimestamp: Number(managed.partialActivatedAt ?? managed.signalM5CloseTime ?? 0),",
+    "afterTimestamp: Number(managed.fastMoveCycleStartedAt ?? managed.partialActivatedAt ?? managed.signalM5CloseTime ?? 0),",
+    "Sideway M5 cycle structure boundary",
+  );
+
+  source = replaceRequired(
+    source,
+    `  if (!managed.fastMoveHandedOffToM5) {
+`,
+    `  if (managed.fastMoveHandedOffToM5 && !(Number(managed.fastMoveCycleAnchorPrice) > 0)) {
+    managed.fastMoveCycleAnchorPrice = marketPrice;
+    managed.fastMovePeakPrice = marketPrice;
+    saveState();
+    journal("FAST_MOVE_CYCLE_ANCHOR_MIGRATED", {
+      ticket: managed.ticket,
+      side: managed.side,
+      anchorPrice: marketPrice,
+      quoteTimestamp: Number(quote.timestamp),
+    });
+  }
+
+  if (managed.fastMoveHandedOffToM5) {
+    const fastMoveCycleAnchorPrice = Number(managed.fastMoveCycleAnchorPrice);
+    const fastMoveReactivationDistance = managed.side === "BUY"
+      ? marketPrice - fastMoveCycleAnchorPrice
+      : fastMoveCycleAnchorPrice - marketPrice;
+    if (
+      fastMoveCycleAnchorPrice > 0 &&
+      fastMoveReactivationDistance + 1e-9 >= FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE
+    ) {
+      managed.fastMoveHandedOffToM5 = false;
+      managed.fastMoveCycleStartedAt = Number(quote.timestamp);
+      managed.fastMovePeakPrice = marketPrice;
+      saveState();
+      journal("FAST_MOVE_REACTIVATED_AFTER_M5", {
+        ticket: managed.ticket,
+        side: managed.side,
+        anchorPrice: fastMoveCycleAnchorPrice,
+        marketPrice,
+        favorableFromAnchor: fastMoveReactivationDistance,
+        cycleStartedAt: managed.fastMoveCycleStartedAt,
+      });
+    }
+  }
+
+  if (!managed.fastMoveHandedOffToM5) {
+`,
+    "Sideway cyclic Fast-Move reactivation gate",
+  );
+
+  source = replaceRequired(
+    source,
+    `  const fastMove = fastMoveProfitLockCandidate({
+    side: managed.side,
+    entry: managed.entry,
+`,
+    `  const fastMoveReferencePrice = Number(managed.fastMoveCycleAnchorPrice) > 0
+    ? Number(managed.fastMoveCycleAnchorPrice)
+    : Number(managed.entry);
+  const fastMove = fastMoveProfitLockCandidate({
+    side: managed.side,
+    entry: fastMoveReferencePrice,
+`,
+    "Sideway Fast-Move cycle reference price",
   );
 
   return source;
@@ -242,6 +325,7 @@ export function transformPhase7CSidewayM5PreStructureProfitLockSource(input) {
   let source = String(input);
 
   source = deferSidewayHandoffUntilAcceptedM5Tighten(source);
+  source = addSidewayCyclicOwnership(source);
   source = replaceRequired(
     source,
     "  const fastMove = fastMoveProfitLockCandidate({",
