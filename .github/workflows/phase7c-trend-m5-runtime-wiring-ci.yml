@@ -4,22 +4,27 @@ on:
   push:
     branches:
       - fix/phase7c-trend-m5-runtime-wiring
+      - fix/phase7c-trend-m5-double-apply
     paths:
       - "scripts/run-phase7c-trend-controller.mjs"
+      - "scripts/run-phase7c-trend-account-mode.mjs"
       - "scripts/phase7c-semi-trend-runtime-source-adapter.mjs"
       - "scripts/phase7c-m5-structural-trailing-source-adapter.mjs"
       - "scripts/phase7c-m5-prestructure-profit-lock-source-adapter.mjs"
       - "scripts/phase7c-m5-structural-trailing.mjs"
       - "scripts/phase7c-trend-m5-runtime-wiring.test.mjs"
+      - "scripts/phase7c-trend-m5-single-owner.test.mjs"
       - ".github/workflows/phase7c-trend-m5-runtime-wiring-ci.yml"
   pull_request:
     paths:
       - "scripts/run-phase7c-trend-controller.mjs"
+      - "scripts/run-phase7c-trend-account-mode.mjs"
       - "scripts/phase7c-semi-trend-runtime-source-adapter.mjs"
       - "scripts/phase7c-m5-structural-trailing-source-adapter.mjs"
       - "scripts/phase7c-m5-prestructure-profit-lock-source-adapter.mjs"
       - "scripts/phase7c-m5-structural-trailing.mjs"
       - "scripts/phase7c-trend-m5-runtime-wiring.test.mjs"
+      - "scripts/phase7c-trend-m5-single-owner.test.mjs"
       - ".github/workflows/phase7c-trend-m5-runtime-wiring-ci.yml"
 
 permissions:
@@ -60,7 +65,10 @@ jobs:
           set -o pipefail
           export NODE_ENV=test
           set +e
-          node --test scripts/phase7c-trend-m5-runtime-wiring.test.mjs 2>&1 | tee phase7c-trend-m5-runtime-wiring.tap
+          node --test \
+            scripts/phase7c-trend-m5-runtime-wiring.test.mjs \
+            scripts/phase7c-trend-m5-single-owner.test.mjs \
+            2>&1 | tee phase7c-trend-m5-runtime-wiring.tap
           code=${PIPESTATUS[0]}
           set -e
           failed="$(sed -n 's/^# fail \([0-9][0-9]*\)$/\1/p' phase7c-trend-m5-runtime-wiring.tap | tail -n 1)"
