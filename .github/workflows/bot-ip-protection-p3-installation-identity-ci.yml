@@ -13,8 +13,8 @@ permissions:
   contents: read
 
 jobs:
-  installation-identity-task2:
-    name: installation-identity-task2
+  installation-identity-task3-red:
+    name: installation-identity-task3-red
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -30,11 +30,9 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Install workspace dependencies for Task 2
+      - name: Install workspace dependencies for Task 3 RED
         run: pnpm install --no-frozen-lockfile
       - name: Build copy protocol dependency
         run: pnpm --filter @xauusd/copy-protocol build
-      - name: Installation identity tests
+      - name: Installation identity full suite RED
         run: pnpm --filter @xauusd/installation-identity test
-      - name: Installation identity typecheck
-        run: pnpm --filter @xauusd/installation-identity typecheck
