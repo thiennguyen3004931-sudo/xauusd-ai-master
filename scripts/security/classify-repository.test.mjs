@@ -5,7 +5,10 @@ import {
   classifyPath,
   classifyTrackedPaths,
 } from "./classify-repository.mjs";
-import { evaluateNameStatusEntries } from "./check-public-change-freeze.mjs";
+import {
+  evaluateNameStatusEntries,
+  evaluatePolicyChangeIsolation,
+} from "./check-public-change-freeze.mjs";
 
 test("known public and private responsibilities classify deterministically", () => {
   assert.equal(classifyPath("packages/copy-protocol/src/index.ts"), "SAFE_PUBLIC");
@@ -72,4 +75,33 @@ test("freeze treats rename into a private destination as blocked", () => {
 
   assert.equal(result.blocked.length, 1);
   assert.equal(result.blocked[0].newPath, "packages/strategy-engine/src/copied.ts");
+});
+
+test("existing boundary policy may only change in an isolated policy PR", () => {
+  const mixed = evaluatePolicyChangeIsolation(
+    [
+      { status: "M", path: "security/repository-boundary.json" },
+      { status: "M", path: "packages/copy-protocol/src/index.ts" },
+    ],
+    { basePolicyPresent: true },
+  );
+  assert.equal(mixed.ok, false);
+  assert.equal(mixed.code, "BOUNDARY_POLICY_CHANGE_MUST_BE_ISOLATED");
+
+  const isolated = evaluatePolicyChangeIsolation(
+    [{ status: "M", path: "security/repository-boundary.json" }],
+    { basePolicyPresent: true },
+  );
+  assert.deepEqual(isolated, { ok: true });
+});
+
+test("bootstrap commit may introduce the initial policy with its governance files", () => {
+  const bootstrap = evaluatePolicyChangeIsolation(
+    [
+      { status: "A", path: "security/repository-boundary.json" },
+      { status: "A", path: "scripts/security/classify-repository.mjs" },
+    ],
+    { basePolicyPresent: false },
+  );
+  assert.deepEqual(bootstrap, { ok: true });
 });
