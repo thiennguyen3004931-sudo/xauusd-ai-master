@@ -9,25 +9,26 @@ on:
       - "scripts/test-bot-ip-protection-p3-boundary.mjs"
       - ".github/workflows/bot-ip-protection-p3-installation-proof-ci.yml"
       - "pnpm-lock.yaml"
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/installation-proof/**"
+      - "scripts/test-bot-ip-protection-p3-boundary.mjs"
+      - ".github/workflows/bot-ip-protection-p3-installation-proof-ci.yml"
+      - "pnpm-lock.yaml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  refresh-p3-lockfile-once:
-    name: refresh-p3-lockfile-once
-    if: >-
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'feat/bot-ip-protection-p3-installation-proof'
+  installation-proof:
+    name: installation-proof
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout exact P3 branch without persisted credentials
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: feat/bot-ip-protection-p3-installation-proof
-          persist-credentials: false
-          fetch-depth: 0
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -38,45 +39,17 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Generate exact workspace lockfile
-        run: pnpm install --no-frozen-lockfile
-      - name: Prove generator changed only pnpm-lock.yaml
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t changed < <(git diff --name-only)
-          if [[ ${#changed[@]} -eq 0 ]]; then
-            echo "LOCKFILE_CHANGE=NONE"
-            exit 0
-          fi
-          if [[ ${#changed[@]} -ne 1 || "${changed[0]}" != "pnpm-lock.yaml" ]]; then
-            printf 'UNEXPECTED_GENERATOR_CHANGE=%s\n' "${changed[@]}" >&2
-            exit 1
-          fi
-          echo "LOCKFILE_CHANGE=PNPM_LOCK_ONLY"
-      - name: Commit generated lockfile if needed
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git diff --quiet -- pnpm-lock.yaml; then
-            echo "LOCKFILE_COMMIT=NOT_REQUIRED"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pnpm-lock.yaml
-          git commit -m "chore: refresh lockfile for installation proof package"
-      - name: Push exact lockfile-only commit
-        if: success()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git diff HEAD^ HEAD --quiet -- pnpm-lock.yaml 2>/dev/null; then
-            echo "LOCKFILE_PUSH=NOT_REQUIRED"
-            exit 0
-          fi
-          gh auth setup-git
-          git push origin HEAD:feat/bot-ip-protection-p3-installation-proof
-          echo "LOCKFILE_PUSH=PASS"
+      - name: Install workspace dependencies from committed lockfile
+        run: pnpm install --frozen-lockfile
+      - name: Build copy protocol dependency
+        run: pnpm --filter @xauusd/copy-protocol build
+      - name: Installation proof package tests
+        run: pnpm --filter @xauusd/installation-proof test
+      - name: Installation proof typecheck
+        run: pnpm --filter @xauusd/installation-proof typecheck
+      - name: Installation proof build
+        run: pnpm --filter @xauusd/installation-proof build
+      - name: P3 public boundary contract
+        run: node --test scripts/test-bot-ip-protection-p3-boundary.mjs
+      - name: Diff hygiene
+        run: git diff --check
