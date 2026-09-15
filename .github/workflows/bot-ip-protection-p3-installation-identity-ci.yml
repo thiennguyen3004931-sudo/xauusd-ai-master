@@ -13,8 +13,8 @@ permissions:
   contents: read
 
 jobs:
-  installation-identity-red:
-    name: installation-identity-red
+  installation-identity-task1:
+    name: installation-identity-task1
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -30,7 +30,9 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Install workspace dependencies for RED checkpoint
+      - name: Install workspace dependencies for Task 1
         run: pnpm install --no-frozen-lockfile
-      - name: Installation identity RED test
+      - name: Installation identity tests
         run: pnpm --filter @xauusd/installation-identity test
+      - name: Installation identity typecheck
+        run: pnpm --filter @xauusd/installation-identity typecheck
