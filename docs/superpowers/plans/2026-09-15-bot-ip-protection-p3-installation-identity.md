@@ -4,7 +4,7 @@
 
 **Goal:** Add installation enrollment identity and asymmetric proof-of-possession without exposing Master strategy logic or long-lived shared secrets in the public repository.
 
-**Architecture:** P3 adds a strategy-independent `@xauusd/installation-identity` package. Each installation owns an Ed25519 device keypair; server-side enrollment stores only the public key and installation binding. Requests prove possession by signing a canonical challenge envelope. Device private-key storage is abstracted behind a local key-store interface; Windows DPAPI integration remains an adapter boundary and is not required to run in CI.
+**Architecture:** P3 adds a strategy-independent `@xauusd/installation-identity` package. Each installation owns an Ed25519 device keypair; server-side enrollment stores only the public key and installation binding. Requests prove possession by signing a canonical challenge envelope. Device private-key storage is abstracted behind a local key-store interface. P3 is source/protocol complete only; production follower rollout stays blocked until a Windows DPAPI-or-equivalent adapter protects the private key on the customer machine.
 
 **Tech Stack:** TypeScript 5.9, Node.js 24 `crypto`, Vitest 2.1.9, tsup, pnpm 10.18.0.
 
@@ -18,6 +18,7 @@
 - No global symmetric secret is embedded in follower code.
 - No MT5, bot mode, ARM, order, position, process, task, or production mutation.
 - P4 replay persistence, P5 command generation/signing integration, and P6 follower execution are explicitly out of scope.
+- Production follower rollout is FORBIDDEN until an OS-protected private-key store (Windows DPAPI or equivalent) is implemented and accepted.
 
 ---
 
@@ -121,7 +122,7 @@ git commit -m "feat(identity): add installation keypair contract"
 
 - [ ] **Step 1: Write failing tests** proving enrollment stores `installationId + publicKey + licenseId`, rejects duplicate installationId with a different public key, and requires a valid proof before returning `ENROLLED`.
 - [ ] **Step 2: Run RED** because `enrollment.ts` does not exist.
-- [ ] **Step 3: Implement in-memory repository interface and pure enrollment service; no network or database dependency.
+- [ ] **Step 3: Implement an in-memory repository interface and pure enrollment service; no network or database dependency.
 - [ ] **Step 4: Run full tests/typecheck/build** and require PASS.
 - [ ] **Step 5: Commit** with `feat(identity): add enrollment binding contract`.
 
@@ -139,7 +140,7 @@ git commit -m "feat(identity): add installation keypair contract"
 
 - [ ] **Step 1: Write RED tests** proving application code depends on the interface, raw private key never appears in enrollment records/log fixtures, and no strategy-engine/risk-engine/mt5-broker dependency exists.
 - [ ] **Step 2: Run RED** on the boundary script before adding final CI/security gates.
-- [ ] **Step 3: Implement the interface and in-memory test adapter; do not commit OS-secret implementation or any key material.
+- [ ] **Step 3: Implement the interface and in-memory test adapter; do not commit key material. Mark production key-store readiness as `BLOCKED_OS_PROTECTED_STORE_REQUIRED`.
 - [ ] **Step 4: Regenerate lockfile with pnpm 10.18.0 and switch CI to `pnpm install --frozen-lockfile`.
 - [ ] **Step 5: Run exact-head gates:** package tests, typecheck, build, boundary script, canonical Linux/Windows workflows, diff hygiene.
 - [ ] **Step 6: Commit** with `ci(identity): enforce P3 security boundary`.
@@ -150,6 +151,7 @@ git commit -m "feat(identity): add installation keypair contract"
 
 - [ ] Review the exact PR diff and confirm only P3 package/CI/lockfile changes.
 - [ ] Confirm no private key, token, strategy code, FastMove/M5 internals, or MT5 execution code is present.
+- [ ] Confirm `PRODUCTION_KEY_STORE_READY=false` and `PRODUCTION_ROLLOUT=BLOCKED_OS_PROTECTED_STORE_REQUIRED`.
 - [ ] Confirm all exact-head CI is green.
 - [ ] Merge source-only PR.
 - [ ] Stop before any production rollout or follower deployment.
