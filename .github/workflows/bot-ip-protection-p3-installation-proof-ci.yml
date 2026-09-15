@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "packages/installation-proof/**"
+      - "scripts/test-bot-ip-protection-p3-boundary.mjs"
       - ".github/workflows/bot-ip-protection-p3-installation-proof-ci.yml"
       - "pnpm-lock.yaml"
 
@@ -13,8 +14,8 @@ permissions:
   contents: read
 
 jobs:
-  installation-proof-task1-red:
-    name: installation-proof-task1-red
+  installation-proof-task5-red:
+    name: installation-proof-task5-red
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -34,5 +35,7 @@ jobs:
         run: pnpm install --no-frozen-lockfile
       - name: Build copy protocol dependency
         run: pnpm --filter @xauusd/copy-protocol build
-      - name: Challenge contract RED test
+      - name: Installation proof package tests
         run: pnpm --filter @xauusd/installation-proof test
+      - name: P3 final boundary RED test
+        run: node --test scripts/test-bot-ip-protection-p3-boundary.mjs
