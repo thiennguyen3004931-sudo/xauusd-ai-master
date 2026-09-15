@@ -12,10 +12,10 @@ permissions:
   contents: read
 
 jobs:
-  m0-boundary:
-    name: m0-public-private-boundary
+  repository-boundary:
+    name: public-private-repository-boundary
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout full history
         uses: actions/checkout@v4
@@ -25,8 +25,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Boundary behavior tests
+      - name: M0 boundary behavior tests
         run: node --test scripts/security/classify-repository.test.mjs
+      - name: M1 credential remediation RED tests
+        run: node --test scripts/security/validate-credential-remediation.test.mjs
       - name: Classify tracked repository
         run: node scripts/security/classify-repository.mjs --tracked
       - name: Enforce public/private change freeze
