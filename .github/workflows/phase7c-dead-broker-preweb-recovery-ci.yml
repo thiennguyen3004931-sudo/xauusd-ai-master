@@ -5,14 +5,14 @@ on:
     branches:
       - main
     paths:
-      - "scripts/recover-phase7c-dead-broker-preweb-local.ps1"
+      - "scripts/recover-phase7c-dead-broker-preweb-v2-local.ps1"
       - "scripts/test-phase7c-dead-broker-preweb-recovery-source.ps1"
       - ".github/workflows/phase7c-dead-broker-preweb-recovery-ci.yml"
   push:
     branches:
       - "fix/phase7c-dead-broker-preweb-recovery"
     paths:
-      - "scripts/recover-phase7c-dead-broker-preweb-local.ps1"
+      - "scripts/recover-phase7c-dead-broker-preweb-v2-local.ps1"
       - "scripts/test-phase7c-dead-broker-preweb-recovery-source.ps1"
       - ".github/workflows/phase7c-dead-broker-preweb-recovery-ci.yml"
 
@@ -37,14 +37,14 @@ jobs:
         run: |
           $tokens = $null
           $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path '.\scripts\recover-phase7c-dead-broker-preweb-local.ps1'), [ref]$tokens, [ref]$errors)
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path '.\scripts\recover-phase7c-dead-broker-preweb-v2-local.ps1'), [ref]$tokens, [ref]$errors)
           if ($errors.Count -ne 0) { throw $errors[0].Message }
       - name: Dead broker recovery helper parser with Windows PowerShell 5.1
         shell: powershell
         run: |
           $tokens = $null
           $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path '.\scripts\recover-phase7c-dead-broker-preweb-local.ps1'), [ref]$tokens, [ref]$errors)
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path '.\scripts\recover-phase7c-dead-broker-preweb-v2-local.ps1'), [ref]$tokens, [ref]$errors)
           if ($errors.Count -ne 0) { throw $errors[0].Message }
       - name: Existing runtime recovery source contract remains green
         shell: pwsh
