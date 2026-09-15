@@ -183,18 +183,22 @@ describe("challenge canonical bytes", () => {
     };
 
     expect(
-      installationChallengeCanonicalBytes(challenge).toString("hex")
-    ).toBe(installationChallengeCanonicalBytes(reordered).toString("hex"));
+      Buffer.from(installationChallengeCanonicalBytes(challenge)).toString("hex")
+    ).toBe(
+      Buffer.from(installationChallengeCanonicalBytes(reordered)).toString("hex")
+    );
   });
 
   it("changes when a security-relevant field changes", () => {
     expect(
-      installationChallengeCanonicalBytes(challenge).toString("hex")
+      Buffer.from(installationChallengeCanonicalBytes(challenge)).toString("hex")
     ).not.toBe(
-      installationChallengeCanonicalBytes({
-        ...challenge,
-        installationId: "inst-other"
-      }).toString("hex")
+      Buffer.from(
+        installationChallengeCanonicalBytes({
+          ...challenge,
+          installationId: "inst-other"
+        })
+      ).toString("hex")
     );
   });
 });
