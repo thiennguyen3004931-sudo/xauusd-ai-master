@@ -68,11 +68,15 @@ describe("installation proof signing", () => {
     };
 
     expect(
-      installationProofBodyCanonicalBytes(CHALLENGE, installationPublicKey).toString("hex"),
+      Buffer.from(
+        installationProofBodyCanonicalBytes(CHALLENGE, installationPublicKey),
+      ).toString("hex"),
     ).toBe(
-      installationProofBodyCanonicalBytes(
-        reorderedChallenge,
-        installationPublicKey,
+      Buffer.from(
+        installationProofBodyCanonicalBytes(
+          reorderedChallenge,
+          installationPublicKey,
+        ),
       ).toString("hex"),
     );
   });
