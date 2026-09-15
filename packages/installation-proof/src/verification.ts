@@ -46,6 +46,10 @@ export type VerifyEnrollmentProofInput = {
   consumeOnce: ConsumeInstallationChallengeOnce;
 };
 
+export type VerifyReconnectProofInput = VerifyEnrollmentProofInput & {
+  expectedInstallationPublicKey: string;
+};
+
 const PROOF_KEYS = ["challenge", "installationPublicKey", "signature"] as const;
 
 function proofRecord(value: unknown): Record<string, unknown> | null {
@@ -105,6 +109,32 @@ function validateProofShape(
   return { ok: true, proof: record as unknown as InstallationProof };
 }
 
+function validateIdentityAndTime(
+  proof: InstallationProof,
+  input: VerifyEnrollmentProofInput,
+  purpose: "ENROLLMENT" | "RECONNECT",
+): InstallationProofFailure | null {
+  if (proof.challenge.purpose !== purpose) {
+    return { ok: false, code: "PURPOSE_MISMATCH" };
+  }
+  if (proof.challenge.licenseId !== input.expectedLicenseId) {
+    return { ok: false, code: "LICENSE_MISMATCH" };
+  }
+  if (proof.challenge.installationId !== input.expectedInstallationId) {
+    return { ok: false, code: "INSTALLATION_MISMATCH" };
+  }
+  if (!Number.isSafeInteger(input.now)) {
+    return { ok: false, code: "INVALID_CHALLENGE" };
+  }
+  if (input.now < proof.challenge.issuedAt) {
+    return { ok: false, code: "CHALLENGE_NOT_YET_VALID" };
+  }
+  if (input.now > proof.challenge.expiresAt) {
+    return { ok: false, code: "CHALLENGE_EXPIRED" };
+  }
+  return null;
+}
+
 async function consumeVerifiedChallenge(
   proof: InstallationProof,
   consumeOnce: ConsumeInstallationChallengeOnce,
@@ -134,24 +164,50 @@ export async function verifyEnrollmentProof(
   }
   const { proof } = parsed;
 
-  if (proof.challenge.purpose !== "ENROLLMENT") {
-    return { ok: false, code: "PURPOSE_MISMATCH" };
+  const identityOrTimeFailure = validateIdentityAndTime(
+    proof,
+    input,
+    "ENROLLMENT",
+  );
+  if (identityOrTimeFailure !== null) {
+    return identityOrTimeFailure;
   }
-  if (proof.challenge.licenseId !== input.expectedLicenseId) {
-    return { ok: false, code: "LICENSE_MISMATCH" };
+
+  if (!verifyInstallationProofSignature(proof)) {
+    return { ok: false, code: "INVALID_SIGNATURE" };
   }
-  if (proof.challenge.installationId !== input.expectedInstallationId) {
-    return { ok: false, code: "INSTALLATION_MISMATCH" };
+
+  return consumeVerifiedChallenge(proof, input.consumeOnce);
+}
+
+export async function verifyReconnectProof(
+  input: VerifyReconnectProofInput,
+): Promise<InstallationProofVerificationResult> {
+  const parsed = validateProofShape(input.proof);
+  if (!parsed.ok) {
+    return parsed;
   }
-  if (!Number.isSafeInteger(input.now)) {
-    return { ok: false, code: "INVALID_CHALLENGE" };
+  const { proof } = parsed;
+
+  try {
+    parseInstallationPublicKey(input.expectedInstallationPublicKey);
+  } catch {
+    return { ok: false, code: "INVALID_EXPECTED_PUBLIC_KEY" };
   }
-  if (input.now < proof.challenge.issuedAt) {
-    return { ok: false, code: "CHALLENGE_NOT_YET_VALID" };
+
+  const identityOrTimeFailure = validateIdentityAndTime(
+    proof,
+    input,
+    "RECONNECT",
+  );
+  if (identityOrTimeFailure !== null) {
+    return identityOrTimeFailure;
   }
-  if (input.now > proof.challenge.expiresAt) {
-    return { ok: false, code: "CHALLENGE_EXPIRED" };
+
+  if (proof.installationPublicKey !== input.expectedInstallationPublicKey) {
+    return { ok: false, code: "PUBLIC_KEY_MISMATCH" };
   }
+
   if (!verifyInstallationProofSignature(proof)) {
     return { ok: false, code: "INVALID_SIGNATURE" };
   }
