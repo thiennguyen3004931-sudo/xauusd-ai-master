@@ -63,15 +63,37 @@ expiresAt
 Rules:
 
 - `challengeId`, `licenseId`, and `installationId` are canonical non-blank strings.
-- `nonce` is exactly 32 random bytes encoded as canonical base64url.
+- `nonce` is exactly 32 cryptographically random bytes encoded as canonical base64url.
+- `createInstallationChallenge(...)` uses `randomUUID()` for `challengeId` and `randomBytes(32)` for `nonce`; tests validate generated shape rather than weakening production randomness for determinism.
 - timestamps are safe integers.
 - `expiresAt > issuedAt`.
 - maximum V1 challenge lifetime is 5 minutes.
 - canonical signing bytes use P1 deterministic canonical JSON.
 
+## Canonical device public key
+
+`installationPublicKey` is **not stored or compared as free-form PEM text**.
+
+Canonical representation:
+
+```text
+Ed25519 public key
+-> SPKI DER bytes
+-> canonical base64url string
+```
+
+Rules:
+
+- decoding then re-encoding must produce exactly the supplied base64url text;
+- DER must parse as an Ed25519 public key;
+- enrollment returns this canonical representation for server-side binding;
+- reconnect compares canonical key material, avoiding PEM whitespace/format ambiguity.
+
+Private signing helpers may accept an Ed25519 private key object/PEM supplied by the caller, but private keys are never persisted by this package.
+
 ## Proof body
 
-The device signs all challenge fields plus its public key:
+The device signs all challenge fields plus its canonical public key:
 
 ```text
 challenge
@@ -84,9 +106,9 @@ The proof adds:
 signature
 ```
 
-The signature is Ed25519 and canonical base64url. The public key must parse as Ed25519.
+The signature is Ed25519 and canonical base64url.
 
-Binding the public key into the signed bytes prevents substitution of another public key after the signature is produced.
+Binding the canonical public key into signed bytes prevents substitution of another public key after the signature is produced.
 
 ## Verification API
 
@@ -100,9 +122,10 @@ Expose separate enrollment and reconnect verification paths.
 - requires `purpose=ENROLLMENT`;
 - verifies expected licenseId + installationId;
 - enforces challenge time window;
-- verifies Ed25519 signature with the candidate `installationPublicKey`;
-- atomically consumes `challengeId` through a caller-provided `consumeOnce(challengeId)` function;
-- returns the verified public key to the caller for later server-side binding.
+- parses the candidate canonical Ed25519 public key;
+- verifies the Ed25519 signature;
+- only after all cryptographic/identity checks pass, atomically consumes `challengeId` through caller-provided `consumeOnce(challengeId)`;
+- returns the verified canonical public key to the caller for later server-side binding.
 
 Challenge issuance authorization and license mutation are outside this package.
 
@@ -111,7 +134,8 @@ Challenge issuance authorization and license mutation are outside this package.
 `verifyReconnectProof(...)` performs the same checks, but:
 
 - requires `purpose=RECONNECT`;
-- requires proof public key to match the already enrolled expected public key exactly;
+- requires proof public key to equal the already enrolled canonical public key;
+- rejects malformed expected enrolled key material fail-closed;
 - only then verifies signature and consumes the challenge.
 
 This prevents a copied installation from reconnecting with a newly generated substitute key.
@@ -131,6 +155,7 @@ Contract:
 - called only after shape/time/identity/signature checks pass;
 - `true` means first atomic consumption -> proof may succeed;
 - `false` means already consumed -> `CHALLENGE_REPLAYED`;
+- thrown/rejected store operations fail closed as `CHALLENGE_STORE_ERROR`;
 - storage/persistence implementation is deferred to server integration;
 - command sequence/idempotency remains P4.
 
@@ -139,6 +164,7 @@ Contract:
 Provide only cryptographic helpers needed for tests/follower integration:
 
 - generate Ed25519 device key pair;
+- export canonical SPKI DER/base64url public key;
 - sign proof using a caller-supplied private key.
 
 The package must not persist private keys or know filesystem paths. DPAPI/equivalent local private-key storage is a follower packaging responsibility and remains required before customer distribution.
@@ -151,7 +177,7 @@ Success:
 VERIFIED
 ```
 
-Fail closed with deterministic codes such as:
+Fail closed with deterministic codes:
 
 ```text
 INVALID_CHALLENGE
@@ -162,11 +188,13 @@ INSTALLATION_MISMATCH
 CHALLENGE_NOT_YET_VALID
 CHALLENGE_EXPIRED
 PUBLIC_KEY_MISMATCH
+INVALID_EXPECTED_PUBLIC_KEY
 INVALID_SIGNATURE
 CHALLENGE_REPLAYED
+CHALLENGE_STORE_ERROR
 ```
 
-Malformed public keys/signatures must never escape as uncaught exceptions from verification.
+Malformed public keys/signatures/store errors must never escape as uncaught exceptions from verification.
 
 ## TDD execution plan
 
@@ -178,21 +206,23 @@ GREEN implements:
 
 - exact challenge fields;
 - strict runtime validation;
+- secure `randomUUID()` + `randomBytes(32)` challenge generation;
 - canonical nonce validation;
 - 5-minute maximum lifetime;
-- deterministic canonical signing bytes.
+- deterministic canonical challenge bytes.
 
 ### Task 2 — Device key + proof signing RED -> GREEN
 
 Tests first for:
 
 - Ed25519 key generation;
+- canonical SPKI DER/base64url public-key export and validation;
 - deterministic proof-body bytes;
 - signature round trip;
-- proof tampering invalidates signature;
+- proof/public-key/challenge tampering invalidates signature;
 - non-Ed25519/malformed keys fail closed.
 
-Then implement minimal signing helpers.
+Then implement minimal key/signing helpers.
 
 ### Task 3 — Enrollment verification RED -> GREEN
 
@@ -204,7 +234,8 @@ Tests first for:
 - copied installation using a different private key cannot prove original identity;
 - valid proof consumes challenge exactly once;
 - second use -> CHALLENGE_REPLAYED;
-- invalid signature must not consume challenge.
+- invalid signature must not consume challenge;
+- challenge-store failure -> CHALLENGE_STORE_ERROR, never throw.
 
 Then implement minimal enrollment verifier.
 
@@ -215,8 +246,10 @@ Tests first for:
 - valid enrolled key reconnect -> VERIFIED;
 - substitute public key -> PUBLIC_KEY_MISMATCH;
 - valid signature from substitute key still rejected;
+- equivalent/noncanonical text encodings are not accepted as canonical key material;
+- malformed expected enrolled key -> INVALID_EXPECTED_PUBLIC_KEY;
 - replay remains rejected;
-- malformed expected key/proof never throws.
+- malformed proof never throws.
 
 Then implement minimal reconnect verifier.
 
@@ -238,7 +271,7 @@ At minimum, exact-head CI must prove:
 
 1. valid enrollment proof verifies once;
 2. copied install without original private key is rejected;
-3. reconnect requires the enrolled public key;
+3. reconnect requires the enrolled canonical public key;
 4. challenge purpose is bound by signature;
 5. licenseId is bound by signature and expected identity;
 6. installationId is bound by signature and expected identity;
@@ -248,17 +281,19 @@ At minimum, exact-head CI must prove:
 10. malformed keys/signatures fail closed without throw;
 11. replayed challenge rejected after atomic first consumption;
 12. invalid signature does not burn the challenge;
-13. package has no proprietary strategy dependency;
-14. package has no persistence/network/MT5 mutation path;
-15. no private keys/secrets are committed;
-16. P1 and P2 regression CI remain green;
-17. canonical repository gates remain green.
+13. challenge-store failure fails closed and does not throw;
+14. package has no proprietary strategy dependency;
+15. package has no persistence/network/MT5 mutation path;
+16. no private keys/secrets are committed;
+17. P1 and P2 regression CI remain green;
+18. canonical repository gates remain green.
 
 ## Integration boundary
 
 P3 does not:
 
 - issue customer credentials;
+- authorize who may request an enrollment challenge;
 - store challenge consumption in a production database;
 - persist device private keys;
 - implement DPAPI;
