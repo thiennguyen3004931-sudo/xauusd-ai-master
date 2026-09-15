@@ -1,0 +1,37 @@
+name: Public Private Repository Boundary CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "security/**"
+      - "scripts/security/**"
+      - ".github/workflows/public-private-boundary-ci.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "security/**"
+      - "scripts/security/**"
+      - ".github/workflows/public-private-boundary-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  m0-boundary:
+    name: m0-boundary-red
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: M0 boundary RED tests
+        run: node --test scripts/security/classify-repository.test.mjs
