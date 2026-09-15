@@ -214,6 +214,15 @@ export function transformPhase7CSemiTrendRuntimeSource(source) {
   }
 
   let output = source;
+  const semiManagePositionCall = output.includes(
+    "await managePosition(managedPosition, quote, spec, m15, m5);",
+  )
+    ? "await managePosition(semiAdoption.position, quote, spec, m15, m5);"
+    : "await managePosition(semiAdoption.position, quote, spec, m15);";
+  const semiUnmanagedBlock = SEMI_UNMANAGED_BLOCK.replace(
+    "await managePosition(semiAdoption.position, quote, spec, m15);",
+    semiManagePositionCall,
+  );
   const semiAlreadyWired =
     output.includes("reconcilePhase7CSemiManualPosition") &&
     output.includes("SEMI_MANUAL_POSITION_ADOPTED") &&
@@ -235,11 +244,11 @@ export function transformPhase7CSemiTrendRuntimeSource(source) {
     }
 
     output = RUNTIME_IMPORT + output;
-    output = output.replace(LEGACY_UNMANAGED_BLOCK, SEMI_UNMANAGED_BLOCK);
+    output = output.replace(LEGACY_UNMANAGED_BLOCK, semiUnmanagedBlock);
     output = output.replaceAll(MANAGED_CLEAR, SEMI_MANAGED_CLEAR);
 
     if (
-      !output.includes("await managePosition(semiAdoption.position, quote, spec, m15);") ||
+      !output.includes(semiManagePositionCall) ||
       output.includes("await managePosition(positions[0], quote, spec, m15);") ||
       !output.includes("markPhase7CSemiManualAdoptionClosed")
     ) {

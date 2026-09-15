@@ -6,6 +6,8 @@ import { acquireRuntimeSingleton } from "./phase7c-runtime-singleton-lock.mjs";
 import { evaluateAutoTrendEntryModeGate } from "./phase7c-trend-mode-gate.mjs";
 import { createPhase7CDecisionAudit } from "./phase7c-decision-audit.mjs";
 import { recordTrendEntryAttributionBestEffort } from "./phase7c-trend-entry-attribution.mjs";
+import { transformPhase7CTrendM5TrailingSource } from "./phase7c-m5-structural-trailing-source-adapter.mjs";
+import { transformPhase7CTrendM5PreStructureProfitLockSource } from "./phase7c-m5-prestructure-profit-lock-source-adapter.mjs";
 import { transformPhase7CSemiTrendRuntimeSource } from "./phase7c-semi-trend-runtime-source-adapter.mjs";
 
 const nativeFetch = globalThis.fetch.bind(globalThis);
@@ -159,6 +161,8 @@ async function importLegacyTrendController() {
   // and execution lock remain active around every new-order request.
   const sourceUrl = new URL("./run-phase7b-demo-controller.ts", import.meta.url);
   let source = fs.readFileSync(sourceUrl, "utf8");
+  source = transformPhase7CTrendM5TrailingSource(source);
+  source = transformPhase7CTrendM5PreStructureProfitLockSource(source);
   source = transformPhase7CSemiTrendRuntimeSource(source);
   const transformed = ts.transpileModule(source, {
     fileName: "run-phase7b-demo-controller.ts",
