@@ -168,10 +168,21 @@ assert.ok(trailingIndex > fastMoveIndex, "Sideway confirmed M5 structural traili
 
 const trendAccountModeSource = fs.readFileSync(new URL("./run-phase7c-trend-account-mode.mjs", import.meta.url), "utf8");
 const trendCanonicalIndex = trendAccountModeSource.indexOf("transformPhase7CTrendCanonicalDailyRecoverySource(accountAdapted)");
-const trendM5Index = trendAccountModeSource.indexOf("transformPhase7CTrendM5TrailingSource(canonicalOutput)");
 assert.ok(
-  trendCanonicalIndex >= 0 && trendM5Index > trendCanonicalIndex,
-  "Trend account-mode runtime must apply canonical Daily Recovery before M5 trailing.",
+  trendCanonicalIndex >= 0,
+  "Trend account-mode runtime must keep canonical Daily Recovery adaptation.",
+);
+assert.doesNotMatch(
+  trendAccountModeSource,
+  /transformPhase7CTrendM5TrailingSource|transformPhase7CTrendM5PreStructureProfitLockSource/,
+  "Trend account-mode runtime must leave M5 structural/FastMove transforms to the canonical Trend runner.",
+);
+const trendCanonicalRunnerSource = fs.readFileSync(new URL("./run-phase7c-trend-controller.mjs", import.meta.url), "utf8");
+const trendRunnerM5Index = trendCanonicalRunnerSource.indexOf("source = transformPhase7CTrendM5TrailingSource(source)");
+const trendRunnerFastMoveIndex = trendCanonicalRunnerSource.indexOf("source = transformPhase7CTrendM5PreStructureProfitLockSource(source)");
+assert.ok(
+  trendRunnerM5Index >= 0 && trendRunnerFastMoveIndex > trendRunnerM5Index,
+  "Canonical Trend runner must apply M5 structural before M5 pre-structure/FastMove transforms.",
 );
 
 const sidewayAccountModeSource = fs.readFileSync(new URL("./run-phase7c-sideway-account-mode.mjs", import.meta.url), "utf8");
