@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$Helper = Join-Path $PSScriptRoot 'recover-phase7c-dead-broker-preweb-local.ps1'
+$Helper = Join-Path $PSScriptRoot 'recover-phase7c-dead-broker-preweb-v2-local.ps1'
 
 function Assert-True([bool]$Value, [string]$Message) {
   if (-not $Value) { throw $Message }
@@ -32,7 +32,7 @@ Assert-True ($text.Contains('requires branch main')) "helper must require branch
 Assert-True ($text.Contains('requires a clean worktree')) "helper must require clean worktree"
 Assert-True ($text.Contains('exact commit mismatch')) "helper must reject source SHA mismatch"
 Assert-True ($text.Contains('$runtimeTransitionChangedPaths')) "helper must explicitly inspect source-transition changed paths"
-Assert-True ($text.Contains('scripts/recover-phase7c-dead-broker-preweb-local.ps1')) "runtime transition allowlist must include only the dedicated helper source"
+Assert-True ($text.Contains('scripts/recover-phase7c-dead-broker-preweb-v2-local.ps1')) "runtime transition allowlist must include only the dedicated helper source"
 Assert-True ($text.Contains('scripts/test-phase7c-dead-broker-preweb-recovery-source.ps1')) "runtime transition allowlist must include the dedicated source contract"
 Assert-True ($text.Contains('.github/workflows/phase7c-dead-broker-preweb-recovery-ci.yml')) "runtime transition allowlist must include the dedicated CI workflow"
 Assert-True ($text.Contains('PHASE7C_DEAD_BROKER_PRE_WEB_RUNTIME_SOURCE_TRANSITION=UNCHANGED_RUNTIME_FILES')) "helper must prove no runtime-loaded files changed between accepted runtime and local HEAD"
