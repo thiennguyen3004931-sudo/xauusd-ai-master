@@ -153,3 +153,25 @@ test("Trend runtime adapter converts transient unresolved state into recoverable
   );
   assert.match(recoveryWindow, /recoveredFromPending: true/);
 });
+
+test("pending Trend recovery matches the broker TP actually sent when fixed TP is enabled", () => {
+  const source = fs.readFileSync(controllerPath, "utf8");
+  const matcherStart = source.indexOf("function matchPendingTrendPosition(");
+  const matcherEnd = source.indexOf("function managedFromPending(", matcherStart);
+
+  assert.notEqual(matcherStart, -1, "pending-position matcher must exist");
+  assert.notEqual(matcherEnd, -1, "managed-from-pending boundary must exist");
+
+  const matcher = source.slice(matcherStart, matcherEnd);
+
+  assert.match(
+    matcher,
+    /pending\.fixedTpEnabled[\s\S]*pending\.fixedTpPrice[\s\S]*pending\.takeProfit/,
+    "fixed-TP recovery must derive the broker TP expectation from the same fixed-TP snapshot used for order submission",
+  );
+  assert.match(
+    matcher,
+    /position\.takeProfit\s*-\s*expectedTakeProfit/,
+    "pending-position TP comparison must use the derived broker TP expectation",
+  );
+});
