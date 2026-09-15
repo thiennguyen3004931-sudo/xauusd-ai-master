@@ -30,6 +30,27 @@ test("only exact security governance files are public-safe", () => {
   assert.equal(classifyPath("scripts/security/unapproved-new-script.mjs"), "PRIVATE_REQUIRED");
 });
 
+test("approved M1 M4 M6 M7 governance files are pre-authorized exactly", () => {
+  const approved = [
+    "security/credential-remediation.json",
+    "scripts/security/validate-credential-remediation.mjs",
+    "scripts/security/validate-credential-remediation.test.mjs",
+    "scripts/security/check-public-boundary.mjs",
+    "scripts/security/check-public-boundary.test.mjs",
+    "scripts/security/check-distribution-artifact.mjs",
+    "scripts/security/check-distribution-artifact.test.mjs",
+    ".github/workflows/public-distribution-ci.yml",
+    "scripts/security/accept-public-private-split.mjs",
+  ];
+  for (const path of approved) {
+    assert.equal(classifyPath(path), "SAFE_PUBLIC", path);
+  }
+  assert.equal(
+    classifyPath("scripts/security/future-unapproved-governance.mjs"),
+    "PRIVATE_REQUIRED",
+  );
+});
+
 test("tracked inventory returns deterministic counts", () => {
   const report = classifyTrackedPaths([
     "packages/copy-protocol/src/index.ts",
