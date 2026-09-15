@@ -217,4 +217,58 @@ Assert-True (-not $runningReleasedSection.Contains('Set-Content')) `
 Assert-True (-not $recovery.Contains('GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK=HEALTHY')) `
   'RUNNING+READY RELEASED/MISSING startup lock must never be normalized to healthy.'
 
+# Production reproduction 2026-09-14: source generation reload can be required while
+# lifecycle remains RUNNING+READY, the canonical SYSTEM broker is alive/fresh and
+# PID-matched, and the startup-runner singleton lock is correctly HELD. This is a
+# healthy old generation, not a lock-repair case. Recovery must quiesce lifecycle
+# before strict Web/API deploy, then reuse the existing stopped-lifecycle generation
+# restart path. It must never weaken the strict verifier or kill processes directly.
+$runningHeldRequired = @(
+  '$preWebRunningHeldLockCandidate',
+  '$preWebRunningHeldLockReloadEligible',
+  'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK=ELIGIBLE_QUIESCE_REQUIRED',
+  '[string]$preWebRuntimeGeneration.startupRunnerLockState -eq ''HELD''',
+  '$preWebRunningHeldCanonicalProcessIds.Count -eq 1',
+  '$preWebRunningHeldInstanceCount -eq 1',
+  '[int]$preWebRunningHeldCanonicalProcessIds[0] -eq [int]$preWebRuntimeGeneration.statusBrokerPid',
+  '[string]$preWebRunningHeldBrokerAttestation.component -eq ''lifecycle-broker''',
+  '[int]$preWebRunningHeldBrokerAttestation.pid -eq [int]$preWebRuntimeGeneration.statusBrokerPid',
+  '$preWebRunningHeldAttestedLauncherSha256 -eq $preWebExpectedLauncherSha256',
+  'Assert-PauseDisarmed -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK"',
+  'Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK"',
+  'Assert-FlatBroker -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK"',
+  '[void](Invoke-ApiPost "/api/v1/phase7c/lifecycle/stop" @{})',
+  'Wait-LifecycleStopped',
+  'Assert-LifecycleExecutorsStopped -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK_POST_STOP"',
+  'Assert-PauseDisarmed -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK_POST_STOP"',
+  'Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK_POST_STOP"',
+  'Assert-FlatBroker -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK_POST_STOP"',
+  'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK_LIFECYCLE_STOP=PASS'
+)
+foreach ($literal in $runningHeldRequired) {
+  Assert-True ($recovery.Contains($literal)) "RED: running+ready held-lock generation quiesce contract missing: $literal"
+}
+
+$runningHeldEligible = 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK=ELIGIBLE_QUIESCE_REQUIRED'
+$runningHeldStopped = 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK_LIFECYCLE_STOP=PASS'
+$runningHeldEligibleIndex = $recovery.IndexOf($runningHeldEligible, [System.StringComparison]::Ordinal)
+$runningHeldStoppedIndex = $recovery.IndexOf($runningHeldStopped, [System.StringComparison]::Ordinal)
+$generalStoppedEligibleIndex = $recovery.IndexOf('PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB=ELIGIBLE', [System.StringComparison]::Ordinal)
+$heldWebDeployIndex = $recovery.IndexOf('& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $WebApiDeploy', [System.StringComparison]::Ordinal)
+
+Assert-True ($runningHeldEligibleIndex -ge 0) 'RUNNING+READY held-lock generation reload must expose exact quiesce eligibility.'
+Assert-True ($runningHeldStoppedIndex -gt $runningHeldEligibleIndex) 'Held-lock lifecycle STOP proof must occur after exact eligibility.'
+Assert-True ($generalStoppedEligibleIndex -gt $runningHeldStoppedIndex) 'Existing stopped-lifecycle generation restart must be entered only after held-lock lifecycle STOP is proven.'
+Assert-True ($heldWebDeployIndex -gt $runningHeldStoppedIndex) 'Strict Web/API deploy must remain after held-lock generation quiesce.'
+
+$runningHeldSection = $recovery.Substring($runningHeldEligibleIndex, $generalStoppedEligibleIndex - $runningHeldEligibleIndex)
+Assert-True (-not $runningHeldSection.Contains('Stop-Process')) `
+  'RUNNING+READY held-lock generation reload must never kill a process directly.'
+Assert-True (-not $runningHeldSection.Contains('Stop-ScheduledTask')) `
+  'RUNNING+READY held-lock quiesce must stop lifecycle before the existing stopped-generation path stops the canonical task.'
+Assert-True (-not $runningHeldSection.Contains('Remove-Item')) `
+  'RUNNING+READY held-lock generation reload must never delete the singleton lock manually.'
+Assert-True (-not $runningHeldSection.Contains('Set-Content')) `
+  'RUNNING+READY held-lock generation reload must never rewrite the singleton lock manually.'
+
 Write-Host "PHASE7C_STOPPED_LIFECYCLE_PREWEB_GENERATION_SOURCE_TEST=PASS"
