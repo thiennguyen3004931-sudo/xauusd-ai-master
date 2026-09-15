@@ -217,4 +217,40 @@ Assert-True (-not $runningReleasedSection.Contains('Set-Content')) `
 Assert-True (-not $recovery.Contains('GENERATION_PRE_WEB_RUNNING_RELEASED_LOCK=HEALTHY')) `
   'RUNNING+READY RELEASED/MISSING startup lock must never be normalized to healthy.'
 
+# Production reproduction 2026-09-14: generation reload can be required while the
+# lifecycle is RUNNING+READY and the old canonical broker still owns a valid HELD
+# singleton lock. HELD proves singleton ownership, not source-generation freshness.
+# The recovery must quiesce this exact canonical old-generation tuple before Web/API
+# deploy and then reuse the stopped-lifecycle generation restart path.
+$runningHeldRequired = @(
+  '$preWebRunningHeldLockCandidate',
+  '$preWebRunningHeldLockQuiesceEligible',
+  'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK=ELIGIBLE_QUIESCE_REQUIRED',
+  '[string]$preWebRuntimeGeneration.startupRunnerLockState -eq ''HELD''',
+  '$preWebRunningHeldCanonicalProcessIds.Count -eq 1',
+  '$preWebRunningHeldInstanceCount -eq 1',
+  '[int]$preWebRunningHeldCanonicalProcessIds[0] -eq [int]$preWebRuntimeGeneration.statusBrokerPid',
+  'Assert-PauseDisarmed -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK"',
+  'Assert-BridgeSession -ExpectedSession $bridgeSessionId -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK"',
+  'Assert-FlatBroker -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK"',
+  'Assert-LifecycleExecutorsStopped -Stage "GENERATION_PRE_WEB_RUNNING_HELD_LOCK_POST_STOP"',
+  'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK_LIFECYCLE_STOP=PASS'
+)
+foreach ($literal in $runningHeldRequired) {
+  Assert-True ($recovery.Contains($literal)) "RED: running+ready HELD-lock generation quiesce contract missing: $literal"
+}
+
+$runningHeldEligible = 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK=ELIGIBLE_QUIESCE_REQUIRED'
+$runningHeldStopped = 'PHASE7C_RUNTIME_READY_STABLE_RECOVERY_GENERATION_PRE_WEB_RUNNING_HELD_LOCK_LIFECYCLE_STOP=PASS'
+$runningHeldEligibleIndex = $recovery.IndexOf($runningHeldEligible, [System.StringComparison]::Ordinal)
+$runningHeldStoppedIndex = $recovery.IndexOf($runningHeldStopped, [System.StringComparison]::Ordinal)
+Assert-True ($runningHeldEligibleIndex -ge 0) 'RUNNING+READY HELD-lock stale-generation recovery must expose exact quiesce eligibility.'
+Assert-True ($runningHeldStoppedIndex -gt $runningHeldEligibleIndex) 'HELD-lock lifecycle STOP proof must occur after exact eligibility.'
+Assert-True ($runningHeldStoppedIndex -lt $webDeployIndex) 'RUNNING+READY HELD-lock generation must quiesce before strict Web/API deploy.'
+$runningHeldSection = $recovery.Substring($runningHeldEligibleIndex, $runningHeldStoppedIndex - $runningHeldEligibleIndex)
+Assert-True (-not $runningHeldSection.Contains('Stop-Process')) `
+  'RUNNING+READY HELD-lock generation recovery must never kill a process directly.'
+Assert-True (-not $runningHeldSection.Contains('Remove-Item')) `
+  'RUNNING+READY HELD-lock generation recovery must never mutate the singleton lock manually.'
+
 Write-Host "PHASE7C_STOPPED_LIFECYCLE_PREWEB_GENERATION_SOURCE_TEST=PASS"
