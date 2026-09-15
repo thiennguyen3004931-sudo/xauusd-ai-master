@@ -1,0 +1,38 @@
+name: BOT IP Protection P3 Installation Proof CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "packages/installation-proof/**"
+      - ".github/workflows/bot-ip-protection-p3-installation-proof-ci.yml"
+      - "pnpm-lock.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  installation-proof-task1-red:
+    name: installation-proof-task1-red
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install workspace dependencies for RED checkpoint
+        run: pnpm install --no-frozen-lockfile
+      - name: Build copy protocol dependency
+        run: pnpm --filter @xauusd/copy-protocol build
+      - name: Challenge contract RED test
+        run: pnpm --filter @xauusd/installation-proof test
