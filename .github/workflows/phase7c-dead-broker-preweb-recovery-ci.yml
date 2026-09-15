@@ -54,4 +54,4 @@ jobs:
         run: .\scripts\test-phase7c-system-lifecycle-broker-source.ps1
       - name: Canonical executor stop-order source contract remains green
         shell: pwsh
-        run: .\scripts\test-phase7c-executor-stop-order.ps1
+        run: .\scripts\test-phase7c-executor-stop-order-source.ps1
