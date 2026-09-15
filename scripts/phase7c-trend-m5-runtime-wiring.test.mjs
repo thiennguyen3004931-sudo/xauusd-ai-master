@@ -137,16 +137,22 @@ test("broker MODIFY failure cannot persist M5 ownership", () => {
   );
 });
 
-test("successful tighter M5 MODIFY persists one-way ownership", () => {
+test("successful tighter M5 MODIFY starts a new FastMove cycle", () => {
   const source = transformTrendM5();
   assert.match(
     source,
-    /if \(response\.success\) \{[\s\S]*?managed\.fastMoveHandedOffToM5 = true;[\s\S]*?managed\.lastStructuralStop = m5Trail\.stopLoss;[\s\S]*?saveState\(\);/,
+    /if \(response\.success\) \{[\s\S]*?managed\.fastMoveHandedOffToM5 = true;[\s\S]*?managed\.lastStructuralStop = m5Trail\.stopLoss;[\s\S]*?managed\.fastMoveCycleAnchorPrice = exitPrice;[\s\S]*?saveState\(\);/,
+    "Accepted M5 tighten must persist the handoff anchor used by the next FastMove cycle.",
   );
-  assert.doesNotMatch(
+  assert.match(
     source,
-    /FAST_MOVE_REACTIVATED_AFTER_M5|managed\.fastMoveHandedOffToM5 = false;|fastMoveCycleAnchorPrice|fastMoveCycleStartedAt/,
-    "After accepted M5 handoff, FastMove must never regain ownership for that position.",
+    /const fastMoveReactivationDistance =[\s\S]*?FAST_MOVE_PROFIT_LOCK_ACTIVATION_PRICE[\s\S]*?managed\.fastMoveHandedOffToM5 = false;[\s\S]*?managed\.fastMoveCycleStartedAt = Number\(quote\.timestamp\);[\s\S]*?FAST_MOVE_REACTIVATED_AFTER_M5/,
+    "FastMove must reactivate after a new +10 favorable impulse from the accepted M5 handoff anchor.",
+  );
+  assert.match(
+    source,
+    /const fastMoveReferencePrice = Number\(managed\.fastMoveCycleAnchorPrice\) > 0[\s\S]*?entry: fastMoveReferencePrice/,
+    "Reactivated FastMove must measure activation/giveback from the latest M5 handoff anchor.",
   );
 });
 
