@@ -6,6 +6,7 @@ import { classifyPath } from "./classify-repository.mjs";
 
 const SCRIPT_DIR = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "../..");
+const POLICY_PATH = "security/repository-boundary.json";
 
 export function parseNameStatus(output) {
   const entries = [];
@@ -48,6 +49,25 @@ export function evaluateNameStatusEntries(entries) {
   return { allowed, blocked };
 }
 
+export function evaluatePolicyChangeIsolation(entries, { basePolicyPresent }) {
+  if (!basePolicyPresent) return { ok: true };
+
+  const policyChanged = entries.some(
+    (entry) => entry.path === POLICY_PATH || entry.newPath === POLICY_PATH,
+  );
+  if (!policyChanged) return { ok: true };
+
+  const mixedNonDeletionChange = entries.some((entry) => {
+    const touchesPolicy = entry.path === POLICY_PATH || entry.newPath === POLICY_PATH;
+    return !touchesPolicy && entry.status !== "D";
+  });
+
+  if (mixedNonDeletionChange) {
+    return { ok: false, code: "BOUNDARY_POLICY_CHANGE_MUST_BE_ISOLATED" };
+  }
+  return { ok: true };
+}
+
 export function diffEntries(baseSha, headSha) {
   if (!baseSha || !headSha) throw new Error("BASE_AND_HEAD_SHA_REQUIRED");
   const output = execFileSync(
@@ -58,6 +78,18 @@ export function diffEntries(baseSha, headSha) {
   return parseNameStatus(output);
 }
 
+export function basePolicyExistsAtCommit(baseSha) {
+  try {
+    execFileSync("git", ["cat-file", "-e", `${baseSha}:${POLICY_PATH}`], {
+      cwd: REPO_ROOT,
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function main() {
   const [baseSha, headSha] = process.argv.slice(2);
   if (!baseSha || !headSha) {
@@ -66,7 +98,18 @@ function main() {
     return;
   }
 
-  const result = evaluateNameStatusEntries(diffEntries(baseSha, headSha));
+  const entries = diffEntries(baseSha, headSha);
+  const policyIsolation = evaluatePolicyChangeIsolation(entries, {
+    basePolicyPresent: basePolicyExistsAtCommit(baseSha),
+  });
+  if (!policyIsolation.ok) {
+    console.error(`PUBLIC_PRIVATE_FREEZE=BLOCKED`);
+    console.error(`REASON=${policyIsolation.code}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const result = evaluateNameStatusEntries(entries);
   if (result.blocked.length > 0) {
     console.error("PUBLIC_PRIVATE_FREEZE=BLOCKED");
     for (const entry of result.blocked) {
