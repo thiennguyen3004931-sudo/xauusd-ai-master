@@ -59,7 +59,7 @@ Assert-True ($text.Contains('PHASE7C_DEAD_BROKER_PRE_WEB_BROKER_ATTESTATION=EXAC
 Assert-True ($text.Contains('PHASE7C_DEAD_BROKER_PRE_WEB_STARTUP_RUNNER_LOCK=HELD')) "helper must prove singleton lock HELD"
 
 Assert-True ($text.Contains('[void](Invoke-ApiPost "/api/v1/phase7c/lifecycle/start" @{})')) "helper must use canonical lifecycle START"
-Assert-True ($text.Contains('$preStartReconcile')) -eq $false "helper itself must not duplicate broker START orphan reconciliation"
+Assert-True (-not $text.Contains('$preStartReconcile')) "helper itself must not duplicate broker START orphan reconciliation"
 Assert-True ($text.Contains('Wait-LifecycleReadyStable')) "helper must require continuous lifecycle readiness"
 Assert-True ($text.Contains('PHASE7C_DEAD_BROKER_PRE_WEB_LIFECYCLE_READY=PASS')) "helper must audit stable lifecycle readiness"
 Assert-True ($text.Contains('Get-Phase7CRuntimeSourceGenerationAttestationStatus')) "helper must prove final runtime source generation exact"
