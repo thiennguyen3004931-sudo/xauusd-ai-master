@@ -4,24 +4,16 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - "security/**"
-      - "scripts/security/**"
-      - ".github/workflows/public-private-boundary-ci.yml"
   push:
     branches:
       - main
-    paths:
-      - "security/**"
-      - "scripts/security/**"
-      - ".github/workflows/public-private-boundary-ci.yml"
 
 permissions:
   contents: read
 
 jobs:
   m0-boundary:
-    name: m0-boundary-red
+    name: m0-public-private-boundary
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -33,5 +25,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: M0 boundary RED tests
+      - name: Boundary behavior tests
         run: node --test scripts/security/classify-repository.test.mjs
+      - name: Classify tracked repository
+        run: node scripts/security/classify-repository.mjs --tracked
+      - name: Enforce public/private change freeze
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/security/check-public-change-freeze.mjs "$BASE_SHA" "$HEAD_SHA"
+      - name: Diff hygiene
+        run: git diff --check
