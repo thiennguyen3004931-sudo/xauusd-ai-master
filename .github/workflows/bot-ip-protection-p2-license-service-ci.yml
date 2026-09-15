@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "packages/license-service/**"
+      - "scripts/test-bot-ip-protection-p2-boundary.mjs"
       - ".github/workflows/bot-ip-protection-p2-license-service-ci.yml"
       - "pnpm-lock.yaml"
 
@@ -13,8 +14,8 @@ permissions:
   contents: read
 
 jobs:
-  license-service-task2:
-    name: license-service-task2
+  license-service-task4-red:
+    name: license-service-task4-red
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -30,7 +31,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Install workspace dependencies for Task 2
+      - name: Install workspace dependencies for Task 4 RED
         run: pnpm install --no-frozen-lockfile
       - name: Build copy protocol dependency
         run: pnpm --filter @xauusd/copy-protocol build
@@ -38,3 +39,5 @@ jobs:
         run: pnpm --filter @xauusd/license-service test
       - name: License service typecheck
         run: pnpm --filter @xauusd/license-service typecheck
+      - name: P2 IP boundary RED
+        run: node --test scripts/test-bot-ip-protection-p2-boundary.mjs
