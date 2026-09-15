@@ -27,9 +27,17 @@ Assert-PowerShellSyntax $Helper
 $text = (Get-Content -LiteralPath $Helper -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
 
 Assert-True ($text.Contains('[Parameter(Mandatory = $true)] [string]$ExpectedCommit')) "helper must require exact ExpectedCommit"
+Assert-True ($text.Contains('[Parameter(Mandatory = $true)] [string]$ExpectedRuntimeCommit')) "helper must pin the pre-existing accepted runtime commit independently from local HEAD"
 Assert-True ($text.Contains('requires branch main')) "helper must require branch main"
 Assert-True ($text.Contains('requires a clean worktree')) "helper must require clean worktree"
 Assert-True ($text.Contains('exact commit mismatch')) "helper must reject source SHA mismatch"
+Assert-True ($text.Contains('$runtimeTransitionChangedPaths')) "helper must explicitly inspect source-transition changed paths"
+Assert-True ($text.Contains('scripts/recover-phase7c-dead-broker-preweb-local.ps1')) "runtime transition allowlist must include only the dedicated helper source"
+Assert-True ($text.Contains('scripts/test-phase7c-dead-broker-preweb-recovery-source.ps1')) "runtime transition allowlist must include the dedicated source contract"
+Assert-True ($text.Contains('.github/workflows/phase7c-dead-broker-preweb-recovery-ci.yml')) "runtime transition allowlist must include the dedicated CI workflow"
+Assert-True ($text.Contains('PHASE7C_DEAD_BROKER_PRE_WEB_RUNTIME_SOURCE_TRANSITION=UNCHANGED_RUNTIME_FILES')) "helper must prove no runtime-loaded files changed between accepted runtime and local HEAD"
+Assert-True ($text.Contains('[string]$deployment.sourceCommit -ne $ExpectedRuntimeCommit')) "helper must prove the current runtime manifest belongs to the explicitly pinned pre-existing runtime commit"
+
 Assert-True ($text.Contains('PHASE7C_DEAD_BROKER_PRE_WEB=ELIGIBLE')) "helper must expose bounded dead-broker eligibility"
 Assert-True ($text.Contains('[string]$deadBrokerTask.State -eq ''Ready''')) "helper must require Scheduled Task Ready"
 Assert-True ($text.Contains('$deadBrokerCanonicalProcessCount -eq 0')) "helper must require zero canonical task processes"
