@@ -1,0 +1,40 @@
+name: BOT IP Protection P2 License Service CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "packages/license-service/**"
+      - ".github/workflows/bot-ip-protection-p2-license-service-ci.yml"
+      - "pnpm-lock.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  license-service-task2:
+    name: license-service-task2
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install workspace dependencies for Task 2
+        run: pnpm install --no-frozen-lockfile
+      - name: Build copy protocol dependency
+        run: pnpm --filter @xauusd/copy-protocol build
+      - name: License service tests
+        run: pnpm --filter @xauusd/license-service test
+      - name: License service typecheck
+        run: pnpm --filter @xauusd/license-service typecheck
