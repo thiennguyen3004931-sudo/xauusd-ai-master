@@ -63,10 +63,12 @@ It owns:
 - proprietary analytics and Performance Intelligence;
 - Master orchestration/controllers;
 - Master Copy Event generation before sanitization;
-- private command-signing services and private signing keys;
-- license administration, private persistence, customer administration, and server-side secret material;
+- private command-signing service implementation and secret-store integration;
+- license administration, private persistence, customer administration, and server-side secret-store integration;
 - private deployment/recovery scripts and runtime-source attestation that expose Master internals;
 - any internal documentation or test vectors that reveal proprietary behavior.
+
+**No private signing key, device private key, API credential, customer secret, or other long-lived secret is committed to the private repository.** Private key material is injected at runtime/CI from an access-controlled secret store and remains outside Git history.
 
 The private repository may consume public protocol artifacts. The public repository must never consume the private repository or private source packages.
 
@@ -123,7 +125,7 @@ At minimum, the proprietary implementation portions of the following responsibil
 - proprietary risk decision logic;
 - Performance Intelligence and internal effectiveness calculations;
 - Master-only Copy Event generation;
-- private signing service and key material;
+- private signing service and secret-store bindings;
 - private license administration and data;
 - Master deployment/runtime tooling that exposes proprietary internals.
 
@@ -224,12 +226,14 @@ Public follower code verifies signed commands and applies public follower protec
 
 ### M6 — Release and secret separation
 
-Private CI owns:
+Private CI is the only CI allowed to request access to:
 
 - signing private keys;
 - private deployment credentials;
 - private customer/license administration secrets;
 - Master operational secrets.
+
+Those secrets remain in an access-controlled secret store (for example an OS/CI secret facility) and are injected only into authorized jobs/runtime. **They are not tracked files in the private repository.**
 
 Public CI owns no private signing material and can build/test public components without access to the private repository.
 
@@ -244,7 +248,7 @@ Before any production cutover, automated acceptance must prove at least:
 3. follower artifact contains no proprietary strategy modules;
 4. private Master build succeeds independently;
 5. public/private protocol vectors are compatible;
-6. private signing key is absent from public repository, public CI, and follower artifact;
+6. private signing key is absent from public repository, private repository Git history, public CI, and follower artifact;
 7. secret scan has been run over public current tree and reachable history and credible findings have been rotated;
 8. sanitized command payload/log tests contain no proprietary internals;
 9. repository split does not modify canonical trading behavior;
@@ -327,6 +331,7 @@ The Public/Private split is source-complete only when all of the following are t
 - current public `main` builds without private source access;
 - every tracked public file is classified and no `PRIVATE_REQUIRED` file remains in the public current tree;
 - secret-history audit is complete and any discovered credential is rotated;
+- no private key/credential is tracked in either public or private Git history;
 - public/private dependency direction is one-way and enforced by CI;
 - one canonical P3 identity/proof implementation is selected;
 - follower/distribution artifacts contain only public-safe responsibilities;
