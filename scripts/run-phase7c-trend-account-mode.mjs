@@ -2,8 +2,6 @@ import fs from "node:fs";
 import { installPhase7CAccountOrderFetchGuard } from "./phase7c-account-runtime-guard.mjs";
 import { transformPhase7CTrendLegacySource } from "./phase7c-live-source-adapters.mjs";
 import { transformPhase7CTrendCanonicalDailyRecoverySource } from "./phase7c-canonical-daily-recovery-source-adapter.mjs";
-import { transformPhase7CTrendM5TrailingSource } from "./phase7c-m5-structural-trailing-source-adapter.mjs";
-import { transformPhase7CTrendM5PreStructureProfitLockSource } from "./phase7c-m5-prestructure-profit-lock-source-adapter.mjs";
 
 const runtime = installPhase7CAccountOrderFetchGuard({ label: "TREND" });
 const mode = runtime.accountMode;
@@ -19,13 +17,9 @@ fs.readFileSync = function phase7CTrendReadFileSync(file, options) {
   const accountAdapted = mode === "LIVE"
     ? transformPhase7CTrendLegacySource(source)
     : source;
-  const canonicalOutput = transformPhase7CTrendCanonicalDailyRecoverySource(accountAdapted);
-  const m5Output = transformPhase7CTrendM5TrailingSource(canonicalOutput);
-  const output = transformPhase7CTrendM5PreStructureProfitLockSource(m5Output);
+  const output = transformPhase7CTrendCanonicalDailyRecoverySource(accountAdapted);
   transformed = true;
   console.log(`PHASE7C_TREND_CANONICAL_DAILY_RECOVERY_ADAPTER=APPLIED|MODE=${mode}`);
-  console.log(`PHASE7C_TREND_M5_STRUCTURAL_TRAILING_ADAPTER=APPLIED|MODE=${mode}`);
-  console.log(`PHASE7C_TREND_M5_PRE_STRUCTURE_PROFIT_LOCK_ADAPTER=APPLIED|MODE=${mode}`);
   if (mode === "LIVE") console.log("PHASE7C_TREND_LIVE_ADAPTER=APPLIED");
   return Buffer.isBuffer(raw) ? Buffer.from(output, "utf8") : output;
 };
@@ -40,7 +34,7 @@ console.log("PHASE7C_TREND_ACCOUNT_ORDER_GATE=ENABLED");
 try {
   await import("./run-phase7c-trend-controller.mjs");
   if (!transformed) {
-    throw new Error("Phase7C Trend canonical Daily Recovery + M5 structural trailing + M5 pre-structure profit-lock adapters were not applied; refusing silent fallback.");
+    throw new Error("Phase7C Trend account-mode/Daily Recovery source adapter was not applied; refusing silent fallback.");
   }
 } finally {
   fs.readFileSync = originalReadFileSync;
