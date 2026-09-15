@@ -12,10 +12,10 @@ permissions:
   contents: read
 
 jobs:
-  m0-boundary:
-    name: m0-public-private-boundary
+  repository-boundary:
+    name: public-private-repository-boundary
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - name: Checkout full history
         uses: actions/checkout@v4
@@ -25,8 +25,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Boundary behavior tests
+      - name: M0 boundary behavior tests
         run: node --test scripts/security/classify-repository.test.mjs
+      - name: M1 credential remediation tests
+        run: node --test scripts/security/validate-credential-remediation.test.mjs
       - name: Classify tracked repository
         run: node scripts/security/classify-repository.mjs --tracked
       - name: Enforce public/private change freeze
@@ -34,5 +36,29 @@ jobs:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: node scripts/security/check-public-change-freeze.mjs "$BASE_SHA" "$HEAD_SHA"
+      - name: Scan full Git history with Gitleaks (redacted)
+        run: |
+          mkdir -p artifacts/security
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.24.2 detect \
+            --source=/repo \
+            --redact \
+            --log-opts="--all" \
+            --report-format=json \
+            --report-path=/repo/artifacts/security/gitleaks.json \
+            --exit-code=0
+      - name: Validate credential remediation coverage
+        run: |
+          node scripts/security/validate-credential-remediation.mjs \
+            artifacts/security/gitleaks.json \
+            security/credential-remediation.json
+      - name: Upload redacted secret scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redacted-gitleaks-report
+          path: artifacts/security/gitleaks.json
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Diff hygiene
+        if: always()
         run: git diff --check
