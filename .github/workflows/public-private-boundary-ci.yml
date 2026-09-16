@@ -21,10 +21,25 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: pnpm
+      - name: Generate sanitized public lockfile
+        run: pnpm install --lockfile-only --no-frozen-lockfile
+      - name: Upload sanitized public lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: m4-sanitized-public-lockfile
+          path: pnpm-lock.yaml
+          if-no-files-found: error
+          retention-days: 1
       - name: M0 boundary behavior tests
         run: node --test scripts/security/classify-repository.test.mjs
       - name: M1 credential remediation tests
