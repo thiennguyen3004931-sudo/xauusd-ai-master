@@ -1,25 +1,33 @@
-# Public Distribution Security Boundary
+# Public Repository Security Boundary
 
-This repository is the public protocol, verification, follower, and distribution surface for XAUUSD AI MASTER.
+This repository is the public distribution surface for XAUUSD AI Master.
 
-Public-safe responsibilities are limited to:
+## Allowed public responsibilities
 
-- Copy protocol contracts and sanitized lifecycle command schemas.
-- License verification contracts.
-- Installation proof-of-possession primitives.
-- Follower/distribution code and public-safe build, test, typecheck, and security tooling.
+The public current head may contain only explicitly allowlisted distribution and governance material, including:
 
-Proprietary Master/Core responsibilities belong only in the private Master/Core repository. They include strategy selection, signal and decision logic, trade-management logic, Master-specific risk decisions, proprietary analytics, Master orchestration, signing administration, and private deployment/runtime tooling.
+- `packages/copy-protocol/**`
+- `packages/license-service/**`
+- `packages/installation-proof/**`
+- the public security/governance files allowlisted by `security/repository-boundary.json`
+- the public P1/P2/P3 and repository-boundary CI workflows
+- the root workspace metadata required to build and verify the public packages
 
-The dependency boundary is one-way:
+Everything else fails closed as `PRIVATE_REQUIRED`.
 
-```text
-PUBLIC contracts
-  -> PRIVATE Master/Core
-  -> sanitized signed lifecycle commands
-  -> PUBLIC follower/distribution
-```
+## Canonical main-rule compatibility
 
-The public repository must build and test without access to the private repository. No private signing key, device private key, credential, token, password, production environment file, proprietary trading threshold, internal strategy formula, or private runtime source may be committed here.
+The `main-canonical-pr-governance` repository ruleset requires the GitHub Actions status contexts:
 
-Historical public exposure is not treated as reversible secrecy. Credential findings are remediated by rotation or revocation and tracked only through redacted remediation metadata.
+- `canonical-pr-linux`
+- `canonical-pr-windows`
+
+The public repository emits those exact contexts from public-only compatibility jobs in `.github/workflows/public-private-boundary-ci.yml`. Both jobs perform real verification on the sanitized public workspace: frozen dependency install, M4 boundary checks, workspace tests/build/typecheck, P1/P2/P3 boundary checks, and diff hygiene.
+
+These compatibility jobs do not restore proprietary source, do not bypass the ruleset, and do not mutate production or trading runtime state.
+
+## Private source boundary
+
+Strategy, risk, execution, MT5 broker/runtime, Phase7B/Phase7C control logic, private deployment/runtime operations, and other proprietary Master/Core implementation remain outside the public current head.
+
+Historical credential findings are governed separately by the redacted Gitleaks scan and `security/credential-remediation.json`.
