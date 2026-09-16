@@ -31,6 +31,8 @@ jobs:
         run: node --test scripts/security/validate-credential-remediation.test.mjs
       - name: Classify tracked repository
         run: node scripts/security/classify-repository.mjs --tracked
+      - name: Enforce sanitized public current-head boundary
+        run: node scripts/security/check-public-boundary.mjs
       - name: Enforce public/private change freeze
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
