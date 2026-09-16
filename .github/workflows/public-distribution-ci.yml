@@ -19,5 +19,30 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Frozen install
+        run: pnpm install --frozen-lockfile
       - name: Distribution artifact boundary tests
         run: node --test scripts/security/check-distribution-artifact.test.mjs
+      - name: Public workspace tests
+        run: pnpm test
+      - name: Public workspace build
+        run: pnpm build
+      - name: Public workspace typecheck
+        run: pnpm typecheck
+      - name: Public current-head boundary
+        run: node scripts/security/check-public-boundary.mjs
+      - name: Distribution artifact boundary
+        run: node scripts/security/check-distribution-artifact.mjs
+      - name: Diff hygiene
+        if: always()
+        run: git diff --check
