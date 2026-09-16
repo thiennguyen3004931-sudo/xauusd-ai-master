@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   classifyPath,
   classifyTrackedPaths,
+  privateRequiredPaths,
 } from "./classify-repository.mjs";
 import {
   evaluateNameStatusEntries,
@@ -65,6 +66,21 @@ test("tracked inventory returns deterministic counts", () => {
       "packages/strategy-engine/src/index.ts",
     ],
   });
+});
+
+test("private removal inventory emits only sorted PRIVATE_REQUIRED paths", () => {
+  assert.deepEqual(
+    privateRequiredPaths([
+      "packages/strategy-engine/src/index.ts",
+      "README.md",
+      "future/unknown-module/index.ts",
+      "packages/copy-protocol/src/index.ts",
+    ]),
+    [
+      "future/unknown-module/index.ts",
+      "packages/strategy-engine/src/index.ts",
+    ],
+  );
 });
 
 test("freeze allows deletion of private source but blocks additions and modifications", () => {
