@@ -29,6 +29,8 @@ jobs:
         run: node --test scripts/security/classify-repository.test.mjs
       - name: M1 credential remediation tests
         run: node --test scripts/security/validate-credential-remediation.test.mjs
+      - name: M4 public boundary behavior tests
+        run: node --test scripts/security/check-public-boundary.test.mjs
       - name: Classify tracked repository
         run: node scripts/security/classify-repository.mjs --tracked
       - name: Enforce public/private change freeze
@@ -36,6 +38,8 @@ jobs:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: node scripts/security/check-public-change-freeze.mjs "$BASE_SHA" "$HEAD_SHA"
+      - name: Enforce sanitized public current-head boundary
+        run: node scripts/security/check-public-boundary.mjs
       - name: Scan full Git history with Gitleaks (redacted)
         run: |
           mkdir -p artifacts/security
