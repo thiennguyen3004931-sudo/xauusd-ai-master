@@ -1,26 +1,17 @@
 {
-  "name": "xauusd-ai-master",
+  "name": "xauusd-ai-master-public",
   "version": "1.0.0",
   "private": true,
-  "description": "AI Trading Platform for XAUUSD",
+  "description": "Public protocol, verification, follower, and distribution surface for XAUUSD AI MASTER",
   "packageManager": "pnpm@10.18.0",
   "scripts": {
-    "dev": "turbo run dev",
     "build": "turbo run build",
-    "lint": "turbo run lint",
     "test": "turbo run test",
-    "format": "prettier --write .",
-    "check:integration": "node scripts/validate-pack-12.mjs",
-    "dev:api": "turbo run dev --filter=@xauusd/api",
-    "dev:web": "turbo run dev --filter=@xauusd/web"
+    "typecheck": "turbo run typecheck",
+    "security:boundary": "node scripts/security/check-public-boundary.mjs"
   },
   "devDependencies": {
-    "prettier": "^3.6.2",
     "turbo": "^2.5.6",
     "typescript": "^5.9.2"
-  },
-  "dependencies": {
-    "@xauusd/mt5-broker": "workspace:*",
-    "@xauusd/risk-engine": "workspace:*"
   }
 }

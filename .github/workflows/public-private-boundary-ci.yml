@@ -21,16 +21,28 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: pnpm
+      - name: Install sanitized public workspace
+        run: pnpm install --frozen-lockfile
       - name: M0 boundary behavior tests
         run: node --test scripts/security/classify-repository.test.mjs
       - name: M1 credential remediation tests
         run: node --test scripts/security/validate-credential-remediation.test.mjs
+      - name: M4 public boundary behavior tests
+        run: node --test scripts/security/check-public-boundary.test.mjs
       - name: Classify tracked repository
         run: node scripts/security/classify-repository.mjs --tracked
+      - name: Enforce sanitized public current-head boundary
+        run: node scripts/security/check-public-boundary.mjs
       - name: Enforce public/private change freeze
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
@@ -51,6 +63,18 @@ jobs:
           node scripts/security/validate-credential-remediation.mjs \
             artifacts/security/gitleaks.json \
             security/credential-remediation.json
+      - name: Public workspace tests
+        run: pnpm test
+      - name: Public workspace build
+        run: pnpm build
+      - name: Public workspace typecheck
+        run: pnpm typecheck
+      - name: P1 copy protocol boundary
+        run: node --test scripts/test-bot-ip-protection-p1-boundary.mjs
+      - name: P2 license service boundary
+        run: node --test scripts/test-bot-ip-protection-p2-boundary.mjs
+      - name: P3 installation proof boundary
+        run: node scripts/test-bot-ip-protection-p3-boundary.mjs
       - name: Upload redacted secret scan report
         if: always()
         uses: actions/upload-artifact@v4
@@ -61,4 +85,80 @@ jobs:
           retention-days: 7
       - name: Diff hygiene
         if: always()
+        run: git diff --check
+
+  canonical-linux-compatibility:
+    name: canonical-pr-linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Frozen install
+        run: pnpm install --frozen-lockfile
+      - name: M4 boundary contract
+        run: node --test scripts/security/check-public-boundary.test.mjs
+      - name: Public current-head boundary
+        run: node scripts/security/check-public-boundary.mjs
+      - name: Public workspace tests
+        run: pnpm test
+      - name: Public workspace build
+        run: pnpm build
+      - name: Public workspace typecheck
+        run: pnpm typecheck
+      - name: P1 boundary
+        run: node --test scripts/test-bot-ip-protection-p1-boundary.mjs
+      - name: P2 boundary
+        run: node --test scripts/test-bot-ip-protection-p2-boundary.mjs
+      - name: P3 boundary
+        run: node scripts/test-bot-ip-protection-p3-boundary.mjs
+      - name: Diff hygiene
+        run: git diff --check
+
+  canonical-windows-compatibility:
+    name: canonical-pr-windows
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+          run_install: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Frozen install
+        run: pnpm install --frozen-lockfile
+      - name: M4 boundary contract
+        run: node --test scripts/security/check-public-boundary.test.mjs
+      - name: Public current-head boundary
+        run: node scripts/security/check-public-boundary.mjs
+      - name: Public workspace tests
+        run: pnpm test
+      - name: Public workspace build
+        run: pnpm build
+      - name: Public workspace typecheck
+        run: pnpm typecheck
+      - name: P1 boundary
+        run: node --test scripts/test-bot-ip-protection-p1-boundary.mjs
+      - name: P2 boundary
+        run: node --test scripts/test-bot-ip-protection-p2-boundary.mjs
+      - name: P3 boundary
+        run: node scripts/test-bot-ip-protection-p3-boundary.mjs
+      - name: Diff hygiene
         run: git diff --check
