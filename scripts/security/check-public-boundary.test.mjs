@@ -30,3 +30,13 @@ test("public workspace tests build workspace dependencies first", () => {
   const turbo = JSON.parse(readFileSync(new URL("../../turbo.json", import.meta.url), "utf8"));
   assert.deepEqual(turbo.tasks?.test?.dependsOn, ["^build"]);
 });
+
+test("public CI emits the repository ruleset required status contexts", () => {
+  const workflow = readFileSync(
+    new URL("../../.github/workflows/public-private-boundary-ci.yml", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(workflow, /name:\s*canonical-pr-linux\b/);
+  assert.match(workflow, /name:\s*canonical-pr-windows\b/);
+});
