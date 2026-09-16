@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { assertPublicBoundary } from "./check-public-boundary.mjs";
 
 test("public boundary rejects any private-required tracked path", () => {
@@ -23,4 +24,9 @@ test("public boundary accepts only allowlisted public paths", () => {
 
   assert.equal(report.PRIVATE_REQUIRED.length, 0);
   assert.equal(report.SAFE_PUBLIC.length, 4);
+});
+
+test("public workspace tests build workspace dependencies first", () => {
+  const turbo = JSON.parse(readFileSync(new URL("../../turbo.json", import.meta.url), "utf8"));
+  assert.deepEqual(turbo.tasks?.test?.dependsOn, ["^build"]);
 });
