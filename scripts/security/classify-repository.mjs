@@ -53,6 +53,10 @@ export function classifyTrackedPaths(paths) {
   return report;
 }
 
+export function privateRequiredPaths(paths) {
+  return classifyTrackedPaths(paths).PRIVATE_REQUIRED;
+}
+
 export function trackedPathsFromGit() {
   const output = execFileSync("git", ["ls-files", "-z"], {
     cwd: REPO_ROOT,
@@ -63,12 +67,22 @@ export function trackedPathsFromGit() {
 
 function main() {
   if (!process.argv.includes("--tracked")) {
-    console.error("USAGE: node scripts/security/classify-repository.mjs --tracked");
+    console.error(
+      "USAGE: node scripts/security/classify-repository.mjs --tracked [--emit-private]",
+    );
     process.exitCode = 2;
     return;
   }
 
-  const report = classifyTrackedPaths(trackedPathsFromGit());
+  const tracked = trackedPathsFromGit();
+  if (process.argv.includes("--emit-private")) {
+    for (const path of privateRequiredPaths(tracked)) {
+      console.log(path);
+    }
+    return;
+  }
+
+  const report = classifyTrackedPaths(tracked);
   console.log(`SAFE_PUBLIC_COUNT=${report.SAFE_PUBLIC.length}`);
   console.log(`PRIVATE_REQUIRED_COUNT=${report.PRIVATE_REQUIRED.length}`);
   console.log("UNCLASSIFIED_COUNT=0");
