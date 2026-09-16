@@ -43,6 +43,8 @@ jobs:
         run: node scripts/security/check-public-boundary.mjs
       - name: Distribution artifact boundary
         run: node scripts/security/check-distribution-artifact.mjs
+      - name: M7 public source acceptance
+        run: node scripts/security/accept-public-private-split.mjs
       - name: Diff hygiene
         if: always()
         run: git diff --check
