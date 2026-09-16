@@ -33,6 +33,18 @@ jobs:
         run: node --test scripts/security/check-public-boundary.test.mjs
       - name: Classify tracked repository
         run: node scripts/security/classify-repository.mjs --tracked
+      - name: Generate exact M4 private removal inventory
+        run: |
+          mkdir -p artifacts/security
+          node scripts/security/classify-repository.mjs --tracked --emit-private > artifacts/security/private-removal-list.txt
+          test -s artifacts/security/private-removal-list.txt
+      - name: Upload M4 private removal inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: m4-private-removal-inventory
+          path: artifacts/security/private-removal-list.txt
+          if-no-files-found: error
+          retention-days: 7
       - name: Enforce public/private change freeze
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
