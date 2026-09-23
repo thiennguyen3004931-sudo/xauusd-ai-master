@@ -1,0 +1,38 @@
+name: Core Runner Cross-Repo Read-Only Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/core-runner-readonly-20260923
+    paths:
+      - ".github/workflows/core-runner-cross-repo-readonly.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    name: inspect-core-runner-process
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 5
+    steps:
+      - name: Inspect runner processes only
+        shell: powershell
+        run: |
+          Write-Host "CROSS_REPO_DIAG_READ_ONLY=TRUE"
+          Write-Host "RUNNER_NAME=$env:RUNNER_NAME"
+          Write-Host "COMPUTERNAME=$env:COMPUTERNAME"
+          foreach ($root in @("C:\actions-runner","C:\actions-runner-page\actions-runner")) {
+            Write-Host "RUNNER_ROOT=$root|EXISTS=$(Test-Path -LiteralPath $root)"
+          }
+          $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match 'Runner\.(Listener|Worker)\.exe' })
+          if ($procs.Count -eq 0) {
+            Write-Host "RUNNER_PROCESS_COUNT=0"
+          } else {
+            Write-Host "RUNNER_PROCESS_COUNT=$($procs.Count)"
+            foreach ($p in $procs) {
+              Write-Host "RUNNER_PROCESS=PID=$($p.ProcessId)|NAME=$($p.Name)|CMD=$([string]$p.CommandLine)"
+            }
+          }
+          Write-Host "CROSS_REPO_DIAG_STATUS=PASS"
