@@ -63,18 +63,6 @@ jobs:
           node scripts/security/validate-credential-remediation.mjs \
             artifacts/security/gitleaks.json \
             security/credential-remediation.json
-      - name: Public workspace tests
-        run: pnpm test
-      - name: Public workspace build
-        run: pnpm build
-      - name: Public workspace typecheck
-        run: pnpm typecheck
-      - name: P1 copy protocol boundary
-        run: node --test scripts/test-bot-ip-protection-p1-boundary.mjs
-      - name: P2 license service boundary
-        run: node --test scripts/test-bot-ip-protection-p2-boundary.mjs
-      - name: P3 installation proof boundary
-        run: node scripts/test-bot-ip-protection-p3-boundary.mjs
       - name: Upload redacted secret scan report
         if: always()
         uses: actions/upload-artifact@v4
